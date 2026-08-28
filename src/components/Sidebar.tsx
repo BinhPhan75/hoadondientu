@@ -87,7 +87,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCaptchaCode('');
     try {
       const res = await fetch('/api/gdt/captcha');
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { success: false };
+      }
+
       if (data && data.success) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
@@ -360,9 +367,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Date Range Inputs */}
           <div>
-            <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block mb-1">
-              Khoảng Thời Gian Truy Xuất
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block">
+                Khoảng Thời Gian
+              </label>
+              <span className="text-[10px] text-amber-400 font-mono">Chọn nhanh:</span>
+            </div>
+            
+            {/* Quick Period Buttons */}
+            <div className="grid grid-cols-4 gap-1 mb-2">
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...filters, fromDate: '2025-01-01', toDate: '2025-12-31' })}
+                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                  filters.fromDate === '2025-01-01' && filters.toDate === '2025-12-31'
+                    ? 'bg-amber-500 text-black font-extrabold'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                2025
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...filters, fromDate: '2024-01-01', toDate: '2024-12-31' })}
+                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                  filters.fromDate === '2024-01-01' && filters.toDate === '2024-12-31'
+                    ? 'bg-amber-500 text-black font-extrabold'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                2024
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...filters, fromDate: '2023-01-01', toDate: '2023-12-31' })}
+                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                  filters.fromDate === '2023-01-01' && filters.toDate === '2023-12-31'
+                    ? 'bg-amber-500 text-black font-extrabold'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                2023
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...filters, fromDate: '2022-01-01', toDate: '2026-12-31' })}
+                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                  filters.fromDate === '2022-01-01'
+                    ? 'bg-amber-500 text-black font-extrabold'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Tất Cả
+              </button>
+            </div>
+
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <span className="text-[10px] text-gray-400 block mb-0.5">Từ ngày:</span>

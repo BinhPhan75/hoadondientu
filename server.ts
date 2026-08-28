@@ -16,6 +16,7 @@ interface SessionData {
   taxpayerName: string;
   address: string;
   token: string;
+  cookieHeader?: string;
   isRealGDT: boolean;
   createdAt: number;
 }
@@ -28,6 +29,9 @@ let currentSession: SessionData | null = {
   isRealGDT: false,
   createdAt: Date.now()
 };
+
+// Store cookies corresponding to captcha keys
+const captchaCookieJar = new Map<string, string>();
 
 let seleniumLogs: Array<{
   id: string;
@@ -66,7 +70,17 @@ app.get('/api/gdt/captcha', async (req, res) => {
     });
 
     if (gdtRes.ok) {
+      // Capture WAF & session cookies from GDT
+      const rawCookies = (gdtRes.headers as any).getSetCookie 
+        ? (gdtRes.headers as any).getSetCookie() 
+        : [gdtRes.headers.get('set-cookie')];
+      const cookieStr = (rawCookies || []).filter(Boolean).map((c: string) => c.split(';')[0]).join('; ');
+
       const data = await gdtRes.json() as { key: string; content: string };
+      if (data.key && cookieStr) {
+        captchaCookieJar.set(data.key, cookieStr);
+      }
+
       return res.json({
         success: true,
         isRealGDT: true,
@@ -142,13 +156,17 @@ app.post('/api/gdt/login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hiển thị trên màn hình.' });
   }
 
+  // Attach session cookies stored from captcha step
+  const cookieHeader = captchaKey ? captchaCookieJar.get(captchaKey) || '' : '';
+
   // REAL GDT AUTHENTICATION: Send POST to https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate
   try {
     const authRes = await fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
       method: 'POST',
       headers: {
         ...GDT_HEADERS,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
       },
       body: JSON.stringify({
         username: taxCode.trim(),
@@ -156,8 +174,15 @@ app.post('/api/gdt/login', async (req, res) => {
         ckey: captchaKey || '',
         cvalue: captchaCode.trim()
       }),
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(12000)
     });
+
+    // Capture updated session cookies from authenticate response
+    const authRawCookies = (authRes.headers as any).getSetCookie 
+      ? (authRes.headers as any).getSetCookie() 
+      : [authRes.headers.get('set-cookie')];
+    const newCookieStr = (authRawCookies || []).filter(Boolean).map((c: string) => c.split(';')[0]).join('; ');
+    const combinedCookies = [cookieHeader, newCookieStr].filter(Boolean).join('; ');
 
     const rawText = await authRes.text();
     let authData: any = {};
@@ -167,7 +192,7 @@ app.post('/api/gdt/login', async (req, res) => {
       console.warn('[GDT Auth Raw Response]:', rawText.substring(0, 300));
       return res.status(502).json({
         success: false,
-        message: 'Cổng Tổng cục Thuế phản hồi dạng văn bản (không phải JSON) hoặc đang quá tải. Vui lòng thử lại sau.'
+        message: 'Cổng Tổng cục Thuế phản hồi dạng văn bản hoặc đang quá tải. Vui lòng thử lại sau.'
       });
     }
 
@@ -177,9 +202,10 @@ app.post('/api/gdt/login', async (req, res) => {
 
       currentSession = {
         taxCode: taxCode.trim(),
-        taxpayerName: authData.user?.fullName || authData.user?.tenNnt || `NGƯỜI NỘP THUẾ (MST: ${taxCode.trim()})`,
-        address: authData.user?.address || 'Đăng ký tại Tổng cục Thuế Việt Nam',
+        taxpayerName: authData.user?.fullName || authData.user?.tenNnt || authData.user?.name || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode.trim()})`,
+        address: authData.user?.address || authData.user?.dchi || 'Đăng ký tại Tổng cục Thuế Việt Nam',
         token: cleanToken,
+        cookieHeader: combinedCookies,
         isRealGDT: true,
         createdAt: Date.now()
       };
@@ -187,7 +213,7 @@ app.post('/api/gdt/login', async (req, res) => {
       return res.json({
         success: true,
         isRealGDT: true,
-        message: 'Đăng nhập Cổng Hóa đơn điện tử Tổng cục Thuế thành công (Token JWT thực tế)!',
+        message: 'Đăng nhập Cổng Hóa đơn điện tử Tổng cục Thuế thành công!',
         session: currentSession
       });
     } else {
@@ -254,9 +280,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     const resp = await fetch(url, {
       headers: {
         ...GDT_HEADERS,
-        'Authorization': tokenHeader
+        'Authorization': tokenHeader,
+        ...(currentSession.cookieHeader ? { 'Cookie': currentSession.cookieHeader } : {})
       },
-      signal: AbortSignal.timeout(12000)
+      signal: AbortSignal.timeout(15000)
     });
     
     if (resp.status === 401 || resp.status === 403) {
@@ -279,41 +306,41 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       return [];
     }
 
-    const list = data.datas || data.data || (Array.isArray(data) ? data : []);
+    const list = data.datas || data.data || data.rows || data.content || (Array.isArray(data) ? data : []);
     
     // Normalize GDT invoice payload
     return list.map((item: any) => ({
-      id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst}`,
-      khmshdon: item.khmshdon || '1',
+      id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
+      khmshdon: item.khmshdon || item.khmhd || '1',
       khhdon: item.khhdon || '',
-      shdon: String(item.shdon || '').padStart(7, '0'),
+      shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
       tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
       nbmst: item.nbmst || '',
-      nbten: item.nbten || '',
-      nbdchi: item.nbdchi || '',
+      nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
+      nbdchi: item.nbdchi || item.nbdchi || '',
       nmmst: item.nmmst || '',
-      nmten: item.nmten || '',
+      nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
       nmdchi: item.nmdchi || '',
-      tgtcthue: Number(item.tgtcthue || item.thtien || 0),
-      tgtthue: Number(item.tgtthue || item.tthue || 0),
-      tgtttbso: Number(item.tgtttbso || item.tongtien || (Number(item.tgtcthue || 0) + Number(item.tgtthue || 0))),
+      tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+      tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+      tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
       tgtttbchu: item.tgtttbchu || '',
       htttoan: item.htttoan || 'TM/CK',
       tthdon: Number(item.tthdon || 1),
       tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
       ttxly: Number(item.ttxly || 1),
-      ttxlyLabel: 'CQT đã cấp mã',
+      ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
       mhdon: item.mhdon || '',
       hsgcma: Boolean(item.mhdon || item.hsgcma),
       loaiHdon: type,
       hasDigitalSignature: true,
-      signerName: item.nbten || 'Người nộp thuế',
+      signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
       signedDate: item.tdlap,
       caProvider: 'Tổng cục Thuế CQT',
-      items: (item.hdhhdvus || item.items || []).map((it: any, idx: number) => ({
+      items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
         id: `item_${idx + 1}`,
         lineNo: idx + 1,
-        itemName: it.thhdvu || it.itemName || 'Hàng hóa dịch vụ',
+        itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
         unit: it.dvtinh || it.unit || 'Lô',
         quantity: Number(it.sluong || it.quantity || 1),
         unitPrice: Number(it.dgia || it.unitPrice || 0),

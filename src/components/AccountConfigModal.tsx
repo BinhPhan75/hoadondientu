@@ -46,7 +46,13 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     setCaptchaCode('');
     try {
       const res = await fetch('/api/gdt/captcha');
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Máy chủ không trả về JSON hợp lệ (Mã: ${res.status})`);
+      }
       setCaptchaImg(data.captchaImage);
       setCaptchaKey(data.captchaKey || '');
       setIsRealGDT(data.isRealGDT ?? false);
@@ -108,7 +114,16 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         })
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = {
+          success: false,
+          message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
+        };
+      }
 
       if (res.ok && data.success) {
         setStatusMessage({ 

@@ -57,33 +57,41 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
         fromDate = formatDate(new Date(year, month - 1, 1));
         toDate = formatDate(new Date(year, month, 0));
         break;
-      case 'q1':
-        fromDate = `${year}-01-01`;
-        toDate = `${year}-03-31`;
-        break;
-      case 'q2':
-        fromDate = `${year}-04-01`;
-        toDate = `${year}-06-30`;
-        break;
-      case 'q3':
-        fromDate = `${year}-07-01`;
-        toDate = `${year}-09-30`;
-        break;
-      case 'q4':
-        fromDate = `${year}-10-01`;
-        toDate = `${year}-12-31`;
-        break;
-      case '2026':
-        fromDate = `2026-01-01`;
-        toDate = `2026-12-31`;
-        break;
       case '2025':
         fromDate = `2025-01-01`;
         toDate = `2025-12-31`;
         break;
+      case '2024':
+        fromDate = `2024-01-01`;
+        toDate = `2024-12-31`;
+        break;
+      case '2023':
+        fromDate = `2023-01-01`;
+        toDate = `2023-12-31`;
+        break;
+      case 'all_time':
+        fromDate = `2022-01-01`;
+        toDate = `2026-12-31`;
+        break;
       case 'q1_2025':
         fromDate = `2025-01-01`;
         toDate = `2025-03-31`;
+        break;
+      case 'q2_2025':
+        fromDate = `2025-04-01`;
+        toDate = `2025-06-30`;
+        break;
+      case 'q3_2025':
+        fromDate = `2025-07-01`;
+        toDate = `2025-09-30`;
+        break;
+      case 'q4_2025':
+        fromDate = `2025-10-01`;
+        toDate = `2025-12-31`;
+        break;
+      case '2026':
+        fromDate = `2026-01-01`;
+        toDate = `2026-12-31`;
         break;
       default:
         return;
