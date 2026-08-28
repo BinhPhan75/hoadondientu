@@ -115,7 +115,7 @@ app.post('/api/gdt/login', async (req, res) => {
   }
 
   // If user explicitly asks for Demo / Sample Sandbox mode
-  if (isDemo || taxCode === '0316892345' && (!password || password === 'Gdt@Tax2025!' || password === 'Gdt@Pass2025!')) {
+  if (isDemo || (taxCode === '0316892345' && (!password || password === 'Gdt@Tax2025!' || password === 'Gdt@Pass2025!'))) {
     currentSession = {
       taxCode: taxCode.trim(),
       taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)',
@@ -139,7 +139,7 @@ app.post('/api/gdt/login', async (req, res) => {
   }
 
   if (!captchaCode) {
-    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha từ Tổng cục Thuế.' });
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hiển thị trên màn hình.' });
   }
 
   // REAL GDT AUTHENTICATION: Send POST to https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate
@@ -159,7 +159,17 @@ app.post('/api/gdt/login', async (req, res) => {
       signal: AbortSignal.timeout(10000)
     });
 
-    const authData = await authRes.json() as any;
+    const rawText = await authRes.text();
+    let authData: any = {};
+    try {
+      authData = JSON.parse(rawText);
+    } catch {
+      console.warn('[GDT Auth Raw Response]:', rawText.substring(0, 300));
+      return res.status(502).json({
+        success: false,
+        message: 'Cổng Tổng cục Thuế phản hồi dạng văn bản (không phải JSON) hoặc đang quá tải. Vui lòng thử lại sau.'
+      });
+    }
 
     if (authRes.ok && (authData.token || authData.jwt || authData.access_token)) {
       const realToken = authData.token || authData.jwt || authData.access_token;
@@ -207,7 +217,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
   if (!currentSession) {
     return res.status(401).json({
       success: false,
-      message: 'Chưa có phiên làm việc với Tổng cục Thuế. Vui lòng đăng nhập tài khoản trước.'
+      message: 'Chưa có phiên làm việc với Tổng cục Thuế. Vui lòng nhập mã Captcha để kết nối.'
     });
   }
 
@@ -233,8 +243,8 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     return dateStr;
   };
 
-  const gdtFrom = formatDateForGdt(fromDate || '2025-01-01', false);
-  const gdtTo = formatDateForGdt(toDate || '2025-03-31', true);
+  const gdtFrom = formatDateForGdt(fromDate || '2026-03-01', false);
+  const gdtTo = formatDateForGdt(toDate || '2026-03-31', true);
   const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
   const tokenHeader = currentSession.token.startsWith('Bearer ') ? currentSession.token : `Bearer ${currentSession.token}`;
@@ -248,12 +258,27 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       },
       signal: AbortSignal.timeout(12000)
     });
+    
+    if (resp.status === 401 || resp.status === 403) {
+      console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
+      return { error: 'AUTH_EXPIRED' };
+    }
+
     if (!resp.ok) {
       const errText = await resp.text();
-      console.warn(`[GDT Query ${type} Error]:`, resp.status, errText);
+      console.warn(`[GDT Query ${type} Error]:`, resp.status, errText.substring(0, 200));
       return [];
     }
-    const data = await resp.json() as any;
+
+    const rawText = await resp.text();
+    let data: any = {};
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+      return [];
+    }
+
     const list = data.datas || data.data || (Array.isArray(data) ? data : []);
     
     // Normalize GDT invoice payload
@@ -305,11 +330,31 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     let results: any[] = [];
     if (invoiceType === 'purchase' || invoiceType === 'both') {
       const purchaseList = await fetchType('purchase');
-      results = results.concat(purchaseList);
+      if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
+        currentSession = null;
+        return res.status(401).json({
+          success: false,
+          isExpired: true,
+          message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+        });
+      }
+      if (Array.isArray(purchaseList)) {
+        results = results.concat(purchaseList);
+      }
     }
     if (invoiceType === 'sold' || invoiceType === 'both') {
       const soldList = await fetchType('sold');
-      results = results.concat(soldList);
+      if ((soldList as any)?.error === 'AUTH_EXPIRED') {
+        currentSession = null;
+        return res.status(401).json({
+          success: false,
+          isExpired: true,
+          message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+        });
+      }
+      if (Array.isArray(soldList)) {
+        results = results.concat(soldList);
+      }
     }
 
     return res.json({

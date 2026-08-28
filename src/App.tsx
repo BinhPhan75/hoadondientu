@@ -5,7 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Header } from './components/Header';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, CrawlerCredentials } from './components/Sidebar';
 import { SearchFilterBar } from './components/SearchFilterBar';
 import { TaxSummaryDashboard } from './components/TaxSummaryDashboard';
 import { InvoiceTable } from './components/InvoiceTable';
@@ -223,10 +223,123 @@ export default function App() {
   };
 
   // Run Crawler / Sync matching invoices for current filter period
-  const handleRunCrawler = async () => {
+  const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
     setIsRefreshing(true);
-    const mst = account.taxCode || '0316892345';
+    const mst = credentials?.taxCode?.trim() || account.taxCode?.trim() || '0316892345';
+    const pwd = credentials?.password?.trim() || account.password?.trim() || '';
 
+    // If explicit Demo request
+    if (credentials?.isDemo) {
+      setAccount(prev => ({
+        ...prev,
+        taxCode: '0316892345',
+        password: 'Gdt@Tax2025!',
+        taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á',
+        isRealGDT: false
+      }));
+      const synchronizedInvoices = generateMatchingInvoicesForPeriod({
+        taxCode: '0316892345',
+        taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á',
+        address: account.address,
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        invoiceType: filters.invoiceType
+      });
+      setInvoices(synchronizedInvoices);
+      setSelectedInvoices([]);
+      setDataSourceType('sample_demo');
+      setConsoleLogs(prev => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'info',
+          message: `[CHẾ ĐỘ MẪU] Đã nạp ${synchronizedInvoices.length} hóa đơn mẫu minh họa theo kỳ lọc (${filters.fromDate} -> ${filters.toDate}).`
+        }
+      ]);
+      setIsRefreshing(false);
+      return { success: true };
+    }
+
+    // Step 1: Check if we need to authenticate with GDT
+    const hasCaptcha = Boolean(credentials?.captchaCode?.trim());
+    const needLogin = !account.isRealGDT || (credentials && credentials.taxCode !== account.taxCode) || hasCaptcha;
+
+    if (needLogin && hasCaptcha) {
+      setConsoleLogs(prev => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'step',
+          message: `[XÁC THỰC CỔNG THUẾ] Đang gửi thông tin đăng nhập và Captcha cho MST ${mst}...`
+        }
+      ]);
+
+      try {
+        const loginRes = await fetch('/api/gdt/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            taxCode: mst,
+            password: pwd,
+            captchaKey: credentials?.captchaKey,
+            captchaCode: credentials?.captchaCode
+          })
+        });
+
+        const loginData = await loginRes.json();
+
+        if (!loginRes.ok || !loginData.success) {
+          const errMsg = loginData.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'error',
+              message: `[KẾT NỐI THẤT BẠI] ${errMsg}`
+            }
+          ]);
+          setIsRefreshing(false);
+          return { success: false, error: errMsg };
+        }
+
+        // Login success!
+        setAccount(prev => ({
+          ...prev,
+          taxCode: mst,
+          password: pwd,
+          isRealGDT: loginData.isRealGDT,
+          taxpayerName: loginData.session?.taxpayerName || prev.taxpayerName,
+          address: loginData.session?.address || prev.address
+        }));
+
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'success',
+            message: `[ĐĂNG NHẬP THÀNH CÔNG] Đã xác thực với Cổng Thuế hoadondientu.gdt.gov.vn cho MST ${mst} (Người nộp thuế: ${loginData.session?.taxpayerName || mst}).`
+          }
+        ]);
+      } catch (authErr: any) {
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'error',
+            message: `[LỖI KẾT NỐI MẠNG] Không thể kết nối tới máy chủ Tổng cục Thuế: ${authErr.message}`
+          }
+        ]);
+        setIsRefreshing(false);
+        return { success: false, error: `Lỗi kết nối: ${authErr.message}` };
+      }
+    }
+
+    // Step 2: Query Invoices from GDT
     setConsoleLogs(prev => [
       ...prev,
       {
@@ -264,10 +377,23 @@ export default function App() {
             message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${data.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn!`
           }
         ]);
+        return { success: true };
+      } else if (res.status === 401 && data.isExpired) {
+        setAccount(prev => ({ ...prev, isRealGDT: false }));
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[PHIÊN HẾT HẠN] ${data.message || 'Phiên làm việc đã hết hạn, vui lòng nhập mã Captcha mới.'}`
+          }
+        ]);
+        return { success: false, error: data.message };
       } else {
         // In demo sandbox mode or user not logged in with GDT credentials
         const synchronizedInvoices = generateMatchingInvoicesForPeriod({
-          taxCode: account.taxCode || '0316892345',
+          taxCode: mst,
           taxpayerName: account.taxpayerName,
           address: account.address,
           fromDate: filters.fromDate,
@@ -285,14 +411,15 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'info',
-            message: `[CHẾ ĐỘ MẪU] Đã tạo ${synchronizedInvoices.length} hóa đơn mẫu minh họa theo kỳ lọc (${filters.fromDate} -> ${filters.toDate}). Để kết nối dữ liệu thật từ Tổng cục Thuế, hãy nhấn "Cấu hình tài khoản" và nhập MST + Mật khẩu CQT.`
+            message: `[CHẾ ĐỘ MẪU] Đã hiển thị ${synchronizedInvoices.length} hóa đơn mẫu minh họa (${filters.fromDate} -> ${filters.toDate}). Để kết nối dữ liệu thật từ Tổng cục Thuế, hãy nhập mã Captcha trong thanh bên trái và bấm Bắt đầu truy xuất.`
           }
         ]);
+        return { success: true };
       }
     } catch (err: any) {
       console.error('Error querying GDT invoices:', err);
       const synchronizedInvoices = generateMatchingInvoicesForPeriod({
-        taxCode: account.taxCode || '0316892345',
+        taxCode: mst,
         taxpayerName: account.taxpayerName,
         address: account.address,
         fromDate: filters.fromDate,
@@ -308,9 +435,10 @@ export default function App() {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: 'warning',
-          message: `Không thể kết nối máy chủ CQT: ${err.message}. Đã chuyển sang chế độ dữ liệu thử nghiệm.`
+          message: `Không thể kết nối máy chủ CQT (${err.message}). Đã chuyển sang chế độ dữ liệu thử nghiệm.`
         }
       ]);
+      return { success: false, error: err.message };
     } finally {
       setIsRefreshing(false);
     }
@@ -442,9 +570,12 @@ export default function App() {
               filters={filters}
               onFilterChange={setFilters}
               onUpdateAccount={setAccount}
-              onRunCrawler={() => {
-                handleRunCrawler();
-                setIsMobileSidebarOpen(false);
+              onRunCrawler={async (credentials) => {
+                const res = await handleRunCrawler(credentials);
+                if (res && res.success) {
+                  setIsMobileSidebarOpen(false);
+                }
+                return res;
               }}
               isLoading={isRefreshing}
               onOpenConfigModal={() => {
