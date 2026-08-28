@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f3f4f6;
+  --sidebar: #111827;
+  --accent: #ef4444;
+  --text-main: #1f2937;
+  --border: #d1d5db;
+  --font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  font-family: var(--font-sans);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Status Indicators */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.status-active {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.status-warning {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.status-error {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+/* High Density Sidebar & Form Controls */
+.text-input-dark {
+  width: 100%;
+  background: #374151;
+  border: 1px solid #4b5563;
+  padding: 0.5rem 0.65rem;
+  color: #ffffff;
+  border-radius: 4px;
+  font-size: 13px;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  transition: border-color 0.15s ease;
+}
+
+.text-input-dark:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.btn-primary-accent {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.65rem 1rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.15s ease;
+}
+
+.btn-primary-accent:hover {
+  background: #dc2626;
+}
+
+.btn-primary-accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* High Density Tags */
+.tag {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.tag-pending {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.tag-error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.tag-info {
+  background: #e0f2fe;
+  color: #075985;
+  border: 1px solid #bae6fd;
+}
+
+/* High Density Table styling */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.data-table th {
+  text-align: left;
+  background: #f3f4f6;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid #e5e7eb;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  font-weight: 700;
+}
+
+.data-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid #f3f4f6;
+}
+
+/* High Density Console / Terminal */
+.console-dock {
+  background: #000000;
+  color: #10b981;
+  font-family: var(--font-mono);
+  padding: 0.85rem 1.25rem;
+  font-size: 12px;
+  border-top: 3px solid #374151;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
