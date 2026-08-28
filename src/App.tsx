@@ -46,6 +46,9 @@ export default function App() {
   // Master Invoices State
   const [invoices, setInvoices] = useState<GDTInvoice[]>(SAMPLE_GDT_INVOICES);
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
+  const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml' | 'sample_demo'>(() => 
+    account.isRealGDT ? 'live_gdt' : 'sample_demo'
+  );
 
   // Filter Parameters State
   const [filters, setFilters] = useState<FilterParams>({
@@ -220,33 +223,74 @@ export default function App() {
   };
 
   // Run Crawler / Sync matching invoices for current filter period
-  const handleRunCrawler = () => {
+  const handleRunCrawler = async () => {
     setIsRefreshing(true);
+    const mst = account.taxCode || '0316892345';
+
     setConsoleLogs(prev => [
       ...prev,
       {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'step',
-        message: `[SELENIUM] Bắt đầu tự động truy xuất: MST ${account.taxCode || '0316892345'} (${filters.fromDate} -> ${filters.toDate})...`
+        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
       }
     ]);
 
-    setTimeout(() => {
-      setConsoleLogs(prev => [
-        ...prev,
-        {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: 'info',
-          message: `[SELENIUM] Đang giải Captcha OCR và xác thực chứng chỉ số CQT...`
-        }
-      ]);
-    }, 400);
+    try {
+      const res = await fetch('/api/gdt/query-invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+          invoiceType: filters.invoiceType,
+          size: 50
+        })
+      });
 
-    setTimeout(() => {
-      setIsRefreshing(false);
-      // Generate authentic matching invoices for current period and MST
+      const data = await res.json();
+
+      if (res.ok && data.isRealGDT && Array.isArray(data.invoices)) {
+        setInvoices(data.invoices);
+        setSelectedInvoices([]);
+        setDataSourceType('live_gdt');
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'success',
+            message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${data.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn!`
+          }
+        ]);
+      } else {
+        // In demo sandbox mode or user not logged in with GDT credentials
+        const synchronizedInvoices = generateMatchingInvoicesForPeriod({
+          taxCode: account.taxCode || '0316892345',
+          taxpayerName: account.taxpayerName,
+          address: account.address,
+          fromDate: filters.fromDate,
+          toDate: filters.toDate,
+          invoiceType: filters.invoiceType
+        });
+
+        setInvoices(synchronizedInvoices);
+        setSelectedInvoices([]);
+        setDataSourceType('sample_demo');
+
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'info',
+            message: `[CHẾ ĐỘ MẪU] Đã tạo ${synchronizedInvoices.length} hóa đơn mẫu minh họa theo kỳ lọc (${filters.fromDate} -> ${filters.toDate}). Để kết nối dữ liệu thật từ Tổng cục Thuế, hãy nhấn "Cấu hình tài khoản" và nhập MST + Mật khẩu CQT.`
+          }
+        ]);
+      }
+    } catch (err: any) {
+      console.error('Error querying GDT invoices:', err);
       const synchronizedInvoices = generateMatchingInvoicesForPeriod({
         taxCode: account.taxCode || '0316892345',
         taxpayerName: account.taxpayerName,
@@ -255,20 +299,21 @@ export default function App() {
         toDate: filters.toDate,
         invoiceType: filters.invoiceType
       });
-
       setInvoices(synchronizedInvoices);
       setSelectedInvoices([]);
-
+      setDataSourceType('sample_demo');
       setConsoleLogs(prev => [
         ...prev,
         {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: 'success',
-          message: `[SELENIUM] Đã đồng bộ thành công ${synchronizedInvoices.length} hóa đơn điện tử trong kỳ (${filters.fromDate} -> ${filters.toDate}) cho MST ${account.taxCode || '0316892345'}!`
+          level: 'warning',
+          message: `Không thể kết nối máy chủ CQT: ${err.message}. Đã chuyển sang chế độ dữ liệu thử nghiệm.`
         }
       ]);
-    }, 900);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   // Handle Import XML/ZIP
@@ -291,6 +336,7 @@ export default function App() {
       }
     }
 
+    setDataSourceType('imported_xml');
     setInvoices(prev => {
       const existingIds = new Set(prev.map(i => i.id));
       const filteredNew = imported.filter(i => !existingIds.has(i.id));
@@ -321,6 +367,7 @@ export default function App() {
       searchKeyword: '',
       taxRateFilter: 'all'
     });
+    setDataSourceType('sample_demo');
     setInvoices([...SAMPLE_GDT_INVOICES]);
     setSelectedInvoices([]);
     setConsoleLogs(prev => [
@@ -337,19 +384,29 @@ export default function App() {
   // Handle Save Account Config
   const handleSaveAccountConfig = (newConfig: GDTAccountConfig) => {
     setAccount(newConfig);
+    if (newConfig.isRealGDT) {
+      setDataSourceType('live_gdt');
+    }
     handleRunCrawler();
   };
 
   // Handle Logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (confirm('Bạn có chắc muốn đăng xuất phiên làm việc với Tổng cục Thuế?')) {
+      try {
+        await fetch('/api/gdt/logout', { method: 'POST' });
+      } catch (e) {
+        // ignore
+      }
       setAccount({
         taxCode: '',
         password: '',
         taxpayerName: 'Chưa đăng nhập',
         rememberMe: false,
-        autoSaveSession: false
+        autoSaveSession: false,
+        isRealGDT: false
       });
+      setDataSourceType('sample_demo');
       setIsConfigModalOpen(true);
     }
   };
@@ -416,6 +473,7 @@ export default function App() {
           account={account}
           selectedInvoices={selectedInvoices}
           totalInvoicesCount={filteredInvoices.length}
+          dataSourceType={dataSourceType}
           onOpenConfig={() => setIsConfigModalOpen(true)}
           onOpenBatchDownload={() => setIsBatchDownloadModalOpen(true)}
           onExportExcel={() => handleExportExcel(selectedInvoices.length > 0 ? selectedInvoices : filteredInvoices)}
@@ -441,6 +499,43 @@ export default function App() {
           totalFilteredCount={filteredInvoices.length}
           onOpenImportXml={() => setIsImportXmlModalOpen(true)}
         />
+
+        {/* Data Source Notice Banner */}
+        <div className="px-4 py-1.5 bg-gray-50 border-b border-[#d1d5db] text-xs flex items-center justify-between gap-2">
+          {dataSourceType === 'live_gdt' ? (
+            <div className="flex items-center gap-2 text-emerald-800 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+              <span><strong>CỔNG THUẾ TRỰC TIẾP:</strong> Đang kết nối trực tiếp với <code>hoadondientu.gdt.gov.vn</code> (MST: <strong>{account.taxCode}</strong>).</span>
+            </div>
+          ) : dataSourceType === 'imported_xml' ? (
+            <div className="flex items-center gap-2 text-blue-800 font-medium">
+              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+              <span><strong>TỆP XML THỰC TẾ:</strong> Đang hiển thị dữ liệu gốc trích xuất từ file XML/ZIP Tổng cục Thuế.</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-amber-900">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span><strong>CHẾ ĐỘ MẪU (SANDBOX):</strong> Đang hiển thị dữ liệu mẫu minh họa. Để lấy hóa đơn thật từ Cổng Thuế, hãy</span>
+              <button 
+                onClick={() => setIsConfigModalOpen(true)} 
+                className="font-bold underline text-[#ef4444] hover:text-red-700 cursor-pointer"
+              >
+                Đăng nhập tài khoản CQT
+              </button>
+              <span>hoặc</span>
+              <button 
+                onClick={() => setIsImportXmlModalOpen(true)} 
+                className="font-bold underline text-blue-700 hover:text-blue-900 cursor-pointer"
+              >
+                Nạp tệp XML/ZIP
+              </button>
+            </div>
+          )}
+
+          <div className="text-[11px] text-gray-500 font-mono hidden md:block">
+            {filteredInvoices.length} hóa đơn trong kỳ ({filters.fromDate} → {filters.toDate})
+          </div>
+        </div>
 
         {/* High Density Scrollable Data Grid Container */}
         <div className="flex-1 overflow-y-auto bg-[#f9fafb]">

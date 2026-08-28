@@ -7,6 +7,7 @@ export interface GDTAccountConfig {
   rememberMe: boolean;
   autoSaveSession: boolean;
   useHeadlessBrowser?: boolean;
+  isRealGDT?: boolean; // True nếu đã đăng nhập thành công với Tổng cục Thuế thật
 }
 
 export interface InvoiceItem {

@@ -16,6 +16,7 @@ interface SessionData {
   taxpayerName: string;
   address: string;
   token: string;
+  isRealGDT: boolean;
   createdAt: number;
 }
 
@@ -23,7 +24,8 @@ let currentSession: SessionData | null = {
   taxCode: '0316892345',
   taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á',
   address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
-  token: 'GDT_AUTH_SESSION_TOKEN_2025_SECURE',
+  token: 'GDT_DEMO_TOKEN_2025',
+  isRealGDT: false,
   createdAt: Date.now()
 };
 
@@ -36,74 +38,306 @@ let seleniumLogs: Array<{
   progress?: number;
 }> = [];
 
+// Helper headers for GDT Portal
+const GDT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/plain, */*',
+  'Referer': 'https://hoadondientu.gdt.gov.vn/',
+  'Origin': 'https://hoadondientu.gdt.gov.vn'
+};
+
 // 1. Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', serverTime: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    serverTime: new Date().toISOString(),
+    gdtConnected: currentSession?.isRealGDT ?? false,
+    sessionMst: currentSession?.taxCode || null
+  });
 });
 
-// 2. Get Captcha for login
-app.get('/api/gdt/captcha', (req, res) => {
-  // Generate random 4-character alphanumeric captcha code
+// 2. Get Real Captcha from official GDT Portal
+app.get('/api/gdt/captcha', async (req, res) => {
+  try {
+    // Fetch directly from official General Department of Taxation Portal
+    const gdtRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
+      headers: GDT_HEADERS,
+      signal: AbortSignal.timeout(6000)
+    });
+
+    if (gdtRes.ok) {
+      const data = await gdtRes.json() as { key: string; content: string };
+      return res.json({
+        success: true,
+        isRealGDT: true,
+        captchaKey: data.key,
+        captchaCode: '', // Real GDT captcha requires user/OCR recognition
+        captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(data.content)}`,
+        source: 'hoadondientu.gdt.gov.vn'
+      });
+    }
+  } catch (error: any) {
+    console.warn('[GDT Proxy] Cannot reach live GDT captcha, falling back to local generator:', error.message);
+  }
+
+  // Fallback local SVG captcha if GDT portal is unreachable
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let captchaText = '';
   for (let i = 0; i < 4; i++) {
     captchaText += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  const captchaKey = 'ckey_' + Math.random().toString(36).substring(2, 10);
-
-  // Generate SVG Captcha image with noise lines and skewed characters
+  const captchaKey = 'ckey_local_' + Math.random().toString(36).substring(2, 10);
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="130" height="42" viewBox="0 0 130 42">
       <rect width="100%" height="100%" fill="#f1f5f9"/>
       <line x1="10" y1="12" x2="120" y2="30" stroke="#cbd5e1" stroke-width="2"/>
       <line x1="15" y1="35" x2="115" y2="8" stroke="#cbd5e1" stroke-width="1.5"/>
-      <circle cx="35" cy="20" r="15" fill="none" stroke="#e2e8f0" stroke-width="1.5"/>
-      <circle cx="95" cy="22" r="18" fill="none" stroke="#e2e8f0" stroke-width="1.5"/>
-      <text x="18" y="29" font-family="monospace, sans-serif" font-size="24" font-weight="bold" fill="#1e293b" letter-spacing="8" transform="rotate(-2 20 25)">${captchaText}</text>
+      <text x="18" y="29" font-family="monospace, sans-serif" font-size="24" font-weight="bold" fill="#1e293b" letter-spacing="8">${captchaText}</text>
     </svg>
   `.trim();
 
   res.json({
+    success: true,
+    isRealGDT: false,
     captchaKey,
     captchaCode: captchaText,
-    captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+    captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    source: 'local_fallback'
   });
 });
 
-// 3. Login to GDT Portal
-app.post('/api/gdt/login', (req, res) => {
-  const { taxCode, password, captchaCode } = req.body;
+// 3. Login directly to GDT Portal / Authenticate Session
+app.post('/api/gdt/login', async (req, res) => {
+  const { taxCode, password, captchaKey, captchaCode, isDemo } = req.body;
 
-  if (!taxCode || !password) {
-    return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ Mã số thuế và Mật khẩu do Tổng cục Thuế cấp.' });
+  if (!taxCode) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
   }
 
-  // Set active session
-  currentSession = {
-    taxCode: taxCode.trim(),
-    taxpayerName: `CÔNG TY TNHH KINH DOANH & ĐẦU TƯ (MST: ${taxCode.trim()})`,
-    address: 'Trụ sở chính đăng ký tại Tổng cục Thuế',
-    token: `GDT_SESSION_${taxCode}_${Date.now()}`,
-    createdAt: Date.now()
-  };
+  // If user explicitly asks for Demo / Sample Sandbox mode
+  if (isDemo || taxCode === '0316892345' && (!password || password === 'Gdt@Tax2025!' || password === 'Gdt@Pass2025!')) {
+    currentSession = {
+      taxCode: taxCode.trim(),
+      taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)',
+      address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
+      token: 'GDT_DEMO_SANDBOX_TOKEN',
+      isRealGDT: false,
+      createdAt: Date.now()
+    };
 
-  res.json({
-    success: true,
-    message: 'Đăng nhập Cổng Hóa đơn điện tử Tổng cục Thuế thành công!',
-    session: currentSession
-  });
+    return res.json({
+      success: true,
+      isRealGDT: false,
+      isDemo: true,
+      message: 'Đã kích hoạt chế độ Dữ liệu Mẫu (Demo Sandbox) cho MST: ' + taxCode,
+      session: currentSession
+    });
+  }
+
+  if (!password) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Mật khẩu tài khoản Tổng cục Thuế cấp.' });
+  }
+
+  if (!captchaCode) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha từ Tổng cục Thuế.' });
+  }
+
+  // REAL GDT AUTHENTICATION: Send POST to https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate
+  try {
+    const authRes = await fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
+      method: 'POST',
+      headers: {
+        ...GDT_HEADERS,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        username: taxCode.trim(),
+        password: password.trim(),
+        ckey: captchaKey || '',
+        cvalue: captchaCode.trim()
+      }),
+      signal: AbortSignal.timeout(10000)
+    });
+
+    const authData = await authRes.json() as any;
+
+    if (authRes.ok && (authData.token || authData.jwt || authData.access_token)) {
+      const realToken = authData.token || authData.jwt || authData.access_token;
+      const cleanToken = realToken.startsWith('Bearer ') ? realToken : `Bearer ${realToken}`;
+
+      currentSession = {
+        taxCode: taxCode.trim(),
+        taxpayerName: authData.user?.fullName || authData.user?.tenNnt || `NGƯỜI NỘP THUẾ (MST: ${taxCode.trim()})`,
+        address: authData.user?.address || 'Đăng ký tại Tổng cục Thuế Việt Nam',
+        token: cleanToken,
+        isRealGDT: true,
+        createdAt: Date.now()
+      };
+
+      return res.json({
+        success: true,
+        isRealGDT: true,
+        message: 'Đăng nhập Cổng Hóa đơn điện tử Tổng cục Thuế thành công (Token JWT thực tế)!',
+        session: currentSession
+      });
+    } else {
+      // Return the exact error message from General Department of Taxation
+      const errorMsg = authData.message || authData.details || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.';
+      return res.status(authRes.status || 400).json({
+        success: false,
+        isRealGDT: true,
+        message: errorMsg,
+        rawGdtResponse: authData
+      });
+    }
+  } catch (err: any) {
+    console.error('[GDT Auth Error]:', err);
+    return res.status(500).json({
+      success: false,
+      isRealGDT: true,
+      message: `Không thể kết nối đến máy chủ Cổng Thuế (hoadondientu.gdt.gov.vn): ${err.message}. Vui lòng thử lại hoặc sử dụng tính năng Nạp tệp XML / Chế độ Mẫu.`
+    });
+  }
 });
 
-// 4. Logout / Reset session
+// 4. Query Real Invoices from GDT API
+app.post('/api/gdt/query-invoices', async (req, res) => {
+  const { fromDate, toDate, invoiceType, size = 50 } = req.body;
+
+  if (!currentSession) {
+    return res.status(401).json({
+      success: false,
+      message: 'Chưa có phiên làm việc với Tổng cục Thuế. Vui lòng đăng nhập tài khoản trước.'
+    });
+  }
+
+  // If in Demo Mode, inform client to use local matching generator
+  if (!currentSession.isRealGDT) {
+    return res.json({
+      success: true,
+      isRealGDT: false,
+      isDemo: true,
+      message: 'Đang ở chế độ Dữ liệu Mẫu (Demo Sandbox)',
+      invoices: []
+    });
+  }
+
+  // Convert date format from YYYY-MM-DD to DD/MM/YYYYT00:00:00
+  const formatDateForGdt = (dateStr: string, isEnd = false) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}${isEnd ? 'T23:59:59' : 'T00:00:00'}`;
+    }
+    return dateStr;
+  };
+
+  const gdtFrom = formatDateForGdt(fromDate || '2025-01-01', false);
+  const gdtTo = formatDateForGdt(toDate || '2025-03-31', true);
+  const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
+
+  const tokenHeader = currentSession.token.startsWith('Bearer ') ? currentSession.token : `Bearer ${currentSession.token}`;
+
+  const fetchType = async (type: 'purchase' | 'sold') => {
+    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc,khhdon:asc,shdon:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+    const resp = await fetch(url, {
+      headers: {
+        ...GDT_HEADERS,
+        'Authorization': tokenHeader
+      },
+      signal: AbortSignal.timeout(12000)
+    });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.warn(`[GDT Query ${type} Error]:`, resp.status, errText);
+      return [];
+    }
+    const data = await resp.json() as any;
+    const list = data.datas || data.data || (Array.isArray(data) ? data : []);
+    
+    // Normalize GDT invoice payload
+    return list.map((item: any) => ({
+      id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst}`,
+      khmshdon: item.khmshdon || '1',
+      khhdon: item.khhdon || '',
+      shdon: String(item.shdon || '').padStart(7, '0'),
+      tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
+      nbmst: item.nbmst || '',
+      nbten: item.nbten || '',
+      nbdchi: item.nbdchi || '',
+      nmmst: item.nmmst || '',
+      nmten: item.nmten || '',
+      nmdchi: item.nmdchi || '',
+      tgtcthue: Number(item.tgtcthue || item.thtien || 0),
+      tgtthue: Number(item.tgtthue || item.tthue || 0),
+      tgtttbso: Number(item.tgtttbso || item.tongtien || (Number(item.tgtcthue || 0) + Number(item.tgtthue || 0))),
+      tgtttbchu: item.tgtttbchu || '',
+      htttoan: item.htttoan || 'TM/CK',
+      tthdon: Number(item.tthdon || 1),
+      tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
+      ttxly: Number(item.ttxly || 1),
+      ttxlyLabel: 'CQT đã cấp mã',
+      mhdon: item.mhdon || '',
+      hsgcma: Boolean(item.mhdon || item.hsgcma),
+      loaiHdon: type,
+      hasDigitalSignature: true,
+      signerName: item.nbten || 'Người nộp thuế',
+      signedDate: item.tdlap,
+      caProvider: 'Tổng cục Thuế CQT',
+      items: (item.hdhhdvus || item.items || []).map((it: any, idx: number) => ({
+        id: `item_${idx + 1}`,
+        lineNo: idx + 1,
+        itemName: it.thhdvu || it.itemName || 'Hàng hóa dịch vụ',
+        unit: it.dvtinh || it.unit || 'Lô',
+        quantity: Number(it.sluong || it.quantity || 1),
+        unitPrice: Number(it.dgia || it.unitPrice || 0),
+        amount: Number(it.thtien || it.amount || 0),
+        taxRate: it.tsuat || it.taxRate || '10%',
+        taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
+        taxAmount: Number(it.tthue || it.taxAmount || 0),
+        totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
+      }))
+    }));
+  };
+
+  try {
+    let results: any[] = [];
+    if (invoiceType === 'purchase' || invoiceType === 'both') {
+      const purchaseList = await fetchType('purchase');
+      results = results.concat(purchaseList);
+    }
+    if (invoiceType === 'sold' || invoiceType === 'both') {
+      const soldList = await fetchType('sold');
+      results = results.concat(soldList);
+    }
+
+    return res.json({
+      success: true,
+      isRealGDT: true,
+      invoices: results,
+      count: results.length,
+      message: `Đã truy xuất thành công ${results.length} hóa đơn thực tế từ Cổng Tổng cục Thuế.`
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: `Lỗi khi truy vấn hóa đơn từ Cổng Thuế: ${err.message}`
+    });
+  }
+});
+
+// 5. Logout / Reset session
 app.post('/api/gdt/logout', (req, res) => {
   currentSession = null;
   res.json({ success: true, message: 'Đã ngắt kết nối phiên làm việc.' });
 });
 
-// 5. Get Session status
+// 6. Get Session status
 app.get('/api/gdt/status', (req, res) => {
   res.json({
     isConnected: !!currentSession,
+    isRealGDT: currentSession?.isRealGDT ?? false,
     session: currentSession
   });
 });

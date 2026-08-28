@@ -31,32 +31,38 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   const [password, setPassword] = useState(currentConfig.password || 'Gdt@Tax2025!');
   const [showPassword, setShowPassword] = useState(false);
   const [captchaCode, setCaptchaCode] = useState('');
+  const [captchaKey, setCaptchaKey] = useState('');
   const [captchaImg, setCaptchaImg] = useState<string>('');
-  const [realCaptchaCode, setRealCaptchaCode] = useState<string>('');
+  const [isRealGDT, setIsRealGDT] = useState<boolean>(false);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
   const [rememberMe, setRememberMe] = useState(currentConfig.rememberMe ?? true);
   const [useHeadless, setUseHeadless] = useState(currentConfig.useHeadlessBrowser ?? true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load new Captcha from API or generate
+  // Load new Captcha directly from official GDT Portal
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
+    setCaptchaCode('');
     try {
       const res = await fetch('/api/gdt/captcha');
       const data = await res.json();
       setCaptchaImg(data.captchaImage);
-      setRealCaptchaCode(data.captchaCode);
-      setCaptchaCode(data.captchaCode); // Pre-fill for convenience
+      setCaptchaKey(data.captchaKey || '');
+      setIsRealGDT(data.isRealGDT ?? false);
+      if (data.captchaCode) {
+        setCaptchaCode(data.captchaCode); // only in local fallback mode
+      }
     } catch (e) {
       // Fallback local SVG captcha
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
       let code = '';
       for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-      setRealCaptchaCode(code);
+      setCaptchaKey('ckey_local');
       setCaptchaCode(code);
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><text x="18" y="27" font-family="monospace" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
       setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
+      setIsRealGDT(false);
     } finally {
       setIsLoadingCaptcha(false);
     }
@@ -71,7 +77,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!taxCode.trim()) {
       setStatusMessage({ type: 'error', text: 'Vui lòng nhập Mã số thuế (MST) của doanh nghiệp.' });
@@ -82,38 +88,77 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       return;
     }
     if (!captchaCode.trim()) {
-      setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã Captcha xác thực.' });
+      setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã Captcha xác thực từ Cổng Thuế.' });
       return;
     }
 
     setIsSubmitting(true);
-    setStatusMessage({ type: 'info', text: 'Đang kết nối và xác thực tài khoản với Cổng Tổng cục Thuế...' });
+    setStatusMessage({ type: 'info', text: 'Đang gửi yêu cầu xác thực trực tiếp đến Cổng Tổng cục Thuế (hoadondientu.gdt.gov.vn)...' });
 
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/gdt/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taxCode: taxCode.trim(),
+          password: password.trim(),
+          captchaKey,
+          captchaCode: captchaCode.trim(),
+          isDemo: false
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setStatusMessage({ 
+          type: 'success', 
+          text: data.isRealGDT 
+            ? 'Xác thực thành công! Đã kết nối phiên làm việc Cổng Tổng cục Thuế thực tế (JWT Token OK).' 
+            : 'Đã kích hoạt chế độ Dữ liệu Mẫu (Demo Sandbox).'
+        });
+
+        const updatedConfig: GDTAccountConfig = {
+          taxCode: taxCode.trim(),
+          password: password,
+          taxpayerName: data.session?.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,
+          address: data.session?.address || 'Đăng ký tại Tổng cục Thuế',
+          rememberMe,
+          autoSaveSession: true,
+          useHeadlessBrowser: useHeadless,
+          isRealGDT: data.isRealGDT ?? false
+        };
+
+        setTimeout(() => {
+          onSave(updatedConfig);
+          onClose();
+        }, 900);
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: data.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.'
+        });
+        // Refresh captcha on failure
+        fetchCaptcha();
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: 'error',
+        text: `Lỗi kết nối máy chủ: ${err.message}`
+      });
+      fetchCaptcha();
+    } finally {
       setIsSubmitting(false);
-      setStatusMessage({ type: 'success', text: 'Xác thực thành công! Đã kết nối với Cổng Hóa đơn điện tử GDT.' });
-
-      const updatedConfig: GDTAccountConfig = {
-        taxCode: taxCode.trim(),
-        password: password,
-        taxpayerName: taxCode === '0316892345' ? 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á' : `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,
-        address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
-        rememberMe,
-        autoSaveSession: true,
-        useHeadlessBrowser: useHeadless
-      };
-
-      setTimeout(() => {
-        onSave(updatedConfig);
-        onClose();
-      }, 700);
-    }, 900);
+    }
   };
 
   const handleUseDemoAccount = () => {
     setTaxCode('0316892345');
     setPassword('Gdt@Pass2025!');
-    fetchCaptcha();
+    setStatusMessage({
+      type: 'info',
+      text: 'Đã chọn tài khoản mẫu minh họa. Nhấn "Lưu & Kết Nối CQT" hoặc chọn chế độ Thử nghiệm để tiếp tục.'
+    });
   };
 
   return (
@@ -227,16 +272,28 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
           {/* Captcha Verification */}
           <div>
-            <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-              Mã xác thực Captcha <span className="text-[#ef4444]">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider">
+                Mã xác thực Captcha <span className="text-[#ef4444]">*</span>
+              </label>
+              {isRealGDT ? (
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                  Cổng Thuế Trực Tiếp
+                </span>
+              ) : (
+                <span className="text-[10px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.5 rounded">
+                  Bộ sinh mã cục bộ
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <div className="flex-1">
                 <input
                   type="text"
                   value={captchaCode}
                   onChange={(e) => setCaptchaCode(e.target.value.toUpperCase())}
-                  placeholder="Mã 4 ký tự"
+                  placeholder="Nhập mã từ hình"
                   maxLength={6}
                   className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#d1d5db] rounded focus:border-[#ef4444] focus:outline-hidden uppercase tracking-widest font-mono text-center font-bold"
                   required
@@ -249,10 +306,10 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                   <img
                     src={captchaImg}
                     alt="Captcha"
-                    className="h-7 w-24 rounded object-contain bg-white"
+                    className="h-8 w-28 rounded object-contain bg-white"
                   />
                 ) : (
-                  <div className="h-7 w-24 bg-gray-200 animate-pulse rounded flex items-center justify-center text-[10px] text-gray-400">
+                  <div className="h-8 w-28 bg-gray-200 animate-pulse rounded flex items-center justify-center text-[10px] text-gray-400">
                     Đang tải...
                   </div>
                 )}
@@ -260,13 +317,16 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                   type="button"
                   onClick={fetchCaptcha}
                   disabled={isLoadingCaptcha}
-                  className="p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
-                  title="Đổi mã captcha khác"
+                  className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
+                  title="Đổi mã captcha khác từ Cổng Thuế"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
                 </button>
               </div>
             </div>
+            <p className="text-[10px] text-gray-500 mt-1">
+              Mã Captcha được lấy trực tiếp theo thời gian thực từ <code>hoadondientu.gdt.gov.vn</code>.
+            </p>
           </div>
 
           {/* Additional Options */}
@@ -293,31 +353,65 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#d1d5db]">
+          <div className="pt-3 flex items-center justify-between border-t border-[#d1d5db]">
             <button
               type="button"
-              onClick={onClose}
-              className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+              onClick={async () => {
+                setIsSubmitting(true);
+                try {
+                  const res = await fetch('/api/gdt/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      taxCode: '0316892345',
+                      isDemo: true
+                    })
+                  });
+                  const data = await res.json();
+                  onSave({
+                    taxCode: '0316892345',
+                    password: '',
+                    taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)',
+                    address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
+                    rememberMe: true,
+                    autoSaveSession: true,
+                    isRealGDT: false
+                  });
+                  onClose();
+                } finally {
+                  setIsSubmitting(false);
+                }
+              }}
+              className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline"
             >
-              Hủy bỏ
+              Chạy Chế độ Mẫu (Demo)
             </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {isSubmitting ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Đang kết nối GDT...</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Lưu & Kết Nối CQT</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Đang kết nối GDT...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Lưu & Kết Nối CQT</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </div>
