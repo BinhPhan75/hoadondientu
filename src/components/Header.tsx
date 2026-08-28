@@ -9,7 +9,8 @@ import {
   RefreshCw,
   FolderArchive,
   Code2,
-  Menu
+  Menu,
+  FileCode2
 } from 'lucide-react';
 import { GDTAccountConfig, GDTInvoice } from '../types';
 
@@ -23,6 +24,7 @@ interface HeaderProps {
   onOpenSeleniumModal: () => void;
   onDownloadPythonScript: () => void;
   onRefreshData: () => void;
+  onOpenImportXml?: () => void;
   isRefreshing: boolean;
   onLogout: () => void;
   onToggleSidebar?: () => void;
@@ -38,6 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSeleniumModal,
   onDownloadPythonScript,
   onRefreshData,
+  onOpenImportXml,
   isRefreshing,
   onLogout,
   onToggleSidebar
@@ -104,6 +107,18 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw className={`w-3.5 h-3.5 text-gray-600 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span className="hidden md:inline">Làm mới</span>
           </button>
+
+          {/* Import XML/ZIP Button */}
+          {onOpenImportXml && (
+            <button
+              onClick={onOpenImportXml}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded transition-colors"
+              title="Nhập tệp XML hoặc ZIP tải từ Cổng Thuế"
+            >
+              <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden sm:inline">Nhập XML/ZIP</span>
+            </button>
+          )}
 
           {/* Python Runner Button */}
           <button

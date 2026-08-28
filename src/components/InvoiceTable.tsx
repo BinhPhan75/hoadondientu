@@ -27,6 +27,11 @@ interface InvoiceTableProps {
   onDownloadPdf: (invoice: GDTInvoice) => void;
   onBatchDownloadSelected: () => void;
   onExportExcelSelected: () => void;
+  onQuickSyncPeriod?: () => void;
+  onQuickResetPeriod?: () => void;
+  onOpenImportXml?: () => void;
+  currentDateRange?: { from: string; to: string };
+  currentMst?: string;
 }
 
 export const InvoiceTable: React.FC<InvoiceTableProps> = ({
@@ -38,7 +43,12 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
   onDownloadXml,
   onDownloadPdf,
   onBatchDownloadSelected,
-  onExportExcelSelected
+  onExportExcelSelected,
+  onQuickSyncPeriod,
+  onQuickResetPeriod,
+  onOpenImportXml,
+  currentDateRange,
+  currentMst
 }) => {
   const [copiedMst, setCopiedMst] = useState<string | null>(null);
 
@@ -110,13 +120,68 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <tbody>
             {invoices.length === 0 ? (
               <tr>
-                <td colSpan={14} className="p-12 text-center text-gray-500">
-                  <div className="flex flex-col items-center justify-center space-y-1.5">
-                    <AlertCircle className="w-6 h-6 text-gray-400" />
-                    <p className="text-xs font-bold text-gray-700">Không có dữ liệu hóa đơn phù hợp</p>
-                    <p className="text-[11px] text-gray-500 font-mono">
-                      Vui lòng điều chỉnh khoảng thời gian hoặc từ khóa tìm kiếm.
-                    </p>
+                <td colSpan={14} className="p-10 text-center text-gray-600 bg-gray-50/40">
+                  <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                      <AlertCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-gray-900">
+                        Không tìm thấy hóa đơn nào trong khoảng thời gian đã lọc
+                      </p>
+                      <p className="text-xs text-gray-500 font-mono mt-1">
+                        Kỳ tra cứu:{' '}
+                        <strong className="text-gray-800">
+                          {currentDateRange ? `${currentDateRange.from} -> ${currentDateRange.to}` : 'Tất cả'}
+                        </strong>{' '}
+                        | MST:{' '}
+                        <strong className="text-gray-800 font-mono">
+                          {currentMst || '0316892345'}
+                        </strong>
+                      </p>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Hóa đơn có thể chưa phát sinh trong kỳ này hoặc chưa được đồng bộ từ Cổng Tổng cục Thuế.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                      {onQuickSyncPeriod && (
+                        <button
+                          onClick={onQuickSyncPeriod}
+                          className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
+                        >
+                          <span>Tự động đồng bộ kỳ này</span>
+                        </button>
+                      )}
+
+                      {onOpenImportXml && (
+                        <button
+                          onClick={onOpenImportXml}
+                          className="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 rounded text-xs font-bold transition-colors flex items-center gap-1.5"
+                        >
+                          <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
+                          <span>Nhập tệp XML / ZIP thực tế</span>
+                        </button>
+                      )}
+
+                      {onQuickResetPeriod && (
+                        <button
+                          onClick={onQuickResetPeriod}
+                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors"
+                        >
+                          <span>Xem kỳ Quý 1/2025</span>
+                        </button>
+                      )}
+
+                      <a
+                        href="https://hoadondientu.gdt.gov.vn"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1"
+                      >
+                        <span>Mở Cổng GDT (hoadondientu.gdt.gov.vn)</span>
+                      </a>
+                    </div>
                   </div>
                 </td>
               </tr>

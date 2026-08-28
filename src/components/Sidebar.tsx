@@ -14,7 +14,8 @@ import {
   EyeOff,
   Sparkles,
   CheckCircle2,
-  X
+  X,
+  FileCode2
 } from 'lucide-react';
 import { GDTAccountConfig, FilterParams } from '../types';
 
@@ -28,6 +29,7 @@ interface SidebarProps {
   onOpenConfigModal: () => void;
   onOpenPythonRunner: () => void;
   onDownloadPackage: () => void;
+  onOpenImportXml?: () => void;
   onCloseMobileSidebar?: () => void;
 }
 
@@ -41,6 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenConfigModal,
   onOpenPythonRunner,
   onDownloadPackage,
+  onOpenImportXml,
   onCloseMobileSidebar
 }) => {
   const [showPassword, setShowPassword] = useState(false);
@@ -265,6 +268,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer Utility Links */}
       <div className="pt-4 border-t border-gray-800 space-y-2 text-xs">
+        {onOpenImportXml && (
+          <button
+            onClick={onOpenImportXml}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-blue-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] font-semibold"
+          >
+            <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
+            <span>Nhập tệp XML / ZIP thực tế</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenConfigModal}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-gray-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px]"

@@ -8,7 +8,8 @@ import {
   Layers, 
   Sparkles,
   RotateCcw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  FileCode2
 } from 'lucide-react';
 import { FilterParams } from '../types';
 
@@ -19,6 +20,7 @@ interface SearchFilterBarProps {
   onRunSelenium: () => void;
   isLoading: boolean;
   totalFilteredCount: number;
+  onOpenImportXml?: () => void;
 }
 
 export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
@@ -27,7 +29,8 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
   onResetFilters,
   onRunSelenium,
   isLoading,
-  totalFilteredCount
+  totalFilteredCount,
+  onOpenImportXml
 }) => {
   // Preset date helpers
   const applyPreset = (preset: string) => {
@@ -70,9 +73,17 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
         fromDate = `${year}-10-01`;
         toDate = `${year}-12-31`;
         break;
-      case 'this_year':
-        fromDate = `${year}-01-01`;
-        toDate = `${year}-12-31`;
+      case '2026':
+        fromDate = `2026-01-01`;
+        toDate = `2026-12-31`;
+        break;
+      case '2025':
+        fromDate = `2025-01-01`;
+        toDate = `2025-12-31`;
+        break;
+      case 'q1_2025':
+        fromDate = `2025-01-01`;
+        toDate = `2025-03-31`;
         break;
       default:
         return;
@@ -128,7 +139,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
           </button>
         </div>
 
-        {/* Date Presets */}
+        {/* Date Presets & Quick Import */}
         <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium">
           <span className="text-gray-500 uppercase font-semibold mr-1">Kỳ kê khai:</span>
           <button
@@ -150,33 +161,33 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             Quý 1
           </button>
           <button
-            onClick={() => applyPreset('q2')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
-          >
-            Quý 2
-          </button>
-          <button
-            onClick={() => applyPreset('q3')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
-          >
-            Quý 3
-          </button>
-          <button
-            onClick={() => applyPreset('q4')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
-          >
-            Quý 4
-          </button>
-          <button
-            onClick={() => applyPreset('this_year')}
+            onClick={() => applyPreset('2026')}
             className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
           >
-            2025
+            2026
           </button>
+          <button
+            onClick={() => applyPreset('q1_2025')}
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
+            title="Dữ liệu mẫu Quý 1/2025"
+          >
+            Q1/2025
+          </button>
+
+          {onOpenImportXml && (
+            <button
+              onClick={onOpenImportXml}
+              className="ml-1 inline-flex items-center gap-1 px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold transition-colors"
+              title="Nhập tệp XML hoặc ZIP từ Tổng cục Thuế"
+            >
+              <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>Nhập XML/ZIP</span>
+            </button>
+          )}
 
           <button
             onClick={onResetFilters}
-            className="ml-auto lg:ml-2 p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded border border-gray-300 transition-colors"
+            className="ml-auto lg:ml-1 p-1 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded border border-gray-300 transition-colors"
             title="Đặt lại bộ lọc"
           >
             <RotateCcw className="w-3.5 h-3.5" />

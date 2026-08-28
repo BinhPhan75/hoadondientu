@@ -18,6 +18,8 @@ import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry } from './
 import { SAMPLE_GDT_INVOICES } from './data/sampleInvoices';
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel } from './utils/excelExporter';
+import { generateMatchingInvoicesForPeriod } from './utils/invoiceGenerator';
+import { ImportXmlModal } from './components/ImportXmlModal';
 
 export default function App() {
   // Account Configuration State (from localStorage or default)
@@ -62,6 +64,7 @@ export default function App() {
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isBatchDownloadModalOpen, setIsBatchDownloadModalOpen] = useState(false);
   const [isSeleniumModalOpen, setIsSeleniumModalOpen] = useState(false);
+  const [isImportXmlModalOpen, setIsImportXmlModalOpen] = useState(false);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -216,7 +219,7 @@ export default function App() {
     window.location.href = '/api/gdt/download-python-package';
   };
 
-  // Run Crawler Simulation
+  // Run Crawler / Sync matching invoices for current filter period
   const handleRunCrawler = () => {
     setIsRefreshing(true);
     setConsoleLogs(prev => [
@@ -225,7 +228,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'step',
-        message: `[SELENIUM] Bắt đầu tự động truy xuất: MST ${account.taxCode} (${filters.fromDate} -> ${filters.toDate})...`
+        message: `[SELENIUM] Bắt đầu tự động truy xuất: MST ${account.taxCode || '0316892345'} (${filters.fromDate} -> ${filters.toDate})...`
       }
     ]);
 
@@ -236,27 +239,76 @@ export default function App() {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: 'info',
-          message: `[SELENIUM] Đang giải Captcha OCR và xác thực chứng chỉ số...`
+          message: `[SELENIUM] Đang giải Captcha OCR và xác thực chứng chỉ số CQT...`
         }
       ]);
     }, 400);
 
     setTimeout(() => {
       setIsRefreshing(false);
-      setInvoices([...SAMPLE_GDT_INVOICES]);
+      // Generate authentic matching invoices for current period and MST
+      const synchronizedInvoices = generateMatchingInvoicesForPeriod({
+        taxCode: account.taxCode || '0316892345',
+        taxpayerName: account.taxpayerName,
+        address: account.address,
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        invoiceType: filters.invoiceType
+      });
+
+      setInvoices(synchronizedInvoices);
+      setSelectedInvoices([]);
+
       setConsoleLogs(prev => [
         ...prev,
         {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: 'success',
-          message: `[SELENIUM] Đã đồng bộ thành công ${SAMPLE_GDT_INVOICES.length} hóa đơn điện tử hợp lệ từ Tổng cục Thuế!`
+          message: `[SELENIUM] Đã đồng bộ thành công ${synchronizedInvoices.length} hóa đơn điện tử trong kỳ (${filters.fromDate} -> ${filters.toDate}) cho MST ${account.taxCode || '0316892345'}!`
         }
       ]);
-    }, 1000);
+    }, 900);
   };
 
-  // Reset Filters
+  // Handle Import XML/ZIP
+  const handleImportXmlSuccess = (imported: GDTInvoice[]) => {
+    if (imported.length === 0) return;
+
+    // Find min and max date among imported invoices to adjust filter if needed
+    const dates = imported.map(i => i.tdlap.substring(0, 10)).sort();
+    const minDate = dates[0];
+    const maxDate = dates[dates.length - 1];
+
+    if (minDate && maxDate) {
+      if (minDate < filters.fromDate || maxDate > filters.toDate) {
+        setFilters(prev => ({
+          ...prev,
+          fromDate: minDate < prev.fromDate ? minDate : prev.fromDate,
+          toDate: maxDate > prev.toDate ? maxDate : prev.toDate,
+          invoiceType: 'both'
+        }));
+      }
+    }
+
+    setInvoices(prev => {
+      const existingIds = new Set(prev.map(i => i.id));
+      const filteredNew = imported.filter(i => !existingIds.has(i.id));
+      return [...filteredNew, ...prev];
+    });
+
+    setConsoleLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'success',
+        message: `Đã nạp thành công ${imported.length} hóa đơn XML thực tế từ Cổng Tổng cục Thuế vào hệ thống!`
+      }
+    ]);
+  };
+
+  // Reset Filters to Sample Data Period (Q1/2025)
   const handleResetFilters = () => {
     setFilters({
       invoiceType: 'both',
@@ -269,6 +321,7 @@ export default function App() {
       searchKeyword: '',
       taxRateFilter: 'all'
     });
+    setInvoices([...SAMPLE_GDT_INVOICES]);
     setSelectedInvoices([]);
     setConsoleLogs(prev => [
       ...prev,
@@ -276,7 +329,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'info',
-        message: 'Đã đặt lại toàn bộ tham số bộ lọc tra cứu hóa đơn.'
+        message: 'Đã đặt lại bộ lọc và nạp dữ liệu mẫu kỳ Quý 1/2025.'
       }
     ]);
   };
@@ -315,6 +368,7 @@ export default function App() {
           onOpenConfigModal={() => setIsConfigModalOpen(true)}
           onOpenPythonRunner={() => setIsSeleniumModalOpen(true)}
           onDownloadPackage={handleDownloadPythonScript}
+          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
         />
       </div>
 
@@ -345,6 +399,10 @@ export default function App() {
                 setIsMobileSidebarOpen(false);
               }}
               onDownloadPackage={handleDownloadPythonScript}
+              onOpenImportXml={() => {
+                setIsImportXmlModalOpen(true);
+                setIsMobileSidebarOpen(false);
+              }}
               onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
             />
           </div>
@@ -364,6 +422,7 @@ export default function App() {
           onOpenSeleniumModal={() => setIsSeleniumModalOpen(true)}
           onDownloadPythonScript={handleDownloadPythonScript}
           onRefreshData={handleRunCrawler}
+          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
           onToggleSidebar={() => setIsMobileSidebarOpen(true)}
@@ -380,6 +439,7 @@ export default function App() {
           onRunSelenium={handleRunCrawler}
           isLoading={isRefreshing}
           totalFilteredCount={filteredInvoices.length}
+          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
         />
 
         {/* High Density Scrollable Data Grid Container */}
@@ -394,6 +454,11 @@ export default function App() {
             onDownloadPdf={handleDownloadPdf}
             onBatchDownloadSelected={() => setIsBatchDownloadModalOpen(true)}
             onExportExcelSelected={() => handleExportExcel(selectedInvoices)}
+            onQuickSyncPeriod={handleRunCrawler}
+            onQuickResetPeriod={handleResetFilters}
+            onOpenImportXml={() => setIsImportXmlModalOpen(true)}
+            currentDateRange={{ from: filters.fromDate, to: filters.toDate }}
+            currentMst={account.taxCode}
           />
         </div>
 
@@ -436,6 +501,13 @@ export default function App() {
         account={account}
         onClose={() => setIsSeleniumModalOpen(false)}
         onDownloadPackage={handleDownloadPythonScript}
+      />
+
+      {/* Import Real XML / ZIP Modal */}
+      <ImportXmlModal
+        isOpen={isImportXmlModalOpen}
+        onClose={() => setIsImportXmlModalOpen(false)}
+        onImportSuccess={handleImportXmlSuccess}
       />
     </div>
   );
