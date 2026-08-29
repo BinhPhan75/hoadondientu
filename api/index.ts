@@ -88,7 +88,7 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
     return textMatch[1].replace(/\s+/g, '').toUpperCase();
   }
 
-  // 2. High accuracy OCR using Gemini 3.7 Flash with timeout
+  // 2. High accuracy OCR using Gemini with timeout protection
   const ai = getGeminiClient();
   if (ai) {
     try {
@@ -103,22 +103,27 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
             }
           },
           {
-            text: 'This is a captcha image from the Vietnam General Department of Taxation (Tổng cục Thuế). Extract and return ONLY the uppercase alphanumeric characters (4 to 6 characters) with no spaces, punctuation, or comments.'
+            text: 'Extract and return ONLY the 4 to 6 uppercase alphanumeric captcha characters shown in the image. Return only the characters with no spaces or other text.'
           }
-        ]
+        ],
+        config: {
+          thinkingConfig: { thinkingBudget: 0 }
+        }
       });
 
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('OCR Timeout')), 4000)
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 5000)
       );
 
       const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
-      const extracted = (aiResp?.text || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-      if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-        return extracted;
+      if (aiResp && aiResp.text) {
+        const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        if (extracted && extracted.length >= 3 && extracted.length <= 8) {
+          return extracted;
+        }
       }
-    } catch (err: any) {
-      console.warn('[Gemini OCR Error]:', err.message);
+    } catch {
+      // Graceful fallback to manual entry
     }
   }
 
@@ -400,7 +405,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
-    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc,khhdon:asc,shdon:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
     try {
       const resp = await fetch(url, {
         headers: {
