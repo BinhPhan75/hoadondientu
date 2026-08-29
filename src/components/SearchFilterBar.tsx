@@ -190,7 +190,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             type="button"
             onClick={() => applyPreset('q1_2025')}
             className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
-            title="Dữ liệu mẫu Quý 1/2025"
+            title="Kỳ kê khai Quý 1/2025"
           >
             Q1/2025
           </button>

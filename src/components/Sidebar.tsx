@@ -28,7 +28,6 @@ export interface CrawlerCredentials {
   password?: string;
   captchaKey?: string;
   captchaCode?: string;
-  isDemo?: boolean;
 }
 
 interface SidebarProps {
@@ -59,8 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobileSidebar
 }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const [localMst, setLocalMst] = useState(account.taxCode || '0316892345');
-  const [localPassword, setLocalPassword] = useState(account.password || 'Gdt@Tax2025!');
+  const [localMst, setLocalMst] = useState(account.taxCode || '');
+  const [localPassword, setLocalPassword] = useState(account.password || '');
   
   // Captcha & AI OCR State
   const [captchaCode, setCaptchaCode] = useState('');
@@ -168,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       onUpdateAccount({
         ...account,
         taxCode: trimmed,
-        taxpayerName: trimmed === '0316892345' ? 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á' : `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})`,
+        taxpayerName: `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})`,
         isRealGDT: false // Reset authenticated state on MST change
       });
     }
@@ -247,18 +246,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // Auto refresh captcha on failure so user can retry immediately
       fetchCaptcha();
     }
-  };
-
-  // Switch to Sample Demo Mode
-  const handleUseDemo = async () => {
-    setAuthError(null);
-    setLocalMst('0316892345');
-    setLocalPassword('Gdt@Tax2025!');
-    await onRunCrawler({
-      taxCode: '0316892345',
-      password: 'Gdt@Tax2025!',
-      isDemo: true
-    });
   };
 
   return (
@@ -476,23 +463,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span className="text-red-200/90">{authError}</span>
                 </div>
               </div>
-              <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-red-900/50">
+              <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-red-900/50">
                 <button
                   type="button"
                   onClick={onOpenPythonRunner}
-                  className="px-2 py-1 text-[10px] font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded transition-colors flex items-center gap-1"
+                  className="px-2 py-1 text-[10px] font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded transition-colors flex items-center gap-1 cursor-pointer"
                   title="Chạy trực tiếp từ máy tính Việt Nam để không bị chặn IP"
                 >
                   <Code2 className="w-3 h-3 text-amber-400" />
                   Chạy trên máy tính
-                </button>
-                <button
-                  type="button"
-                  onClick={handleUseDemo}
-                  className="px-2 py-1 text-[10px] font-bold bg-amber-500 text-black hover:bg-amber-400 rounded transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
-                >
-                  <Database className="w-3 h-3" />
-                  Kích hoạt Chế độ Mẫu
                 </button>
               </div>
             </div>
@@ -620,7 +599,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           {/* Primary Action Button */}
-          <div className="pt-1.5 space-y-2">
+          <div className="pt-1.5">
             <button
               type="submit"
               disabled={isLoading}
@@ -637,17 +616,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span>BẮT ĐẦU TRUY XUẤT</span>
                 </>
               )}
-            </button>
-
-            {/* Quick Demo Sandbox Switch Button */}
-            <button
-              type="button"
-              onClick={handleUseDemo}
-              className="w-full py-1 px-2 rounded bg-gray-800 hover:bg-gray-700 text-amber-300 text-[11px] font-medium flex items-center justify-center gap-1.5 border border-gray-700 transition-colors cursor-pointer"
-              title="Xem và kiểm tra toàn bộ tính năng với dữ liệu mẫu minh họa"
-            >
-              <Database className="w-3 h-3 text-amber-400" />
-              <span>Chạy chế độ Mẫu (Demo Sandbox)</span>
             </button>
           </div>
         </form>

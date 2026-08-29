@@ -18,7 +18,7 @@ interface HeaderProps {
   account: GDTAccountConfig;
   selectedInvoices: GDTInvoice[];
   totalInvoicesCount: number;
-  dataSourceType?: 'live_gdt' | 'imported_xml' | 'sample_demo';
+  dataSourceType?: 'live_gdt' | 'imported_xml';
   onOpenConfig: () => void;
   onOpenBatchDownload: () => void;
   onExportExcel: () => void;
@@ -35,7 +35,7 @@ export const Header: React.FC<HeaderProps> = ({
   account,
   selectedInvoices,
   totalInvoicesCount,
-  dataSourceType = 'sample_demo',
+  dataSourceType = 'live_gdt',
   onOpenConfig,
   onOpenBatchDownload,
   onExportExcel,
@@ -84,28 +84,27 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-sm font-bold text-gray-900 tracking-tight">
                 Bảng điều khiển tác vụ Hóa đơn điện tử
               </h1>
-              {dataSourceType === 'live_gdt' ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping"></span>
-                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                  CỔNG THUẾ TRỰC TIẾP (LIVE)
-                </span>
-              ) : dataSourceType === 'imported_xml' ? (
+              {dataSourceType === 'imported_xml' ? (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
                   <FileCode2 className="w-3 h-3 text-blue-600" />
                   TỆP XML/ZIP GỐC
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                  CHẾ ĐỘ MẪU (SANDBOX)
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  CỔNG THUẾ TRỰC TIẾP (LIVE)
                 </span>
               )}
             </div>
             <p className="text-[11px] text-gray-500 font-mono mt-0.5 flex items-center gap-2">
-              <span>MST: <strong className="text-gray-900">{account.taxCode || '0316892345'}</strong></span>
-              <span className="text-gray-300">•</span>
-              <span className="truncate max-w-[260px] sm:max-w-md text-gray-600">{account.taxpayerName}</span>
+              <span>MST: <strong className="text-gray-900">{account.taxCode || '(Chưa nhập MST)'}</strong></span>
+              {account.taxpayerName && (
+                <>
+                  <span className="text-gray-300">•</span>
+                  <span className="truncate max-w-[260px] sm:max-w-md text-gray-600">{account.taxpayerName}</span>
+                </>
+              )}
             </p>
           </div>
         </div>

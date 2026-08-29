@@ -136,7 +136,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                         </strong>{' '}
                         | MST:{' '}
                         <strong className="text-gray-800 font-mono">
-                          {currentMst || '0316892345'}
+                          {currentMst || '(Chưa nhập)'}
                         </strong>
                       </p>
                       <p className="text-[11px] text-gray-500 mt-1">
@@ -148,7 +148,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {onQuickSyncPeriod && (
                         <button
                           onClick={onQuickSyncPeriod}
-                          className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5"
+                          className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
                         >
                           <span>Tự động đồng bộ kỳ này</span>
                         </button>
@@ -157,7 +157,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {onOpenImportXml && (
                         <button
                           onClick={onOpenImportXml}
-                          className="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 rounded text-xs font-bold transition-colors flex items-center gap-1.5"
+                          className="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 rounded text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
                           <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
                           <span>Nhập tệp XML / ZIP thực tế</span>
@@ -167,9 +167,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {onQuickResetPeriod && (
                         <button
                           onClick={onQuickResetPeriod}
-                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors"
+                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors cursor-pointer"
                         >
-                          <span>Xem kỳ Quý 1/2025</span>
+                          <span>Đặt lại bộ lọc kỳ</span>
                         </button>
                       )}
 

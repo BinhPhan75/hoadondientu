@@ -27,8 +27,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   onSave,
   onClose,
 }) => {
-  const [taxCode, setTaxCode] = useState(currentConfig.taxCode || '0316892345');
-  const [password, setPassword] = useState(currentConfig.password || 'Gdt@Tax2025!');
+  const [taxCode, setTaxCode] = useState(currentConfig.taxCode || '');
+  const [password, setPassword] = useState(currentConfig.password || '');
   const [showPassword, setShowPassword] = useState(false);
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaKey, setCaptchaKey] = useState('');
@@ -121,22 +121,6 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleActivateDemo = () => {
-    onSave({
-      taxCode: taxCode.trim() || '0316892345',
-      password: password || 'Gdt@Tax2025!',
-      taxpayerName: taxCode.trim() === '0316892345' || !taxCode.trim()
-        ? 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)'
-        : `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode.trim()})`,
-      address: 'Đăng ký tại Tổng cục Thuế Việt Nam',
-      rememberMe: true,
-      autoSaveSession: true,
-      useHeadlessBrowser: useHeadless,
-      isRealGDT: false
-    });
-    onClose();
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!taxCode.trim()) {
@@ -186,8 +170,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           taxCode: taxCode.trim(),
           password: password.trim(),
           captchaKey,
-          captchaCode: activeCode,
-          isDemo: false
+          captchaCode: activeCode
         })
       });
 
@@ -196,26 +179,16 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       try {
         data = JSON.parse(text);
       } catch {
-        if (res.status === 404) {
-          data = {
-            success: false,
-            is404: true,
-            message: 'Máy chủ backend API trả về mã HTTP 404 (Chưa nhận Vercel Serverless Function hoặc đang chạy trên host tĩnh). Bạn có thể bấm nút "Dùng Chế độ Mẫu" bên dưới để sử dụng ngay.'
-          };
-        } else {
-          data = {
-            success: false,
-            message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
-          };
-        }
+        data = {
+          success: false,
+          message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
+        };
       }
 
       if (res.ok && data.success) {
         setStatusMessage({ 
           type: 'success', 
-          text: data.isRealGDT 
-            ? 'Xác thực thành công! Đã kết nối phiên làm việc Cổng Tổng cục Thuế thực tế (JWT Token OK).' 
-            : 'Đã kích hoạt chế độ Dữ liệu Mẫu (Demo Sandbox).'
+          text: 'Xác thực thành công! Đã kết nối phiên làm việc Cổng Tổng cục Thuế thực tế.' 
         });
 
         const updatedConfig: GDTAccountConfig = {
@@ -226,7 +199,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           rememberMe,
           autoSaveSession: true,
           useHeadlessBrowser: useHeadless,
-          isRealGDT: data.isRealGDT ?? false
+          isRealGDT: true
         };
 
         setTimeout(() => {
@@ -244,21 +217,12 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     } catch (err: any) {
       setStatusMessage({
         type: 'error',
-        text: `Lỗi kết nối máy chủ (${err.message}). Bạn có thể kích hoạt Chế độ Mẫu để tiếp tục.`
+        text: `Lỗi kết nối máy chủ (${err.message}). Vui lòng thử lại hoặc sử dụng công cụ Python trên máy tính.`
       });
       fetchCaptcha();
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleUseDemoAccount = () => {
-    setTaxCode('0316892345');
-    setPassword('Gdt@Pass2025!');
-    setStatusMessage({
-      type: 'info',
-      text: 'Đã điền tài khoản mẫu. Nhấn "Lưu & Kết Nối CQT" hoặc chọn "Chạy Chế độ Mẫu (Demo)" bên dưới để tiếp tục.'
-    });
   };
 
   return (
@@ -316,18 +280,6 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 )}
                 <span className="flex-1 leading-snug">{statusMessage.text}</span>
               </div>
-              {statusMessage.type === 'error' && (
-                <div className="pt-1 flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={handleActivateDemo}
-                    className="px-2.5 py-1 text-[10px] font-bold bg-rose-900 text-white rounded hover:bg-rose-950 transition-colors flex items-center gap-1 shadow-xs"
-                  >
-                    <Sparkles className="w-3 h-3 text-amber-300" />
-                    Kích hoạt Chế độ Mẫu ngay (Offline/Sandbox)
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
@@ -337,14 +289,6 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
               <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider">
                 Mã số thuế (Tên đăng nhập) <span className="text-[#ef4444]">*</span>
               </label>
-              <button
-                type="button"
-                onClick={handleUseDemoAccount}
-                className="text-[11px] font-semibold text-[#ef4444] hover:text-red-700 flex items-center gap-1"
-              >
-                <Sparkles className="w-3 h-3" />
-                Dùng MST mẫu
-              </button>
             </div>
             <div className="relative">
               <Building2 className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -396,8 +340,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                     Cổng Thuế Trực Tiếp
                   </span>
                 ) : (
-                  <span className="text-[9px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.2 rounded">
-                    Bộ sinh mã cục bộ
+                  <span className="text-[9px] bg-gray-100 text-gray-700 font-medium px-1.5 py-0.2 rounded">
+                    Mã xác nhận
                   </span>
                 )}
               </label>
@@ -500,41 +444,31 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-3 flex items-center justify-between border-t border-[#d1d5db]">
+          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#d1d5db]">
             <button
               type="button"
-              onClick={handleActivateDemo}
-              className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline flex items-center gap-1"
+              onClick={onClose}
+              className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              Chạy Chế độ Mẫu (Demo)
+              Hủy bỏ
             </button>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
-              >
-                Hủy bỏ
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isSubmitting ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Đang kết nối GDT...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Lưu & Kết Nối CQT</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Đang kết nối GDT...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Lưu & Kết Nối CQT</span>
+                </>
+              )}
+            </button>
           </div>
         </form>
       </div>

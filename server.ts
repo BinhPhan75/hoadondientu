@@ -32,14 +32,7 @@ interface SessionData {
   createdAt: number;
 }
 
-let currentSession: SessionData | null = {
-  taxCode: '0316892345',
-  taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á',
-  address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
-  token: 'GDT_DEMO_TOKEN_2025',
-  isRealGDT: false,
-  createdAt: Date.now()
-};
+let currentSession: SessionData | null = null;
 
 // Store cookies and content corresponding to captcha keys
 const captchaCookieJar = new Map<string, string>();
@@ -237,30 +230,10 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
 
 // 3. Login directly to GDT Portal / Authenticate Session
 app.post('/api/gdt/login', async (req, res) => {
-  let { taxCode, password, captchaKey, captchaCode, isDemo } = req.body;
+  let { taxCode, password, captchaKey, captchaCode } = req.body;
 
   if (!taxCode) {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
-  }
-
-  // If user explicitly asks for Demo / Sample Sandbox mode
-  if (isDemo || (taxCode === '0316892345' && (!password || password === 'Gdt@Tax2025!' || password === 'Gdt@Pass2025!'))) {
-    currentSession = {
-      taxCode: taxCode.trim(),
-      taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)',
-      address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
-      token: 'GDT_DEMO_SANDBOX_TOKEN',
-      isRealGDT: false,
-      createdAt: Date.now()
-    };
-
-    return res.json({
-      success: true,
-      isRealGDT: false,
-      isDemo: true,
-      message: 'Đã kích hoạt chế độ Dữ liệu Mẫu (Demo Sandbox) cho MST: ' + taxCode,
-      session: currentSession
-    });
   }
 
   if (!password) {
@@ -295,7 +268,7 @@ app.post('/api/gdt/login', async (req, res) => {
         ckey: captchaKey || '',
         cvalue: captchaCode.trim()
       }),
-      signal: AbortSignal.timeout(12000)
+      signal: AbortSignal.timeout(15000)
     });
 
     // Capture updated session cookies from authenticate response
@@ -353,7 +326,7 @@ app.post('/api/gdt/login', async (req, res) => {
       success: false,
       isRealGDT: true,
       isNetworkBlocked: true,
-      message: `Máy chủ Cổng Thuế chặn kết nối đám mây (${err.message}). Bạn có thể kích hoạt Chế độ Mẫu ngay lập tức hoặc dùng công cụ Python trên máy tính.`
+      message: `Không thể kết nối đến máy chủ Cổng Thuế (${err.message}). Vui lòng thử lại hoặc sử dụng công cụ Python trên máy tính để kết nối trực tiếp.`
     });
   }
 });
@@ -391,23 +364,12 @@ function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string)
 
 // 4. Query Real Invoices from GDT API
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType, size = 50 } = req.body;
+  const { fromDate, toDate, invoiceType = 'both', size = 50 } = req.body;
 
   if (!currentSession) {
     return res.status(401).json({
       success: false,
       message: 'Chưa có phiên làm việc với Tổng cục Thuế. Vui lòng nhập mã Captcha để kết nối.'
-    });
-  }
-
-  // If in Demo Mode, inform client to use local matching generator
-  if (!currentSession.isRealGDT) {
-    return res.json({
-      success: true,
-      isRealGDT: false,
-      isDemo: true,
-      message: 'Đang ở chế độ Dữ liệu Mẫu (Demo Sandbox)',
-      invoices: []
     });
   }
 
@@ -422,8 +384,8 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     return dateStr;
   };
 
-  const rawFrom = fromDate || '2026-03-01';
-  const rawTo = toDate || '2026-03-31';
+  const rawFrom = fromDate || '2025-01-01';
+  const rawTo = toDate || '2025-12-31';
 
   // Chunk the requested period into <= 1-month slices to satisfy GDT's API rule
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
@@ -435,86 +397,96 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
     const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc,khhdon:asc,shdon:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
-    const resp = await fetch(url, {
-      headers: {
-        ...GDT_HEADERS,
-        'Authorization': tokenHeader,
-        ...(currentSession.cookieHeader ? { 'Cookie': currentSession.cookieHeader } : {})
-      },
-      signal: AbortSignal.timeout(15000)
-    });
     
-    if (resp.status === 401 || resp.status === 403) {
-      console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
-      return { error: 'AUTH_EXPIRED' };
-    }
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      console.warn(`[GDT Query ${type} Error for ${chunkFrom}..${chunkTo}]:`, resp.status, errText.substring(0, 200));
-      return [];
-    }
-
-    const rawText = await resp.text();
-    let data: any = {};
     try {
-      data = JSON.parse(rawText);
-    } catch {
-      console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+      const resp = await fetch(url, {
+        headers: {
+          ...GDT_HEADERS,
+          'Authorization': tokenHeader,
+          ...(currentSession?.cookieHeader ? { 'Cookie': currentSession.cookieHeader } : {})
+        },
+        signal: AbortSignal.timeout(20000)
+      });
+      
+      if (resp.status === 401 || resp.status === 403) {
+        console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
+        return { error: 'AUTH_EXPIRED' };
+      }
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.warn(`[GDT Query ${type} Error for ${chunkFrom}..${chunkTo}]:`, resp.status, errText.substring(0, 200));
+        return [];
+      }
+
+      const rawText = await resp.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+        return [];
+      }
+
+      const list = data.datas || data.data || data.rows || data.content || data.items || data.results || data.result || data.dshdon || (Array.isArray(data) ? data : []);
+      
+      console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
+
+      // Normalize GDT invoice payload
+      return list.map((item: any) => ({
+        id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
+        khmshdon: item.khmshdon || item.khmhd || '1',
+        khhdon: item.khhdon || '',
+        shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
+        tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
+        nbmst: item.nbmst || '',
+        nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
+        nbdchi: item.nbdchi || '',
+        nmmst: item.nmmst || '',
+        nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
+        nmdchi: item.nmdchi || '',
+        tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+        tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+        tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
+        tgtttbchu: item.tgtttbchu || '',
+        htttoan: item.htttoan || 'TM/CK',
+        tthdon: Number(item.tthdon || 1),
+        tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
+        ttxly: Number(item.ttxly || 1),
+        ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
+        mhdon: item.mhdon || '',
+        hsgcma: Boolean(item.mhdon || item.hsgcma),
+        loaiHdon: type,
+        hasDigitalSignature: true,
+        signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
+        signedDate: item.tdlap,
+        caProvider: 'Tổng cục Thuế CQT',
+        items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
+          id: `item_${idx + 1}`,
+          lineNo: idx + 1,
+          itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
+          unit: it.dvtinh || it.unit || 'Lô',
+          quantity: Number(it.sluong || it.quantity || 1),
+          unitPrice: Number(it.dgia || it.unitPrice || 0),
+          amount: Number(it.thtien || it.amount || 0),
+          taxRate: it.tsuat || it.taxRate || '10%',
+          taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
+          taxAmount: Number(it.tthue || it.taxAmount || 0),
+          totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
+        }))
+      }));
+    } catch (err: any) {
+      console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo}]:`, err.message);
       return [];
     }
-
-    const list = data.datas || data.data || data.rows || data.content || (Array.isArray(data) ? data : []);
-    
-    // Normalize GDT invoice payload
-    return list.map((item: any) => ({
-      id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
-      khmshdon: item.khmshdon || item.khmhd || '1',
-      khhdon: item.khhdon || '',
-      shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
-      tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
-      nbmst: item.nbmst || '',
-      nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
-      nbdchi: item.nbdchi || item.nbdchi || '',
-      nmmst: item.nmmst || '',
-      nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
-      nmdchi: item.nmdchi || '',
-      tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
-      tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
-      tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
-      tgtttbchu: item.tgtttbchu || '',
-      htttoan: item.htttoan || 'TM/CK',
-      tthdon: Number(item.tthdon || 1),
-      tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
-      ttxly: Number(item.ttxly || 1),
-      ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
-      mhdon: item.mhdon || '',
-      hsgcma: Boolean(item.mhdon || item.hsgcma),
-      loaiHdon: type,
-      hasDigitalSignature: true,
-      signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
-      signedDate: item.tdlap,
-      caProvider: 'Tổng cục Thuế CQT',
-      items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
-        id: `item_${idx + 1}`,
-        lineNo: idx + 1,
-        itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
-        unit: it.dvtinh || it.unit || 'Lô',
-        quantity: Number(it.sluong || it.quantity || 1),
-        unitPrice: Number(it.dgia || it.unitPrice || 0),
-        amount: Number(it.thtien || it.amount || 0),
-        taxRate: it.tsuat || it.taxRate || '10%',
-        taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
-        taxAmount: Number(it.tthue || it.taxAmount || 0),
-        totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
-      }))
-    }));
   };
 
   const fetchAllChunksForType = async (type: 'purchase' | 'sold') => {
     let allInvoices: any[] = [];
-    for (const chunk of dateChunks) {
-      const chunkResult = await fetchChunk(type, chunk.from, chunk.to);
+    const chunkPromises = dateChunks.map(chunk => fetchChunk(type, chunk.from, chunk.to));
+    const chunkResults = await Promise.all(chunkPromises);
+
+    for (const chunkResult of chunkResults) {
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
@@ -527,7 +499,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   try {
     let results: any[] = [];
-    if (invoiceType === 'purchase' || invoiceType === 'both') {
+    const queryPurchase = invoiceType === 'purchase' || invoiceType === 'both' || invoiceType === 'all';
+    const querySold = invoiceType === 'sold' || invoiceType === 'both' || invoiceType === 'all';
+
+    if (queryPurchase) {
       const purchaseList = await fetchAllChunksForType('purchase');
       if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
         currentSession = null;
@@ -541,7 +516,8 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         results = results.concat(purchaseList);
       }
     }
-    if (invoiceType === 'sold' || invoiceType === 'both') {
+
+    if (querySold) {
       const soldList = await fetchAllChunksForType('sold');
       if ((soldList as any)?.error === 'AUTH_EXPIRED') {
         currentSession = null;
@@ -575,7 +551,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       invoices: dedupedResults,
       count: dedupedResults.length,
       chunksQueried: dateChunks.length,
-      message: `Đã truy xuất thành công ${dedupedResults.length} hóa đơn thực tế từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
+      message: `Đã truy xuất ${dedupedResults.length} hóa đơn thực tế từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
     });
   } catch (err: any) {
     return res.status(500).json({
