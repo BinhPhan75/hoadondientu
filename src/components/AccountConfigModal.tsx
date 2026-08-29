@@ -75,13 +75,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     setOcrSuccess(false);
     try {
       const res = await fetch('/api/gdt/captcha');
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { success: false };
-      }
+      const data = await res.json();
       
       if (data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
@@ -90,12 +84,10 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         if (data.captchaCode) {
           setCaptchaCode(data.captchaCode);
           setOcrSuccess(true);
-        } else {
-          handleScanOcr(data.captchaImage, data.captchaKey);
         }
         return;
       }
-      throw new Error('Cannot load remote captcha');
+      throw new Error(data?.message || 'Cannot load remote captcha');
     } catch (e) {
       // Fallback local SVG captcha with clear high contrast text
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -105,7 +97,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       setCaptchaCode(code);
       setOcrSuccess(true);
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="110" y2="28" stroke="#cbd5e1" stroke-width="2"/><text x="18" y="27" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
-      setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
+      setCaptchaImg(`data:image/svg+xml;base64,${btoa(svg)}`);
       setIsRealGDT(false);
     } finally {
       setIsLoadingCaptcha(false);

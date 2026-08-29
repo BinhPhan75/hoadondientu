@@ -51,8 +51,12 @@ let seleniumLogs: Array<{
 const GDT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
   'Referer': 'https://hoadondientu.gdt.gov.vn/',
-  'Origin': 'https://hoadondientu.gdt.gov.vn'
+  'Origin': 'https://hoadondientu.gdt.gov.vn',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin'
 };
 
 // Gemini AI OCR Client Lazy Initializer
@@ -86,12 +90,12 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
     return textMatch[1].replace(/\s+/g, '').toUpperCase();
   }
 
-  // 2. High accuracy OCR using Gemini 3.7 Flash
+  // 2. High accuracy OCR using Gemini 3.7 Flash with timeout protection
   const ai = getGeminiClient();
   if (ai) {
     try {
-      const base64Data = Buffer.from(rawSvg).toString('base64');
-      const aiResp = await ai.models.generateContent({
+      const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
+      const ocrPromise = ai.models.generateContent({
         model: 'gemini-3.7-flash',
         contents: [
           {
@@ -101,12 +105,17 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
             }
           },
           {
-            text: 'This is a captcha image from the Vietnam General Department of Taxation (Tổng cục Thuế). Extract and return ONLY the 4 to 6 uppercase alphanumeric characters with no spaces, punctuation, or comments.'
+            text: 'This is a captcha image from the Vietnam General Department of Taxation (Tổng cục Thuế). Extract and return ONLY the uppercase alphanumeric characters (4 to 6 characters) with no spaces, punctuation, or comments.'
           }
         ]
       });
 
-      const extracted = (aiResp.text || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('OCR Timeout')), 4000)
+      );
+
+      const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
+      const extracted = (aiResp?.text || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
       if (extracted && extracted.length >= 3 && extracted.length <= 8) {
         console.log(`[Gemini OCR] Successfully recognized GDT Captcha: "${extracted}"`);
         return extracted;
@@ -129,13 +138,13 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 2. Get Real Captcha from official GDT Portal & Auto-run OCR
+// 2. Get Real Captcha from official GDT Portal (Instant response < 500ms)
 app.get('/api/gdt/captcha', async (req, res) => {
   try {
     // Fetch directly from official General Department of Taxation Portal
     const gdtRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
       headers: GDT_HEADERS,
-      signal: AbortSignal.timeout(6000)
+      signal: AbortSignal.timeout(8000)
     });
 
     if (gdtRes.ok) {
@@ -146,34 +155,27 @@ app.get('/api/gdt/captcha', async (req, res) => {
       const cookieStr = (rawCookies || []).filter(Boolean).map((c: string) => c.split(';')[0]).join('; ');
 
       const data = await gdtRes.json() as { key: string; content: string };
-      if (data.key) {
+      if (data.key && data.content) {
         if (cookieStr) captchaCookieJar.set(data.key, cookieStr);
-        if (data.content) captchaContentMap.set(data.key, data.content);
-      }
+        captchaContentMap.set(data.key, data.content);
 
-      // Auto-run OCR on GDT Captcha
-      let autoSolvedCode = '';
-      try {
-        autoSolvedCode = await solveCaptchaOCR(data.content);
-      } catch (ocrErr) {
-        console.warn('[OCR on Fetch Failed]:', ocrErr);
-      }
+        const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`;
 
-      return res.json({
-        success: true,
-        isRealGDT: true,
-        captchaKey: data.key,
-        captchaCode: autoSolvedCode,
-        captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(data.content)}`,
-        source: 'hoadondientu.gdt.gov.vn',
-        autoOcr: Boolean(autoSolvedCode)
-      });
+        return res.json({
+          success: true,
+          isRealGDT: true,
+          captchaKey: data.key,
+          captchaImage: base64Image,
+          rawSvg: data.content,
+          source: 'hoadondientu.gdt.gov.vn'
+        });
+      }
     }
   } catch (error: any) {
-    console.warn('[GDT Proxy] Cannot reach live GDT captcha, falling back to local generator:', error.message);
+    console.warn('[GDT Proxy] Live GDT captcha fetch error, falling back to local generator:', error.message);
   }
 
-  // Fallback local SVG captcha if GDT portal is unreachable
+  // Fallback local SVG captcha if GDT portal is temporarily unreachable
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   let captchaText = '';
   for (let i = 0; i < 4; i++) {
@@ -190,13 +192,15 @@ app.get('/api/gdt/captcha', async (req, res) => {
   `.trim();
 
   captchaContentMap.set(captchaKey, svg);
+  const base64Fallback = `data:image/svg+xml;base64,${Buffer.from(svg, 'utf-8').toString('base64')}`;
 
   res.json({
     success: true,
     isRealGDT: false,
     captchaKey,
     captchaCode: captchaText,
-    captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+    captchaImage: base64Fallback,
+    rawSvg: svg,
     source: 'local_fallback',
     autoOcr: true
   });
@@ -218,7 +222,7 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
 
     const code = await solveCaptchaOCR(contentToSolve);
     return res.json({
-      success: true,
+      success: Boolean(code),
       captchaCode: code,
       isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
     });

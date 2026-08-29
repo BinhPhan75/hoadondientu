@@ -116,13 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setOcrSuccess(false);
     try {
       const res = await fetch('/api/gdt/captcha');
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { success: false };
-      }
+      const data = await res.json();
 
       if (data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
@@ -132,22 +126,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (data.captchaCode) {
           setCaptchaCode(data.captchaCode);
           setOcrSuccess(true);
-        } else {
-          // If server did not pre-solve, trigger client-side OCR scan
-          handleScanOcr(data.captchaImage, data.captchaKey);
         }
         return;
       }
-      throw new Error('No captcha returned from server');
+      throw new Error(data?.message || 'Không thể tải captcha từ Cổng Thuế');
     } catch (err) {
-      console.warn('Cannot fetch GDT captcha, using local SVG generator:', err);
+      console.warn('Cannot fetch GDT captcha, using local generator:', err);
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
       let code = '';
       for (let i = 0; i < 4; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
       }
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="130" height="42" viewBox="0 0 130 42"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="120" y2="30" stroke="#cbd5e1" stroke-width="2"/><line x1="15" y1="35" x2="115" y2="8" stroke="#cbd5e1" stroke-width="1.5"/><text x="18" y="29" font-family="monospace, sans-serif" font-size="24" font-weight="bold" fill="#1e293b" letter-spacing="8">${code}</text></svg>`;
-      setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
+      const base64Fallback = `data:image/svg+xml;base64,${btoa(svg)}`;
+      setCaptchaImg(base64Fallback);
       setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
       setCaptchaCode(code);
       setOcrSuccess(true);
