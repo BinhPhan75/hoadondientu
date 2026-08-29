@@ -151,30 +151,43 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
         <div className="flex flex-wrap items-center gap-1 text-[11px] font-medium">
           <span className="text-gray-500 uppercase font-semibold mr-1">Kỳ kê khai:</span>
           <button
+            type="button"
             onClick={() => applyPreset('this_month')}
             className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
           >
             Tháng này
           </button>
           <button
-            onClick={() => applyPreset('last_month')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
+            type="button"
+            onClick={() => applyPreset('2025')}
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
           >
-            Tháng trước
+            2025
           </button>
           <button
-            onClick={() => applyPreset('q1')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors"
+            type="button"
+            onClick={() => applyPreset('2024')}
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
           >
-            Quý 1
+            2024
           </button>
           <button
-            onClick={() => applyPreset('2026')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
+            type="button"
+            onClick={() => applyPreset('2023')}
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
           >
-            2026
+            2023
           </button>
           <button
+            type="button"
+            onClick={() => applyPreset('all_time')}
+            className="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 transition-colors font-semibold"
+            title="Tra cứu từ năm 2022 đến nay"
+          >
+            Toàn bộ
+          </button>
+          <button
+            type="button"
             onClick={() => applyPreset('q1_2025')}
             className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
             title="Dữ liệu mẫu Quý 1/2025"

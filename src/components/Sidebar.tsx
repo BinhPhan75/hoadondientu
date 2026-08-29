@@ -95,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         data = { success: false };
       }
 
-      if (data && data.success) {
+      if (data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
         setIsRealGdtCaptcha(Boolean(data.isRealGDT));
@@ -103,9 +103,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           // If in local fallback mode with pre-solved code
           setCaptchaCode(data.captchaCode);
         }
+        return;
       }
+      throw new Error('No captcha returned from server');
     } catch (err) {
-      console.warn('Cannot fetch GDT captcha:', err);
+      console.warn('Cannot fetch GDT captcha, using local SVG generator:', err);
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let code = '';
+      for (let i = 0; i < 4; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="130" height="42" viewBox="0 0 130 42"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="120" y2="30" stroke="#cbd5e1" stroke-width="2"/><line x1="15" y1="35" x2="115" y2="8" stroke="#cbd5e1" stroke-width="1.5"/><text x="18" y="29" font-family="monospace, sans-serif" font-size="24" font-weight="bold" fill="#1e293b" letter-spacing="8">${code}</text></svg>`;
+      setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
+      setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
+      setCaptchaCode(code);
+      setIsRealGdtCaptcha(false);
     } finally {
       setIsLoadingCaptcha(false);
     }
@@ -356,11 +368,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Error Message if Authentication Failed */}
           {authError && (
-            <div className="p-2 bg-red-950/80 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex items-start gap-1.5 animate-fadeIn">
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block text-red-300">Không thể kết nối Cổng Thuế:</strong>
-                <span>{authError}</span>
+            <div className="p-2.5 bg-red-950/90 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex flex-col gap-2 animate-fadeIn shadow-md">
+              <div className="flex items-start gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block text-red-300 font-semibold">Không thể kết nối Cổng Thuế:</strong>
+                  <span className="text-red-200/90">{authError}</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-end pt-1 border-t border-red-900/50">
+                <button
+                  type="button"
+                  onClick={handleUseDemo}
+                  className="px-2 py-1 text-[10px] font-bold bg-amber-500 text-black hover:bg-amber-400 rounded transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                >
+                  <Database className="w-3 h-3" />
+                  Kích hoạt Chế độ Mẫu ngay
+                </button>
               </div>
             </div>
           )}

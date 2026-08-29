@@ -288,7 +288,16 @@ export default function App() {
           })
         });
 
-        const loginData = await loginRes.json();
+        const rawLoginText = await loginRes.text();
+        let loginData: any = {};
+        try {
+          loginData = JSON.parse(rawLoginText);
+        } catch {
+          loginData = {
+            success: false,
+            message: `Máy chủ phản hồi mã ${loginRes.status}. Vui lòng thử lại.`
+          };
+        }
 
         if (!loginRes.ok || !loginData.success) {
           const errMsg = loginData.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
@@ -362,7 +371,13 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const rawQueryText = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(rawQueryText);
+      } catch {
+        data = { success: false, message: `Máy chủ phản hồi mã ${res.status}` };
+      }
 
       if (res.ok && data.isRealGDT && Array.isArray(data.invoices)) {
         setInvoices(data.invoices);

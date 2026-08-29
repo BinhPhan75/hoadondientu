@@ -51,22 +51,27 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       try {
         data = JSON.parse(text);
       } catch {
-        throw new Error(`Máy chủ không trả về JSON hợp lệ (Mã: ${res.status})`);
+        data = { success: false };
       }
-      setCaptchaImg(data.captchaImage);
-      setCaptchaKey(data.captchaKey || '');
-      setIsRealGDT(data.isRealGDT ?? false);
-      if (data.captchaCode) {
-        setCaptchaCode(data.captchaCode); // only in local fallback mode
+      
+      if (data && data.success && data.captchaImage) {
+        setCaptchaImg(data.captchaImage);
+        setCaptchaKey(data.captchaKey || '');
+        setIsRealGDT(data.isRealGDT ?? false);
+        if (data.captchaCode) {
+          setCaptchaCode(data.captchaCode); // only in local fallback mode
+        }
+        return;
       }
+      throw new Error('Cannot load remote captcha');
     } catch (e) {
-      // Fallback local SVG captcha
+      // Fallback local SVG captcha with clear high contrast text
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
       let code = '';
       for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-      setCaptchaKey('ckey_local');
+      setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
       setCaptchaCode(code);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><text x="18" y="27" font-family="monospace" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="110" y2="28" stroke="#cbd5e1" stroke-width="2"/><text x="18" y="27" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
       setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
       setIsRealGDT(false);
     } finally {
@@ -82,6 +87,22 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleActivateDemo = () => {
+    onSave({
+      taxCode: taxCode.trim() || '0316892345',
+      password: password || 'Gdt@Tax2025!',
+      taxpayerName: taxCode.trim() === '0316892345' || !taxCode.trim()
+        ? 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)'
+        : `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode.trim()})`,
+      address: 'Đăng ký tại Tổng cục Thuế Việt Nam',
+      rememberMe: true,
+      autoSaveSession: true,
+      useHeadlessBrowser: useHeadless,
+      isRealGDT: false
+    });
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,10 +140,18 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       try {
         data = JSON.parse(text);
       } catch {
-        data = {
-          success: false,
-          message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
-        };
+        if (res.status === 404) {
+          data = {
+            success: false,
+            is404: true,
+            message: 'Máy chủ backend API trả về mã HTTP 404 (Chưa nhận Vercel Serverless Function hoặc đang chạy trên host tĩnh). Bạn có thể bấm nút "Dùng Chế độ Mẫu" bên dưới để sử dụng ngay.'
+          };
+        } else {
+          data = {
+            success: false,
+            message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
+          };
+        }
       }
 
       if (res.ok && data.success) {
@@ -159,7 +188,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     } catch (err: any) {
       setStatusMessage({
         type: 'error',
-        text: `Lỗi kết nối máy chủ: ${err.message}`
+        text: `Lỗi kết nối máy chủ (${err.message}). Bạn có thể kích hoạt Chế độ Mẫu để tiếp tục.`
       });
       fetchCaptcha();
     } finally {
@@ -172,7 +201,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     setPassword('Gdt@Pass2025!');
     setStatusMessage({
       type: 'info',
-      text: 'Đã chọn tài khoản mẫu minh họa. Nhấn "Lưu & Kết Nối CQT" hoặc chọn chế độ Thử nghiệm để tiếp tục.'
+      text: 'Đã điền tài khoản mẫu. Nhấn "Lưu & Kết Nối CQT" hoặc chọn "Chạy Chế độ Mẫu (Demo)" bên dưới để tiếp tục.'
     });
   };
 
@@ -215,7 +244,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
           {statusMessage && (
             <div
-              className={`p-2.5 rounded text-[11px] flex items-center gap-2 ${
+              className={`p-2.5 rounded text-[11px] flex flex-col gap-1.5 ${
                 statusMessage.type === 'success'
                   ? 'bg-emerald-50 border border-emerald-300 text-emerald-800 font-medium'
                   : statusMessage.type === 'error'
@@ -223,12 +252,26 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                   : 'bg-blue-50 border border-blue-300 text-blue-800 font-medium'
               }`}
             >
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              ) : (
-                <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+              <div className="flex items-start gap-2">
+                {statusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <span className="flex-1 leading-snug">{statusMessage.text}</span>
+              </div>
+              {statusMessage.type === 'error' && (
+                <div className="pt-1 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={handleActivateDemo}
+                    className="px-2.5 py-1 text-[10px] font-bold bg-rose-900 text-white rounded hover:bg-rose-950 transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    <Sparkles className="w-3 h-3 text-amber-300" />
+                    Kích hoạt Chế độ Mẫu ngay (Offline/Sandbox)
+                  </button>
+                </div>
               )}
-              <span>{statusMessage.text}</span>
             </div>
           )}
 
@@ -371,34 +414,10 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           <div className="pt-3 flex items-center justify-between border-t border-[#d1d5db]">
             <button
               type="button"
-              onClick={async () => {
-                setIsSubmitting(true);
-                try {
-                  const res = await fetch('/api/gdt/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      taxCode: '0316892345',
-                      isDemo: true
-                    })
-                  });
-                  const data = await res.json();
-                  onSave({
-                    taxCode: '0316892345',
-                    password: '',
-                    taxpayerName: 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á (DỮ LIỆU MẪU)',
-                    address: 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh',
-                    rememberMe: true,
-                    autoSaveSession: true,
-                    isRealGDT: false
-                  });
-                  onClose();
-                } finally {
-                  setIsSubmitting(false);
-                }
-              }}
-              className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline"
+              onClick={handleActivateDemo}
+              className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline flex items-center gap-1"
             >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
               Chạy Chế độ Mẫu (Demo)
             </button>
             <div className="flex items-center gap-2">
