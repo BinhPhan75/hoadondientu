@@ -104,12 +104,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
-        setAuthError('Không thể tự động đọc mã Captcha này. Vui lòng nhìn hình và nhập tay.');
       }
     } catch (err) {
       console.warn('[AI OCR Scan Error]:', err);
       setOcrSuccess(false);
-      setAuthError('Lỗi khi gọi AI OCR. Vui lòng tự nhập mã Captcha theo hình.');
     } finally {
       setIsScanningOcr(false);
     }
@@ -137,10 +135,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             setOcrSuccess(true);
           }
         } else {
-          // If server could not reach real GDT, clear code and notify
           setCaptchaCode('');
           setOcrSuccess(false);
-          setAuthError(data.message || 'Chưa thể kết nối Cổng Thuế thật từ IP máy chủ Vercel. Bấm "Đổi mã" để thử lại.');
         }
         return;
       }
@@ -160,7 +156,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCaptchaCode('');
       setOcrSuccess(false);
       setIsRealGdtCaptcha(false);
-      setAuthError('Không thể kết nối đến máy chủ Cổng Thuế. Vui lòng bấm "Đổi mã" để thử lại.');
     } finally {
       setIsLoadingCaptcha(false);
     }
@@ -448,16 +443,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {isScanningOcr ? (
                 <span className="text-amber-400 flex items-center gap-1 animate-pulse">
                   <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
-                  AI OCR đang tự động quét mã...
+                  AI OCR đang nhận diện mã...
                 </span>
-              ) : isRealGdtCaptcha && ocrSuccess && captchaCode ? (
+              ) : ocrSuccess && captchaCode ? (
                 <span className="text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Đã đọc mã CQT: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                  Đã tự động đọc: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                </span>
+              ) : captchaCode ? (
+                <span className="text-emerald-400/90 flex items-center gap-1">
+                  Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
                 </span>
               ) : isRealGdtCaptcha ? (
                 <span className="text-gray-400">
-                  Nhập 4-5 ký tự trên hình hoặc bấm Quét OCR
+                  Nhìn hình nhập mã vào ô bên cạnh (hoặc bấm Quét OCR)
                 </span>
               ) : (
                 <span className="text-amber-400">

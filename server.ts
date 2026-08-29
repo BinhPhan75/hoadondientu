@@ -96,7 +96,7 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
     try {
       const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
       const ocrPromise = ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-3.6-flash',
         contents: [
           {
             inlineData: {
@@ -107,14 +107,11 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
           {
             text: 'Extract and return ONLY the 4 to 6 uppercase alphanumeric captcha characters shown in the image. Return only the characters with no spaces or other text.'
           }
-        ],
-        config: {
-          thinkingConfig: { thinkingBudget: 0 }
-        }
+        ]
       });
 
       const timeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), 5000)
+        setTimeout(() => resolve(null), 9000)
       );
 
       const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
@@ -125,8 +122,8 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
           return extracted;
         }
       }
-    } catch {
-      // Graceful fallback to manual entry
+    } catch (err: any) {
+      console.warn('[Gemini OCR Error]:', err.message);
     }
   }
 
