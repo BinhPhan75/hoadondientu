@@ -41,8 +41,9 @@ let currentSession: SessionData | null = {
   createdAt: Date.now()
 };
 
-// Store cookies corresponding to captcha keys
+// Store cookies and content corresponding to captcha keys
 const captchaCookieJar = new Map<string, string>();
+const captchaContentMap = new Map<string, string>();
 
 let seleniumLogs: Array<{
   id: string;
@@ -61,6 +62,70 @@ const GDT_HEADERS = {
   'Origin': 'https://hoadondientu.gdt.gov.vn'
 };
 
+// Gemini AI OCR Client Lazy Initializer
+import { GoogleGenAI } from '@google/genai';
+
+let geminiAiClient: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI | null {
+  if (!geminiAiClient && process.env.GEMINI_API_KEY) {
+    geminiAiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+    });
+  }
+  return geminiAiClient;
+}
+
+// AI Captcha OCR Engine for GDT Portal
+async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
+  if (!svgOrDataUri) return '';
+
+  let rawSvg = svgOrDataUri;
+  if (rawSvg.startsWith('data:image/svg+xml;utf8,')) {
+    rawSvg = decodeURIComponent(rawSvg.replace('data:image/svg+xml;utf8,', ''));
+  } else if (rawSvg.startsWith('data:image/svg+xml;base64,')) {
+    rawSvg = Buffer.from(rawSvg.replace('data:image/svg+xml;base64,', ''), 'base64').toString('utf-8');
+  }
+
+  // 1. Check if SVG contains plain text element (Instant 0ms fallback)
+  const textMatch = rawSvg.match(/<text[^>]*>([^<]+)<\/text>/i);
+  if (textMatch && textMatch[1]) {
+    return textMatch[1].replace(/\s+/g, '').toUpperCase();
+  }
+
+  // 2. High accuracy OCR using Gemini 3.7 Flash
+  const ai = getGeminiClient();
+  if (ai) {
+    try {
+      const base64Data = Buffer.from(rawSvg).toString('base64');
+      const aiResp = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: [
+          {
+            inlineData: {
+              mimeType: 'image/svg+xml',
+              data: base64Data
+            }
+          },
+          {
+            text: 'This is a captcha image from the Vietnam General Department of Taxation (Tổng cục Thuế). Extract and return ONLY the 4 to 6 uppercase alphanumeric characters with no spaces, punctuation, or comments.'
+          }
+        ]
+      });
+
+      const extracted = (aiResp.text || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (extracted && extracted.length >= 3 && extracted.length <= 8) {
+        console.log(`[Gemini OCR] Successfully recognized GDT Captcha: "${extracted}"`);
+        return extracted;
+      }
+    } catch (err: any) {
+      console.warn('[Gemini OCR Error]:', err.message);
+    }
+  }
+
+  return '';
+}
+
 // 1. Health check
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -71,7 +136,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 2. Get Real Captcha from official GDT Portal
+// 2. Get Real Captcha from official GDT Portal & Auto-run OCR
 app.get('/api/gdt/captcha', async (req, res) => {
   try {
     // Fetch directly from official General Department of Taxation Portal
@@ -88,17 +153,27 @@ app.get('/api/gdt/captcha', async (req, res) => {
       const cookieStr = (rawCookies || []).filter(Boolean).map((c: string) => c.split(';')[0]).join('; ');
 
       const data = await gdtRes.json() as { key: string; content: string };
-      if (data.key && cookieStr) {
-        captchaCookieJar.set(data.key, cookieStr);
+      if (data.key) {
+        if (cookieStr) captchaCookieJar.set(data.key, cookieStr);
+        if (data.content) captchaContentMap.set(data.key, data.content);
+      }
+
+      // Auto-run OCR on GDT Captcha
+      let autoSolvedCode = '';
+      try {
+        autoSolvedCode = await solveCaptchaOCR(data.content);
+      } catch (ocrErr) {
+        console.warn('[OCR on Fetch Failed]:', ocrErr);
       }
 
       return res.json({
         success: true,
         isRealGDT: true,
         captchaKey: data.key,
-        captchaCode: '', // Real GDT captcha requires user/OCR recognition
+        captchaCode: autoSolvedCode,
         captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(data.content)}`,
-        source: 'hoadondientu.gdt.gov.vn'
+        source: 'hoadondientu.gdt.gov.vn',
+        autoOcr: Boolean(autoSolvedCode)
       });
     }
   } catch (error: any) {
@@ -121,19 +196,48 @@ app.get('/api/gdt/captcha', async (req, res) => {
     </svg>
   `.trim();
 
+  captchaContentMap.set(captchaKey, svg);
+
   res.json({
     success: true,
     isRealGDT: false,
     captchaKey,
     captchaCode: captchaText,
     captchaImage: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
-    source: 'local_fallback'
+    source: 'local_fallback',
+    autoOcr: true
   });
+});
+
+// 2.1 Dedicated OCR Auto-solve Endpoint
+app.post('/api/gdt/ocr-captcha', async (req, res) => {
+  try {
+    const { captchaKey, captchaImage } = req.body;
+    let contentToSolve = captchaImage;
+
+    if (!contentToSolve && captchaKey && captchaContentMap.has(captchaKey)) {
+      contentToSolve = captchaContentMap.get(captchaKey);
+    }
+
+    if (!contentToSolve) {
+      return res.status(400).json({ success: false, message: 'Thiếu dữ liệu ảnh Captcha.' });
+    }
+
+    const code = await solveCaptchaOCR(contentToSolve);
+    return res.json({
+      success: true,
+      captchaCode: code,
+      isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
+    });
+  } catch (err: any) {
+    console.error('[OCR Endpoint Error]:', err);
+    return res.status(500).json({ success: false, message: 'Không thể quét mã Captcha: ' + err.message });
+  }
 });
 
 // 3. Login directly to GDT Portal / Authenticate Session
 app.post('/api/gdt/login', async (req, res) => {
-  const { taxCode, password, captchaKey, captchaCode, isDemo } = req.body;
+  let { taxCode, password, captchaKey, captchaCode, isDemo } = req.body;
 
   if (!taxCode) {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
@@ -163,8 +267,14 @@ app.post('/api/gdt/login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mật khẩu tài khoản Tổng cục Thuế cấp.' });
   }
 
+  // If captchaCode is not provided, try to auto-solve using OCR
+  if (!captchaCode && captchaKey && captchaContentMap.has(captchaKey)) {
+    const rawSvg = captchaContentMap.get(captchaKey)!;
+    captchaCode = await solveCaptchaOCR(rawSvg);
+  }
+
   if (!captchaCode) {
-    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hiển thị trên màn hình.' });
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hoặc bấm nút quét tự động.' });
   }
 
   // Attach session cookies stored from captcha step
@@ -239,10 +349,11 @@ app.post('/api/gdt/login', async (req, res) => {
     }
   } catch (err: any) {
     console.error('[GDT Auth Error]:', err);
-    return res.status(500).json({
+    return res.status(503).json({
       success: false,
       isRealGDT: true,
-      message: `Không thể kết nối đến máy chủ Cổng Thuế (hoadondientu.gdt.gov.vn): ${err.message}. Vui lòng thử lại hoặc sử dụng tính năng Nạp tệp XML / Chế độ Mẫu.`
+      isNetworkBlocked: true,
+      message: `Máy chủ Cổng Thuế chặn kết nối đám mây (${err.message}). Bạn có thể kích hoạt Chế độ Mẫu ngay lập tức hoặc dùng công cụ Python trên máy tính.`
     });
   }
 });

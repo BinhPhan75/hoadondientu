@@ -62,12 +62,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [localMst, setLocalMst] = useState(account.taxCode || '0316892345');
   const [localPassword, setLocalPassword] = useState(account.password || 'Gdt@Tax2025!');
   
-  // Captcha State
+  // Captcha & AI OCR State
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaKey, setCaptchaKey] = useState('');
   const [captchaImg, setCaptchaImg] = useState<string>('');
   const [isRealGdtCaptcha, setIsRealGdtCaptcha] = useState(true);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
+  const [isScanningOcr, setIsScanningOcr] = useState(false);
+  const [ocrSuccess, setOcrSuccess] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Synchronize local input state if parent account updates
@@ -80,11 +82,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-  // Load Captcha on Mount
+  // AI OCR Scanner helper
+  const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
+    const targetImg = imgToScan || captchaImg;
+    const targetKey = keyToScan || captchaKey;
+    if (!targetImg && !targetKey) return;
+
+    setIsScanningOcr(true);
+    setOcrSuccess(false);
+    try {
+      const res = await fetch('/api/gdt/ocr-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
+      });
+      const data = await res.json();
+      if (data && data.success && data.captchaCode) {
+        setCaptchaCode(data.captchaCode);
+        setOcrSuccess(true);
+        if (authError) setAuthError(null);
+      }
+    } catch (err) {
+      console.warn('[AI OCR Scan Error]:', err);
+    } finally {
+      setIsScanningOcr(false);
+    }
+  };
+
+  // Load Captcha on Mount & Trigger Auto-OCR
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setAuthError(null);
     setCaptchaCode('');
+    setOcrSuccess(false);
     try {
       const res = await fetch('/api/gdt/captcha');
       const text = await res.text();
@@ -99,9 +129,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
         setIsRealGdtCaptcha(Boolean(data.isRealGDT));
+        
         if (data.captchaCode) {
-          // If in local fallback mode with pre-solved code
           setCaptchaCode(data.captchaCode);
+          setOcrSuccess(true);
+        } else {
+          // If server did not pre-solve, trigger client-side OCR scan
+          handleScanOcr(data.captchaImage, data.captchaKey);
         }
         return;
       }
@@ -117,6 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
       setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
       setCaptchaCode(code);
+      setOcrSuccess(true);
       setIsRealGdtCaptcha(false);
     } finally {
       setIsLoadingCaptcha(false);
@@ -150,7 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Submit flow
+  // Submit flow with Auto-OCR validation
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
@@ -163,14 +198,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
+    let activeCaptchaCode = captchaCode.trim();
+
     // If user has not authenticated with real GDT yet, check credentials
     if (!account.isRealGDT) {
       if (!pwd) {
         setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
         return;
       }
-      if (!captchaCode.trim()) {
-        setAuthError('Vui lòng nhập mã Captcha hiển thị trên hình ảnh.');
+      
+      // Auto-scan captcha on-the-fly if empty
+      if (!activeCaptchaCode) {
+        setIsScanningOcr(true);
+        try {
+          const res = await fetch('/api/gdt/ocr-captcha', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ captchaImage: captchaImg, captchaKey })
+          });
+          const ocrData = await res.json();
+          if (ocrData && ocrData.success && ocrData.captchaCode) {
+            activeCaptchaCode = ocrData.captchaCode;
+            setCaptchaCode(ocrData.captchaCode);
+            setOcrSuccess(true);
+          }
+        } catch (err) {
+          console.warn('[Auto-OCR in Submit Error]:', err);
+        } finally {
+          setIsScanningOcr(false);
+        }
+      }
+
+      if (!activeCaptchaCode) {
+        setAuthError('Vui lòng nhập mã Captcha hoặc nhấn nút Quét OCR.');
         return;
       }
     }
@@ -179,7 +239,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       taxCode: mst,
       password: pwd,
       captchaKey,
-      captchaCode: captchaCode.trim()
+      captchaCode: activeCaptchaCode
     });
 
     if (result && !result.success && result.error) {
@@ -305,35 +365,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Captcha Section */}
+          {/* Captcha Section with Automated AI OCR Scanner */}
           <div className="bg-gray-900/90 p-2.5 rounded border border-gray-800 space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1">
-                <span>Mã Captcha CQT</span>
-                {isRealGdtCaptcha && (
+              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Mã Captcha</span>
+                {isRealGdtCaptcha ? (
                   <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-800 font-mono">
                     Live GDT
                   </span>
+                ) : (
+                  <span className="text-[9px] bg-gray-800 text-gray-400 px-1 py-0.2 rounded font-mono">
+                    Fallback
+                  </span>
                 )}
               </label>
-              <button
-                type="button"
-                onClick={fetchCaptcha}
-                disabled={isLoadingCaptcha}
-                className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono cursor-pointer"
-                title="Lấy mã Captcha mới từ Cổng Thuế"
-              >
-                <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
-                <span>Đổi mã</span>
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleScanOcr()}
+                  disabled={isScanningOcr || isLoadingCaptcha}
+                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono cursor-pointer transition-colors"
+                  title="Tự động quét và đọc mã Captcha bằng AI OCR"
+                >
+                  <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
+                  <span>{isScanningOcr ? 'Đang quét...' : 'Quét OCR'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={fetchCaptcha}
+                  disabled={isLoadingCaptcha || isScanningOcr}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5 font-mono cursor-pointer transition-colors"
+                  title="Đổi ảnh Captcha mới từ Cổng Thuế"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
+                  <span>Đổi mã</span>
+                </button>
+              </div>
             </div>
 
-            {/* Captcha Image Display */}
+            {/* Captcha Image Display & Input */}
             <div className="flex items-center gap-2">
               <div 
-                className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[130px] flex-1"
+                className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[125px] flex-1 relative group"
                 onClick={fetchCaptcha}
-                title="Nhấn để đổi mã Captcha"
+                title="Nhấn vào hình để đổi mã Captcha khác"
               >
                 {isLoadingCaptcha ? (
                   <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
@@ -343,26 +420,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <img
                     src={captchaImg}
                     alt="GDT Captcha"
-                    className="max-h-full object-contain filter contrast-125"
+                    className="max-h-full object-contain filter contrast-125 select-none"
                   />
                 ) : (
                   <span className="text-[11px] text-gray-400 font-mono">Chưa có Captcha</span>
                 )}
               </div>
 
-              {/* Captcha Input */}
-              <input
-                type="text"
-                value={captchaCode}
-                onChange={(e) => {
-                  setCaptchaCode(e.target.value.toUpperCase());
-                  if (authError) setAuthError(null);
-                }}
-                placeholder="Nhập mã"
-                maxLength={8}
-                className="w-24 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 border-gray-700 text-amber-300 focus:border-amber-500 py-1.5"
-                required={!account.isRealGDT}
-              />
+              {/* Captcha Input with auto-OCR indicator */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={captchaCode}
+                  onChange={(e) => {
+                    setCaptchaCode(e.target.value.toUpperCase());
+                    if (authError) setAuthError(null);
+                  }}
+                  placeholder={isScanningOcr ? 'Quét...' : 'Mã...'}
+                  maxLength={8}
+                  className={`w-24 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 border-gray-700 py-1.5 ${
+                    ocrSuccess ? 'text-emerald-300 border-emerald-700/80' : 'text-amber-300'
+                  } focus:border-amber-500`}
+                  required={!account.isRealGDT}
+                />
+              </div>
+            </div>
+
+            {/* OCR Status Line */}
+            <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
+              {isScanningOcr ? (
+                <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+                  <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
+                  AI OCR đang tự động quét mã...
+                </span>
+              ) : ocrSuccess && captchaCode ? (
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  Đã tự động đọc mã: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                </span>
+              ) : (
+                <span className="text-gray-500">
+                  Tự động quét khi có ảnh Captcha
+                </span>
+              )}
             </div>
           </div>
 
@@ -372,18 +472,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block text-red-300 font-semibold">Không thể kết nối Cổng Thuế:</strong>
+                  <strong className="block text-red-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
                   <span className="text-red-200/90">{authError}</span>
                 </div>
               </div>
-              <div className="flex items-center justify-end pt-1 border-t border-red-900/50">
+              <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-red-900/50">
+                <button
+                  type="button"
+                  onClick={onOpenPythonRunner}
+                  className="px-2 py-1 text-[10px] font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded transition-colors flex items-center gap-1"
+                  title="Chạy trực tiếp từ máy tính Việt Nam để không bị chặn IP"
+                >
+                  <Code2 className="w-3 h-3 text-amber-400" />
+                  Chạy trên máy tính
+                </button>
                 <button
                   type="button"
                   onClick={handleUseDemo}
                   className="px-2 py-1 text-[10px] font-bold bg-amber-500 text-black hover:bg-amber-400 rounded transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
                 >
                   <Database className="w-3 h-3" />
-                  Kích hoạt Chế độ Mẫu ngay
+                  Kích hoạt Chế độ Mẫu
                 </button>
               </div>
             </div>

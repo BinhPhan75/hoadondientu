@@ -35,15 +35,44 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   const [captchaImg, setCaptchaImg] = useState<string>('');
   const [isRealGDT, setIsRealGDT] = useState<boolean>(false);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
+  const [isScanningOcr, setIsScanningOcr] = useState(false);
+  const [ocrSuccess, setOcrSuccess] = useState(false);
   const [rememberMe, setRememberMe] = useState(currentConfig.rememberMe ?? true);
   const [useHeadless, setUseHeadless] = useState(currentConfig.useHeadlessBrowser ?? true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load new Captcha directly from official GDT Portal
+  // AI OCR Scanner helper for modal
+  const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
+    const targetImg = imgToScan || captchaImg;
+    const targetKey = keyToScan || captchaKey;
+    if (!targetImg && !targetKey) return;
+
+    setIsScanningOcr(true);
+    setOcrSuccess(false);
+    try {
+      const res = await fetch('/api/gdt/ocr-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
+      });
+      const data = await res.json();
+      if (data && data.success && data.captchaCode) {
+        setCaptchaCode(data.captchaCode);
+        setOcrSuccess(true);
+      }
+    } catch (err) {
+      console.warn('[AI OCR Scan in Modal Error]:', err);
+    } finally {
+      setIsScanningOcr(false);
+    }
+  };
+
+  // Load new Captcha directly from official GDT Portal & auto-solve
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setCaptchaCode('');
+    setOcrSuccess(false);
     try {
       const res = await fetch('/api/gdt/captcha');
       const text = await res.text();
@@ -59,7 +88,10 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         setCaptchaKey(data.captchaKey || '');
         setIsRealGDT(data.isRealGDT ?? false);
         if (data.captchaCode) {
-          setCaptchaCode(data.captchaCode); // only in local fallback mode
+          setCaptchaCode(data.captchaCode);
+          setOcrSuccess(true);
+        } else {
+          handleScanOcr(data.captchaImage, data.captchaKey);
         }
         return;
       }
@@ -71,6 +103,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
       setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
       setCaptchaCode(code);
+      setOcrSuccess(true);
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="110" y2="28" stroke="#cbd5e1" stroke-width="2"/><text x="18" y="27" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
       setCaptchaImg(`data:image/svg+xml;utf8,${encodeURIComponent(svg)}`);
       setIsRealGDT(false);
@@ -114,8 +147,31 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       setStatusMessage({ type: 'error', text: 'Vui lòng nhập mật khẩu tài khoản Tổng cục Thuế cấp.' });
       return;
     }
-    if (!captchaCode.trim()) {
-      setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã Captcha xác thực từ Cổng Thuế.' });
+
+    let activeCode = captchaCode.trim();
+    if (!activeCode) {
+      setIsScanningOcr(true);
+      try {
+        const res = await fetch('/api/gdt/ocr-captcha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ captchaImage: captchaImg, captchaKey })
+        });
+        const ocrData = await res.json();
+        if (ocrData && ocrData.success && ocrData.captchaCode) {
+          activeCode = ocrData.captchaCode;
+          setCaptchaCode(ocrData.captchaCode);
+          setOcrSuccess(true);
+        }
+      } catch (err) {
+        console.warn('[Auto-OCR Modal Error]:', err);
+      } finally {
+        setIsScanningOcr(false);
+      }
+    }
+
+    if (!activeCode) {
+      setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã Captcha hoặc bấm nút Quét OCR.' });
       return;
     }
 
@@ -130,7 +186,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           taxCode: taxCode.trim(),
           password: password.trim(),
           captchaKey,
-          captchaCode: captchaCode.trim(),
+          captchaCode: activeCode,
           isDemo: false
         })
       });
@@ -331,29 +387,44 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           {/* Captcha Verification */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider">
-                Mã xác thực Captcha <span className="text-[#ef4444]">*</span>
+              <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+                <span>Mã xác thực Captcha</span>
+                <span className="text-[#ef4444]">*</span>
+                {isRealGDT ? (
+                  <span className="text-[9px] bg-emerald-100 text-emerald-800 font-semibold px-1.5 py-0.2 rounded flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                    Cổng Thuế Trực Tiếp
+                  </span>
+                ) : (
+                  <span className="text-[9px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.2 rounded">
+                    Bộ sinh mã cục bộ
+                  </span>
+                )}
               </label>
-              {isRealGDT ? (
-                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-1.5 py-0.5 rounded flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-                  Cổng Thuế Trực Tiếp
-                </span>
-              ) : (
-                <span className="text-[10px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.5 rounded">
-                  Bộ sinh mã cục bộ
-                </span>
-              )}
+              
+              <button
+                type="button"
+                onClick={() => handleScanOcr()}
+                disabled={isScanningOcr || isLoadingCaptcha}
+                className="text-[10px] text-amber-700 hover:text-amber-900 font-semibold flex items-center gap-1 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 transition-colors"
+                title="Tự động quét và đọc mã Captcha"
+              >
+                <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-600' : 'text-amber-600'}`} />
+                <span>{isScanningOcr ? 'Đang quét OCR...' : 'Quét lại OCR'}</span>
+              </button>
             </div>
+
             <div className="flex items-center gap-2">
-              <div className="flex-1">
+              <div className="flex-1 relative">
                 <input
                   type="text"
                   value={captchaCode}
                   onChange={(e) => setCaptchaCode(e.target.value.toUpperCase())}
-                  placeholder="Nhập mã từ hình"
-                  maxLength={6}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-[#d1d5db] rounded focus:border-[#ef4444] focus:outline-hidden uppercase tracking-widest font-mono text-center font-bold"
+                  placeholder={isScanningOcr ? 'Đang đọc OCR...' : 'Mã Captcha'}
+                  maxLength={8}
+                  className={`w-full px-2.5 py-1.5 text-xs bg-white border ${
+                    ocrSuccess ? 'border-emerald-500 text-emerald-800 font-extrabold' : 'border-[#d1d5db]'
+                  } rounded focus:border-[#ef4444] focus:outline-hidden uppercase tracking-widest font-mono text-center font-bold`}
                   required
                 />
               </div>
@@ -364,7 +435,9 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                   <img
                     src={captchaImg}
                     alt="Captcha"
-                    className="h-8 w-28 rounded object-contain bg-white"
+                    className="h-8 w-28 rounded object-contain bg-white cursor-pointer"
+                    onClick={fetchCaptcha}
+                    title="Nhấp để đổi ảnh Captcha mới"
                   />
                 ) : (
                   <div className="h-8 w-28 bg-gray-200 animate-pulse rounded flex items-center justify-center text-[10px] text-gray-400">
@@ -374,7 +447,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 <button
                   type="button"
                   onClick={fetchCaptcha}
-                  disabled={isLoadingCaptcha}
+                  disabled={isLoadingCaptcha || isScanningOcr}
                   className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition-colors"
                   title="Đổi mã captcha khác từ Cổng Thuế"
                 >
@@ -382,9 +455,25 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 </button>
               </div>
             </div>
-            <p className="text-[10px] text-gray-500 mt-1">
-              Mã Captcha được lấy trực tiếp theo thời gian thực từ <code>hoadondientu.gdt.gov.vn</code>.
-            </p>
+
+            {/* OCR Helper status text */}
+            <div className="flex items-center justify-between text-[10px] font-mono mt-1 px-0.5">
+              {isScanningOcr ? (
+                <span className="text-amber-700 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 animate-spin text-amber-600" />
+                  Đang nhận diện ký tự Captcha bằng AI OCR...
+                </span>
+              ) : ocrSuccess && captchaCode ? (
+                <span className="text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  AI đã tự động quét mã: <strong>{captchaCode}</strong>
+                </span>
+              ) : (
+                <span className="text-gray-500">
+                  Phần mềm tự động quét và vượt Captcha khi kết nối
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Additional Options */}
