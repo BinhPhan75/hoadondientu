@@ -28,6 +28,7 @@ export interface CrawlerCredentials {
   password?: string;
   captchaKey?: string;
   captchaCode?: string;
+  captchaCookie?: string;
 }
 
 interface SidebarProps {
@@ -64,6 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Captcha & AI OCR State
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaKey, setCaptchaKey] = useState('');
+  const [captchaCookie, setCaptchaCookie] = useState('');
   const [captchaImg, setCaptchaImg] = useState<string>('');
   const [isRealGdtCaptcha, setIsRealGdtCaptcha] = useState(true);
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
@@ -100,9 +102,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setCaptchaCode(data.captchaCode);
         setOcrSuccess(true);
         if (authError) setAuthError(null);
+      } else {
+        setOcrSuccess(false);
+        setAuthError('Không thể tự động đọc mã Captcha này. Vui lòng nhìn hình và nhập tay.');
       }
     } catch (err) {
       console.warn('[AI OCR Scan Error]:', err);
+      setOcrSuccess(false);
+      setAuthError('Lỗi khi gọi AI OCR. Vui lòng tự nhập mã Captcha theo hình.');
     } finally {
       setIsScanningOcr(false);
     }
@@ -121,16 +128,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
+        setCaptchaCookie(data.captchaCookie || '');
         setIsRealGdtCaptcha(Boolean(data.isRealGDT));
         
-        if (data.captchaCode) {
-          setCaptchaCode(data.captchaCode);
-          setOcrSuccess(true);
+        if (data.isRealGDT) {
+          if (data.captchaCode) {
+            setCaptchaCode(data.captchaCode);
+            setOcrSuccess(true);
+          }
+        } else {
+          // If server could not reach real GDT, clear code and notify
+          setCaptchaCode('');
+          setOcrSuccess(false);
+          setAuthError(data.message || 'Chưa thể kết nối Cổng Thuế thật từ IP máy chủ Vercel. Bấm "Đổi mã" để thử lại.');
         }
         return;
       }
       throw new Error(data?.message || 'Không thể tải captcha từ Cổng Thuế');
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Cannot fetch GDT captcha, using local generator:', err);
       const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
       let code = '';
@@ -141,9 +156,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const base64Fallback = `data:image/svg+xml;base64,${btoa(svg)}`;
       setCaptchaImg(base64Fallback);
       setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
-      setCaptchaCode(code);
-      setOcrSuccess(true);
+      setCaptchaCookie('');
+      setCaptchaCode('');
+      setOcrSuccess(false);
       setIsRealGdtCaptcha(false);
+      setAuthError('Không thể kết nối đến máy chủ Cổng Thuế. Vui lòng bấm "Đổi mã" để thử lại.');
     } finally {
       setIsLoadingCaptcha(false);
     }
@@ -221,7 +238,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
 
       if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhập mã Captcha hoặc nhấn nút Quét OCR.');
+        setAuthError('Vui lòng nhập mã Captcha hiển thị trên hình.');
         return;
       }
     }
@@ -230,7 +247,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       taxCode: mst,
       password: pwd,
       captchaKey,
-      captchaCode: activeCaptchaCode
+      captchaCode: activeCaptchaCode,
+      captchaCookie
     });
 
     if (result && !result.success && result.error) {
@@ -432,14 +450,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
                   AI OCR đang tự động quét mã...
                 </span>
-              ) : ocrSuccess && captchaCode ? (
+              ) : isRealGdtCaptcha && ocrSuccess && captchaCode ? (
                 <span className="text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Đã tự động đọc mã: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                  Đã đọc mã CQT: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                </span>
+              ) : isRealGdtCaptcha ? (
+                <span className="text-gray-400">
+                  Nhập 4-5 ký tự trên hình hoặc bấm Quét OCR
                 </span>
               ) : (
-                <span className="text-gray-500">
-                  Tự động quét khi có ảnh Captcha
+                <span className="text-amber-400">
+                  Chưa kết nối Cổng Thuế thật (Bấm Đổi mã để thử lại)
                 </span>
               )}
             </div>

@@ -143,13 +143,13 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 2. Get Real Captcha from official GDT Portal (Instant response < 500ms)
+// 2. Get Real Captcha from official GDT Portal
 app.get('/api/gdt/captcha', async (req, res) => {
   try {
     // Fetch directly from official General Department of Taxation Portal
     const gdtRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
       headers: GDT_HEADERS,
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(12000)
     });
 
     if (gdtRes.ok) {
@@ -166,10 +166,20 @@ app.get('/api/gdt/captcha', async (req, res) => {
 
         const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`;
 
+        // Attempt OCR if Gemini API key exists
+        let autoSolved = '';
+        try {
+          autoSolved = await solveCaptchaOCR(data.content);
+        } catch {
+          // ignore
+        }
+
         return res.json({
           success: true,
           isRealGDT: true,
           captchaKey: data.key,
+          captchaCookie: cookieStr,
+          captchaCode: autoSolved,
           captchaImage: base64Image,
           rawSvg: data.content,
           source: 'hoadondientu.gdt.gov.vn'
@@ -203,11 +213,12 @@ app.get('/api/gdt/captcha', async (req, res) => {
     success: true,
     isRealGDT: false,
     captchaKey,
-    captchaCode: captchaText,
+    captchaCookie: '',
+    captchaCode: '',
     captchaImage: base64Fallback,
     rawSvg: svg,
     source: 'local_fallback',
-    autoOcr: true
+    message: 'Không thể kết nối trực tiếp đến Cổng Thuế từ IP máy chủ Vercel. Vui lòng kiểm tra lại mạng hoặc thử đổi region sang Singapore (sin1).'
   });
 });
 
@@ -239,7 +250,7 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
 
 // 3. Login directly to GDT Portal / Authenticate Session
 app.post('/api/gdt/login', async (req, res) => {
-  let { taxCode, password, captchaKey, captchaCode } = req.body;
+  let { taxCode, password, captchaKey, captchaCode, captchaCookie } = req.body;
 
   if (!taxCode) {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
@@ -259,8 +270,8 @@ app.post('/api/gdt/login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hoặc bấm nút quét tự động.' });
   }
 
-  // Attach session cookies stored from captcha step
-  const cookieHeader = captchaKey ? captchaCookieJar.get(captchaKey) || '' : '';
+  // Attach session cookies stored from captcha step or body
+  const cookieHeader = captchaCookie || (captchaKey ? captchaCookieJar.get(captchaKey) || '' : '');
 
   // REAL GDT AUTHENTICATION: Send POST to https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate
   try {
@@ -371,11 +382,14 @@ function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string)
   return chunks;
 }
 
-// 4. Query Real Invoices from GDT API
+// 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50 } = req.body;
+  const { fromDate, toDate, invoiceType = 'both', size = 50, token: bodyToken, cookieHeader: bodyCookie } = req.body;
 
-  if (!currentSession) {
+  const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
+  const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
+
+  if (!authHeader) {
     return res.status(401).json({
       success: false,
       message: 'Chưa có phiên làm việc với Tổng cục Thuế. Vui lòng nhập mã Captcha để kết nối.'
@@ -398,7 +412,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   // Chunk the requested period into <= 1-month slices to satisfy GDT's API rule
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
-  const tokenHeader = currentSession.token.startsWith('Bearer ') ? currentSession.token : `Bearer ${currentSession.token}`;
+  const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
 
   const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string) => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
@@ -412,7 +426,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         headers: {
           ...GDT_HEADERS,
           'Authorization': tokenHeader,
-          ...(currentSession?.cookieHeader ? { 'Cookie': currentSession.cookieHeader } : {})
+          ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
         },
         signal: AbortSignal.timeout(20000)
       });

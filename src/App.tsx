@@ -69,6 +69,16 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  // Stateless GDT Session tokens (for Vercel compatibility)
+  const [gdtSession, setGdtSession] = useState<{ token: string; cookieHeader: string } | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('gdt_session_tokens');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   // Live Console Logs
   const [consoleLogs, setConsoleLogs] = useState<SeleniumLogEntry[]>([
     {
@@ -235,6 +245,9 @@ export default function App() {
     const hasCaptcha = Boolean(credentials?.captchaCode?.trim());
     const needLogin = !account.isRealGDT || (credentials && credentials.taxCode !== account.taxCode) || hasCaptcha;
 
+    let activeToken = gdtSession?.token || '';
+    let activeCookie = gdtSession?.cookieHeader || '';
+
     if (needLogin && hasCaptcha) {
       setConsoleLogs(prev => [
         ...prev,
@@ -254,7 +267,8 @@ export default function App() {
             taxCode: mst,
             password: pwd,
             captchaKey: credentials?.captchaKey,
-            captchaCode: credentials?.captchaCode
+            captchaCode: credentials?.captchaCode,
+            captchaCookie: credentials?.captchaCookie
           })
         });
 
@@ -285,6 +299,16 @@ export default function App() {
         }
 
         // Login success!
+        if (loginData.session?.token) {
+          activeToken = loginData.session.token;
+          activeCookie = loginData.session.cookieHeader || '';
+          const newSession = { token: activeToken, cookieHeader: activeCookie };
+          setGdtSession(newSession);
+          try {
+            sessionStorage.setItem('gdt_session_tokens', JSON.stringify(newSession));
+          } catch {}
+        }
+
         setAccount(prev => ({
           ...prev,
           taxCode: mst,
@@ -332,12 +356,18 @@ export default function App() {
     try {
       const res = await fetch('/api/gdt/query-invoices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': activeToken,
+          'x-gdt-cookie': activeCookie
+        },
         body: JSON.stringify({
           fromDate: filters.fromDate,
           toDate: filters.toDate,
           invoiceType: filters.invoiceType,
-          size: 50
+          size: 50,
+          token: activeToken,
+          cookieHeader: activeCookie
         })
       });
 
