@@ -685,9 +685,11 @@ export default function App() {
         onClose={() => setIsBatchDownloadModalOpen(false)}
       />
 
-      {/* Invoice Detail & Visual Modal */}
+      {/* Invoice Detail & Visual Original PDF Modal */}
       <InvoiceDetailModal
         invoice={selectedInvoiceForDetail}
+        allInvoices={filteredInvoices}
+        onSelectInvoice={(inv) => setSelectedInvoiceForDetail(inv)}
         onClose={() => setSelectedInvoiceForDetail(null)}
         onDownloadXml={handleDownloadXml}
       />

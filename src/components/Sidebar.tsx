@@ -113,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Load Captcha on Mount & Trigger Auto-OCR
+  // Load Real Captcha from GDT & Trigger Auto-OCR
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setAuthError(null);
@@ -123,39 +123,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const res = await fetch('/api/gdt/captcha');
       const data = await res.json();
 
-      if (data && data.success && data.captchaImage) {
+      if (res.ok && data && data.success && data.isRealGDT && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
         setCaptchaCookie(data.captchaCookie || '');
-        setIsRealGdtCaptcha(Boolean(data.isRealGDT));
+        setIsRealGdtCaptcha(true);
         
-        if (data.isRealGDT) {
-          if (data.captchaCode) {
-            setCaptchaCode(data.captchaCode);
-            setOcrSuccess(true);
-          }
+        if (data.captchaCode) {
+          setCaptchaCode(data.captchaCode);
+          setOcrSuccess(true);
         } else {
           setCaptchaCode('');
           setOcrSuccess(false);
         }
         return;
       }
-      throw new Error(data?.message || 'Không thể tải captcha từ Cổng Thuế');
-    } catch (err: any) {
-      console.warn('Cannot fetch GDT captcha, using local generator:', err);
-      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-      let code = '';
-      for (let i = 0; i < 4; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="130" height="42" viewBox="0 0 130 42"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="120" y2="30" stroke="#cbd5e1" stroke-width="2"/><line x1="15" y1="35" x2="115" y2="8" stroke="#cbd5e1" stroke-width="1.5"/><text x="18" y="29" font-family="monospace, sans-serif" font-size="24" font-weight="bold" fill="#1e293b" letter-spacing="8">${code}</text></svg>`;
-      const base64Fallback = `data:image/svg+xml;base64,${btoa(svg)}`;
-      setCaptchaImg(base64Fallback);
-      setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
+
+      // If GDT portal is unreachable from this IP
+      setCaptchaImg('');
+      setCaptchaKey('');
       setCaptchaCookie('');
       setCaptchaCode('');
       setOcrSuccess(false);
       setIsRealGdtCaptcha(false);
+      setAuthError(data?.message || 'Không thể tải mã Captcha từ Cổng Tổng cục Thuế (hoadondientu.gdt.gov.vn). Cổng Thuế có thể đang chặn IP nước ngoài của Vercel.');
+    } catch (err: any) {
+      console.warn('Cannot fetch GDT captcha:', err);
+      setCaptchaImg('');
+      setCaptchaKey('');
+      setCaptchaCookie('');
+      setCaptchaCode('');
+      setOcrSuccess(false);
+      setIsRealGdtCaptcha(false);
+      setAuthError('Không thể kết nối đến máy chủ Cổng Thuế (' + (err.message || 'Lỗi mạng') + '). Vui lòng thử lại.');
     } finally {
       setIsLoadingCaptcha(false);
     }
@@ -364,11 +364,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>Mã Captcha</span>
                 {isRealGdtCaptcha ? (
                   <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-800 font-mono">
-                    Live GDT
+                    Cổng Thuế GDT
                   </span>
                 ) : (
-                  <span className="text-[9px] bg-gray-800 text-gray-400 px-1 py-0.2 rounded font-mono">
-                    Fallback
+                  <span className="text-[9px] bg-amber-950/80 text-amber-400 px-1 py-0.2 rounded border border-amber-800/80 font-mono">
+                    Chờ kết nối
                   </span>
                 )}
               </label>
@@ -377,8 +377,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   type="button"
                   onClick={() => handleScanOcr()}
-                  disabled={isScanningOcr || isLoadingCaptcha}
-                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono cursor-pointer transition-colors"
+                  disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
+                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono cursor-pointer transition-colors disabled:opacity-50"
                   title="Tự động quét và đọc mã Captcha bằng AI OCR"
                 >
                   <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
@@ -406,7 +406,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               >
                 {isLoadingCaptcha ? (
                   <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
-                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang tải...
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang kết nối...
                   </div>
                 ) : captchaImg ? (
                   <img
@@ -415,7 +415,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     className="max-h-full object-contain filter contrast-125 select-none"
                   />
                 ) : (
-                  <span className="text-[11px] text-gray-400 font-mono">Chưa có Captcha</span>
+                  <div className="text-[10px] text-red-600 font-medium flex items-center gap-1">
+                    <RefreshCw className="w-2.5 h-2.5" /> Bấm thử lại
+                  </div>
                 )}
               </div>
 
@@ -459,8 +461,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   Nhìn hình nhập mã vào ô bên cạnh (hoặc bấm Quét OCR)
                 </span>
               ) : (
-                <span className="text-amber-400">
-                  Chưa kết nối Cổng Thuế thật (Bấm Đổi mã để thử lại)
+                <span className="text-amber-400 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> Nhấn &quot;Đổi mã&quot; để kết nối Cổng Thuế
                 </span>
               )}
             </div>

@@ -176,3 +176,57 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Print Optimization for Official Vietnamese Electronic Invoices */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide app shell, sidebar, header, console, modals overlays, action toolbars */
+  header,
+  aside,
+  .console-dock,
+  .no-print,
+  button,
+  .status-dot,
+  .fixed.bottom-5 {
+    display: none !important;
+  }
+
+  /* Ensure the printable invoice container fills the page cleanly */
+  #invoice-printable-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 4mm !important;
+    page-break-inside: avoid !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .fixed.inset-0 {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .bg-\[\#1f2937\],
+  .bg-\[\#111827\],
+  .bg-slate-900\/90 {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}
