@@ -52,7 +52,7 @@ export default function App() {
 
   // Filter Parameters State
   const [filters, setFilters] = useState<FilterParams>({
-    invoiceType: 'both',
+    invoiceType: 'purchase',
     fromDate: '2025-01-01',
     toDate: '2025-12-31',
     status: 'all',
@@ -132,11 +132,11 @@ export default function App() {
     }
   }, [account]);
 
-  // Filter Invoices according to all criteria
+  // Filter Invoices according to all criteria (Strictly Purchase Invoices Only)
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
-      // 1. Invoice Type Filter (Purchase / Sold / Both)
-      if (filters.invoiceType !== 'both' && inv.loaiHdon !== filters.invoiceType) {
+      // 1. Strictly Purchase Invoices Only as required
+      if (inv.loaiHdon !== 'purchase') {
         return false;
       }
 
@@ -357,7 +357,7 @@ export default function App() {
           body: JSON.stringify({
             fromDate: chunk.fromDate,
             toDate: chunk.toDate,
-            invoiceType: filters.invoiceType,
+            invoiceType: 'purchase',
             size: 50,
             token: activeToken,
             cookieHeader: activeCookie
@@ -554,7 +554,7 @@ export default function App() {
         body: JSON.stringify({
           fromDate: chunk.fromDate,
           toDate: chunk.toDate,
-          invoiceType: filters.invoiceType,
+          invoiceType: 'purchase',
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie
@@ -784,7 +784,7 @@ export default function App() {
         body: JSON.stringify({
           fromDate: filters.fromDate,
           toDate: filters.toDate,
-          invoiceType: filters.invoiceType,
+          invoiceType: 'purchase',
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie
@@ -869,7 +869,7 @@ export default function App() {
           ...prev,
           fromDate: minDate < prev.fromDate ? minDate : prev.fromDate,
           toDate: maxDate > prev.toDate ? maxDate : prev.toDate,
-          invoiceType: 'both'
+          invoiceType: 'purchase'
         }));
       }
     }
@@ -895,7 +895,7 @@ export default function App() {
   // Reset Filters
   const handleResetFilters = () => {
     setFilters({
-      invoiceType: 'both',
+      invoiceType: 'purchase',
       fromDate: '2025-01-01',
       toDate: '2025-12-31',
       status: 'all',
@@ -960,9 +960,6 @@ export default function App() {
           onRunCrawler={handleRunCrawler}
           isLoading={isRefreshing}
           onOpenConfigModal={() => setIsConfigModalOpen(true)}
-          onOpenPythonRunner={() => setIsSeleniumModalOpen(true)}
-          onDownloadPackage={handleDownloadPythonScript}
-          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
         />
       </div>
 
@@ -991,15 +988,6 @@ export default function App() {
                 setIsConfigModalOpen(true);
                 setIsMobileSidebarOpen(false);
               }}
-              onOpenPythonRunner={() => {
-                setIsSeleniumModalOpen(true);
-                setIsMobileSidebarOpen(false);
-              }}
-              onDownloadPackage={handleDownloadPythonScript}
-              onOpenImportXml={() => {
-                setIsImportXmlModalOpen(true);
-                setIsMobileSidebarOpen(false);
-              }}
               onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
             />
           </div>
@@ -1017,12 +1005,7 @@ export default function App() {
           onOpenConfig={() => setIsConfigModalOpen(true)}
           onOpenBatchDownload={() => setIsBatchDownloadModalOpen(true)}
           onExportExcel={() => handleExportExcel(selectedInvoices.length > 0 ? selectedInvoices : filteredInvoices)}
-          onOpenSeleniumModal={() => setIsSeleniumModalOpen(true)}
-          onDownloadPythonScript={handleDownloadPythonScript}
           onRefreshData={handleRunCrawler}
-          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
-          onOpenMonthlyReport={() => setIsMultiMonthModalOpen(true)}
-          isMultiMonthActive={syncState.isActive}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
           onToggleSidebar={() => setIsMobileSidebarOpen(true)}
@@ -1036,31 +1019,8 @@ export default function App() {
           filters={filters}
           onFilterChange={setFilters}
           onResetFilters={handleResetFilters}
-          onRunSelenium={handleRunCrawler}
-          isLoading={isRefreshing}
           totalFilteredCount={filteredInvoices.length}
-          onOpenImportXml={() => setIsImportXmlModalOpen(true)}
-          onOpenMonthlyReport={() => setIsMultiMonthModalOpen(true)}
         />
-
-        {/* Data Source Notice Banner */}
-        <div className="px-4 py-1.5 bg-gray-50 border-b border-[#d1d5db] text-xs flex items-center justify-between gap-2">
-          {dataSourceType === 'live_gdt' ? (
-            <div className="flex items-center gap-2 text-emerald-800 font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-              <span><strong>KẾT NỐI TRỰC TIẾP CỔNG THUẾ:</strong> {account.isRealGDT ? `Đang kết nối phiên làm việc Tổng cục Thuế (MST: ${account.taxCode || '---'})` : 'Chưa kết nối phiên Tổng cục Thuế. Vui lòng nhập Captcha ở bảng bên trái.'}</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 text-blue-800 font-medium">
-              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-              <span><strong>TỆP XML THỰC TẾ:</strong> Đang hiển thị dữ liệu gốc trích xuất từ tệp XML/ZIP hóa đơn Tổng cục Thuế.</span>
-            </div>
-          )}
-
-          <div className="text-[11px] text-gray-500 font-mono hidden md:block">
-            {filteredInvoices.length} hóa đơn trong kỳ ({filters.fromDate} → {filters.toDate})
-          </div>
-        </div>
 
         {/* High Density Scrollable Data Grid Container */}
         <div className="flex-1 overflow-y-auto bg-[#f9fafb]">
@@ -1076,7 +1036,6 @@ export default function App() {
             onExportExcelSelected={() => handleExportExcel(selectedInvoices)}
             onQuickSyncPeriod={handleRunCrawler}
             onQuickResetPeriod={handleResetFilters}
-            onOpenImportXml={() => setIsImportXmlModalOpen(true)}
             currentDateRange={{ from: filters.fromDate, to: filters.toDate }}
             currentMst={account.taxCode}
           />

@@ -2,13 +2,9 @@ import React, { useState } from 'react';
 import { 
   FileCode2, 
   FileText, 
-  Eye, 
   Copy, 
   Check, 
-  ArrowDownLeft, 
-  ArrowUpRight, 
   ShieldCheck, 
-  Download, 
   CheckSquare, 
   Square,
   AlertCircle,
@@ -29,7 +25,6 @@ interface InvoiceTableProps {
   onExportExcelSelected: () => void;
   onQuickSyncPeriod?: () => void;
   onQuickResetPeriod?: () => void;
-  onOpenImportXml?: () => void;
   currentDateRange?: { from: string; to: string };
   currentMst?: string;
 }
@@ -46,7 +41,6 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
   onExportExcelSelected,
   onQuickSyncPeriod,
   onQuickResetPeriod,
-  onOpenImportXml,
   currentDateRange,
   currentMst
 }) => {
@@ -78,7 +72,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
   return (
     <div className="flex-1 flex flex-col min-w-0">
-      {/* High Density Table Container */}
+      {/* High Density Clean Table Container */}
       <div className="overflow-x-auto w-full border-b border-[#d1d5db] bg-white">
         <table className="data-table">
           {/* Table Header */}
@@ -87,7 +81,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
               <th className="w-8 text-center" style={{ width: '36px' }}>
                 <button
                   onClick={onToggleSelectAll}
-                  className="text-gray-500 hover:text-gray-900 transition-colors flex items-center justify-center mx-auto"
+                  className="text-gray-500 hover:text-gray-900 transition-colors flex items-center justify-center mx-auto cursor-pointer"
                 >
                   {isAllSelected ? (
                     <CheckSquare className="w-3.5 h-3.5 text-[#ef4444]" />
@@ -101,18 +95,16 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                 </button>
               </th>
               <th style={{ width: '38px' }} className="text-center">STT</th>
-              <th style={{ width: '90px' }}>Loại HĐ</th>
               <th style={{ width: '100px' }}>Ký hiệu</th>
-              <th style={{ width: '80px' }}>Số HĐ</th>
+              <th style={{ width: '85px' }}>Số HĐ</th>
               <th style={{ width: '95px' }}>Ngày lập</th>
-              <th style={{ minWidth: '220px' }}>Bên bán (Nhà cung cấp)</th>
-              <th style={{ minWidth: '220px' }}>Bên mua (Khách hàng)</th>
-              <th style={{ width: '115px' }} className="text-right">Doanh số</th>
-              <th style={{ width: '95px' }} className="text-right">Tiền thuế</th>
-              <th style={{ width: '125px' }} className="text-right">Tổng tiền</th>
-              <th style={{ width: '95px' }} className="text-center">Trạng thái</th>
-              <th style={{ width: '95px' }} className="text-center">Mã CQT</th>
-              <th style={{ width: '135px' }} className="text-center">Tác vụ / Mở HĐ</th>
+              <th style={{ minWidth: '260px' }}>Bên bán (Nhà cung cấp)</th>
+              <th style={{ width: '120px' }} className="text-right">Tiền chưa thuế</th>
+              <th style={{ width: '105px' }} className="text-right">Tiền thuế</th>
+              <th style={{ width: '130px' }} className="text-right">Tổng tiền</th>
+              <th style={{ width: '90px' }} className="text-center">Trạng thái</th>
+              <th style={{ width: '90px' }} className="text-center">Mã CQT</th>
+              <th style={{ width: '130px' }} className="text-center">Thao tác</th>
             </tr>
           </thead>
 
@@ -120,47 +112,34 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <tbody>
             {invoices.length === 0 ? (
               <tr>
-                <td colSpan={14} className="p-10 text-center text-gray-600 bg-gray-50/40">
+                <td colSpan={12} className="p-10 text-center text-gray-600 bg-gray-50/40">
                   <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
-                      <AlertCircle className="w-6 h-6" />
+                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                      <AlertCircle className="w-5 h-5" />
                     </div>
                     <div>
                       <p className="text-sm font-bold text-gray-900">
-                        Không tìm thấy hóa đơn nào trong khoảng thời gian đã lọc
+                        Không tìm thấy hóa đơn mua vào nào trong khoảng thời gian đã lọc
                       </p>
                       <p className="text-xs text-gray-500 font-mono mt-1">
                         Kỳ tra cứu:{' '}
                         <strong className="text-gray-800">
-                          {currentDateRange ? `${currentDateRange.from} -> ${currentDateRange.to}` : 'Tất cả'}
+                          {currentDateRange ? `${currentDateRange.from} → ${currentDateRange.to}` : 'Tất cả'}
                         </strong>{' '}
                         | MST:{' '}
                         <strong className="text-gray-800 font-mono">
                           {currentMst || '(Chưa nhập)'}
                         </strong>
                       </p>
-                      <p className="text-[11px] text-gray-500 mt-1">
-                        Hóa đơn có thể chưa phát sinh trong kỳ này hoặc chưa được đồng bộ từ Cổng Tổng cục Thuế.
-                      </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                       {onQuickSyncPeriod && (
                         <button
                           onClick={onQuickSyncPeriod}
                           className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
                         >
-                          <span>Tự động đồng bộ kỳ này</span>
-                        </button>
-                      )}
-
-                      {onOpenImportXml && (
-                        <button
-                          onClick={onOpenImportXml}
-                          className="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-800 border border-gray-300 rounded text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
-                          <span>Nhập tệp XML / ZIP thực tế</span>
+                          <span>Tra cứu kỳ này</span>
                         </button>
                       )}
 
@@ -169,18 +148,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           onClick={onQuickResetPeriod}
                           className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors cursor-pointer"
                         >
-                          <span>Đặt lại bộ lọc kỳ</span>
+                          <span>Đặt lại bộ lọc</span>
                         </button>
                       )}
-
-                      <a
-                        href="https://hoadondientu.gdt.gov.vn"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-xs font-semibold transition-colors inline-flex items-center gap-1"
-                      >
-                        <span>Mở Cổng GDT (hoadondientu.gdt.gov.vn)</span>
-                      </a>
                     </div>
                   </div>
                 </td>
@@ -226,7 +196,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                     <td className="text-center" onClick={(e) => { e.stopPropagation(); onToggleSelect(inv); }}>
                       <button
                         onClick={(e) => { e.stopPropagation(); onToggleSelect(inv); }}
-                        className="text-gray-400 hover:text-[#ef4444] transition-colors flex items-center justify-center mx-auto"
+                        className="text-gray-400 hover:text-[#ef4444] transition-colors flex items-center justify-center mx-auto cursor-pointer"
                       >
                         {isSelected ? (
                           <CheckSquare className="w-3.5 h-3.5 text-[#ef4444]" />
@@ -238,19 +208,6 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
                     {/* STT */}
                     <td className="text-center text-gray-500 font-mono text-[11px]">{idx + 1}</td>
-
-                    {/* Loại HĐ */}
-                    <td>
-                      {inv.loaiHdon === 'purchase' ? (
-                        <span className="inline-flex items-center gap-1 font-semibold text-blue-700 text-[11px]">
-                          <ArrowDownLeft className="w-3 h-3" /> Mua vào
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 text-[11px]">
-                          <ArrowUpRight className="w-3 h-3" /> Bán ra
-                        </span>
-                      )}
-                    </td>
 
                     {/* Mẫu số / Ký hiệu */}
                     <td className="font-mono font-medium text-gray-900 text-xs">
@@ -270,14 +227,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
                     {/* Bên bán */}
                     <td>
-                      <div className="font-medium text-gray-900 truncate max-w-[240px] text-xs" title={inv.nbten}>
+                      <div className="font-semibold text-gray-900 truncate max-w-[280px] text-xs" title={inv.nbten}>
                         {inv.nbten}
                       </div>
                       <div className="flex items-center gap-1 text-[11px] text-gray-500 font-mono">
-                        <span>MST: {inv.nbmst}</span>
+                        <span>MST: <strong className="text-gray-700">{inv.nbmst}</strong></span>
                         <button
                           onClick={(e) => handleCopyMst(inv.nbmst, e)}
-                          className="hover:text-gray-900 p-0.5"
+                          className="hover:text-gray-900 p-0.5 cursor-pointer"
                           title="Sao chép MST"
                         >
                           {copiedMst === inv.nbmst ? (
@@ -286,16 +243,6 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             <Copy className="w-2.5 h-2.5" />
                           )}
                         </button>
-                      </div>
-                    </td>
-
-                    {/* Bên mua */}
-                    <td>
-                      <div className="font-medium text-gray-800 truncate max-w-[240px] text-xs" title={inv.nmten}>
-                        {inv.nmten}
-                      </div>
-                      <div className="text-[11px] text-gray-500 font-mono">
-                        MST: {inv.nmmst}
                       </div>
                     </td>
 
@@ -340,8 +287,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => onViewDetail(inv)}
-                          className="px-2 py-1 bg-red-50 hover:bg-[#ef4444] text-[#ef4444] hover:text-white border border-red-200 hover:border-[#ef4444] rounded text-[11px] font-bold transition-all flex items-center gap-1 shadow-2xs"
-                          title="Mở hóa đơn bản PDF hiển thị như bản gốc"
+                          className="px-2 py-1 bg-red-50 hover:bg-[#ef4444] text-[#ef4444] hover:text-white border border-red-200 hover:border-[#ef4444] rounded text-[11px] font-bold transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                          title="Mở xem bản thể hiện PDF"
                         >
                           <FileText className="w-3 h-3" />
                           <span>Xem PDF</span>
@@ -349,7 +296,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
                         <button
                           onClick={() => onDownloadXml(inv)}
-                          className="p-1 text-gray-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                          className="p-1 text-gray-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors cursor-pointer"
                           title="Tải tệp XML gốc"
                         >
                           <FileCode2 className="w-3.5 h-3.5" />
@@ -370,7 +317,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <div className="flex items-center gap-2">
             <span className="status-dot status-active"></span>
             <span>
-              Đã chọn: <strong className="text-emerald-400 font-mono font-bold">{selectedInvoices.length}</strong> HĐ
+              Đã chọn: <strong className="text-emerald-400 font-mono font-bold">{selectedInvoices.length}</strong> HĐ mua vào
             </span>
             <span className="text-gray-600">|</span>
             <span>
@@ -384,7 +331,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => onViewDetail(selectedInvoices[0])}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-white rounded text-xs font-bold transition-colors border border-gray-700"
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-white rounded text-xs font-bold transition-colors border border-gray-700 cursor-pointer"
               title="Mở xem bản PDF của hóa đơn đã chọn"
             >
               <FileText className="w-3 h-3 text-[#ef4444]" />
@@ -393,7 +340,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
             <button
               onClick={onExportExcelSelected}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
             >
               <FileSpreadsheet className="w-3 h-3" />
               <span>Xuất Excel</span>
@@ -401,7 +348,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
             <button
               onClick={onBatchDownloadSelected}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors cursor-pointer"
             >
               <FolderArchive className="w-3 h-3" />
               <span>Tải ZIP</span>

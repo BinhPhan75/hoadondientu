@@ -611,41 +611,18 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   try {
     let results: any[] = [];
-    const queryPurchase = invoiceType === 'purchase' || invoiceType === 'both' || invoiceType === 'all';
-    const querySold = invoiceType === 'sold' || invoiceType === 'both' || invoiceType === 'all';
-
-    if (queryPurchase) {
-      const purchaseList = await fetchAllChunksForType('purchase');
-      if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
-        currentSession = null;
-        return res.status(401).json({
-          success: false,
-          isExpired: true,
-          message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
-        });
-      }
-      if (Array.isArray(purchaseList)) {
-        results = results.concat(purchaseList);
-      }
+    // User requirement: "Phần mềm chỉ cần chức năng lấy hóa đơn mua vào ko cần bán ra"
+    const purchaseList = await fetchAllChunksForType('purchase');
+    if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
+      currentSession = null;
+      return res.status(401).json({
+        success: false,
+        isExpired: true,
+        message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+      });
     }
-
-    if (queryPurchase && querySold) {
-      await sleep(300);
-    }
-
-    if (querySold) {
-      const soldList = await fetchAllChunksForType('sold');
-      if ((soldList as any)?.error === 'AUTH_EXPIRED') {
-        currentSession = null;
-        return res.status(401).json({
-          success: false,
-          isExpired: true,
-          message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
-        });
-      }
-      if (Array.isArray(soldList)) {
-        results = results.concat(soldList);
-      }
+    if (Array.isArray(purchaseList)) {
+      results = results.concat(purchaseList);
     }
 
     // Deduplicate by unique invoice key

@@ -5,19 +5,15 @@ import {
   KeyRound, 
   Building2, 
   Calendar, 
-  Layers, 
   Play, 
   RefreshCw, 
   Settings, 
-  Code2, 
-  Terminal, 
   Eye, 
   EyeOff,
   Sparkles,
   CheckCircle2,
   AlertTriangle,
   X,
-  FileCode2,
   Globe2,
   Database
 } from 'lucide-react';
@@ -39,9 +35,6 @@ interface SidebarProps {
   onRunCrawler: (credentials?: CrawlerCredentials) => Promise<{ success: boolean; error?: string } | void>;
   isLoading: boolean;
   onOpenConfigModal: () => void;
-  onOpenPythonRunner: () => void;
-  onDownloadPackage: () => void;
-  onOpenImportXml?: () => void;
   onCloseMobileSidebar?: () => void;
 }
 
@@ -53,9 +46,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRunCrawler,
   isLoading,
   onOpenConfigModal,
-  onOpenPythonRunner,
-  onDownloadPackage,
-  onOpenImportXml,
   onCloseMobileSidebar
 }) => {
   const [showPassword, setShowPassword] = useState(false);
@@ -470,24 +460,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Error Message if Authentication Failed */}
           {authError && (
-            <div className="p-2.5 bg-red-950/90 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex flex-col gap-2 animate-fadeIn shadow-md">
-              <div className="flex items-start gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="block text-red-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
-                  <span className="text-red-200/90">{authError}</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-red-900/50">
-                <button
-                  type="button"
-                  onClick={onOpenPythonRunner}
-                  className="px-2 py-1 text-[10px] font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 rounded transition-colors flex items-center gap-1 cursor-pointer"
-                  title="Chạy trực tiếp từ máy tính Việt Nam để không bị chặn IP"
-                >
-                  <Code2 className="w-3 h-3 text-amber-400" />
-                  Chạy trên máy tính
-                </button>
+            <div className="p-2.5 bg-red-950/90 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex items-start gap-1.5 animate-fadeIn shadow-md">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <strong className="block text-red-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
+                <span className="text-red-200/90">{authError}</span>
               </div>
             </div>
           )}
@@ -503,6 +480,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             
             {/* Quick Period Buttons */}
             <div className="grid grid-cols-4 gap-1 mb-2">
+              <button
+                type="button"
+                onClick={() => onFilterChange({ ...filters, fromDate: '2026-01-01', toDate: '2026-12-31' })}
+                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                  filters.fromDate === '2026-01-01' && filters.toDate === '2026-12-31'
+                    ? 'bg-amber-500 text-black font-extrabold'
+                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                2026
+              </button>
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...filters, fromDate: '2025-01-01', toDate: '2025-12-31' })}
@@ -524,17 +512,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 }`}
               >
                 2024
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2023-01-01', toDate: '2023-12-31' })}
-                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
-                  filters.fromDate === '2023-01-01' && filters.toDate === '2023-12-31'
-                    ? 'bg-amber-500 text-black font-extrabold'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                }`}
-              >
-                2023
               </button>
               <button
                 type="button"
@@ -571,46 +548,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Invoice Type Radio */}
-          <div>
-            <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block mb-1">
-              Loại Hóa Đơn
-            </label>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, invoiceType: 'purchase' })}
-                className={`py-1 px-1 text-center text-[11px] font-bold rounded transition-colors ${
-                  filters.invoiceType === 'purchase'
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                Mua Vào
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, invoiceType: 'sold' })}
-                className={`py-1 px-1 text-center text-[11px] font-bold rounded transition-colors ${
-                  filters.invoiceType === 'sold'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                Bán Ra
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, invoiceType: 'both' })}
-                className={`py-1 px-1 text-center text-[11px] font-bold rounded transition-colors ${
-                  filters.invoiceType === 'both'
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-                }`}
-              >
-                Tất Cả
-              </button>
-            </div>
+          {/* Invoice Type Fixed to Purchase */}
+          <div className="flex items-center justify-between py-1.5 px-2.5 bg-blue-950/40 border border-blue-900/60 rounded">
+            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Phạm vi tra cứu</span>
+            <span className="text-xs font-bold text-blue-400 font-mono">HÓA ĐƠN MUA VÀO</span>
           </div>
 
           {/* Primary Action Button */}
@@ -649,47 +590,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Chứng thư số:</span>
             <span className="text-blue-400">CQT SHA-256</span>
           </div>
-          <div className="flex items-center justify-between text-gray-300">
-            <span>Nghị định:</span>
-            <span className="text-purple-400">123/2020 & TT78</span>
-          </div>
         </div>
       </div>
 
       {/* Footer Utility Links */}
       <div className="pt-3 border-t border-gray-800 space-y-1.5 text-xs">
-        {onOpenImportXml && (
-          <button
-            onClick={onOpenImportXml}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-blue-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] font-semibold cursor-pointer"
-          >
-            <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
-            <span>Nạp tệp XML / Gói ZIP thực tế</span>
-          </button>
-        )}
-
         <button
           onClick={onOpenConfigModal}
           className="w-full flex items-center gap-2 px-2 py-1 text-gray-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] cursor-pointer"
         >
           <Settings className="w-3.5 h-3.5 text-gray-400" />
           <span>Cấu hình tài khoản & Captcha</span>
-        </button>
-
-        <button
-          onClick={onOpenPythonRunner}
-          className="w-full flex items-center gap-2 px-2 py-1 text-gray-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] cursor-pointer"
-        >
-          <Terminal className="w-3.5 h-3.5 text-purple-400" />
-          <span>Mở Python CLI Console</span>
-        </button>
-
-        <button
-          onClick={onDownloadPackage}
-          className="w-full flex items-center gap-2 px-2 py-1 text-gray-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] cursor-pointer"
-        >
-          <Code2 className="w-3.5 h-3.5 text-blue-400" />
-          <span>Tải script Python Selenium (.zip)</span>
         </button>
       </div>
     </aside>

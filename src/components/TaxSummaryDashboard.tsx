@@ -88,7 +88,7 @@ export const TaxSummaryDashboard: React.FC<TaxSummaryDashboardProps> = ({ invoic
         {/* Metric 1: Total Invoices */}
         <div className="pt-2 md:pt-0 md:pr-4">
           <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-            Tổng số hóa đơn
+            Tổng HĐ Mua Vào
           </div>
           <div className="text-xl font-bold font-mono text-gray-900 mt-0.5">
             {totalCount.toLocaleString()}
@@ -101,33 +101,33 @@ export const TaxSummaryDashboard: React.FC<TaxSummaryDashboardProps> = ({ invoic
         {/* Metric 2: Total Before Tax */}
         <div className="pt-2 md:pt-0 md:px-4">
           <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-            Doanh số chưa thuế
+            Tiền Hàng Chưa Thuế
           </div>
           <div className="text-lg font-bold font-mono text-blue-700 mt-0.5">
             {formatVND(totalBeforeTax)}
           </div>
           <div className="text-[11px] text-gray-500 mt-0.5">
-            Cơ sở tính thuế GTGT
+            Tổng giá trị hàng mua
           </div>
         </div>
 
         {/* Metric 3: Total VAT */}
         <div className="pt-2 md:pt-0 md:px-4">
           <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-            Tiền thuế GTGT
+            Thuế GTGT Đầu Vào
           </div>
           <div className="text-lg font-bold font-mono text-amber-700 mt-0.5">
             {formatVND(totalTax)}
           </div>
           <div className="text-[11px] text-gray-500 mt-0.5">
-            Theo TT78 & NĐ123
+            Thuế GTGT khấu trừ
           </div>
         </div>
 
         {/* Metric 4: Total Payment */}
         <div className="pt-2 md:pt-0 md:px-4">
           <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-            Tổng thanh toán
+            Tổng Thanh Toán
           </div>
           <div className="text-lg font-black font-mono text-[#166534] mt-0.5">
             {formatVND(totalPayment)}
@@ -219,7 +219,7 @@ export const TaxSummaryDashboard: React.FC<TaxSummaryDashboardProps> = ({ invoic
               <div className="flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-emerald-600" />
                 <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
-                  Top đối tác theo giá trị (Triệu VNĐ)
+                  Top nhà cung cấp theo giá trị (Triệu VNĐ)
                 </h4>
               </div>
               <span className="text-[10px] font-mono text-gray-500">Tổng thanh toán</span>

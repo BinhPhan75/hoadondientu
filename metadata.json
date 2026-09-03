@@ -1,6 +1,6 @@
 {
-  "name": "Tải Hóa Đơn Điện Tử Tổng Cục Thuế",
-  "description": "Ứng dụng tự động hóa kết nối Cổng Hóa đơn điện tử Tổng cục Thuế (hoadondientu.gdt.gov.vn) để tra cứu, tải hàng loạt hóa đơn XML/PDF và xuất bảng kê Excel bằng Python & Selenium.",
+  "name": "Tra Cứu & Tải Hóa Đơn Mua Vào - Cổng Tổng Cục Thuế",
+  "description": "Ứng dụng tự động tra cứu, tải hóa đơn điện tử mua vào và xuất bảng kê Excel từ Cổng Tổng cục Thuế theo từng tháng.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

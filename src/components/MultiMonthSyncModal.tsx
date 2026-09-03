@@ -161,15 +161,7 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
 
             <div className="flex items-center gap-3">
               <span className="text-emerald-400">
-                Mua vào: <strong>{syncState.totalPurchaseFound} HĐ</strong>
-              </span>
-              <span className="text-gray-600">|</span>
-              <span className="text-blue-400">
-                Bán ra: <strong>{syncState.totalSoldFound} HĐ</strong>
-              </span>
-              <span className="text-gray-600">|</span>
-              <span className="text-white font-bold">
-                Tổng: {syncState.totalInvoicesFound} HĐ
+                Tổng HĐ mua vào: <strong>{syncState.totalPurchaseFound} HĐ</strong>
               </span>
             </div>
           </div>
@@ -253,11 +245,11 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
                   <th className="py-2.5 px-3 font-semibold">Kỳ / Tháng</th>
                   <th className="py-2.5 px-3 font-semibold">Khoảng Ngày</th>
                   <th className="py-2.5 px-3 font-semibold text-center">Trạng Thái</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">Mua Vào</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">Bán Ra</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">Tổng HĐ</th>
-                  <th className="py-2.5 px-3 font-semibold text-right">Doanh Số (VNĐ)</th>
-                  <th className="py-2.5 px-3 font-semibold text-center">Báo Cáo Tháng</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Số HĐ Mua Vào</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Tiền Hàng Chưa Thuế</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Thuế GTGT</th>
+                  <th className="py-2.5 px-3 font-semibold text-right">Tổng Thanh Toán</th>
+                  <th className="py-2.5 px-3 font-semibold text-center">Xuất Excel</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/80">
@@ -327,37 +319,31 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
 
                       {/* Purchase count */}
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                        {chunk.status === 'completed' ? `${chunk.purchaseCount} HĐ` : '-'}
+                        {chunk.status === 'completed' ? `${chunk.purchaseCount || chunk.totalInvoices} HĐ` : '-'}
                       </td>
 
-                      {/* Sold count */}
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-blue-400">
-                        {chunk.status === 'completed' ? `${chunk.soldCount} HĐ` : '-'}
+                      {/* Purchase Amount */}
+                      <td className="py-2.5 px-3 text-right font-mono text-gray-200">
+                        {chunk.status === 'completed' ? formatVND(chunk.purchaseAmount || chunk.totalAmount) : '-'}
                       </td>
 
-                      {/* Total count */}
-                      <td className="py-2.5 px-3 text-right font-mono font-extrabold text-white">
-                        {chunk.status === 'completed' ? (
-                          <span className="bg-gray-800 px-1.5 py-0.5 rounded">
-                            {chunk.totalCount}
-                          </span>
-                        ) : '-'}
+                      {/* Purchase Tax */}
+                      <td className="py-2.5 px-3 text-right font-mono text-amber-400">
+                        {chunk.status === 'completed' ? formatVND(chunk.purchaseTax || chunk.totalTax) : '-'}
                       </td>
 
-                      {/* Total Amount */}
-                      <td className="py-2.5 px-3 text-right font-mono text-gray-300">
-                        {chunk.status === 'completed' ? (
-                          formatVND(chunk.totalAmount)
-                        ) : '-'}
+                      {/* Total Payment */}
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
+                        {chunk.status === 'completed' ? formatVND(chunk.totalPayment || (chunk.purchaseAmount + chunk.purchaseTax)) : '-'}
                       </td>
 
                       {/* Action for this month */}
                       <td className="py-2.5 px-3 text-center">
                         <button
                           onClick={() => handleExportMonth(chunk)}
-                          disabled={chunk.status !== 'completed' || chunk.totalCount === 0}
+                          disabled={chunk.status !== 'completed' || (chunk.purchaseCount === 0 && chunk.totalInvoices === 0)}
                           className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:pointer-events-none rounded transition-colors cursor-pointer"
-                          title={`Xuất Excel riêng cho ${chunk.label}`}
+                          title={`Xuất Excel hóa đơn mua vào của ${chunk.label}`}
                         >
                           <Download className="w-3 h-3 text-emerald-400" />
                           <span>Xuất Excel</span>
@@ -376,82 +362,49 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
               <div className="flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-emerald-400" />
                 <h5 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
-                  Tổng Hợp Toàn Bộ Kỳ ({syncState.completedMonths}/{syncState.totalMonths} tháng)
+                  Tổng Hợp Hóa Đơn Mua Vào Toàn Kỳ ({syncState.completedMonths}/{syncState.totalMonths} tháng)
                 </h5>
               </div>
-              <span className="text-[11px] font-mono text-gray-400">
-                Theo Thông tư 78/2021/TT-BTC & Nghị định 123/2020/NĐ-CP
-              </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Purchase Box */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              {/* Box 1: Total Purchase Invoices */}
               <div className="p-3 bg-gray-900/90 rounded border border-gray-800">
-                <div className="text-[11px] font-semibold text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>Tổng Mua Vào (Đầu vào)</span>
-                  <span className="font-mono text-white bg-emerald-950 px-1.5 py-0.5 rounded text-[10px]">
-                    {syncState.totalPurchaseFound} HĐ
-                  </span>
+                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Tổng Số HĐ Mua Vào
                 </div>
-                <div className="mt-1">
-                  <div className="text-xs text-gray-400">Doanh số chưa thuế:</div>
-                  <div className="text-sm font-bold font-mono text-white">
-                    {formatVND(syncState.chunks.reduce((s, c) => s + c.purchaseAmount, 0))}
-                  </div>
-                </div>
-                <div className="mt-1">
-                  <div className="text-xs text-gray-400">Thuế GTGT đầu vào:</div>
-                  <div className="text-sm font-bold font-mono text-emerald-400">
-                    {formatVND(totalPurchaseTax)}
-                  </div>
+                <div className="text-lg font-bold font-mono text-emerald-400 mt-1">
+                  {syncState.totalPurchaseFound} HĐ
                 </div>
               </div>
 
-              {/* Sold Box */}
+              {/* Box 2: Total Amount Before Tax */}
               <div className="p-3 bg-gray-900/90 rounded border border-gray-800">
-                <div className="text-[11px] font-semibold text-blue-400 uppercase tracking-wider flex items-center justify-between">
-                  <span>Tổng Bán Ra (Đầu ra)</span>
-                  <span className="font-mono text-white bg-blue-950 px-1.5 py-0.5 rounded text-[10px]">
-                    {syncState.totalSoldFound} HĐ
-                  </span>
+                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Tiền Hàng Chưa Thuế
                 </div>
-                <div className="mt-1">
-                  <div className="text-xs text-gray-400">Doanh thu chưa thuế:</div>
-                  <div className="text-sm font-bold font-mono text-white">
-                    {formatVND(syncState.chunks.reduce((s, c) => s + c.soldAmount, 0))}
-                  </div>
-                </div>
-                <div className="mt-1">
-                  <div className="text-xs text-gray-400">Thuế GTGT đầu ra:</div>
-                  <div className="text-sm font-bold font-mono text-blue-400">
-                    {formatVND(totalSoldTax)}
-                  </div>
+                <div className="text-sm font-bold font-mono text-white mt-1">
+                  {formatVND(syncState.chunks.reduce((s, c) => s + (c.purchaseAmount || c.totalAmount || 0), 0))}
                 </div>
               </div>
 
-              {/* Net VAT Obligation */}
+              {/* Box 3: Total VAT */}
               <div className="p-3 bg-gray-900/90 rounded border border-gray-800">
-                <div className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
-                  Nghĩa Vụ Thuế GTGT Toàn Kỳ
+                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Thuế GTGT Đầu Vào
                 </div>
-                <div className="mt-1">
-                  <div className="text-xs text-gray-400">Chênh lệch (Đầu ra - Đầu vào):</div>
-                  <div className={`text-base font-extrabold font-mono mt-0.5 ${netVat >= 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {formatVND(netVat)}
-                  </div>
+                <div className="text-sm font-bold font-mono text-amber-400 mt-1">
+                  {formatVND(syncState.chunks.reduce((s, c) => s + (c.purchaseTax || c.totalTax || 0), 0))}
                 </div>
-                <div className="mt-1 text-[11px] font-medium text-gray-300">
-                  {netVat > 0 ? (
-                    <span className="text-amber-300 font-bold">
-                      → Thuế GTGT phải nộp Ngân sách Nhà nước
-                    </span>
-                  ) : netVat < 0 ? (
-                    <span className="text-emerald-300 font-bold">
-                      → Thuế GTGT còn được khấu trừ chuyển kỳ sau
-                    </span>
-                  ) : (
-                    <span>Thuế GTGT cân bằng</span>
-                  )}
+              </div>
+
+              {/* Box 4: Total Payment */}
+              <div className="p-3 bg-gray-900/90 rounded border border-gray-800">
+                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Tổng Tiền Thanh Toán
+                </div>
+                <div className="text-sm font-bold font-mono text-emerald-400 mt-1">
+                  {formatVND(syncState.chunks.reduce((s, c) => s + ((c.purchaseAmount || c.totalAmount || 0) + (c.purchaseTax || c.totalTax || 0)), 0))}
                 </div>
               </div>
             </div>
