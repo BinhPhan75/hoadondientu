@@ -699,18 +699,55 @@ export default function App() {
         }
 
         if (!loginRes.ok || !loginData.success) {
-          const errMsg = loginData.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
-          setConsoleLogs(prev => [
-            ...prev,
-            {
-              id: Math.random().toString(36).substring(2, 9),
-              timestamp: new Date().toLocaleTimeString('vi-VN'),
-              level: 'error',
-              message: `[KẾT NỐI THẤT BẠI] ${errMsg}`
+          // Fallback: If cloud server proxy was blocked by GDT firewall, attempt direct authentication from client browser in Vietnam
+          let directLoginSucceeded = false;
+          try {
+            const directAuthRes = await fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*'
+              },
+              body: JSON.stringify({
+                username: mst,
+                password: pwd,
+                ckey: credentials?.captchaKey,
+                cvalue: credentials?.captchaCode
+              })
+            });
+
+            if (directAuthRes.ok) {
+              const directAuthData = await directAuthRes.json();
+              if (directAuthData && directAuthData.token) {
+                loginData = {
+                  success: true,
+                  session: {
+                    token: directAuthData.token,
+                    taxpayerName: directAuthData.name || directAuthData.taxpayerName,
+                    address: directAuthData.address
+                  }
+                };
+                directLoginSucceeded = true;
+              }
             }
-          ]);
-          setIsRefreshing(false);
-          return { success: false, error: errMsg };
+          } catch (directAuthErr) {
+            console.warn('[Direct Browser Auth Attempt]:', directAuthErr);
+          }
+
+          if (!directLoginSucceeded && (!loginRes.ok || !loginData.success)) {
+            const errMsg = loginData.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
+            setConsoleLogs(prev => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString('vi-VN'),
+                level: 'error',
+                message: `[KẾT NỐI THẤT BẠI] ${errMsg}`
+              }
+            ]);
+            setIsRefreshing(false);
+            return { success: false, error: errMsg };
+          }
         }
 
         // Login success!

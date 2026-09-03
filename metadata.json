@@ -1,6 +1,6 @@
 {
   "name": "Tra Cứu & Tải Hóa Đơn Mua Vào - Cổng Tổng Cục Thuế",
-  "description": "Ứng dụng tự động tra cứu, tải hóa đơn điện tử mua vào và xuất bảng kê Excel từ Cổng Tổng cục Thuế theo từng tháng.",
+  "description": "Ứng dụng tự động tra cứu, tải hóa đơn điện tử mua vào, xuất bảng kê Excel và bộ Adapter Engine tải PDF gốc từ nhà cung cấp (MISA, Viettel, VNPT, 4Si) kèm OCR Captcha.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

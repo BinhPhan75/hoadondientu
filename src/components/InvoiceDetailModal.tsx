@@ -18,7 +18,13 @@ import {
   Palette,
   Code2,
   FileSpreadsheet,
-  CheckCircle2
+  CheckCircle2,
+  Layers,
+  Terminal,
+  Cpu,
+  Sparkles,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
@@ -46,7 +52,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   onClose,
   onDownloadXml
 }) => {
-  const [activeTab, setActiveTab] = useState<'pdf' | 'html' | 'xslt' | 'xml' | 'meta'>('pdf');
+  const [activeTab, setActiveTab] = useState<'pdf' | 'html' | 'xslt' | 'xml' | 'meta' | 'engine'>('pdf');
   const [theme, setTheme] = useState<'red' | 'blue'>('red');
   const [isCopiedXml, setIsCopiedXml] = useState(false);
   const [isCopiedHtml, setIsCopiedHtml] = useState(false);
@@ -55,6 +61,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const invoicePaperRef = useRef<HTMLDivElement>(null);
+
+  // Multi-Provider Adapter Engine States
+  const [isEngineDownloading, setIsEngineDownloading] = useState(false);
+  const [engineResult, setEngineResult] = useState<any>(null);
+  const [engineLogs, setEngineLogs] = useState<string[]>([]);
+  const [detectedProvider, setDetectedProvider] = useState<any>(null);
+  const [isDetecting, setIsDetecting] = useState(false);
 
   // Find index in list for navigation
   const currentIndex = invoice && allInvoices.length > 0 
@@ -84,6 +97,30 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [invoice]);
 
+  // Auto-detect invoice provider (MISA, Viettel, 4Si, VNPT, etc.) via Adapter Engine
+  useEffect(() => {
+    if (!invoice) return;
+    setIsDetecting(true);
+    setEngineResult(null);
+    setEngineLogs([]);
+    const xml = invoice.rawXml || generateGDTInvoiceXml(invoice);
+    fetch('/api/invoice-downloader/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ xml })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setDetectedProvider(data);
+        }
+      })
+      .catch(err => {
+        console.warn('Lỗi nhận diện Provider:', err);
+      })
+      .finally(() => setIsDetecting(false));
+  }, [invoice]);
+
   if (!invoice) return null;
 
   const xmlContent = invoice.rawXml || generateGDTInvoiceXml(invoice);
@@ -92,6 +129,56 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     qrCodeDataUrl: qrCodeUrl,
     showPrintControls: true
   });
+
+  const handleEngineDownload = async (forceFallback = false) => {
+    if (!invoice) return;
+    setIsEngineDownloading(true);
+    setEngineResult(null);
+    setEngineLogs([
+      `[${new Date().toLocaleTimeString('vi-VN')}] [Khởi động] Đang kết nối đến Multi-Provider Adapter Engine...`,
+      `[${new Date().toLocaleTimeString('vi-VN')}] [Tham số] Chế độ fallback ép buộc: ${forceFallback ? 'CÓ' : 'TỰ ĐỘNG'}`
+    ]);
+    try {
+      const xml = invoice.rawXml || generateGDTInvoiceXml(invoice);
+      const res = await fetch('/api/invoice-downloader/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ xml, forceFallback })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setEngineResult(data);
+        if (data.executionLogs && Array.isArray(data.executionLogs)) {
+          setEngineLogs(data.executionLogs);
+        }
+        
+        // Auto trigger file download
+        if (data.pdfBase64) {
+          const byteCharacters = atob(data.pdfBase64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/pdf' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = data.filename || `HD_${invoice.khhdon}_${invoice.shdon}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+      } else {
+        setEngineLogs(prev => [...prev, `[${new Date().toLocaleTimeString('vi-VN')}] [Lỗi] ${data.error || 'Thao tác không thành công'}`]);
+      }
+    } catch (err: any) {
+      setEngineLogs(prev => [...prev, `[${new Date().toLocaleTimeString('vi-VN')}] [Lỗi kết nối] ${err.message}`]);
+    } finally {
+      setIsEngineDownloading(false);
+    }
+  };
 
   const handleCopyXml = () => {
     navigator.clipboard.writeText(xmlContent);
@@ -178,7 +265,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 font-bold text-xs ${
               isRed ? 'bg-red-500/20 border border-red-500/30 text-red-400' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
             }`}>
-              {activeTab === 'html' ? 'HTML' : activeTab === 'xslt' ? 'XSLT' : activeTab === 'xml' ? 'XML' : 'PDF'}
+              {activeTab === 'html' ? 'HTML' : activeTab === 'xslt' ? 'XSLT' : activeTab === 'xml' ? 'XML' : activeTab === 'engine' ? 'DRV' : 'PDF'}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -285,6 +372,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               >
                 <Info className="w-3.5 h-3.5" />
                 <span>Ký Số</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('engine')}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all ${
+                  activeTab === 'engine' ? 'bg-amber-600 text-white shadow-2xs' : 'text-amber-400 hover:text-white'
+                }`}
+                title="Hệ thống Adapter Engine tải PDF gốc NCC kèm OCR Captcha"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>PDF Gốc (Driver)</span>
+                {detectedProvider && (
+                  <span className="text-[9px] px-1 py-0.2 bg-black/50 text-amber-200 font-mono rounded">
+                    {detectedProvider.provider}
+                  </span>
+                )}
               </button>
             </div>
 
@@ -787,7 +889,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <pre>{xmlContent}</pre>
               </div>
             </div>
-          ) : (
+          ) : activeTab === 'meta' ? (
             /* ============================================================
                LEGAL & SIGNATURE DETAILS TAB
                ============================================================ */
@@ -832,6 +934,205 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </ul>
               </div>
             </div>
+          ) : (
+            /* ============================================================
+               MULTI-PROVIDER ADAPTER ENGINE & OCR CAPTCHA TAB
+               ============================================================ */
+            <div className="w-full max-w-4xl space-y-5 animate-in fade-in duration-200">
+              {/* Architecture Intro Banner */}
+              <div className="bg-linear-to-r from-amber-950/50 via-slate-900 to-slate-900 border border-amber-500/30 p-4 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-md border border-amber-500/30">
+                      <Layers className="w-4 h-4" />
+                    </span>
+                    <h4 className="text-sm font-bold text-amber-300">
+                      Hệ Thống Tải PDF Gốc Nhà Cung Cấp (Adapter Pattern)
+                    </h4>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                    Tự động nhận diện nhà cung cấp giải pháp HĐĐT (MISA, Viettel, 4Si, VNPT...), giải Captcha bằng OCR Tesseract và tự động fallback về bản dựng nội bộ nếu cổng nhà cung cấp bảo trì.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 text-xs font-mono font-bold rounded border border-emerald-700 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Bảo đảm 100% không gián đoạn
+                  </span>
+                </div>
+              </div>
+
+              {/* Provider Detection Card */}
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                      Kết quả nhận diện Driver tự động
+                    </span>
+                  </div>
+                  {isDetecting ? (
+                    <span className="text-xs text-gray-400 flex items-center gap-1.5 font-mono">
+                      <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                      Đang phân tích XML...
+                    </span>
+                  ) : detectedProvider ? (
+                    <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-xs font-mono font-bold">
+                      {detectedProvider.driverName} ({detectedProvider.provider})
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-400 font-mono">Chưa nhận diện</span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Nhà cung cấp</span>
+                    <span className="font-bold text-amber-300 text-sm mt-0.5 block">
+                      {detectedProvider?.provider || 'TỰ ĐỘNG'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      {detectedProvider?.driverName || 'Generic Fallback'}
+                    </span>
+                  </div>
+
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Mã tra cứu / Mã bí mật</span>
+                    <span className="font-mono font-bold text-emerald-400 text-sm mt-0.5 block truncate" title={detectedProvider?.info?.lookupCode || detectedProvider?.info?.secretCode || 'Tự động bóc tách'}>
+                      {detectedProvider?.info?.lookupCode || detectedProvider?.info?.secretCode || detectedProvider?.info?.fkey || '(Tự động bóc tách)'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      Bóc tách từ thẻ XML gốc
+                    </span>
+                  </div>
+
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Giải mã Captcha</span>
+                    <span className="font-bold text-blue-300 text-sm mt-0.5 block flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      {detectedProvider?.supportsCaptcha ? 'Tesseract OCR' : 'API Token'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      {detectedProvider?.supportsCaptcha ? 'Hỗ trợ OCR ký tự tự động' : 'Không yêu cầu Captcha'}
+                    </span>
+                  </div>
+
+                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
+                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Cơ chế Safeguard</span>
+                    <span className="font-bold text-emerald-400 text-sm mt-0.5 block">
+                      Generic Fallback
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-1 block">
+                      Dựng PDF nội bộ chuẩn NĐ 123
+                    </span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    onClick={() => handleEngineDownload(false)}
+                    disabled={isEngineDownloading}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-linear-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs rounded-md shadow-md transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isEngineDownloading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Đang thực thi Crawl & OCR...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-4 h-4" />
+                        <span>Tải PDF Gốc (Adapter Driver + OCR)</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => handleEngineDownload(true)}
+                    disabled={isEngineDownloading}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 font-semibold text-xs rounded-md transition-colors disabled:opacity-50"
+                    title="Bỏ qua crawl máy chủ nhà cung cấp và tạo PDF thể hiện nội bộ ngay lập tức"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Thử nghiệm chế độ Fallback Nội bộ</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Execution Result Banner if available */}
+              {engineResult && (
+                <div className={`p-4 rounded-lg border text-xs space-y-2 ${
+                  engineResult.isFallback 
+                    ? 'bg-amber-950/40 border-amber-600/50 text-amber-200' 
+                    : 'bg-emerald-950/40 border-emerald-600/50 text-emerald-200'
+                }`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2 font-bold">
+                      {engineResult.isFallback ? (
+                        <>
+                          <AlertTriangle className="w-4 h-4 text-amber-400" />
+                          <span>Đã kích hoạt Safeguard Fallback: Bản thể hiện nội bộ tạo thành công</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>Đã tải thành công PDF gốc từ máy chủ {engineResult.provider}!</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="font-mono text-[11px] opacity-80">
+                      Tệp: {engineResult.filename}
+                    </span>
+                  </div>
+                  <p className="opacity-90 leading-relaxed">
+                    {engineResult.isFallback
+                      ? 'Do máy chủ nhà cung cấp không phản hồi hoặc mã tra cứu thử nghiệm, hệ thống đã kích hoạt GenericFallbackDriver để render PDF vector độ phân giải cao chuẩn NĐ 123/2020/NĐ-CP, đảm bảo quy trình kế toán không bị gián đoạn.'
+                      : `Hóa đơn đã được tải trực tiếp từ cổng ${engineResult.provider}. Quá trình giải Captcha OCR và xác thực hoàn tất.`
+                    }
+                  </p>
+                </div>
+              )}
+
+              {/* Live Execution Logs Terminal */}
+              <div className="bg-gray-950 rounded-lg border border-gray-800 overflow-hidden">
+                <div className="bg-gray-900/90 px-3 py-2 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[11px] font-mono font-bold text-gray-300 uppercase">
+                      Terminal Tiến Trình Adapter Driver & OCR
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-gray-500 font-mono">
+                    {engineLogs.length} sự kiện
+                  </span>
+                </div>
+                <div className="p-3 font-mono text-xs max-h-56 overflow-y-auto space-y-1.5 select-text">
+                  {engineLogs.length === 0 ? (
+                    <p className="text-gray-600 italic">
+                      Nhấn "Tải PDF Gốc (Adapter Driver)" để xem nhật ký thực thi chi tiết theo thời gian thực...
+                    </p>
+                  ) : (
+                    engineLogs.map((log, index) => {
+                      const isError = log.includes('[Lỗi]') || log.includes('CẢNH BÁO') || log.includes('Error');
+                      const isSuccess = log.includes('thành công') || log.includes('HOÀN TẤT') || log.includes('Khởi tạo');
+                      const isFallback = log.includes('FALLBACK') || log.includes('SAFEGUARD');
+                      return (
+                        <div 
+                          key={index} 
+                          className={`flex items-start gap-2 leading-relaxed ${
+                            isError ? 'text-red-400' : isFallback ? 'text-amber-400' : isSuccess ? 'text-emerald-400' : 'text-gray-300'
+                          }`}
+                        >
+                          <span className="text-gray-600 select-none">&gt;</span>
+                          <span className="break-all">{log}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
@@ -868,6 +1169,25 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             >
               <FileCode2 className="w-3.5 h-3.5 text-[#ef4444]" />
               <span>Tải XML Gốc</span>
+            </button>
+
+            <button
+              onClick={() => handleEngineDownload(false)}
+              disabled={isEngineDownloading}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/80 hover:bg-amber-900 border border-amber-600 rounded transition-colors shadow-sm disabled:opacity-50"
+              title="Tải PDF gốc từ máy chủ Nhà cung cấp (MISA, Viettel, 4Si...) hoặc kích hoạt Fallback"
+            >
+              {isEngineDownloading ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Đang crawl & OCR...</span>
+                </>
+              ) : (
+                <>
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Tải PDF Gốc (Adapter)</span>
+                </>
+              )}
             </button>
 
             <button

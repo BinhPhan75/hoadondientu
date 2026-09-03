@@ -2,9 +2,8 @@ import express from 'express';
 import JSZip from 'jszip';
 import path from 'path';
 import fs from 'fs';
-import { parseGDTInvoiceXml } from '../src/utils/xmlParser';
-import { generateOfficialInvoiceHtml } from '../src/utils/officialInvoiceHtml';
-import { OFFICIAL_GDT_INVOICE_XSLT } from '../src/utils/xsltTransformer';
+import { GoogleGenAI } from '@google/genai';
+import { invoiceManager, CaptchaSolver } from '../src/services/invoice-engine';
 
 const app = express();
 
@@ -92,7 +91,7 @@ function extractCookies(res: any): string {
 }
 
 // Resilient GDT Fetch with Exponential Backoff & Timeout Protection
-async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 3, timeoutMs = 20000): Promise<Response> {
+async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 5000): Promise<Response> {
   let lastError: any = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -123,15 +122,13 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 3, 
     }
 
     if (attempt < maxRetries) {
-      await new Promise((r) => setTimeout(r, 600 * attempt));
+      await new Promise((r) => setTimeout(r, 400 * attempt));
     }
   }
   throw lastError || new Error('Không thể kết nối đến Cổng Tổng cục Thuế.');
 }
 
 // Gemini AI OCR Client Lazy Initializer
-import { GoogleGenAI } from '@google/genai';
-
 let geminiAiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
   if (!geminiAiClient && process.env.GEMINI_API_KEY) {
@@ -150,43 +147,56 @@ interface OCRResult {
   isMissingApiKey?: boolean;
 }
 
-// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.5 Flash Lite)
+// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.1 Flash Lite / Flash)
 async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
   let rawSvg = svgOrDataUri;
+  let isBitmap = false;
+  let bitmapMime = 'image/png';
+  let bitmapBase64 = '';
+
   if (rawSvg.startsWith('data:image/svg+xml;utf8,')) {
     rawSvg = decodeURIComponent(rawSvg.replace('data:image/svg+xml;utf8,', ''));
   } else if (rawSvg.startsWith('data:image/svg+xml;base64,')) {
     rawSvg = Buffer.from(rawSvg.replace('data:image/svg+xml;base64,', ''), 'base64').toString('utf-8');
+  } else if (rawSvg.startsWith('data:image/')) {
+    isBitmap = true;
+    const match = rawSvg.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (match) {
+      bitmapMime = match[1];
+      bitmapBase64 = match[2];
+    }
   }
 
-  if (!rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
+  if (!isBitmap && !rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
     return { code: '', error: 'Định dạng SVG không hợp lệ' };
   }
 
   // 1. Quick regex extraction if SVG contains direct <text> tags (0 token cost, instant)
-  const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
-  if (textTagMatches) {
-    const textContent = textTagMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).join('');
-    const cleanChars = textContent.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    if (cleanChars.length >= 4 && cleanChars.length <= 6) {
-      console.log(`[SVG Direct Parser] Extracted Captcha: "${cleanChars}"`);
-      return { code: cleanChars, modelUsed: 'svg-direct' };
+  if (!isBitmap) {
+    const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
+    if (textTagMatches) {
+      const textContent = textTagMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).join('');
+      const cleanChars = textContent.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (cleanChars.length >= 4 && cleanChars.length <= 6) {
+        console.log(`[SVG Direct Parser] Extracted Captcha: "${cleanChars}"`);
+        return { code: cleanChars, modelUsed: 'svg-direct' };
+      }
     }
   }
 
   // 2. Check if GEMINI_API_KEY is configured
   if (!process.env.GEMINI_API_KEY) {
-    console.warn('[Gemini OCR] GEMINI_API_KEY chưa được thiết lập trong Environment Variables trên Vercel.');
+    console.warn('[Gemini OCR] GEMINI_API_KEY chưa được thiết lập trong Environment Variables.');
     return {
       code: '',
       isMissingApiKey: true,
-      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Trên Vercel: Vào Project Settings > Environment Variables để thêm GEMINI_API_KEY.'
+      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Vui lòng cấu hình GEMINI_API_KEY.'
     };
   }
 
-  // 3. High-precision Gemini AI OCR with Gemini 3.5 Flash Lite
+  // 3. High-precision Gemini AI OCR with Gemini 3.1 Flash Lite / Gemini Flash
   const ai = getGeminiClient();
   if (!ai) {
     return {
@@ -196,39 +206,45 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     };
   }
 
-  // Candidate models: Gemini 3.5 Flash Lite as primary (highest free quota, lowest latency)
+  // Candidate models: Gemini 3.1 Flash Lite as primary, fallback to Gemini Flash Latest and Gemini 3.8 Flash
   const candidateModels = [
-    'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-2.5-flash-lite',
-    'gemini-flash-latest'
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest',
+    'gemini-3.8-flash'
   ];
 
   let lastErrorMsg = '';
-  const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
-  const svgSnippet = rawSvg.substring(0, 3000);
+  const svgSnippet = rawSvg.substring(0, 4000);
 
   for (const modelName of candidateModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const ocrPromise = ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'image/svg+xml',
-                data: base64Data
+        const contentsPayload: any[] = isBitmap && bitmapBase64
+          ? [
+              {
+                inlineData: {
+                  mimeType: bitmapMime,
+                  data: bitmapBase64
+                }
+              },
+              {
+                text: 'This is a captcha image. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.'
               }
-            },
-            {
-              text: `This is a Vietnamese GDT tax portal captcha SVG image.
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.
+            ]
+          : [
+              {
+                text: `This is a Vietnamese GDT tax portal captcha SVG image.
+Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without any spaces, markdown, or punctuation.
 SVG Source:
 \`\`\`xml
 ${svgSnippet}
 \`\`\``
-            }
-          ]
+              }
+            ];
+
+        const ocrPromise = ai.models.generateContent({
+          model: modelName,
+          contents: contentsPayload
         });
 
         const timeoutPromise = new Promise<null>((resolve) =>
@@ -239,7 +255,7 @@ ${svgSnippet}
         if (aiResp && aiResp.text) {
           const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
           if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha on Vercel: "${extracted}"`);
+            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
             return { code: extracted, modelUsed: modelName };
           }
         }
@@ -314,8 +330,9 @@ apiRouter.get('/health', (req, res) => {
 
 // 2. Get Real Captcha from official GDT Portal
 apiRouter.get('/gdt/captcha', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
-    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 3, 20000);
+    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 1, 4000);
 
     if (gdtRes.ok) {
       const cookieStr = extractCookies(gdtRes);
@@ -355,9 +372,8 @@ apiRouter.get('/gdt/captcha', async (req, res) => {
     console.warn('[GDT Proxy] Live GDT captcha fetch error on Vercel:', error.message);
   }
 
-  // If live GDT is unreachable, DO NOT return a deceptive fake captcha!
-  // Return explicit status so UI can notify user with actionable options.
-  return res.status(503).json({
+  // Return clean JSON (status 200) so client can seamlessly switch to direct Vietnam browser fetch
+  return res.json({
     success: false,
     isRealGDT: false,
     captchaKey: '',
@@ -365,8 +381,8 @@ apiRouter.get('/gdt/captcha', async (req, res) => {
     captchaCode: '',
     captchaImage: '',
     source: 'gdt_unreachable',
-    message: 'Không thể kết nối đến máy chủ Cổng Thuế (hoadondientu.gdt.gov.vn). Tường lửa CQT có thể đang chặn IP nước ngoài của Vercel hoặc Cổng Thuế đang quá tải.',
-    solution: 'Vui lòng nhấn "Đổi mã" để thử lại, hoặc dùng công cụ Python trên máy tính Việt Nam để kết nối trực tiếp.'
+    message: 'Máy chủ Vercel (nước ngoài) không thể kết nối trực tiếp đến Cổng Thuế. Ứng dụng sẽ tự động tải Captcha trực tiếp từ trình duyệt của bạn tại Việt Nam.',
+    directFallbackUrl: 'https://hoadondientu.gdt.gov.vn/api/captcha'
   });
 });
 
@@ -446,7 +462,7 @@ apiRouter.post('/gdt/login', async (req, res) => {
         ckey: captchaKey || '',
         cvalue: captchaCode.trim()
       })
-    }, 2, 20000);
+    }, 1, 6000);
 
     const newCookieStr = extractCookies(authRes);
     const combinedCookies = [cookieHeader, newCookieStr].filter(Boolean).join('; ');
@@ -720,47 +736,112 @@ apiRouter.get('/gdt/download-python-package', async (req, res) => {
   }
 });
 
-// XML E-Invoice Parser endpoint
-apiRouter.post('/xml/parse', (req, res) => {
+// Multi-provider Invoice Downloader API: List drivers
+apiRouter.get('/invoice-downloader/drivers', (req, res) => {
+  try {
+    const drivers = invoiceManager.getRegisteredDrivers();
+    res.json({ success: true, drivers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Multi-provider Invoice Downloader API: Detect provider from XML
+apiRouter.post('/invoice-downloader/detect', async (req, res) => {
   try {
     const { xml } = req.body;
     if (!xml) {
       return res.status(400).json({ error: 'Nội dung XML không được để trống' });
     }
-    const invoice = parseGDTInvoiceXml(xml);
-    res.json({ success: true, invoice });
+    const driver = await invoiceManager.selectDriver(xml);
+    const info = await driver.extractInfo(xml);
+    res.json({
+      success: true,
+      provider: driver.providerCode,
+      driverName: driver.name,
+      supportsCaptcha: driver.metadata.supportsCaptcha,
+      info
+    });
   } catch (error: any) {
-    res.status(400).json({ error: 'Không thể phân tích XML: ' + error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// XML to HTML E-Invoice Transformer endpoint
-apiRouter.post('/xml/transform-html', (req, res) => {
+// Multi-provider Invoice Downloader API: Download Original PDF / Fallback
+apiRouter.post('/invoice-downloader/download', async (req, res) => {
   try {
-    const { xml, theme } = req.body;
+    const { xml, forceFallback, timeoutMs } = req.body;
     if (!xml) {
       return res.status(400).json({ error: 'Nội dung XML không được để trống' });
     }
-    const invoice = parseGDTInvoiceXml(xml);
-    const html = generateOfficialInvoiceHtml(invoice, {
-      theme: theme === 'blue' ? 'blue' : 'red',
-      showPrintControls: true
+
+    const result = await invoiceManager.downloadInvoicePdf(xml, {
+      forceFallback: Boolean(forceFallback),
+      timeoutMs: timeoutMs ? Number(timeoutMs) : undefined
     });
-    res.json({ success: true, html });
+
+    if (req.query.format === 'binary') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+      return res.send(result.pdfBuffer);
+    }
+
+    res.json({
+      success: true,
+      provider: result.provider,
+      driverName: result.driverName,
+      filename: result.filename,
+      isFallback: result.isFallback,
+      captchaSolved: result.captchaSolved,
+      sourceUrl: result.sourceUrl,
+      executionLogs: result.executionLogs,
+      pdfBase64: result.pdfBase64
+    });
   } catch (error: any) {
-    res.status(400).json({ error: 'Không thể chuyển đổi XML sang HTML: ' + error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Download W3C XSLT Stylesheet
-apiRouter.get('/xml/xslt', (req, res) => {
-  res.setHeader('Content-Type', 'application/xslt+xml; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="GDT_Invoice_Transformer.xslt"');
-  res.send(OFFICIAL_GDT_INVOICE_XSLT);
+// Tesseract OCR Captcha Solver endpoint
+apiRouter.post('/invoice-downloader/solve-captcha', async (req, res) => {
+  try {
+    const { image, whitelist } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Ảnh Captcha không được để trống' });
+    }
+
+    const result = await CaptchaSolver.solveWithDetails(image, {
+      whitelist: whitelist || undefined
+    });
+
+    res.json({
+      success: true,
+      code: result.code,
+      confidence: result.confidence,
+      engine: result.engine,
+      processingTimeMs: result.processingTimeMs
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Register router on both `/api` and `/` so all paths match whether Vercel rewrites or strips prefix
 app.use('/api', apiRouter);
 app.use('/', apiRouter);
+
+// Fallback 404 handler returning JSON
+app.use((req, res) => {
+  res.status(404).json({ error: 'Endpoint not found', path: req.url });
+});
+
+// Global error handler ensuring JSON responses
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('[Vercel Serverless Error]:', err);
+  res.status(500).json({
+    success: false,
+    error: err?.message || 'Lỗi xử lý yêu cầu'
+  });
+});
 
 export default app;

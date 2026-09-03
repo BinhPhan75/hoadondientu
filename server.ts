@@ -6,6 +6,7 @@ import { createServer as createViteServer } from 'vite';
 import { parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
+import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 
 const app = express();
 const PORT = 3000;
@@ -94,7 +95,7 @@ function extractCookies(res: any): string {
 }
 
 // Resilient GDT Fetch with Retry & Timeout Protection
-async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 3, timeoutMs = 20000): Promise<Response> {
+async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 5000): Promise<Response> {
   let lastError: any = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -124,7 +125,7 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 3, 
     }
 
     if (attempt < maxRetries) {
-      await new Promise((r) => setTimeout(r, 600 * attempt));
+      await new Promise((r) => setTimeout(r, 400 * attempt));
     }
   }
   throw lastError || new Error('Không thể kết nối đến Cổng Tổng cục Thuế.');
@@ -151,29 +152,42 @@ interface OCRResult {
   isMissingApiKey?: boolean;
 }
 
-// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.5 Flash Lite)
+// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.1 Flash Lite / Flash)
 async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
   let rawSvg = svgOrDataUri;
+  let isBitmap = false;
+  let bitmapMime = 'image/png';
+  let bitmapBase64 = '';
+
   if (rawSvg.startsWith('data:image/svg+xml;utf8,')) {
     rawSvg = decodeURIComponent(rawSvg.replace('data:image/svg+xml;utf8,', ''));
   } else if (rawSvg.startsWith('data:image/svg+xml;base64,')) {
     rawSvg = Buffer.from(rawSvg.replace('data:image/svg+xml;base64,', ''), 'base64').toString('utf-8');
+  } else if (rawSvg.startsWith('data:image/')) {
+    isBitmap = true;
+    const match = rawSvg.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (match) {
+      bitmapMime = match[1];
+      bitmapBase64 = match[2];
+    }
   }
 
-  if (!rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
+  if (!isBitmap && !rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
     return { code: '', error: 'Định dạng SVG không hợp lệ' };
   }
 
   // 1. Quick regex extraction if SVG contains direct <text> tags (0 token cost, instant)
-  const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
-  if (textTagMatches) {
-    const textContent = textTagMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).join('');
-    const cleanChars = textContent.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-    if (cleanChars.length >= 4 && cleanChars.length <= 6) {
-      console.log(`[SVG Direct Parser] Extracted Captcha: "${cleanChars}"`);
-      return { code: cleanChars, modelUsed: 'svg-direct' };
+  if (!isBitmap) {
+    const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
+    if (textTagMatches) {
+      const textContent = textTagMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).join('');
+      const cleanChars = textContent.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (cleanChars.length >= 4 && cleanChars.length <= 6) {
+        console.log(`[SVG Direct Parser] Extracted Captcha: "${cleanChars}"`);
+        return { code: cleanChars, modelUsed: 'svg-direct' };
+      }
     }
   }
 
@@ -183,11 +197,11 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     return {
       code: '',
       isMissingApiKey: true,
-      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Trên Vercel: Vào Project Settings > Environment Variables để thêm GEMINI_API_KEY.'
+      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Vui lòng cấu hình GEMINI_API_KEY.'
     };
   }
 
-  // 3. High-precision Gemini AI OCR with Gemini 3.5 Flash Lite
+  // 3. High-precision Gemini AI OCR with Gemini 3.1 Flash Lite / Gemini Flash
   const ai = getGeminiClient();
   if (!ai) {
     return {
@@ -197,39 +211,45 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     };
   }
 
-  // Candidate models: Gemini 3.5 Flash Lite as primary (highest free quota, lowest latency)
+  // Candidate models: Gemini 3.1 Flash Lite as primary, fallback to Gemini Flash Latest and Gemini 3.8 Flash
   const candidateModels = [
-    'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-2.5-flash-lite',
-    'gemini-flash-latest'
+    'gemini-3.1-flash-lite',
+    'gemini-flash-latest',
+    'gemini-3.8-flash'
   ];
 
   let lastErrorMsg = '';
-  const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
-  const svgSnippet = rawSvg.substring(0, 3000);
+  const svgSnippet = rawSvg.substring(0, 4000);
 
   for (const modelName of candidateModels) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const ocrPromise = ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'image/svg+xml',
-                data: base64Data
+        const contentsPayload: any[] = isBitmap && bitmapBase64
+          ? [
+              {
+                inlineData: {
+                  mimeType: bitmapMime,
+                  data: bitmapBase64
+                }
+              },
+              {
+                text: 'This is a captcha image. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.'
               }
-            },
-            {
-              text: `This is a Vietnamese GDT tax portal captcha SVG image.
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.
+            ]
+          : [
+              {
+                text: `This is a Vietnamese GDT tax portal captcha SVG image.
+Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without any spaces, markdown, or punctuation.
 SVG Source:
 \`\`\`xml
 ${svgSnippet}
 \`\`\``
-            }
-          ]
+              }
+            ];
+
+        const ocrPromise = ai.models.generateContent({
+          model: modelName,
+          contents: contentsPayload
         });
 
         const timeoutPromise = new Promise<null>((resolve) =>
@@ -282,8 +302,9 @@ app.get('/api/health', (req, res) => {
 
 // 2. Get Real Captcha from official GDT Portal
 app.get('/api/gdt/captcha', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
-    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 3, 20000);
+    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 1, 4000);
 
     if (gdtRes.ok) {
       const cookieStr = extractCookies(gdtRes);
@@ -322,8 +343,8 @@ app.get('/api/gdt/captcha', async (req, res) => {
     console.warn('[GDT Proxy] Live GDT captcha fetch error:', error.message);
   }
 
-  // If live GDT is unreachable, DO NOT return a deceptive fake captcha
-  return res.status(503).json({
+  // Return clean JSON (status 200) so client can seamlessly switch to direct Vietnam browser fetch
+  return res.json({
     success: false,
     isRealGDT: false,
     captchaKey: '',
@@ -331,8 +352,8 @@ app.get('/api/gdt/captcha', async (req, res) => {
     captchaCode: '',
     captchaImage: '',
     source: 'gdt_unreachable',
-    message: 'Không thể kết nối đến máy chủ Cổng Thuế (hoadondientu.gdt.gov.vn). Tường lửa CQT có thể đang chặn IP nước ngoài của Vercel hoặc Cổng Thuế đang quá tải.',
-    solution: 'Vui lòng nhấn "Đổi mã" để thử lại, hoặc dùng công cụ Python trên máy tính Việt Nam để kết nối trực tiếp.'
+    message: 'Máy chủ Vercel (nước ngoài) không thể kết nối trực tiếp đến Cổng Thuế. Ứng dụng sẽ tự động tải Captcha trực tiếp từ trình duyệt của bạn tại Việt Nam.',
+    directFallbackUrl: 'https://hoadondientu.gdt.gov.vn/api/captcha'
   });
 });
 
@@ -885,6 +906,96 @@ app.get('/api/xml/xslt', (req, res) => {
   res.setHeader('Content-Type', 'application/xslt+xml; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="GDT_Invoice_Transformer.xslt"');
   res.send(OFFICIAL_GDT_INVOICE_XSLT);
+});
+
+// 12. Multi-provider Invoice Downloader API: List registered drivers
+app.get('/api/invoice-downloader/drivers', (req, res) => {
+  try {
+    const drivers = invoiceManager.getRegisteredDrivers();
+    res.json({ success: true, drivers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 13. Multi-provider Invoice Downloader API: Detect provider from XML
+app.post('/api/invoice-downloader/detect', async (req, res) => {
+  try {
+    const { xml } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+    const driver = await invoiceManager.selectDriver(xml);
+    const info = await driver.extractInfo(xml);
+    res.json({
+      success: true,
+      provider: driver.providerCode,
+      driverName: driver.name,
+      supportsCaptcha: driver.metadata.supportsCaptcha,
+      info
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 14. Multi-provider Invoice Downloader API: Download Original PDF / Fallback
+app.post('/api/invoice-downloader/download', async (req, res) => {
+  try {
+    const { xml, forceFallback, timeoutMs } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+
+    const result = await invoiceManager.downloadInvoicePdf(xml, {
+      forceFallback: Boolean(forceFallback),
+      timeoutMs: timeoutMs ? Number(timeoutMs) : undefined
+    });
+
+    if (req.query.format === 'binary') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+      return res.send(result.pdfBuffer);
+    }
+
+    res.json({
+      success: true,
+      provider: result.provider,
+      driverName: result.driverName,
+      filename: result.filename,
+      isFallback: result.isFallback,
+      captchaSolved: result.captchaSolved,
+      sourceUrl: result.sourceUrl,
+      executionLogs: result.executionLogs,
+      pdfBase64: result.pdfBase64
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 15. Tesseract OCR Captcha Solver endpoint
+app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
+  try {
+    const { image, whitelist } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Ảnh Captcha không được để trống' });
+    }
+
+    const result = await CaptchaSolver.solveWithDetails(image, {
+      whitelist: whitelist || undefined
+    });
+
+    res.json({
+      success: true,
+      code: result.code,
+      confidence: result.confidence,
+      engine: result.engine,
+      processingTimeMs: result.processingTimeMs
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Start Express Server with Vite integration

@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-  // AI OCR Scanner helper
+  // AI OCR Scanner helper with safe text-to-JSON parsing
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
     const targetImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
@@ -87,7 +87,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error('Máy chủ OCR phản hồi định dạng không hợp lệ');
+      }
+
       if (data && data.success && data.captchaCode) {
         setCaptchaCode(data.captchaCode);
         setOcrSuccess(true);
@@ -101,58 +108,112 @@ export const Sidebar: React.FC<SidebarProps> = ({
     } catch (err: any) {
       console.warn('[AI OCR Scan Error]:', err);
       setOcrSuccess(false);
-      setAuthError('Không thể kết nối đến máy chủ OCR: ' + (err?.message || 'Lỗi mạng'));
+      setAuthError('Không thể nhận diện mã tự động (' + (err?.message || 'Lỗi kết nối') + '). Bạn có thể tự nhìn ảnh và gõ mã.');
     } finally {
       setIsScanningOcr(false);
     }
   };
 
-  // Load Real Captcha from GDT & Trigger Auto-OCR
+  // Load Real Captcha from GDT with Dual-Strategy (Server Proxy + Direct Browser Fallback)
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setAuthError(null);
     setCaptchaCode('');
     setOcrSuccess(false);
+
+    // Strategy 1: Attempt via Serverless Backend Proxy (/api/gdt/captcha)
     try {
       const res = await fetch('/api/gdt/captcha');
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        console.warn('[Proxy Captcha Non-JSON]:', rawText.slice(0, 100));
+      }
 
-      if (res.ok && data && data.success && data.isRealGDT && data.captchaImage) {
+      if (res.ok && data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
         setCaptchaCookie(data.captchaCookie || '');
         setIsRealGdtCaptcha(true);
-        
+        setAuthError(null);
+
         if (data.captchaCode) {
           setCaptchaCode(data.captchaCode);
           setOcrSuccess(true);
-        } else {
-          setCaptchaCode('');
-          setOcrSuccess(false);
         }
+        setIsLoadingCaptcha(false);
         return;
       }
-
-      // If GDT portal is unreachable from this IP
-      setCaptchaImg('');
-      setCaptchaKey('');
-      setCaptchaCookie('');
-      setCaptchaCode('');
-      setOcrSuccess(false);
-      setIsRealGdtCaptcha(false);
-      setAuthError(data?.message || 'Không thể tải mã Captcha từ Cổng Tổng cục Thuế (hoadondientu.gdt.gov.vn). Cổng Thuế có thể đang chặn IP nước ngoài của Vercel.');
-    } catch (err: any) {
-      console.warn('Cannot fetch GDT captcha:', err);
-      setCaptchaImg('');
-      setCaptchaKey('');
-      setCaptchaCookie('');
-      setCaptchaCode('');
-      setOcrSuccess(false);
-      setIsRealGdtCaptcha(false);
-      setAuthError('Không thể kết nối đến máy chủ Cổng Thuế (' + (err.message || 'Lỗi mạng') + '). Vui lòng thử lại.');
-    } finally {
-      setIsLoadingCaptcha(false);
+    } catch (proxyErr) {
+      console.warn('[Proxy Captcha Failed, attempting direct fetch]:', proxyErr);
     }
+
+    // Strategy 2: Direct browser fetch from official GDT Portal
+    // (hoadondientu.gdt.gov.vn supports CORS and works natively when user connects from Vietnam)
+    try {
+      const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json, text/plain, */*' }
+      });
+
+      if (directRes.ok) {
+        const rawDirectText = await directRes.text();
+        let directData: any = null;
+        try {
+          directData = JSON.parse(rawDirectText);
+        } catch {
+          console.warn('[Direct GDT Non-JSON]:', rawDirectText.slice(0, 100));
+        }
+
+        if (directData && directData.key && directData.content) {
+          const imgUrl = directData.content.startsWith('data:')
+            ? directData.content
+            : `data:image/svg+xml;utf8,${encodeURIComponent(directData.content)}`;
+
+          setCaptchaImg(imgUrl);
+          setCaptchaKey(directData.key);
+          setCaptchaCookie('');
+          setIsRealGdtCaptcha(true);
+          setAuthError(null);
+
+          // Trigger AI OCR on server for this captcha
+          try {
+            const ocrRes = await fetch('/api/gdt/ocr-captcha', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ captchaImage: imgUrl, captchaKey: directData.key })
+            });
+            const ocrRaw = await ocrRes.text();
+            try {
+              const ocrJson = JSON.parse(ocrRaw);
+              if (ocrJson?.success && ocrJson?.captchaCode) {
+                setCaptchaCode(ocrJson.captchaCode);
+                setOcrSuccess(true);
+              }
+            } catch {}
+          } catch (ocrErr) {
+            console.warn('[Auto-OCR On Direct Captcha]:', ocrErr);
+          }
+
+          setIsLoadingCaptcha(false);
+          return;
+        }
+      }
+    } catch (directErr) {
+      console.warn('[Direct GDT Captcha Fetch Failed]:', directErr);
+    }
+
+    // If both failed:
+    setCaptchaImg('');
+    setCaptchaKey('');
+    setCaptchaCookie('');
+    setCaptchaCode('');
+    setOcrSuccess(false);
+    setIsRealGdtCaptcha(false);
+    setAuthError('Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" hoặc bấm vào ô ảnh để thử lại.');
+    setIsLoadingCaptcha(false);
   };
 
   useEffect(() => {
@@ -205,7 +266,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
       
       // Auto-scan captcha on-the-fly if empty
-      if (!activeCaptchaCode) {
+      if (!activeCaptchaCode && captchaImg) {
         setIsScanningOcr(true);
         try {
           const res = await fetch('/api/gdt/ocr-captcha', {
@@ -213,7 +274,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ captchaImage: captchaImg, captchaKey })
           });
-          const ocrData = await res.json();
+          const rawOcr = await res.text();
+          let ocrData: any = null;
+          try {
+            ocrData = JSON.parse(rawOcr);
+          } catch {}
+
           if (ocrData && ocrData.success && ocrData.captchaCode) {
             activeCaptchaCode = ocrData.captchaCode;
             setCaptchaCode(ocrData.captchaCode);

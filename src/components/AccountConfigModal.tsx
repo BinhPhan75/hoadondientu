@@ -56,7 +56,12 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
       });
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {}
+
       if (data && data.success && data.captchaCode) {
         setCaptchaCode(data.captchaCode);
         setOcrSuccess(true);
@@ -68,40 +73,97 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     }
   };
 
-  // Load new Captcha directly from official GDT Portal & auto-solve
+  // Load new Captcha with Dual-Strategy (Server Proxy + Direct GDT Fallback)
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setCaptchaCode('');
     setOcrSuccess(false);
+
+    // Strategy 1: Server proxy (/api/gdt/captcha)
     try {
       const res = await fetch('/api/gdt/captcha');
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        console.warn('[Modal Proxy Captcha Non-JSON]:', rawText.slice(0, 100));
+      }
       
-      if (data && data.success && data.captchaImage) {
+      if (res.ok && data && data.success && data.captchaImage) {
         setCaptchaImg(data.captchaImage);
         setCaptchaKey(data.captchaKey || '');
-        setIsRealGDT(data.isRealGDT ?? false);
+        setIsRealGDT(data.isRealGDT ?? true);
         if (data.captchaCode) {
           setCaptchaCode(data.captchaCode);
           setOcrSuccess(true);
         }
+        setIsLoadingCaptcha(false);
         return;
       }
-      throw new Error(data?.message || 'Cannot load remote captcha');
     } catch (e) {
-      // Fallback local SVG captcha with clear high contrast text
-      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-      let code = '';
-      for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
-      setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
-      setCaptchaCode(code);
-      setOcrSuccess(true);
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="110" y2="28" stroke="#cbd5e1" stroke-width="2"/><text x="18" y="27" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
-      setCaptchaImg(`data:image/svg+xml;base64,${btoa(svg)}`);
-      setIsRealGDT(false);
-    } finally {
-      setIsLoadingCaptcha(false);
+      console.warn('[Modal Proxy Captcha Failed, attempting direct]:', e);
     }
+
+    // Strategy 2: Direct browser fetch from official GDT Portal
+    try {
+      const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json, text/plain, */*' }
+      });
+
+      if (directRes.ok) {
+        const rawDirectText = await directRes.text();
+        let directData: any = null;
+        try {
+          directData = JSON.parse(rawDirectText);
+        } catch {}
+
+        if (directData && directData.key && directData.content) {
+          const imgUrl = directData.content.startsWith('data:')
+            ? directData.content
+            : `data:image/svg+xml;utf8,${encodeURIComponent(directData.content)}`;
+
+          setCaptchaImg(imgUrl);
+          setCaptchaKey(directData.key);
+          setIsRealGDT(true);
+
+          // Auto-OCR scan
+          try {
+            const ocrRes = await fetch('/api/gdt/ocr-captcha', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ captchaImage: imgUrl, captchaKey: directData.key })
+            });
+            const ocrRaw = await ocrRes.text();
+            try {
+              const ocrJson = JSON.parse(ocrRaw);
+              if (ocrJson?.success && ocrJson?.captchaCode) {
+                setCaptchaCode(ocrJson.captchaCode);
+                setOcrSuccess(true);
+              }
+            } catch {}
+          } catch {}
+
+          setIsLoadingCaptcha(false);
+          return;
+        }
+      }
+    } catch (directErr) {
+      console.warn('[Modal Direct GDT Fetch Failed]:', directErr);
+    }
+
+    // Strategy 3: Fallback local SVG captcha with clear high contrast text
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let code = '';
+    for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+    setCaptchaKey('ckey_local_' + Math.random().toString(36).substring(2, 9));
+    setCaptchaCode(code);
+    setOcrSuccess(true);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9"/><line x1="10" y1="12" x2="110" y2="28" stroke="#cbd5e1" stroke-width="2"/><text x="18" y="27" font-family="monospace, sans-serif" font-size="22" font-weight="bold" fill="#1e293b" letter-spacing="6">${code}</text></svg>`;
+    setCaptchaImg(`data:image/svg+xml;base64,${btoa(svg)}`);
+    setIsRealGDT(false);
+    setIsLoadingCaptcha(false);
   };
 
   useEffect(() => {
