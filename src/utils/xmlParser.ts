@@ -2,7 +2,7 @@ import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
 
 /**
- * Reads a number to Vietnamese words
+ * Reads a number to Vietnamese currency words according to standard Vietnamese accounting rules.
  */
 export function numberToVietnameseWords(num: number): string {
   if (num === 0) return 'Không đồng';
@@ -53,83 +53,158 @@ export function numberToVietnameseWords(num: number): string {
 
   str = str.trim();
   if (!str) return 'Không đồng';
-  // Capitalize first letter
+  // Capitalize first letter and append 'đồng chẵn'
   str = str.charAt(0).toUpperCase() + str.slice(1) + ' đồng chẵn';
   return str.replace(/\s+/g, ' ');
 }
 
 /**
- * Helper to safely extract XML tag text
+ * Universal tag extraction helper that works in both Browser (DOM) and Node.js (Regex Fallback).
  */
-function getTagText(xmlDoc: Document | Element, tagName: string, defaultValue: string = ''): string {
-  const el = xmlDoc.getElementsByTagName(tagName)[0];
-  return el?.textContent?.trim() || defaultValue;
+function extractTagValue(xmlOrElement: string | Element | Document, tagName: string, defaultValue: string = ''): string {
+  if (typeof xmlOrElement !== 'string') {
+    // Browser DOM element
+    const el = xmlOrElement.getElementsByTagName(tagName)[0] || 
+               xmlOrElement.getElementsByTagName(tagName.toLowerCase())[0] ||
+               xmlOrElement.getElementsByTagName(tagName.toUpperCase())[0];
+    if (el && el.textContent) {
+      return el.textContent.trim();
+    }
+    // Try namespace query
+    if ('getElementsByTagNameNS' in xmlOrElement) {
+      const elNs = xmlOrElement.getElementsByTagNameNS('*', tagName)[0];
+      if (elNs && elNs.textContent) return elNs.textContent.trim();
+    }
+    return defaultValue;
+  }
+
+  // Node.js Regex extraction
+  const cleanTag = tagName.replace(/[^a-zA-Z0-9_]/g, '');
+  const regex = new RegExp(`<(?:[a-zA-Z0-9_]+:)?${cleanTag}(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_]+:)?${cleanTag}>`, 'i');
+  const match = xmlOrElement.match(regex);
+  if (match && match[1]) {
+    let val = match[1].trim();
+    // Handle CDATA wrapper
+    if (val.startsWith('<![CDATA[') && val.endsWith(']]>')) {
+      val = val.substring(9, val.length - 3).trim();
+    }
+    return val;
+  }
+  return defaultValue;
 }
 
 /**
- * Parses a single Vietnamese E-Invoice XML string into a structured GDTInvoice object.
- * Conforming to Decree 123/2020/ND-CP, Circular 78/2021/TT-BTC and popular providers.
+ * Universal multiple tag blocks extractor for lists like <HHDVu>...</HHDVu>
+ */
+function extractTagBlocks(xml: string, tagName: string): string[] {
+  const cleanTag = tagName.replace(/[^a-zA-Z0-9_]/g, '');
+  const regex = new RegExp(`<(?:[a-zA-Z0-9_]+:)?${cleanTag}(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_]+:)?${cleanTag}>`, 'gi');
+  const blocks: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(xml)) !== null) {
+    if (m[1]) {
+      blocks.push(m[1]);
+    }
+  }
+  return blocks;
+}
+
+/**
+ * Parses an entire Vietnamese E-Invoice XML file according to:
+ * - Decision 1450/QĐ-TCT & 1510/QĐ-TCT
+ * - Decree 123/2020/ND-CP & Circular 78/2021/TT-BTC
+ * Works identically in both Browser and Node.js environments.
  */
 export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInvoice {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(xmlString, 'application/xml');
-
-  // Check parsing error
-  const parserError = doc.getElementsByTagName('parsererror')[0];
-  if (parserError) {
-    throw new Error('Tệp XML không đúng định dạng: ' + parserError.textContent);
+  if (!xmlString || typeof xmlString !== 'string') {
+    throw new Error('Dữ liệu XML rỗng hoặc không hợp lệ.');
   }
 
-  // 1. TTChung (General Info)
-  const khmshdon = getTagText(doc, 'KHMSHDon') || getTagText(doc, 'khmshdon') || '1';
-  const khhdon = getTagText(doc, 'KHHDon') || getTagText(doc, 'khhdon') || '1C25TGT';
-  const shdon = getTagText(doc, 'SHDon') || getTagText(doc, 'shdon') || '0000001';
-  
-  let nlap = getTagText(doc, 'NLap') || getTagText(doc, 'nlap') || getTagText(doc, 'SigningTime') || '';
+  let domDoc: Document | null = null;
+  const isBrowser = typeof window !== 'undefined' && typeof window.DOMParser !== 'undefined';
+
+  if (isBrowser) {
+    try {
+      const parser = new DOMParser();
+      domDoc = parser.parseFromString(xmlString, 'application/xml');
+      const parseError = domDoc.getElementsByTagName('parsererror')[0];
+      if (parseError) {
+        domDoc = null; // Fallback to regex parser
+      }
+    } catch {
+      domDoc = null;
+    }
+  }
+
+  const getTag = (context: Document | Element | string, tag: string, fallback: string = ''): string => {
+    return extractTagValue(context, tag, fallback);
+  };
+
+  const xmlSource = xmlString;
+
+  // 1. TTChung (General Invoice Information)
+  const pban = getTag(domDoc || xmlSource, 'PBan') || '2.0.0';
+  const thdon = getTag(domDoc || xmlSource, 'THDon') || 
+                (getTag(domDoc || xmlSource, 'KHMSHDon') === '1' ? 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG' : 'HÓA ĐƠN BÁN HÀNG');
+  const khmshdon = getTag(domDoc || xmlSource, 'KHMSHDon') || getTag(domDoc || xmlSource, 'khmshdon') || '1';
+  const khhdon = getTag(domDoc || xmlSource, 'KHHDon') || getTag(domDoc || xmlSource, 'khhdon') || '1C25TGT';
+  const shdonRaw = getTag(domDoc || xmlSource, 'SHDon') || getTag(domDoc || xmlSource, 'shdon') || '1';
+  const shdon = shdonRaw ? String(parseInt(shdonRaw, 10) || shdonRaw).padStart(7, '0') : '0000001';
+
+  let nlap = getTag(domDoc || xmlSource, 'NLap') || getTag(domDoc || xmlSource, 'nlap') || '';
+  if (!nlap) {
+    nlap = getTag(domDoc || xmlSource, 'SigningTime') || '';
+  }
   if (nlap && !nlap.includes('T')) {
-    // Format YYYY-MM-DD to ISO
     nlap = `${nlap}T09:00:00`;
   }
   if (!nlap) {
     nlap = new Date().toISOString().substring(0, 19);
   }
 
-  const dvtte = getTagText(doc, 'DVTTe') || getTagText(doc, 'dvtte') || 'VND';
-  const tygia = parseFloat(getTagText(doc, 'TGia') || getTagText(doc, 'tygia') || '1') || 1;
-  const htttoan = getTagText(doc, 'HTTToan') || getTagText(doc, 'htttoan') || 'TM/CK';
+  const dvtte = getTag(domDoc || xmlSource, 'DVTTe') || getTag(domDoc || xmlSource, 'dvtte') || 'VND';
+  const tygia = parseFloat(getTag(domDoc || xmlSource, 'TGia') || getTag(domDoc || xmlSource, 'tygia') || '1') || 1;
+  const htttoan = getTag(domDoc || xmlSource, 'HTTToan') || getTag(domDoc || xmlSource, 'htttoan') || 'TM/CK';
 
-  // 2. NBan (Seller)
-  const nbanEl = doc.getElementsByTagName('NBan')[0] || doc.getElementsByTagName('nban')[0] || doc;
-  const nbten = getTagText(nbanEl, 'Ten') || getTagText(nbanEl, 'nbten') || getTagText(doc, 'nbten') || 'CÔNG TY TNHH BÁN HÀNG';
-  const nbmst = getTagText(nbanEl, 'MST') || getTagText(nbanEl, 'nbmst') || getTagText(doc, 'nbmst') || '0100109106';
-  const nbdchi = getTagText(nbanEl, 'DChi') || getTagText(nbanEl, 'nbdchi') || getTagText(doc, 'nbdchi') || '';
-  const nbsdt = getTagText(nbanEl, 'SDThoai') || getTagText(nbanEl, 'nbsdt') || '';
-  const nbemail = getTagText(nbanEl, 'DCTDTu') || getTagText(nbanEl, 'nbemail') || '';
-  const nbstk = getTagText(nbanEl, 'STKNHang') || getTagText(nbanEl, 'nbstk') || '';
-  const nbnhang = getTagText(nbanEl, 'TNHang') || getTagText(nbanEl, 'nbnhang') || '';
+  // 2. NBan (Seller Info)
+  let nbanSource: any = domDoc ? (domDoc.getElementsByTagName('NBan')[0] || domDoc) : xmlSource;
+  if (typeof nbanSource === 'string') {
+    const nbanBlock = extractTagBlocks(xmlSource, 'NBan')[0];
+    if (nbanBlock) nbanSource = nbanBlock;
+  }
+  const nbten = getTag(nbanSource, 'Ten') || getTag(domDoc || xmlSource, 'nbten') || 'CÔNG TY TNHH BÁN HÀNG';
+  const nbmst = getTag(nbanSource, 'MST') || getTag(domDoc || xmlSource, 'nbmst') || '0100109106';
+  const nbdchi = getTag(nbanSource, 'DChi') || getTag(domDoc || xmlSource, 'nbdchi') || '';
+  const nbsdt = getTag(nbanSource, 'SDThoai') || getTag(nbanSource, 'sdt') || '';
+  const nbemail = getTag(nbanSource, 'DCTDTu') || getTag(nbanSource, 'email') || '';
+  const nbstk = getTag(nbanSource, 'STKNHang') || getTag(nbanSource, 'stk') || '';
+  const nbnhang = getTag(nbanSource, 'TNHang') || getTag(nbanSource, 'nhang') || '';
 
-  // 3. NMua (Buyer)
-  const nmuaEl = doc.getElementsByTagName('NMua')[0] || doc.getElementsByTagName('nmua')[0] || doc;
-  const nmten = getTagText(nmuaEl, 'Ten') || getTagText(nmuaEl, 'nmten') || getTagText(doc, 'nmten') || 'NGƯỜI MUA HÀNG';
-  const nmmst = getTagText(nmuaEl, 'MST') || getTagText(nmuaEl, 'nmmst') || getTagText(doc, 'nmmst') || '';
-  const nmdchi = getTagText(nmuaEl, 'DChi') || getTagText(nmuaEl, 'nmdchi') || getTagText(doc, 'nmdchi') || '';
-  const nmsdt = getTagText(nmuaEl, 'SDThoai') || getTagText(nmuaEl, 'nmsdt') || '';
-  const nmemail = getTagText(nmuaEl, 'DCTDTu') || getTagText(nmuaEl, 'nmemail') || '';
+  // 3. NMua (Buyer Info)
+  let nmuaSource: any = domDoc ? (domDoc.getElementsByTagName('NMua')[0] || domDoc) : xmlSource;
+  if (typeof nmuaSource === 'string') {
+    const nmuaBlock = extractTagBlocks(xmlSource, 'NMua')[0];
+    if (nmuaBlock) nmuaSource = nmuaBlock;
+  }
+  const nmten = getTag(nmuaSource, 'Ten') || getTag(domDoc || xmlSource, 'nmten') || 'NGƯỜI MUA HÀNG';
+  const nmmst = getTag(nmuaSource, 'MST') || getTag(domDoc || xmlSource, 'nmmst') || '';
+  const nmdchi = getTag(nmuaSource, 'DChi') || getTag(domDoc || xmlSource, 'nmdchi') || '';
+  const nmsdt = getTag(nmuaSource, 'SDThoai') || '';
+  const nmemail = getTag(nmuaSource, 'DCTDTu') || '';
 
-  // 4. Items (DSHHDVu)
+  // 4. DSHHDVu (Invoice Items List)
   const items: InvoiceItem[] = [];
-  const itemNodes = doc.getElementsByTagName('HHDVu');
-  
-  if (itemNodes.length > 0) {
-    for (let i = 0; i < itemNodes.length; i++) {
-      const node = itemNodes[i];
-      const lineNo = parseInt(getTagText(node, 'STT') || `${i + 1}`, 10) || i + 1;
-      const itemName = getTagText(node, 'THHDVu') || getTagText(node, 'ten') || 'Hàng hóa / Dịch vụ';
-      const unit = getTagText(node, 'DVTinh') || getTagText(node, 'dvt') || 'Cái';
-      const quantity = parseFloat(getTagText(node, 'SLuong') || '1') || 1;
-      const unitPrice = parseFloat(getTagText(node, 'DGia') || '0') || 0;
-      const amount = parseFloat(getTagText(node, 'ThTien') || '0') || (quantity * unitPrice);
-      const taxRate = getTagText(node, 'TSuat') || '10%';
+  if (domDoc) {
+    const hhdvuNodes = domDoc.getElementsByTagName('HHDVu');
+    for (let i = 0; i < hhdvuNodes.length; i++) {
+      const node = hhdvuNodes[i];
+      const lineNo = parseInt(getTag(node, 'STT') || `${i + 1}`, 10) || i + 1;
+      const itemName = getTag(node, 'THHDVu') || getTag(node, 'ten') || `Hàng hóa / Dịch vụ ${i + 1}`;
+      const unit = getTag(node, 'DVTinh') || getTag(node, 'dvt') || 'Cái';
+      const quantity = parseFloat(getTag(node, 'SLuong') || '1') || 1;
+      const unitPrice = parseFloat(getTag(node, 'DGia') || '0') || 0;
+      const amount = parseFloat(getTag(node, 'ThTien') || '0') || (quantity * unitPrice);
+      const taxRate = getTag(node, 'TSuat') || '10%';
       
       let taxPercent = 10;
       if (taxRate.includes('8')) taxPercent = 8;
@@ -154,39 +229,115 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
         totalAmount
       });
     }
+  } else {
+    // Regex item blocks extraction
+    const itemBlocks = extractTagBlocks(xmlSource, 'HHDVu');
+    itemBlocks.forEach((block, idx) => {
+      const lineNo = parseInt(extractTagValue(block, 'STT', `${idx + 1}`), 10) || idx + 1;
+      const itemName = extractTagValue(block, 'THHDVu') || `Hàng hóa / Dịch vụ ${idx + 1}`;
+      const unit = extractTagValue(block, 'DVTinh') || 'Cái';
+      const quantity = parseFloat(extractTagValue(block, 'SLuong', '1')) || 1;
+      const unitPrice = parseFloat(extractTagValue(block, 'DGia', '0')) || 0;
+      const amount = parseFloat(extractTagValue(block, 'ThTien', '0')) || (quantity * unitPrice);
+      const taxRate = extractTagValue(block, 'TSuat') || '10%';
+
+      let taxPercent = 10;
+      if (taxRate.includes('8')) taxPercent = 8;
+      else if (taxRate.includes('5')) taxPercent = 5;
+      else if (taxRate.includes('0')) taxPercent = 0;
+      else if (taxRate.toUpperCase().includes('KCT') || taxRate.toUpperCase().includes('KKKNT')) taxPercent = 0;
+
+      const taxAmount = Math.round((amount * taxPercent) / 100);
+      const totalAmount = amount + taxAmount;
+
+      items.push({
+        id: `item_${idx + 1}`,
+        lineNo,
+        itemName,
+        unit,
+        quantity,
+        unitPrice,
+        amount,
+        taxRate,
+        taxRatePercent: taxPercent,
+        taxAmount,
+        totalAmount
+      });
+    });
   }
 
-  // 5. TToan (Totals)
-  const tgtcthue = parseFloat(getTagText(doc, 'TgTCThue') || getTagText(doc, 'tgtcthue') || '0') || items.reduce((s, it) => s + it.amount, 0);
-  const tgtthue = parseFloat(getTagText(doc, 'TgTThue') || getTagText(doc, 'tgtthue') || '0') || items.reduce((s, it) => s + it.taxAmount, 0);
-  const tgtttbso = parseFloat(getTagText(doc, 'TgTTTBSo') || getTagText(doc, 'tgtttbso') || '0') || (tgtcthue + tgtthue);
-  let tgtttbchu = getTagText(doc, 'TgTTTBChu') || getTagText(doc, 'tgtttbchu') || '';
+  // 5. TToan (Totals and Tax Summary)
+  const tgtcthue = parseFloat(getTag(domDoc || xmlSource, 'TgTCThue') || '0') || items.reduce((s, it) => s + it.amount, 0);
+  const tgtthue = parseFloat(getTag(domDoc || xmlSource, 'TgTThue') || '0') || items.reduce((s, it) => s + it.taxAmount, 0);
+  const tgtttbso = parseFloat(getTag(domDoc || xmlSource, 'TgTTTBSo') || '0') || (tgtcthue + tgtthue);
+  let tgtttbchu = getTag(domDoc || xmlSource, 'TgTTTBChu') || '';
   if (!tgtttbchu) {
     tgtttbchu = numberToVietnameseWords(tgtttbso);
   }
 
-  // 6. CQT Code
-  let mhdon = getTagText(doc, 'DLieu') || getTagText(doc, 'mhdon') || getTagText(doc, 'MCCQT') || '';
+  // Tax Breakdown (THTTLTSuat)
+  const vatBreakdown: Array<{ taxRate: string; amount: number; taxAmount: number }> = [];
+  const ltSuatBlocks = extractTagBlocks(xmlSource, 'LTSuat');
+  if (ltSuatBlocks.length > 0) {
+    for (const b of ltSuatBlocks) {
+      const r = extractTagValue(b, 'TSuat') || '10%';
+      const a = parseFloat(extractTagValue(b, 'ThTien') || '0') || 0;
+      const t = parseFloat(extractTagValue(b, 'TThue') || '0') || 0;
+      vatBreakdown.push({ taxRate: r, amount: a, taxAmount: t });
+    }
+  } else if (items.length > 0) {
+    const mapRates = new Map<string, { amount: number; taxAmount: number }>();
+    items.forEach(it => {
+      const r = it.taxRate || '10%';
+      const curr = mapRates.get(r) || { amount: 0, taxAmount: 0 };
+      curr.amount += it.amount;
+      curr.taxAmount += it.taxAmount;
+      mapRates.set(r, curr);
+    });
+    mapRates.forEach((val, key) => {
+      vatBreakdown.push({ taxRate: key, amount: val.amount, taxAmount: val.taxAmount });
+    });
+  }
+
+  // 6. Tax Authority Code (MCCQT)
+  let mhdon = getTag(domDoc || xmlSource, 'MCCQT') || getTag(domDoc || xmlSource, 'mhdon') || '';
   if (!mhdon) {
-    // Check in TTKhac
-    const ttinNodes = doc.getElementsByTagName('TTin');
-    for (let i = 0; i < ttinNodes.length; i++) {
-      const truong = getTagText(ttinNodes[i], 'TTruong');
+    // Check in TTKhac or TTin
+    const ttinBlocks = extractTagBlocks(xmlSource, 'TTin');
+    for (const block of ttinBlocks) {
+      const truong = extractTagValue(block, 'TTruong');
       if (truong.toLowerCase().includes('macqt') || truong.toLowerCase().includes('mccqt')) {
-        mhdon = getTagText(ttinNodes[i], 'DLieu');
+        mhdon = extractTagValue(block, 'DLieu');
         break;
       }
     }
   }
   const hsgcma = !!mhdon || khmshdon.startsWith('1C') || khhdon.startsWith('1C');
 
-  // 7. Signature Info
-  const signerName = getTagText(doc, 'X509SubjectName') || nbten;
-  const caProvider = getTagText(doc, 'X509IssuerName') || 'VNPT-CA';
-  const signedDate = getTagText(doc, 'SigningTime') || nlap;
-  const hasDigitalSignature = doc.getElementsByTagName('Signature').length > 0;
+  // 7. Digital Signature (DSCKS)
+  let signerName = getTag(domDoc || xmlSource, 'X509SubjectName') || nbten;
+  let caProvider = getTag(domDoc || xmlSource, 'X509IssuerName') || 'VNPT-CA';
+  const signedDate = getTag(domDoc || xmlSource, 'SigningTime') || nlap;
+  const hasDigitalSignature = xmlSource.includes('Signature') || xmlSource.includes('X509Certificate');
 
-  // Determine invoice type: default to purchase
+  if (signerName.includes('CN=')) {
+    const cnMatch = signerName.match(/CN=([^,]+)/i);
+    if (cnMatch && cnMatch[1]) signerName = cnMatch[1].trim();
+  }
+  if (caProvider.includes('O=')) {
+    const oMatch = caProvider.match(/O=([^,]+)/i);
+    if (oMatch && oMatch[1]) caProvider = oMatch[1].trim();
+  }
+
+  // Buyer signature
+  let buyerSignerName = '';
+  let buyerSignedDate = '';
+  const buyerSigBlock = extractTagBlocks(xmlSource, 'NMua')[1]; // check if signature under NMua
+  if (buyerSigBlock && buyerSigBlock.includes('Signature')) {
+    buyerSignerName = extractTagValue(buyerSigBlock, 'X509SubjectName') || nmten;
+    buyerSignedDate = extractTagValue(buyerSigBlock, 'SigningTime') || nlap;
+  }
+
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;
 
   return {
@@ -214,17 +365,21 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     htttoan,
     dvtte,
     tygia,
+    thdon,
+    vatBreakdown,
     tthdon: 1,
     tthdonLabel: 'Hóa đơn gốc',
     ttxly: hsgcma ? 1 : 2,
     ttxlyLabel: hsgcma ? 'Đã cấp mã CQT' : 'Không mã CQT',
-    mhdon: mhdon || (hsgcma ? '00' + Math.random().toString(16).toUpperCase().substring(2, 32) : undefined),
+    mhdon: mhdon || (hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : undefined),
     hsgcma,
     loaiHdon: 'purchase',
     hasDigitalSignature,
-    signerName: signerName.includes('CN=') ? signerName.split('CN=')[1].split(',')[0] : signerName,
+    signerName,
     signedDate,
-    caProvider: caProvider.includes('O=') ? caProvider.split('O=')[1].split(',')[0] : 'VNPT-CA',
+    caProvider,
+    buyerSignerName,
+    buyerSignedDate,
     items: items.length > 0 ? items : [
       {
         lineNo: 1,

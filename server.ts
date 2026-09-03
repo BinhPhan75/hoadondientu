@@ -3,6 +3,9 @@ import path from 'path';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
+import { parseGDTInvoiceXml } from './src/utils/xmlParser';
+import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
+import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 
 const app = express();
 const PORT = 3000;
@@ -843,6 +846,45 @@ python3 gdt_selenium_crawler.py --mst 0316892345 --type purchase
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// 9. XML E-Invoice Parser endpoint (Node.js backend)
+app.post('/api/xml/parse', (req, res) => {
+  try {
+    const { xml } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+    const invoice = parseGDTInvoiceXml(xml);
+    res.json({ success: true, invoice });
+  } catch (error: any) {
+    res.status(400).json({ error: 'Không thể phân tích XML: ' + error.message });
+  }
+});
+
+// 10. XML to HTML E-Invoice Transformer endpoint
+app.post('/api/xml/transform-html', (req, res) => {
+  try {
+    const { xml, theme } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+    const invoice = parseGDTInvoiceXml(xml);
+    const html = generateOfficialInvoiceHtml(invoice, {
+      theme: theme === 'blue' ? 'blue' : 'red',
+      showPrintControls: true
+    });
+    res.json({ success: true, html });
+  } catch (error: any) {
+    res.status(400).json({ error: 'Không thể chuyển đổi XML sang HTML: ' + error.message });
+  }
+});
+
+// 11. Download W3C XSLT Stylesheet
+app.get('/api/xml/xslt', (req, res) => {
+  res.setHeader('Content-Type', 'application/xslt+xml; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="GDT_Invoice_Transformer.xslt"');
+  res.send(OFFICIAL_GDT_INVOICE_XSLT);
 });
 
 // Start Express Server with Vite integration

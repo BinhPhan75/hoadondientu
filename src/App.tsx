@@ -1089,6 +1089,9 @@ export default function App() {
         isOpen={isImportXmlModalOpen}
         onClose={() => setIsImportXmlModalOpen(false)}
         onImportSuccess={handleImportXmlSuccess}
+        onViewInvoice={(inv) => {
+          setSelectedInvoiceForDetail(inv);
+        }}
       />
 
       {/* Multi-Month Sync Progress & Report Modal */}

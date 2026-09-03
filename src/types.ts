@@ -57,6 +57,8 @@ export interface GDTInvoice {
   htttoan?: string; // Hình thức thanh toán: TM/CK (Tiền mặt / Chuyển khoản)
   dvtte?: string; // Đơn vị tiền tệ (VND, USD)
   tygia?: number; // Tỷ giá (mặc định 1)
+  thdon?: string; // Tên loại hóa đơn (HÓA ĐƠN GIÁ TRỊ GIA TĂNG, HÓA ĐƠN BÁN HÀNG,...)
+  vatBreakdown?: Array<{ taxRate: string; amount: number; taxAmount: number }>; // Phân tích theo từng nhóm thuế suất
 
   // Trạng thái hóa đơn & Cơ quan thuế
   tthdon: number; // 1: Mới, 2: Thay thế, 3: Điều chỉnh, 4: Hủy, 5: Bị thay thế, 6: Bị điều chỉnh
@@ -67,11 +69,18 @@ export interface GDTInvoice {
   hsgcma: boolean; // Có mã của CQT hay không
   loaiHdon: 'purchase' | 'sold'; // Mua vào hoặc Bán ra
   
-  // Chữ ký số
+  // Chữ ký số (DSCKS)
   hasDigitalSignature?: boolean;
   signerName?: string;
   signedDate?: string;
   caProvider?: string; // VNPT, Viettel, MISA, BKAV, FPT...
+  buyerSignerName?: string;
+  buyerSignedDate?: string;
+  cqtSignature?: {
+    signerName?: string;
+    signedDate?: string;
+    signatureValue?: string;
+  };
 
   // Hàng hóa chi tiết
   items: InvoiceItem[];

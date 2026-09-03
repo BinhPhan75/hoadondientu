@@ -18,12 +18,14 @@ interface ImportXmlModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportSuccess: (importedInvoices: GDTInvoice[]) => void;
+  onViewInvoice?: (invoice: GDTInvoice) => void;
 }
 
 export const ImportXmlModal: React.FC<ImportXmlModalProps> = ({
   isOpen,
   onClose,
-  onImportSuccess
+  onImportSuccess,
+  onViewInvoice
 }) => {
   const [dragOver, setDragOver] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -227,8 +229,8 @@ export const ImportXmlModal: React.FC<ImportXmlModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right mr-1">
                         <div className="font-mono font-bold text-gray-900">
                           {formatVND(inv.tgtttbso)}
                         </div>
@@ -236,6 +238,16 @@ export const ImportXmlModal: React.FC<ImportXmlModalProps> = ({
                           Thuế: {formatVND(inv.tgtthue)}
                         </div>
                       </div>
+                      {onViewInvoice && (
+                        <button
+                          onClick={() => onViewInvoice(inv)}
+                          className="px-2 py-1 text-[11px] font-semibold text-white bg-[#ef4444] hover:bg-red-600 rounded flex items-center gap-1 transition-colors"
+                          title="Xem giao diện hóa đơn hoàn chỉnh chuẩn A4 / HTML / XSLT"
+                        >
+                          <FileText className="w-3 h-3" />
+                          <span>Xem HĐ</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleRemoveItem(idx)}
                         className="p-1 text-gray-400 hover:text-red-600 rounded hover:bg-gray-100"

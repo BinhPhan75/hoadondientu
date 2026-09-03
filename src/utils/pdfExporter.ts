@@ -33,7 +33,8 @@ export async function generateInvoiceQrCode(invoice: GDTInvoice): Promise<string
 export async function exportInvoiceToPdfFile(
   invoice: GDTInvoice, 
   element?: HTMLElement | null,
-  fileName?: string
+  fileName?: string,
+  theme: 'red' | 'blue' = 'red'
 ): Promise<boolean> {
   try {
     const cleanShd = String(invoice.shdon).padStart(7, '0');
@@ -45,13 +46,17 @@ export async function exportInvoiceToPdfFile(
     if (!targetElement) {
       // Create offscreen container with official invoice HTML
       const qrCode = await generateInvoiceQrCode(invoice);
-      const htmlString = generateOfficialInvoiceHtml(invoice, qrCode);
+      const htmlString = generateOfficialInvoiceHtml(invoice, {
+        theme,
+        qrCodeDataUrl: qrCode,
+        showPrintControls: false
+      });
       
       tempContainer = document.createElement('div');
       tempContainer.style.position = 'fixed';
       tempContainer.style.left = '-9999px';
       tempContainer.style.top = '0';
-      tempContainer.style.width = '800px';
+      tempContainer.style.width = '820px';
       tempContainer.style.background = '#ffffff';
       tempContainer.innerHTML = htmlString;
       document.body.appendChild(tempContainer);
@@ -64,7 +69,7 @@ export async function exportInvoiceToPdfFile(
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
-      windowWidth: 800
+      windowWidth: 820
     });
 
     if (tempContainer) {
@@ -100,11 +105,46 @@ export async function exportInvoiceToPdfFile(
 }
 
 /**
+ * Downloads a standalone, offline-viewable HTML file of the invoice.
+ */
+export async function downloadStandaloneHtmlFile(
+  invoice: GDTInvoice,
+  theme: 'red' | 'blue' = 'red'
+): Promise<void> {
+  const qrCode = await generateInvoiceQrCode(invoice);
+  const htmlContent = generateOfficialInvoiceHtml(invoice, {
+    theme,
+    qrCodeDataUrl: qrCode,
+    showPrintControls: true
+  });
+
+  const cleanShd = String(invoice.shdon).padStart(7, '0');
+  const fileName = `HoaDon_${invoice.khhdon}_${cleanShd}_${invoice.nbmst}.html`;
+
+  const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Opens a clean, dedicated print window for instant native printing or saving as PDF
  */
-export async function openInvoicePrintWindow(invoice: GDTInvoice): Promise<void> {
+export async function openInvoicePrintWindow(
+  invoice: GDTInvoice,
+  theme: 'red' | 'blue' = 'red'
+): Promise<void> {
   const qrCode = await generateInvoiceQrCode(invoice);
-  const invoiceHtmlContent = generateOfficialInvoiceHtml(invoice, qrCode);
+  const invoiceHtmlContent = generateOfficialInvoiceHtml(invoice, {
+    theme,
+    qrCodeDataUrl: qrCode,
+    showPrintControls: true
+  });
 
   const printWindow = window.open('', '_blank', 'width=900,height=1000');
   if (!printWindow) {

@@ -2,6 +2,9 @@ import express from 'express';
 import JSZip from 'jszip';
 import path from 'path';
 import fs from 'fs';
+import { parseGDTInvoiceXml } from '../src/utils/xmlParser';
+import { generateOfficialInvoiceHtml } from '../src/utils/officialInvoiceHtml';
+import { OFFICIAL_GDT_INVOICE_XSLT } from '../src/utils/xsltTransformer';
 
 const app = express();
 
@@ -715,6 +718,45 @@ apiRouter.get('/gdt/download-python-package', async (req, res) => {
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// XML E-Invoice Parser endpoint
+apiRouter.post('/xml/parse', (req, res) => {
+  try {
+    const { xml } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+    const invoice = parseGDTInvoiceXml(xml);
+    res.json({ success: true, invoice });
+  } catch (error: any) {
+    res.status(400).json({ error: 'Không thể phân tích XML: ' + error.message });
+  }
+});
+
+// XML to HTML E-Invoice Transformer endpoint
+apiRouter.post('/xml/transform-html', (req, res) => {
+  try {
+    const { xml, theme } = req.body;
+    if (!xml) {
+      return res.status(400).json({ error: 'Nội dung XML không được để trống' });
+    }
+    const invoice = parseGDTInvoiceXml(xml);
+    const html = generateOfficialInvoiceHtml(invoice, {
+      theme: theme === 'blue' ? 'blue' : 'red',
+      showPrintControls: true
+    });
+    res.json({ success: true, html });
+  } catch (error: any) {
+    res.status(400).json({ error: 'Không thể chuyển đổi XML sang HTML: ' + error.message });
+  }
+});
+
+// Download W3C XSLT Stylesheet
+apiRouter.get('/xml/xslt', (req, res) => {
+  res.setHeader('Content-Type', 'application/xslt+xml; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="GDT_Invoice_Transformer.xslt"');
+  res.send(OFFICIAL_GDT_INVOICE_XSLT);
 });
 
 // Register router on both `/api` and `/` so all paths match whether Vercel rewrites or strips prefix
