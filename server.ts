@@ -141,9 +141,16 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiAiClient;
 }
 
-// AI Captcha OCR Engine for Real GDT Portal SVGs
-async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
-  if (!svgOrDataUri) return '';
+interface OCRResult {
+  code: string;
+  modelUsed?: string;
+  error?: string;
+  isMissingApiKey?: boolean;
+}
+
+// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.5 Flash Lite)
+async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
+  if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
   let rawSvg = svgOrDataUri;
   if (rawSvg.startsWith('data:image/svg+xml;utf8,')) {
@@ -153,83 +160,111 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
   }
 
   if (!rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
-    return '';
+    return { code: '', error: 'Định dạng SVG không hợp lệ' };
   }
 
-  // 1. Quick regex extraction if SVG contains direct <text> tags
+  // 1. Quick regex extraction if SVG contains direct <text> tags (0 token cost, instant)
   const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
   if (textTagMatches) {
     const textContent = textTagMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).join('');
     const cleanChars = textContent.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     if (cleanChars.length >= 4 && cleanChars.length <= 6) {
       console.log(`[SVG Direct Parser] Extracted Captcha: "${cleanChars}"`);
-      return cleanChars;
+      return { code: cleanChars, modelUsed: 'svg-direct' };
     }
   }
 
-  // 2. High-precision Gemini AI OCR with Recommended Models
-  const ai = getGeminiClient();
-  if (ai) {
-    const candidateModels = [
-      'gemini-3.6-flash',
-      'gemini-flash-latest'
-    ];
+  // 2. Check if GEMINI_API_KEY is configured
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn('[Gemini OCR] GEMINI_API_KEY chưa được thiết lập trong Environment Variables.');
+    return {
+      code: '',
+      isMissingApiKey: true,
+      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Trên Vercel: Vào Project Settings > Environment Variables để thêm GEMINI_API_KEY.'
+    };
+  }
 
-    for (const modelName of candidateModels) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
-          const ocrPromise = ai.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                inlineData: {
-                  mimeType: 'image/svg+xml',
-                  data: base64Data
-                }
-              },
-              {
-                text: `This is a Vietnamese GDT tax portal captcha SVG image.
+  // 3. High-precision Gemini AI OCR with Gemini 3.5 Flash Lite
+  const ai = getGeminiClient();
+  if (!ai) {
+    return {
+      code: '',
+      isMissingApiKey: true,
+      error: 'Không thể khởi tạo Gemini AI Client. Vui lòng kiểm tra lại GEMINI_API_KEY.'
+    };
+  }
+
+  // Candidate models: Gemini 3.5 Flash Lite as primary (highest free quota, lowest latency)
+  const candidateModels = [
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest'
+  ];
+
+  let lastErrorMsg = '';
+  const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
+  const svgSnippet = rawSvg.substring(0, 3000);
+
+  for (const modelName of candidateModels) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const ocrPromise = ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              inlineData: {
+                mimeType: 'image/svg+xml',
+                data: base64Data
+              }
+            },
+            {
+              text: `This is a Vietnamese GDT tax portal captcha SVG image.
+Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.
 SVG Source:
 \`\`\`xml
-${rawSvg.substring(0, 4000)}
-\`\`\`
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.`
-              }
-            ]
-          });
-
-          const timeoutPromise = new Promise<null>((resolve) =>
-            setTimeout(() => resolve(null), 8500)
-          );
-
-          const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
-          if (aiResp && aiResp.text) {
-            const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-            if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-              console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
-              return extracted;
+${svgSnippet}
+\`\`\``
             }
+          ]
+        });
+
+        const timeoutPromise = new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), 8000)
+        );
+
+        const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
+        if (aiResp && aiResp.text) {
+          const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+          if (extracted && extracted.length >= 3 && extracted.length <= 8) {
+            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
+            return { code: extracted, modelUsed: modelName };
           }
-          break; // Succeeded or valid response without error
-        } catch (err: any) {
-          const errMsg = err?.message || String(err);
-          const is503OrRateLimit = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('UNAVAILABLE') || errMsg.includes('429');
-          
-          if (is503OrRateLimit && attempt === 0) {
-            await new Promise(r => setTimeout(r, 600));
-            continue; // Retry once
-          }
-          
-          // Log only a concise warning
-          console.warn(`[Gemini OCR (${modelName}) Warning]:`, errMsg.substring(0, 120));
-          break; // Move to next fallback candidate model
         }
+        break; // Got response without error but no matching chars, fallback to next model
+      } catch (err: any) {
+        lastErrorMsg = err?.message || String(err);
+        const isRateLimit = lastErrorMsg.includes('429') || lastErrorMsg.includes('RESOURCE_EXHAUSTED') || lastErrorMsg.includes('quota');
+        const isUnavailable = lastErrorMsg.includes('503') || lastErrorMsg.includes('high demand') || lastErrorMsg.includes('UNAVAILABLE');
+        
+        console.warn(`[Gemini OCR (${modelName}) Warning, attempt ${attempt + 1}]:`, lastErrorMsg.substring(0, 120));
+
+        if ((isRateLimit || isUnavailable) && attempt === 0) {
+          await new Promise(r => setTimeout(r, 600));
+          continue; // Retry once on transient backpressure
+        }
+        break; // Move to next fallback candidate model
       }
     }
   }
 
-  return '';
+  const isRateLimitFinal = lastErrorMsg.includes('429') || lastErrorMsg.includes('quota') || lastErrorMsg.includes('RESOURCE_EXHAUSTED');
+  return {
+    code: '',
+    error: isRateLimitFinal
+      ? 'Hạn mức API Gemini của bạn đã vượt quá (429 Rate Limit/Quota Exceeded). Hạn mức miễn phí sẽ tự reset sau 1 phút.'
+      : (lastErrorMsg ? `Lỗi Gemini API: ${lastErrorMsg.substring(0, 120)}` : 'Không nhận diện được mã Captcha.')
+  };
 }
 
 // 1. Health check
@@ -259,7 +294,8 @@ app.get('/api/gdt/captcha', async (req, res) => {
 
         let autoSolved = '';
         try {
-          autoSolved = await solveCaptchaOCR(data.content);
+          const ocrRes = await solveCaptchaOCR(data.content);
+          autoSolved = ocrRes.code;
         } catch (ocrErr) {
           console.warn('[Auto-OCR Warning]:', ocrErr);
         }
@@ -311,12 +347,23 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Thiếu dữ liệu ảnh Captcha.' });
     }
 
-    const code = await solveCaptchaOCR(contentToSolve);
-    return res.json({
-      success: Boolean(code),
-      captchaCode: code,
-      isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
-    });
+    const ocrResult = await solveCaptchaOCR(contentToSolve);
+    if (ocrResult.code) {
+      return res.json({
+        success: true,
+        captchaCode: ocrResult.code,
+        modelUsed: ocrResult.modelUsed,
+        isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
+      });
+    } else {
+      return res.json({
+        success: false,
+        captchaCode: '',
+        isMissingApiKey: ocrResult.isMissingApiKey,
+        message: ocrResult.error || 'Không nhận diện được mã Captcha. Vui lòng nhập thủ công.',
+        isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
+      });
+    }
   } catch (err: any) {
     console.error('[OCR Endpoint Error]:', err);
     return res.status(500).json({ success: false, message: 'Không thể quét mã Captcha: ' + err.message });
@@ -337,7 +384,8 @@ app.post('/api/gdt/login', async (req, res) => {
 
   if (!captchaCode && captchaKey && captchaContentMap.has(captchaKey)) {
     const rawSvg = captchaContentMap.get(captchaKey)!;
-    captchaCode = await solveCaptchaOCR(rawSvg);
+    const ocrRes = await solveCaptchaOCR(rawSvg);
+    captchaCode = ocrRes.code;
   }
 
   if (!captchaCode) {

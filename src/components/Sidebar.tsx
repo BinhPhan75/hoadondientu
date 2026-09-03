@@ -94,10 +94,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
+        if (data && data.message) {
+          setAuthError(data.message);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[AI OCR Scan Error]:', err);
       setOcrSuccess(false);
+      setAuthError('Không thể kết nối đến máy chủ OCR: ' + (err?.message || 'Lỗi mạng'));
     } finally {
       setIsScanningOcr(false);
     }
@@ -214,6 +218,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             activeCaptchaCode = ocrData.captchaCode;
             setCaptchaCode(ocrData.captchaCode);
             setOcrSuccess(true);
+          } else if (ocrData && ocrData.message) {
+            setAuthError(ocrData.message);
           }
         } catch (err) {
           console.warn('[Auto-OCR in Submit Error]:', err);
