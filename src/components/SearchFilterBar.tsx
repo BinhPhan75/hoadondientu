@@ -9,9 +9,11 @@ import {
   Sparkles,
   RotateCcw,
   SlidersHorizontal,
-  FileCode2
+  FileCode2,
+  Info
 } from 'lucide-react';
 import { FilterParams } from '../types';
+import { isMultiMonthRange, generateMonthChunks } from '../utils/dateChunker';
 
 interface SearchFilterBarProps {
   filters: FilterParams;
@@ -21,6 +23,7 @@ interface SearchFilterBarProps {
   isLoading: boolean;
   totalFilteredCount: number;
   onOpenImportXml?: () => void;
+  onOpenMonthlyReport?: () => void;
 }
 
 export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
@@ -30,7 +33,8 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
   onRunSelenium,
   isLoading,
   totalFilteredCount,
-  onOpenImportXml
+  onOpenImportXml,
+  onOpenMonthlyReport
 }) => {
   // Preset date helpers
   const applyPreset = (preset: string) => {
@@ -57,41 +61,46 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
         fromDate = formatDate(new Date(year, month - 1, 1));
         toDate = formatDate(new Date(year, month, 0));
         break;
-      case '2025':
-        fromDate = `2025-01-01`;
-        toDate = `2025-12-31`;
-        break;
-      case '2024':
-        fromDate = `2024-01-01`;
-        toDate = `2024-12-31`;
-        break;
-      case '2023':
-        fromDate = `2023-01-01`;
-        toDate = `2023-12-31`;
-        break;
-      case 'all_time':
-        fromDate = `2022-01-01`;
-        toDate = `2026-12-31`;
-        break;
-      case 'q1_2025':
-        fromDate = `2025-01-01`;
-        toDate = `2025-03-31`;
-        break;
-      case 'q2_2025':
-        fromDate = `2025-04-01`;
-        toDate = `2025-06-30`;
-        break;
-      case 'q3_2025':
-        fromDate = `2025-07-01`;
-        toDate = `2025-09-30`;
-        break;
-      case 'q4_2025':
-        fromDate = `2025-10-01`;
-        toDate = `2025-12-31`;
+      case '2026_8m':
+        // As requested by user: 01/01/2026 to 31/08/2026
+        fromDate = '2026-01-01';
+        toDate = '2026-08-31';
         break;
       case '2026':
-        fromDate = `2026-01-01`;
-        toDate = `2026-12-31`;
+        fromDate = '2026-01-01';
+        toDate = '2026-12-31';
+        break;
+      case '2025':
+        fromDate = '2025-01-01';
+        toDate = '2025-12-31';
+        break;
+      case '2024':
+        fromDate = '2024-01-01';
+        toDate = '2024-12-31';
+        break;
+      case '2023':
+        fromDate = '2023-01-01';
+        toDate = '2023-12-31';
+        break;
+      case 'all_time':
+        fromDate = '2022-01-01';
+        toDate = '2026-12-31';
+        break;
+      case 'q1_2025':
+        fromDate = '2025-01-01';
+        toDate = '2025-03-31';
+        break;
+      case 'q2_2025':
+        fromDate = '2025-04-01';
+        toDate = '2025-06-30';
+        break;
+      case 'q3_2025':
+        fromDate = '2025-07-01';
+        toDate = '2025-09-30';
+        break;
+      case 'q4_2025':
+        fromDate = '2025-10-01';
+        toDate = '2025-12-31';
         break;
       default:
         return;
@@ -104,8 +113,11 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
     });
   };
 
+  const isMultiMonth = isMultiMonthRange(filters.fromDate, filters.toDate);
+  const monthChunks = isMultiMonth ? generateMonthChunks(filters.fromDate, filters.toDate) : [];
+
   return (
-    <div className="bg-white border-b border-[#d1d5db] px-4 sm:px-6 py-3 space-y-2.5">
+    <div className="bg-white border-b border-[#d1d5db] px-4 sm:px-6 py-2.5 space-y-2">
       {/* Top Row: Type Segments & Action Buttons */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
         {/* Invoice Type Tabs */}
@@ -159,6 +171,21 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => applyPreset('2026_8m')}
+            className="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-colors font-mono font-bold"
+            title="Kỳ ví dụ: 01/01/2026 đến 31/08/2026 (8 tháng)"
+          >
+            01-08/2026 (8T)
+          </button>
+          <button
+            type="button"
+            onClick={() => applyPreset('2026')}
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
+          >
+            2026
+          </button>
+          <button
+            type="button"
             onClick={() => applyPreset('2025')}
             className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
           >
@@ -173,26 +200,11 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => applyPreset('2023')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono font-semibold"
-          >
-            2023
-          </button>
-          <button
-            type="button"
             onClick={() => applyPreset('all_time')}
-            className="px-2 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 transition-colors font-semibold"
+            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-semibold"
             title="Tra cứu từ năm 2022 đến nay"
           >
             Toàn bộ
-          </button>
-          <button
-            type="button"
-            onClick={() => applyPreset('q1_2025')}
-            className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 transition-colors font-mono"
-            title="Kỳ kê khai Quý 1/2025"
-          >
-            Q1/2025
           </button>
 
           {onOpenImportXml && (
@@ -215,6 +227,26 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Multi-Month Notice Banner if period > 1 month */}
+      {isMultiMonth && (
+        <div className="bg-amber-50 border border-amber-200 rounded px-2.5 py-1 flex items-center justify-between text-[11px] text-amber-900">
+          <div className="flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+            <span>
+              <strong>Kỳ tra cứu dài hơn 1 tháng ({monthChunks.length} tháng):</strong> Cổng Thuế giới hạn 1 tháng/lần. Hệ thống sẽ tự động tra cứu lần lượt từng tháng và cập nhật trực quan tiến trình.
+            </span>
+          </div>
+          {onOpenMonthlyReport && (
+            <button
+              onClick={onOpenMonthlyReport}
+              className="font-bold text-amber-800 hover:text-amber-950 underline shrink-0 cursor-pointer ml-2"
+            >
+              Xem tiến trình & Báo cáo tháng
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Bottom Row: Date Inputs, Keywords & Selectors */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2 text-xs">

@@ -167,48 +167,64 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<string> {
     }
   }
 
-  // 2. High-precision Gemini AI OCR
+  // 2. High-precision Gemini AI OCR with Recommended Models
   const ai = getGeminiClient();
   if (ai) {
-    const candidateModels = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    const candidateModels = [
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
+    ];
+
     for (const modelName of candidateModels) {
-      try {
-        const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
-        const ocrPromise = ai.models.generateContent({
-          model: modelName,
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'image/svg+xml',
-                data: base64Data
-              }
-            },
-            {
-              text: `This is a Vietnamese GDT tax portal captcha SVG image.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const base64Data = Buffer.from(rawSvg, 'utf-8').toString('base64');
+          const ocrPromise = ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                inlineData: {
+                  mimeType: 'image/svg+xml',
+                  data: base64Data
+                }
+              },
+              {
+                text: `This is a Vietnamese GDT tax portal captcha SVG image.
 SVG Source:
 \`\`\`xml
 ${rawSvg.substring(0, 4000)}
 \`\`\`
 Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.`
+              }
+            ]
+          });
+
+          const timeoutPromise = new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), 8500)
+          );
+
+          const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
+          if (aiResp && aiResp.text) {
+            const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+            if (extracted && extracted.length >= 3 && extracted.length <= 8) {
+              console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
+              return extracted;
             }
-          ]
-        });
-
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 8500)
-        );
-
-        const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
-        if (aiResp && aiResp.text) {
-          const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-          if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
-            return extracted;
           }
+          break; // Succeeded or valid response without error
+        } catch (err: any) {
+          const errMsg = err?.message || String(err);
+          const is503OrRateLimit = errMsg.includes('503') || errMsg.includes('high demand') || errMsg.includes('UNAVAILABLE') || errMsg.includes('429');
+          
+          if (is503OrRateLimit && attempt === 0) {
+            await new Promise(r => setTimeout(r, 600));
+            continue; // Retry once
+          }
+          
+          // Log only a concise warning
+          console.warn(`[Gemini OCR (${modelName}) Warning]:`, errMsg.substring(0, 120));
+          break; // Move to next fallback candidate model
         }
-        break; // If call executed without model error, break loop
-      } catch (err: any) {
-        console.warn(`[Gemini OCR (${modelName}) Error]:`, err.message || err);
       }
     }
   }
@@ -463,102 +479,126 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
   const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
 
-  const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string) => {
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 3): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
     const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
     
-    try {
-      const resp = await fetch(url, {
-        headers: {
-          ...GDT_HEADERS,
-          'Authorization': tokenHeader,
-          ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
-        },
-        signal: AbortSignal.timeout(20000)
-      });
-      
-      if (resp.status === 401 || resp.status === 403) {
-        console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
-        return { error: 'AUTH_EXPIRED' };
-      }
-
-      if (!resp.ok) {
-        const errText = await resp.text();
-        console.warn(`[GDT Query ${type} Error for ${chunkFrom}..${chunkTo}]:`, resp.status, errText.substring(0, 200));
-        return [];
-      }
-
-      const rawText = await resp.text();
-      let data: any = {};
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        data = JSON.parse(rawText);
-      } catch {
-        console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+        const resp = await fetch(url, {
+          headers: {
+            ...GDT_HEADERS,
+            'Authorization': tokenHeader,
+            ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
+          },
+          signal: AbortSignal.timeout(20000)
+        });
+        
+        if (resp.status === 401 || resp.status === 403) {
+          console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
+          return { error: 'AUTH_EXPIRED' };
+        }
+
+        if (resp.status === 429) {
+          console.warn(`[GDT Query ${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
+          if (attempt < maxRetries) {
+            const backoffMs = (attempt + 1) * 1200;
+            await sleep(backoffMs);
+            continue;
+          } else {
+            console.warn(`[GDT Query ${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
+            return [];
+          }
+        }
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          console.warn(`[GDT Query ${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
+          return [];
+        }
+
+        const rawText = await resp.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+          return [];
+        }
+
+        const list = data.datas || data.data || data.rows || data.content || data.items || data.results || data.result || data.dshdon || (Array.isArray(data) ? data : []);
+        
+        console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
+
+        // Normalize GDT invoice payload
+        return list.map((item: any) => ({
+          id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
+          khmshdon: item.khmshdon || item.khmhd || '1',
+          khhdon: item.khhdon || '',
+          shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
+          tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
+          nbmst: item.nbmst || '',
+          nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
+          nbdchi: item.nbdchi || '',
+          nmmst: item.nmmst || '',
+          nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
+          nmdchi: item.nmdchi || '',
+          tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+          tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+          tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
+          tgtttbchu: item.tgtttbchu || '',
+          htttoan: item.htttoan || 'TM/CK',
+          tthdon: Number(item.tthdon || 1),
+          tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
+          ttxly: Number(item.ttxly || 1),
+          ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
+          mhdon: item.mhdon || '',
+          hsgcma: Boolean(item.mhdon || item.hsgcma),
+          loaiHdon: type,
+          hasDigitalSignature: true,
+          signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
+          signedDate: item.tdlap,
+          caProvider: 'Tổng cục Thuế CQT',
+          items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
+            id: `item_${idx + 1}`,
+            lineNo: idx + 1,
+            itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
+            unit: it.dvtinh || it.unit || 'Lô',
+            quantity: Number(it.sluong || it.quantity || 1),
+            unitPrice: Number(it.dgia || it.unitPrice || 0),
+            amount: Number(it.thtien || it.amount || 0),
+            taxRate: it.tsuat || it.taxRate || '10%',
+            taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
+            taxAmount: Number(it.tthue || it.taxAmount || 0),
+            totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
+          }))
+        }));
+      } catch (err: any) {
+        console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
+        if (attempt < maxRetries) {
+          await sleep(1000);
+          continue;
+        }
         return [];
       }
-
-      const list = data.datas || data.data || data.rows || data.content || data.items || data.results || data.result || data.dshdon || (Array.isArray(data) ? data : []);
-      
-      console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
-
-      // Normalize GDT invoice payload
-      return list.map((item: any) => ({
-        id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
-        khmshdon: item.khmshdon || item.khmhd || '1',
-        khhdon: item.khhdon || '',
-        shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
-        tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
-        nbmst: item.nbmst || '',
-        nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
-        nbdchi: item.nbdchi || '',
-        nmmst: item.nmmst || '',
-        nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
-        nmdchi: item.nmdchi || '',
-        tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
-        tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
-        tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
-        tgtttbchu: item.tgtttbchu || '',
-        htttoan: item.htttoan || 'TM/CK',
-        tthdon: Number(item.tthdon || 1),
-        tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
-        ttxly: Number(item.ttxly || 1),
-        ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
-        mhdon: item.mhdon || '',
-        hsgcma: Boolean(item.mhdon || item.hsgcma),
-        loaiHdon: type,
-        hasDigitalSignature: true,
-        signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
-        signedDate: item.tdlap,
-        caProvider: 'Tổng cục Thuế CQT',
-        items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
-          id: `item_${idx + 1}`,
-          lineNo: idx + 1,
-          itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
-          unit: it.dvtinh || it.unit || 'Lô',
-          quantity: Number(it.sluong || it.quantity || 1),
-          unitPrice: Number(it.dgia || it.unitPrice || 0),
-          amount: Number(it.thtien || it.amount || 0),
-          taxRate: it.tsuat || it.taxRate || '10%',
-          taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
-          taxAmount: Number(it.tthue || it.taxAmount || 0),
-          totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
-        }))
-      }));
-    } catch (err: any) {
-      console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo}]:`, err.message);
-      return [];
     }
+    return [];
   };
 
   const fetchAllChunksForType = async (type: 'purchase' | 'sold') => {
     let allInvoices: any[] = [];
-    const chunkPromises = dateChunks.map(chunk => fetchChunk(type, chunk.from, chunk.to));
-    const chunkResults = await Promise.all(chunkPromises);
-
-    for (const chunkResult of chunkResults) {
+    for (let i = 0; i < dateChunks.length; i++) {
+      const chunk = dateChunks[i];
+      if (i > 0) {
+        // Pacing delay between sequential requests to prevent 429 Too Many Requests
+        await sleep(250);
+      }
+      const chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to);
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
@@ -587,6 +627,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       if (Array.isArray(purchaseList)) {
         results = results.concat(purchaseList);
       }
+    }
+
+    if (queryPurchase && querySold) {
+      await sleep(300);
     }
 
     if (querySold) {

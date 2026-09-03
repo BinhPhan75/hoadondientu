@@ -10,7 +10,8 @@ import {
   FolderArchive,
   Code2,
   Menu,
-  FileCode2
+  FileCode2,
+  Layers
 } from 'lucide-react';
 import { GDTAccountConfig, GDTInvoice } from '../types';
 
@@ -26,6 +27,8 @@ interface HeaderProps {
   onDownloadPythonScript: () => void;
   onRefreshData: () => void;
   onOpenImportXml?: () => void;
+  onOpenMonthlyReport?: () => void;
+  isMultiMonthActive?: boolean;
   isRefreshing: boolean;
   onLogout: () => void;
   onToggleSidebar?: () => void;
@@ -43,6 +46,8 @@ export const Header: React.FC<HeaderProps> = ({
   onDownloadPythonScript,
   onRefreshData,
   onOpenImportXml,
+  onOpenMonthlyReport,
+  isMultiMonthActive = false,
   isRefreshing,
   onLogout,
   onToggleSidebar
@@ -131,6 +136,22 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <FileCode2 className="w-3.5 h-3.5 text-blue-600" />
               <span className="hidden sm:inline">Nhập XML/ZIP</span>
+            </button>
+          )}
+
+          {/* Monthly Report / Multi-month Sync Progress */}
+          {onOpenMonthlyReport && (
+            <button
+              onClick={onOpenMonthlyReport}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded transition-colors ${
+                isMultiMonthActive 
+                  ? 'bg-amber-100 text-amber-900 border border-amber-300 animate-pulse' 
+                  : 'bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200'
+              }`}
+              title="Xem tiến trình và báo cáo thuế từng tháng"
+            >
+              <Layers className="w-3.5 h-3.5 text-purple-600" />
+              <span className="hidden md:inline">Báo Cáo Từng Tháng</span>
             </button>
           )}
 

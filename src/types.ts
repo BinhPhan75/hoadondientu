@@ -112,6 +112,48 @@ export interface SeleniumLogEntry {
   progress?: number; // 0 - 100
 }
 
+export interface MonthSyncChunk {
+  id: string;
+  monthIndex: number; // 0-based
+  totalMonths: number;
+  label: string; // e.g. "Tháng 01/2026"
+  shortLabel: string; // e.g. "T01/26"
+  fromDate: string; // YYYY-MM-DD
+  toDate: string; // YYYY-MM-DD
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  purchaseCount: number;
+  soldCount: number;
+  totalCount: number;
+  purchaseAmount: number; // Tiền hàng chưa thuế mua vào
+  purchaseTax: number; // Thuế mua vào
+  soldAmount: number; // Doanh thu chưa thuế bán ra
+  soldTax: number; // Thuế bán ra
+  totalAmount: number; // Tổng tiền hàng chưa thuế cả 2
+  totalTax: number; // Tổng thuế
+  totalPayment: number; // Tổng thanh toán
+  errorMessage?: string;
+  durationMs?: number;
+}
+
+export interface MultiMonthSyncState {
+  isActive: boolean;
+  isPaused: boolean;
+  isCompleted: boolean;
+  hasErrors: boolean;
+  totalMonths: number;
+  completedMonths: number;
+  currentMonthIndex: number;
+  currentMonthLabel: string;
+  progressPercent: number;
+  chunks: MonthSyncChunk[];
+  totalInvoicesFound: number;
+  totalPurchaseFound: number;
+  totalSoldFound: number;
+  totalBeforeTax: number;
+  totalTax: number;
+  totalPayment: number;
+}
+
 export interface GDTConnectionStatus {
   isConnected: boolean;
   isDemoMode: boolean;

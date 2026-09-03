@@ -14,10 +14,13 @@ import { AccountConfigModal } from './components/AccountConfigModal';
 import { BatchDownloadModal } from './components/BatchDownloadModal';
 import { InvoiceDetailModal } from './components/InvoiceDetailModal';
 import { PythonSeleniumModal } from './components/PythonSeleniumModal';
-import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry } from './types';
+import { MultiMonthSyncModal } from './components/MultiMonthSyncModal';
+import { FloatingSyncBadge } from './components/FloatingSyncBadge';
+import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMonthSyncState, MonthSyncChunk } from './types';
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
-import { exportInvoicesToExcel } from './utils/excelExporter';
+import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
+import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
 
 export default function App() {
   // Account Configuration State (from localStorage or default)
@@ -65,9 +68,34 @@ export default function App() {
   const [isBatchDownloadModalOpen, setIsBatchDownloadModalOpen] = useState(false);
   const [isSeleniumModalOpen, setIsSeleniumModalOpen] = useState(false);
   const [isImportXmlModalOpen, setIsImportXmlModalOpen] = useState(false);
+  const [isMultiMonthModalOpen, setIsMultiMonthModalOpen] = useState(false);
+  const [showFloatingBadge, setShowFloatingBadge] = useState(false);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Multi-Month Orchestration State
+  const [syncState, setSyncState] = useState<MultiMonthSyncState>({
+    isActive: false,
+    isPaused: false,
+    isCompleted: false,
+    hasErrors: false,
+    totalMonths: 0,
+    completedMonths: 0,
+    currentMonthIndex: 0,
+    currentMonthLabel: '',
+    progressPercent: 0,
+    chunks: [],
+    totalInvoicesFound: 0,
+    totalPurchaseFound: 0,
+    totalSoldFound: 0,
+    totalBeforeTax: 0,
+    totalTax: 0,
+    totalPayment: 0
+  });
+
+  const isSyncPausedRef = React.useRef(false);
+  const isSyncCancelledRef = React.useRef(false);
 
   // Stateless GDT Session tokens (for Vercel compatibility)
   const [gdtSession, setGdtSession] = useState<{ token: string; cookieHeader: string } | null>(() => {
@@ -229,6 +257,393 @@ export default function App() {
     window.location.href = '/api/gdt/download-python-package';
   };
 
+  // Multi-Month Sequential Execution
+  const runMultiMonthQuery = async (activeToken: string, activeCookie: string, mst: string) => {
+    const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
+    if (chunks.length === 0) return { success: false, error: 'Khoảng thời gian không hợp lệ' };
+
+    isSyncPausedRef.current = false;
+    isSyncCancelledRef.current = false;
+
+    setSyncState({
+      isActive: true,
+      isPaused: false,
+      isCompleted: false,
+      hasErrors: false,
+      totalMonths: chunks.length,
+      completedMonths: 0,
+      currentMonthIndex: 0,
+      currentMonthLabel: chunks[0]?.label || '',
+      progressPercent: 0,
+      chunks: chunks,
+      totalInvoicesFound: 0,
+      totalPurchaseFound: 0,
+      totalSoldFound: 0,
+      totalBeforeTax: 0,
+      totalTax: 0,
+      totalPayment: 0
+    });
+
+    setIsMultiMonthModalOpen(true);
+    setShowFloatingBadge(true);
+
+    setConsoleLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'step',
+        message: `[KỲ DÀI HƠN 1 THÁNG] Đã chia thành ${chunks.length} tháng (${filters.fromDate} -> ${filters.toDate}). Bắt đầu tra cứu tự động lần lượt từng tháng...`
+      }
+    ]);
+
+    let runningTotalInvoices = 0;
+    let runningPurchases = 0;
+    let runningSolds = 0;
+    let runningBeforeTax = 0;
+    let runningTax = 0;
+    let runningPayment = 0;
+    let hasEncounteredError = false;
+
+    for (let i = 0; i < chunks.length; i++) {
+      if (isSyncCancelledRef.current) {
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[ĐÃ DỪNG] Người dùng đã dừng quá trình tra cứu đa tháng.`
+          }
+        ]);
+        break;
+      }
+
+      // Check if paused
+      while (isSyncPausedRef.current) {
+        await new Promise(r => setTimeout(r, 250));
+        if (isSyncCancelledRef.current) break;
+      }
+      if (isSyncCancelledRef.current) break;
+
+      const chunk = chunks[i];
+
+      // Mark current chunk as running
+      setSyncState(prev => ({
+        ...prev,
+        currentMonthIndex: i,
+        currentMonthLabel: chunk.label,
+        chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'running' as const } : c)
+      }));
+
+      setConsoleLogs(prev => [
+        ...prev,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'step',
+          message: `[TIẾN TRÌNH THÁNG ${i + 1}/${chunks.length}] Đang truy xuất ${chunk.label} (từ ${chunk.fromDate} đến ${chunk.toDate})...`
+        }
+      ]);
+
+      try {
+        const res = await fetch('/api/gdt/query-invoices', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': activeToken,
+            'x-gdt-cookie': activeCookie
+          },
+          body: JSON.stringify({
+            fromDate: chunk.fromDate,
+            toDate: chunk.toDate,
+            invoiceType: filters.invoiceType,
+            size: 50,
+            token: activeToken,
+            cookieHeader: activeCookie
+          })
+        });
+
+        const rawText = await res.text();
+        let data: any = {};
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          data = { success: false, message: `Lỗi phân tích máy chủ HTTP ${res.status}` };
+        }
+
+        if (res.ok && Array.isArray(data.invoices)) {
+          const monthInvoices: GDTInvoice[] = data.invoices;
+          const purchases = monthInvoices.filter(inv => inv.loaiHdon === 'purchase');
+          const solds = monthInvoices.filter(inv => inv.loaiHdon === 'sold');
+          
+          const pAmount = purchases.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+          const pTax = purchases.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+          const sAmount = solds.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+          const sTax = solds.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+          const mAmount = pAmount + sAmount;
+          const mTax = pTax + sTax;
+          const mPayment = mAmount + mTax;
+
+          runningTotalInvoices += monthInvoices.length;
+          runningPurchases += purchases.length;
+          runningSolds += solds.length;
+          runningBeforeTax += mAmount;
+          runningTax += mTax;
+          runningPayment += mPayment;
+
+          // Merge into master invoices (avoid duplicates by ID)
+          setInvoices(prev => {
+            const map = new Map<string, GDTInvoice>();
+            prev.forEach(item => map.set(item.id, item));
+            monthInvoices.forEach(item => map.set(item.id, item));
+            return Array.from(map.values());
+          });
+          setDataSourceType('live_gdt');
+
+          // Update syncState chunk
+          setSyncState(prev => {
+            const completedCount = i + 1;
+            const updatedChunks = prev.chunks.map((c, idx) => {
+              if (idx === i) {
+                return {
+                  ...c,
+                  status: 'completed' as const,
+                  totalInvoices: monthInvoices.length,
+                  purchaseCount: purchases.length,
+                  soldCount: solds.length,
+                  purchaseAmount: pAmount,
+                  purchaseTax: pTax,
+                  soldAmount: sAmount,
+                  soldTax: sTax,
+                  totalAmount: mAmount,
+                  totalTax: mTax,
+                  totalPayment: mPayment,
+                  invoices: monthInvoices
+                };
+              }
+              return c;
+            });
+
+            return {
+              ...prev,
+              completedMonths: completedCount,
+              progressPercent: Math.round((completedCount / chunks.length) * 100),
+              chunks: updatedChunks,
+              totalInvoicesFound: runningTotalInvoices,
+              totalPurchaseFound: runningPurchases,
+              totalSoldFound: runningSolds,
+              totalBeforeTax: runningBeforeTax,
+              totalTax: runningTax,
+              totalPayment: runningPayment
+            };
+          });
+
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'success',
+              message: `✓ [HOÀN TẤT ${chunk.label}] Thu được ${monthInvoices.length} HĐ (${purchases.length} mua vào, ${solds.length} bán ra). Tổng lũy kế: ${runningTotalInvoices} HĐ.`
+            }
+          ]);
+        } else if (res.status === 401) {
+          hasEncounteredError = true;
+          setAccount(prev => ({ ...prev, isRealGDT: false }));
+          setSyncState(prev => ({
+            ...prev,
+            hasErrors: true,
+            chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'failed' as const, errorMessage: 'Phiên Cổng Thuế hết hạn, cần nhập Captcha' } : c)
+          }));
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'error',
+              message: `[PHIÊN HẾT HẠN] Phiên làm việc Cổng Thuế hết hạn khi đang tra cứu ${chunk.label}. Vui lòng nhập Captcha mới và bấm Thử lại.`
+            }
+          ]);
+          break;
+        } else {
+          hasEncounteredError = true;
+          const msg = data.message || `Lỗi máy chủ (${res.status})`;
+          setSyncState(prev => ({
+            ...prev,
+            hasErrors: true,
+            chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'failed' as const, errorMessage: msg } : c)
+          }));
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'warning',
+              message: `⚠️ [LỖI THÁNG ${chunk.label}] ${msg}. Bạn có thể bấm Thử lại tháng này trên bảng tiến trình.`
+            }
+          ]);
+        }
+      } catch (err: any) {
+        hasEncounteredError = true;
+        setSyncState(prev => ({
+          ...prev,
+          hasErrors: true,
+          chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'failed' as const, errorMessage: err.message } : c)
+        }));
+      }
+
+      // Small pacing delay to prevent 429
+      if (i < chunks.length - 1) {
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+
+    setSyncState(prev => ({
+      ...prev,
+      isActive: false,
+      isCompleted: true,
+      hasErrors: hasEncounteredError
+    }));
+
+    setConsoleLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'success',
+        message: `🎉 [HOÀN THÀNH TRA CỨU KỲ] Đã hoàn tất đồng bộ ${chunks.length} tháng (${filters.fromDate} -> ${filters.toDate}). Thu thập tổng cộng ${runningTotalInvoices} hóa đơn.`
+      }
+    ]);
+
+    setIsRefreshing(false);
+    return { success: true };
+  };
+
+  // Retry single chunk
+  const handleRetryChunk = async (chunkIndex: number) => {
+    const chunk = syncState.chunks[chunkIndex];
+    if (!chunk) return;
+
+    let activeToken = gdtSession?.token || '';
+    let activeCookie = gdtSession?.cookieHeader || '';
+
+    setSyncState(prev => ({
+      ...prev,
+      chunks: prev.chunks.map((c, idx) => idx === chunkIndex ? { ...c, status: 'running' as const, errorMessage: undefined } : c)
+    }));
+
+    setConsoleLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'step',
+        message: `[THỬ LẠI RIÊNG] Đang thử lấy lại dữ liệu ${chunk.label} (${chunk.fromDate} -> ${chunk.toDate})...`
+      }
+    ]);
+
+    try {
+      const res = await fetch('/api/gdt/query-invoices', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': activeToken,
+          'x-gdt-cookie': activeCookie
+        },
+        body: JSON.stringify({
+          fromDate: chunk.fromDate,
+          toDate: chunk.toDate,
+          invoiceType: filters.invoiceType,
+          size: 50,
+          token: activeToken,
+          cookieHeader: activeCookie
+        })
+      });
+
+      const data = await res.json().catch(() => ({ success: false }));
+
+      if (res.ok && Array.isArray(data.invoices)) {
+        const monthInvoices: GDTInvoice[] = data.invoices;
+        const purchases = monthInvoices.filter(inv => inv.loaiHdon === 'purchase');
+        const solds = monthInvoices.filter(inv => inv.loaiHdon === 'sold');
+        const pAmount = purchases.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+        const pTax = purchases.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+        const sAmount = solds.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+        const sTax = solds.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+        const mAmount = pAmount + sAmount;
+        const mTax = pTax + sTax;
+        const mPayment = mAmount + mTax;
+
+        setInvoices(prev => {
+          const map = new Map<string, GDTInvoice>();
+          prev.forEach(item => map.set(item.id, item));
+          monthInvoices.forEach(item => map.set(item.id, item));
+          return Array.from(map.values());
+        });
+
+        setSyncState(prev => {
+          const updatedChunks = prev.chunks.map((c, idx) => {
+            if (idx === chunkIndex) {
+              return {
+                ...c,
+                status: 'completed' as const,
+                totalInvoices: monthInvoices.length,
+                purchaseCount: purchases.length,
+                soldCount: solds.length,
+                purchaseAmount: pAmount,
+                purchaseTax: pTax,
+                soldAmount: sAmount,
+                soldTax: sTax,
+                totalAmount: mAmount,
+                totalTax: mTax,
+                totalPayment: mPayment,
+                invoices: monthInvoices
+              };
+            }
+            return c;
+          });
+
+          return {
+            ...prev,
+            chunks: updatedChunks
+          };
+        });
+
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'success',
+            message: `✓ [THỬ LẠI THÀNH CÔNG] Đã lấy thành công ${monthInvoices.length} hóa đơn của ${chunk.label}!`
+          }
+        ]);
+      } else {
+        const errMsg = data.message || `Lỗi HTTP ${res.status}`;
+        setSyncState(prev => ({
+          ...prev,
+          chunks: prev.chunks.map((c, idx) => idx === chunkIndex ? { ...c, status: 'failed' as const, errorMessage: errMsg } : c)
+        }));
+      }
+    } catch (err: any) {
+      setSyncState(prev => ({
+        ...prev,
+        chunks: prev.chunks.map((c, idx) => idx === chunkIndex ? { ...c, status: 'failed' as const, errorMessage: err.message } : c)
+      }));
+    }
+  };
+
+  const handlePauseSync = () => {
+    isSyncPausedRef.current = true;
+    setSyncState(prev => ({ ...prev, isPaused: true }));
+  };
+
+  const handleResumeSync = () => {
+    isSyncPausedRef.current = false;
+    setSyncState(prev => ({ ...prev, isPaused: false }));
+  };
+
   // Run Crawler / Query real invoices from GDT
   const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
     setIsRefreshing(true);
@@ -342,7 +757,12 @@ export default function App() {
       }
     }
 
-    // Step 2: Query Invoices from GDT
+    // Step 2: Check if multi-month range is requested (> 1 month)
+    if (isMultiMonthRange(filters.fromDate, filters.toDate)) {
+      return await runMultiMonthQuery(activeToken, activeCookie, mst);
+    }
+
+    // Step 3: Single-month Query from GDT
     setConsoleLogs(prev => [
       ...prev,
       {
@@ -601,6 +1021,8 @@ export default function App() {
           onDownloadPythonScript={handleDownloadPythonScript}
           onRefreshData={handleRunCrawler}
           onOpenImportXml={() => setIsImportXmlModalOpen(true)}
+          onOpenMonthlyReport={() => setIsMultiMonthModalOpen(true)}
+          isMultiMonthActive={syncState.isActive}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
           onToggleSidebar={() => setIsMobileSidebarOpen(true)}
@@ -618,6 +1040,7 @@ export default function App() {
           isLoading={isRefreshing}
           totalFilteredCount={filteredInvoices.length}
           onOpenImportXml={() => setIsImportXmlModalOpen(true)}
+          onOpenMonthlyReport={() => setIsMultiMonthModalOpen(true)}
         />
 
         {/* Data Source Notice Banner */}
@@ -708,6 +1131,28 @@ export default function App() {
         onClose={() => setIsImportXmlModalOpen(false)}
         onImportSuccess={handleImportXmlSuccess}
       />
+
+      {/* Multi-Month Sync Progress & Report Modal */}
+      <MultiMonthSyncModal
+        isOpen={isMultiMonthModalOpen}
+        onClose={() => setIsMultiMonthModalOpen(false)}
+        syncState={syncState}
+        account={account}
+        allInvoices={invoices}
+        onPauseSync={handlePauseSync}
+        onResumeSync={handleResumeSync}
+        onRetryChunk={handleRetryChunk}
+        onStartSync={() => handleRunCrawler()}
+      />
+
+      {/* Persistent Floating Progress Badge */}
+      {showFloatingBadge && !isMultiMonthModalOpen && (
+        <FloatingSyncBadge
+          syncState={syncState}
+          onOpenModal={() => setIsMultiMonthModalOpen(true)}
+          onDismiss={() => setShowFloatingBadge(false)}
+        />
+      )}
     </div>
   );
 }
