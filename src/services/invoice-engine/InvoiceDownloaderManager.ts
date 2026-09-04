@@ -20,6 +20,8 @@ import { FourSiDriver } from './drivers/FourSiDriver';
 import { VnptDriver } from './drivers/VnptDriver';
 import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
 import { BkavDriver } from './drivers/BkavDriver';
+import { ThaiSonDriver } from './drivers/ThaiSonDriver';
+import { CyberBillDriver } from './drivers/CyberBillDriver';
 import { GenericFallbackDriver } from './drivers/GenericFallbackDriver';
 import { detectProvider, detectProviderWithDetails, DetectedInvoiceProvider, DetectionResultDetails } from './providerDetector';
 
@@ -41,6 +43,8 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
     this.registerDriver(new BkavDriver());
+    this.registerDriver(new ThaiSonDriver());
+    this.registerDriver(new CyberBillDriver());
   }
 
   /**
@@ -152,14 +156,32 @@ export class InvoiceDownloaderManager {
       return res;
     }
 
-    // 2. Tự động nhận diện Driver phù hợp
+    // 2. Tự động nhận diện Driver phù hợp HOẶC áp dụng Driver do người dùng chỉ định
     let selectedDriver: InvoiceProviderDriver = this.fallbackDriver;
-    try {
-      selectedDriver = await this.selectDriver(xmlContent);
-      this.log(`Tự động chọn Driver: [${selectedDriver.name}] (${selectedDriver.providerCode})`, overallLogs);
-    } catch (err: any) {
-      this.log(`Lỗi khi phát hiện Driver, chuyển sang Fallback: ${err.message}`, overallLogs);
-      selectedDriver = this.fallbackDriver;
+    const isExplicitOverride = Boolean(options?.overrideProvider && options.overrideProvider !== 'AUTO');
+
+    if (isExplicitOverride) {
+      if (options!.overrideProvider === 'GENERIC' || options!.overrideProvider === 'FALLBACK') {
+        selectedDriver = this.fallbackDriver;
+        this.log(`Áp dụng Nhà cung cấp do Người dùng chỉ định: [${this.fallbackDriver.name}] (Safeguard Fallback)`, overallLogs);
+      } else {
+        const manual = this.drivers.find(d => d.providerCode.toUpperCase() === options!.overrideProvider?.toUpperCase());
+        if (manual) {
+          selectedDriver = manual;
+          this.log(`Áp dụng Nhà cung cấp do Người dùng chỉ định: [${selectedDriver.name}] (${selectedDriver.providerCode})`, overallLogs);
+        } else {
+          this.log(`Không tìm thấy Driver tương ứng mã [${options!.overrideProvider}], chuyển về Generic Fallback`, overallLogs);
+          selectedDriver = this.fallbackDriver;
+        }
+      }
+    } else if (!options?.forceFallback) {
+      try {
+        selectedDriver = await this.selectDriver(xmlContent);
+        this.log(`Tự động chọn Driver: [${selectedDriver.name}] (${selectedDriver.providerCode})`, overallLogs);
+      } catch (err: any) {
+        this.log(`Lỗi khi phát hiện Driver, chuyển sang Fallback: ${err.message}`, overallLogs);
+        selectedDriver = this.fallbackDriver;
+      }
     }
 
     // 3. Trích xuất thông tin cần thiết từ XML
@@ -170,6 +192,25 @@ export class InvoiceDownloaderManager {
     } catch (extractErr: any) {
       this.log(`Lỗi trích xuất metadata: ${extractErr.message}. Sử dụng Fallback parser.`, overallLogs);
       invoiceInfo = await this.fallbackDriver.extractInfo(xmlContent);
+    }
+
+    // 3.1 Hợp nhất thông tin tùy chỉnh từ người dùng (customInfo: lookupCode, secretCode, lookupUrl, sellerTaxCode)
+    if (options?.customInfo) {
+      if (options.customInfo.lookupCode) {
+        invoiceInfo.lookupCode = options.customInfo.lookupCode;
+        this.log(`Áp dụng Mã tra cứu do người dùng cung cấp: "${invoiceInfo.lookupCode}"`, overallLogs);
+      }
+      if (options.customInfo.secretCode) {
+        invoiceInfo.secretCode = options.customInfo.secretCode;
+        this.log(`Áp dụng Mã bí mật do người dùng cung cấp: "${invoiceInfo.secretCode}"`, overallLogs);
+      }
+      if (options.customInfo.lookupUrl) {
+        invoiceInfo.lookupUrl = options.customInfo.lookupUrl;
+        this.log(`Áp dụng Cổng tra cứu tùy chỉnh: "${invoiceInfo.lookupUrl}"`, overallLogs);
+      }
+      if (options.customInfo.sellerTaxCode) {
+        invoiceInfo.sellerTaxCode = options.customInfo.sellerTaxCode;
+      }
     }
 
     // 4. Thực thi tải PDF qua Driver được chọn

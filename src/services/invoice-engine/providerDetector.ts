@@ -26,11 +26,13 @@ export type DetectedInvoiceProvider =
   | '4SI' 
   | 'EASYINVOICE' 
   | 'BKAV' 
+  | 'THAISON'
+  | 'CYBERBILL'
   | 'UNKNOWN';
 
 export interface DetectionResultDetails {
   provider: DetectedInvoiceProvider;
-  priority: 1 | 2 | 0; // 1: Domain URL, 2: Digital Signature CA, 0: Unknown Fallback
+  priority: 1 | 1.5 | 2 | 0; // 1: Domain URL, 1.5: Solution Provider MSTTCGP, 2: Digital Signature CA, 0: Unknown Fallback
   matchedPattern: string;
   sourceDescription: string;
 }
@@ -38,7 +40,7 @@ export interface DetectionResultDetails {
 /**
  * Hàm nhận diện nhà cung cấp HĐĐT từ chuỗi XML theo đúng thứ tự ưu tiên nghiêm ngặt
  * @param xmlString Chuỗi XML hóa đơn điện tử
- * @returns Mã nhà cung cấp ('MISA' | 'VIETTEL' | 'VNPT' | '4SI' | 'EASYINVOICE' | 'BKAV' | 'UNKNOWN')
+ * @returns Mã nhà cung cấp
  */
 export function detectProvider(xmlString: string | null | undefined): DetectedInvoiceProvider {
   return detectProviderWithDetails(xmlString).provider;
@@ -61,8 +63,8 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   // ƯU TIÊN 1: Regex quét Domain URL Tra cứu trong toàn bộ XML
   // =========================================================================
 
-  // 1.1 meinvoice.vn -> 'MISA'
-  if (/meinvoice\.vn/i.test(xmlString)) {
+  // 1.1 meinvoice.vn / misa.vn -> 'MISA'
+  if (/meinvoice\.vn|tracuu\.meinvoice|misa\.vn/i.test(xmlString)) {
     return {
       provider: 'MISA',
       priority: 1,
@@ -71,8 +73,8 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
-  // 1.2 sinvoice.viettel.vn -> 'VIETTEL'
-  if (/sinvoice\.viettel\.vn/i.test(xmlString)) {
+  // 1.2 sinvoice.viettel.vn / sinvoice.vn / viettel.vn/sinvoice -> 'VIETTEL'
+  if (/sinvoice\.viettel\.vn|sinvoice\.vn|vinvoice\.viettel\.vn|viettel\.vn\/sinvoice/i.test(xmlString)) {
     return {
       provider: 'VIETTEL',
       priority: 1,
@@ -81,8 +83,8 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
-  // 1.3 vnpt-invoice -> 'VNPT'
-  if (/vnpt-invoice/i.test(xmlString)) {
+  // 1.3 vnpt-invoice / invoice.vnpt.vn -> 'VNPT'
+  if (/vnpt-invoice|invoice\.vnpt\.vn|tracuu\.vnpt-invoice/i.test(xmlString)) {
     return {
       provider: 'VNPT',
       priority: 1,
@@ -91,8 +93,8 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
-  // 1.4 inv.4si.vn -> '4SI'
-  if (/inv\.4si\.vn/i.test(xmlString)) {
+  // 1.4 inv.4si.vn / 4si.vn -> '4SI'
+  if (/inv\.4si\.vn|4si\.vn/i.test(xmlString)) {
     return {
       provider: '4SI',
       priority: 1,
@@ -101,8 +103,8 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
-  // 1.5 easyinvoice -> 'EASYINVOICE'
-  if (/easyinvoice/i.test(xmlString)) {
+  // 1.5 easyinvoice / softdreams.vn -> 'EASYINVOICE'
+  if (/easyinvoice|softdreams\.vn|tracuu\.easyinvoice/i.test(xmlString)) {
     return {
       provider: 'EASYINVOICE',
       priority: 1,
@@ -111,14 +113,137 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
-  // 1.6 bkav -> 'BKAV'
-  if (/bkav/i.test(xmlString)) {
+  // 1.6 bkav / ehoadon.vn -> 'BKAV'
+  if (/bkav|ehoadon\.vn|ehoadon\.bkav/i.test(xmlString)) {
     return {
       provider: 'BKAV',
       priority: 1,
       matchedPattern: 'bkav',
-      sourceDescription: 'Phát hiện Domain/Chuỗi tra cứu Bkav eHoadon (bkav)'
+      sourceDescription: 'Phát hiện Domain/Chuỗi tra cứu Bkav eHoadon (bkav / ehoadon.vn)'
     };
+  }
+
+  // 1.7 einvoice.vn / thaison.vn -> 'THAISON'
+  if (/einvoice\.vn|thaison\.vn/i.test(xmlString)) {
+    return {
+      provider: 'THAISON',
+      priority: 1,
+      matchedPattern: 'einvoice.vn',
+      sourceDescription: 'Phát hiện Domain tra cứu Thái Sơn E-Invoice (einvoice.vn)'
+    };
+  }
+
+  // 1.8 cyberbill.vn / cyberlotus -> 'CYBERBILL'
+  if (/cyberbill\.vn|cyberlotus\.com/i.test(xmlString)) {
+    return {
+      provider: 'CYBERBILL',
+      priority: 1,
+      matchedPattern: 'cyberbill.vn',
+      sourceDescription: 'Phát hiện Domain tra cứu CyberLotus CyberBill (cyberbill.vn)'
+    };
+  }
+
+  // =========================================================================
+  // ƯU TIÊN 1.5: Thẻ <MSTTCGP> & <TenTCGP> (Mã số thuế & Tên Tổ chức giải pháp)
+  // Chuẩn pháp lý Quyết định 1450/QĐ-TCT và 1510/QĐ-TCT của Tổng cục Thuế
+  // =========================================================================
+  const msttcgpMatch = xmlString.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
+  if (msttcgpMatch && msttcgpMatch[1]) {
+    const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    if (msttcgp === '0101243150') {
+      return {
+        provider: 'MISA',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0101243150',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp MISA meInvoice qua thẻ <MSTTCGP> (0101243150)'
+      };
+    }
+    if (msttcgp === '0100109106') {
+      return {
+        provider: 'VIETTEL',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0100109106',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Viettel S-Invoice qua thẻ <MSTTCGP> (0100109106)'
+      };
+    }
+    if (msttcgp === '0100684378') {
+      return {
+        provider: 'VNPT',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0100684378',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp VNPT Invoice qua thẻ <MSTTCGP> (0100684378)'
+      };
+    }
+    if (msttcgp === '0101360697') {
+      return {
+        provider: 'BKAV',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0101360697',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Bkav eHoadon qua thẻ <MSTTCGP> (0101360697)'
+      };
+    }
+    if (msttcgp === '0105987432') {
+      return {
+        provider: 'EASYINVOICE',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0105987432',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Softdreams EasyInvoice qua thẻ <MSTTCGP> (0105987432)'
+      };
+    }
+    if (msttcgp === '0315744883') {
+      return {
+        provider: '4SI',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0315744883',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp 4Si E-Invoice qua thẻ <MSTTCGP> (0315744883)'
+      };
+    }
+    if (msttcgp === '0101300842') {
+      return {
+        provider: 'THAISON',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0101300842',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Thái Sơn E-Invoice qua thẻ <MSTTCGP> (0101300842)'
+      };
+    }
+    if (msttcgp === '0107871301') {
+      return {
+        provider: 'CYBERBILL',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0107871301',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp CyberBill qua thẻ <MSTTCGP> (0107871301)'
+      };
+    }
+  }
+
+  // Quét thẻ tên tổ chức giải pháp <TenTCGP>, <TCGP>, <ToChucGiaiPhap>
+  const tentcgpMatch = xmlString.match(/<(?:[a-zA-Z0-9_]+:)?(?:TenTCGP|TCGP|ToChucGiaiPhap)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:TenTCGP|TCGP|ToChucGiaiPhap)>/i);
+  if (tentcgpMatch && tentcgpMatch[1]) {
+    const tentcgp = tentcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim().toUpperCase();
+    if (tentcgp.includes('MISA')) {
+      return { provider: 'MISA', priority: 1.5, matchedPattern: 'TenTCGP: MISA', sourceDescription: 'Tổ chức giải pháp: MISA' };
+    }
+    if (tentcgp.includes('VIETTEL')) {
+      return { provider: 'VIETTEL', priority: 1.5, matchedPattern: 'TenTCGP: VIETTEL', sourceDescription: 'Tổ chức giải pháp: Viettel' };
+    }
+    if (tentcgp.includes('VNPT')) {
+      return { provider: 'VNPT', priority: 1.5, matchedPattern: 'TenTCGP: VNPT', sourceDescription: 'Tổ chức giải pháp: VNPT' };
+    }
+    if (tentcgp.includes('BKAV')) {
+      return { provider: 'BKAV', priority: 1.5, matchedPattern: 'TenTCGP: BKAV', sourceDescription: 'Tổ chức giải pháp: BKAV' };
+    }
+    if (tentcgp.includes('SOFTDREAMS') || tentcgp.includes('EASYINVOICE')) {
+      return { provider: 'EASYINVOICE', priority: 1.5, matchedPattern: 'TenTCGP: SOFTDREAMS', sourceDescription: 'Tổ chức giải pháp: Softdreams EasyInvoice' };
+    }
+    if (tentcgp.includes('4SI')) {
+      return { provider: '4SI', priority: 1.5, matchedPattern: 'TenTCGP: 4SI', sourceDescription: 'Tổ chức giải pháp: 4Si' };
+    }
+    if (tentcgp.includes('THÁI SƠN') || tentcgp.includes('THAISON')) {
+      return { provider: 'THAISON', priority: 1.5, matchedPattern: 'TenTCGP: THAISON', sourceDescription: 'Tổ chức giải pháp: Thái Sơn' };
+    }
+    if (tentcgp.includes('CYBERLOTUS') || tentcgp.includes('CYBERBILL')) {
+      return { provider: 'CYBERBILL', priority: 1.5, matchedPattern: 'TenTCGP: CYBERBILL', sourceDescription: 'Tổ chức giải pháp: CyberBill' };
+    }
   }
 
   // =========================================================================

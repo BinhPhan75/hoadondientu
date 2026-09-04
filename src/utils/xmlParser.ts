@@ -1,5 +1,6 @@
 import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
+import { detectProvider } from '../services/invoice-engine/providerDetector';
 
 /**
  * Reads a number to Vietnamese currency words according to standard Vietnamese accounting rules.
@@ -316,9 +317,10 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
 
   // 7. Digital Signature (DSCKS)
   let signerName = getTag(domDoc || xmlSource, 'X509SubjectName') || nbten;
-  let caProvider = getTag(domDoc || xmlSource, 'X509IssuerName') || 'VNPT-CA';
+  let rawIssuer = getTag(domDoc || xmlSource, 'X509IssuerName') || '';
   const signedDate = getTag(domDoc || xmlSource, 'SigningTime') || nlap;
   const hasDigitalSignature = xmlSource.includes('Signature') || xmlSource.includes('X509Certificate');
+  let caProvider = rawIssuer || (hasDigitalSignature ? 'Chữ ký số hợp lệ' : 'Chưa ký số');
 
   if (signerName.includes('CN=')) {
     const cnMatch = signerName.match(/CN=([^,]+)/i);
@@ -336,6 +338,37 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   if (buyerSigBlock && buyerSigBlock.includes('Signature')) {
     buyerSignerName = extractTagValue(buyerSigBlock, 'X509SubjectName') || nmten;
     buyerSignedDate = extractTagValue(buyerSigBlock, 'SigningTime') || nlap;
+  }
+
+  // 8. Provider & Lookup Details (Nhà cung cấp giải pháp & Mã tra cứu)
+  const provider = detectProvider(xmlSource);
+  const msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
+  const tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
+
+  // Bóc tách mã tra cứu từ <MTCuu>, <MaTraCuu>, <TTin>
+  let lookupCode = getTag(domDoc || xmlSource, 'MTCuu') || getTag(domDoc || xmlSource, 'MaTraCuu') || '';
+  let lookupUrl = getTag(domDoc || xmlSource, 'Website') || getTag(domDoc || xmlSource, 'WebTraCuu') || '';
+
+  if (!lookupCode || !lookupUrl) {
+    const ttinBlocks = extractTagBlocks(xmlSource, 'TTin');
+    for (const block of ttinBlocks) {
+      const truong = extractTagValue(block, 'TTruong').toLowerCase();
+      const dlieu = extractTagValue(block, 'DLieu');
+      if (!lookupCode && (truong.includes('tra cuu') || truong.includes('tracuu') || truong.includes('matracuu') || truong.includes('fkey') || truong.includes('mã tra cứu'))) {
+        lookupCode = dlieu;
+      }
+      if (!lookupUrl && (truong.includes('link') || truong.includes('url') || truong.includes('website') || truong.includes('cổng tra cứu') || dlieu.startsWith('http'))) {
+        lookupUrl = dlieu;
+      }
+    }
+  }
+
+  // Nếu lookupUrl chưa có, trích xuất URL http/https bất kỳ trong XML
+  if (!lookupUrl) {
+    const urlMatch = xmlSource.match(/https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:\/[^\s<"']*)?/i);
+    if (urlMatch && urlMatch[0] && !urlMatch[0].includes('w3.org')) {
+      lookupUrl = urlMatch[0];
+    }
   }
 
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;
@@ -380,6 +413,11 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     caProvider,
     buyerSignerName,
     buyerSignedDate,
+    provider,
+    msttcgp,
+    tentcgp,
+    lookupCode,
+    lookupUrl,
     items: items.length > 0 ? items : [
       {
         lineNo: 1,

@@ -85,8 +85,14 @@ export interface GDTInvoice {
   // Hàng hóa chi tiết
   items: InvoiceItem[];
 
-  // Dữ liệu XML gốc
+  // Dữ liệu XML gốc & Nhà cung cấp
   rawXml?: string;
+  provider?: string;
+  msttcgp?: string; // Mã số thuế tổ chức giải pháp HĐĐT (MISA: 0101243150, Viettel: 0100109106, VNPT: 0100684378,...)
+  tentcgp?: string; // Tên tổ chức giải pháp
+  lookupCode?: string; // Mã tra cứu hóa đơn
+  lookupUrl?: string; // Đường dẫn cổng tra cứu
+  secretCode?: string; // Mã bí mật tra cứu
 }
 
 export interface FilterParams {

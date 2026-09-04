@@ -24,10 +24,102 @@ import {
   Cpu,
   Sparkles,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Key,
+  Globe,
+  Sliders,
+  HelpCircle,
+  Search,
+  RotateCcw,
+  ArrowUpRight
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
+
+export interface ProviderPresetOption {
+  code: string;
+  name: string;
+  shortName: string;
+  badge: string;
+  portalUrl: string;
+  description: string;
+  color: string;
+}
+
+export const SUPPORTED_PROVIDERS: ProviderPresetOption[] = [
+  { 
+    code: 'MISA', 
+    name: 'MISA meInvoice', 
+    shortName: 'meinvoice.vn', 
+    badge: 'MISA', 
+    portalUrl: 'https://www.meinvoice.vn/tra-cuu', 
+    description: 'Tra cứu qua Mã tra cứu hóa đơn MISA (8-32 ký tự alphanumeric)', 
+    color: 'border-blue-500/50 text-blue-400 bg-blue-950/40 hover:bg-blue-900/50' 
+  },
+  { 
+    code: 'VIETTEL', 
+    name: 'Viettel S-Invoice', 
+    shortName: 'sinvoice.viettel.vn', 
+    badge: 'Viettel', 
+    portalUrl: 'https://sinvoice.viettel.vn/tracuuhoadon', 
+    description: 'Tra cứu qua Mã số bí mật hoặc Số HĐ + Ký hiệu + MST bên bán', 
+    color: 'border-red-500/50 text-red-400 bg-red-950/40 hover:bg-red-900/50' 
+  },
+  { 
+    code: 'VNPT', 
+    name: 'VNPT Invoice', 
+    shortName: 'vnpt-invoice.com.vn', 
+    badge: 'VNPT', 
+    portalUrl: 'https://tracuu.vnpt-invoice.com.vn', 
+    description: 'Tra cứu qua Mã tra cứu / Fkey hóa đơn VNPT', 
+    color: 'border-cyan-500/50 text-cyan-400 bg-cyan-950/40 hover:bg-cyan-900/50' 
+  },
+  { 
+    code: 'BKAV', 
+    name: 'Bkav eHoadon', 
+    shortName: 'ehoadon.vn', 
+    badge: 'Bkav', 
+    portalUrl: 'https://ehoadon.bkav.com/tra-cuu', 
+    description: 'Tra cứu qua Mã tra cứu / Mã nhận hóa đơn Bkav', 
+    color: 'border-amber-500/50 text-amber-400 bg-amber-950/40 hover:bg-amber-900/50' 
+  },
+  { 
+    code: 'EASYINVOICE', 
+    name: 'Softdreams EasyInvoice', 
+    shortName: 'easyinvoice.vn', 
+    badge: 'EasyInvoice', 
+    portalUrl: 'https://easyinvoice.vn/tra-cuu', 
+    description: 'Tra cứu qua Mã tra cứu Softdreams EasyInvoice', 
+    color: 'border-emerald-500/50 text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900/50' 
+  },
+  { 
+    code: '4SI', 
+    name: '4Si E-Invoice', 
+    shortName: 'inv.4si.vn', 
+    badge: '4Si', 
+    portalUrl: 'https://inv.4si.vn', 
+    description: 'Tra cứu qua Mã tra cứu 4Si + OCR Captcha', 
+    color: 'border-purple-500/50 text-purple-400 bg-purple-950/40 hover:bg-purple-900/50' 
+  },
+  { 
+    code: 'THAISON', 
+    name: 'Thái Sơn E-Invoice', 
+    shortName: 'einvoice.vn', 
+    badge: 'Thái Sơn', 
+    portalUrl: 'https://einvoice.vn/tra-cuu', 
+    description: 'Tra cứu qua Mã nhận hóa đơn / MST bên bán Thái Sơn', 
+    color: 'border-indigo-500/50 text-indigo-400 bg-indigo-950/40 hover:bg-indigo-900/50' 
+  },
+  { 
+    code: 'CYBERBILL', 
+    name: 'CyberBill (CyberLotus)', 
+    shortName: 'cyberbill.vn', 
+    badge: 'CyberBill', 
+    portalUrl: 'https://cyberbill.vn/tra-cuu', 
+    description: 'Tra cứu qua Mã tra cứu CyberBill + MST bên bán', 
+    color: 'border-teal-500/50 text-teal-400 bg-teal-950/40 hover:bg-teal-900/50' 
+  }
+];
 import { 
   generateInvoiceQrCode, 
   exportInvoiceToPdfFile, 
@@ -69,6 +161,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [detectedProvider, setDetectedProvider] = useState<any>(null);
   const [isDetecting, setIsDetecting] = useState(false);
 
+  // Manual Override & Custom Lookup Parameters States
+  const [selectedProviderOverride, setSelectedProviderOverride] = useState<string>('AUTO');
+  const [customLookupCode, setCustomLookupCode] = useState<string>('');
+  const [customSecretCode, setCustomSecretCode] = useState<string>('');
+  const [customLookupUrl, setCustomLookupUrl] = useState<string>('');
+  const [customSellerTaxCode, setCustomSellerTaxCode] = useState<string>('');
+  const [isCopiedLookup, setIsCopiedLookup] = useState(false);
+
   // Find index in list for navigation
   const currentIndex = invoice && allInvoices.length > 0 
     ? allInvoices.findIndex(i => i.id === invoice.id) 
@@ -103,6 +203,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsDetecting(true);
     setEngineResult(null);
     setEngineLogs([]);
+    setSelectedProviderOverride('AUTO');
+
     const xml = invoice.rawXml || generateGDTInvoiceXml(invoice);
     fetch('/api/invoice-downloader/detect', {
       method: 'POST',
@@ -113,6 +215,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       .then(data => {
         if (data.success) {
           setDetectedProvider(data);
+          // Pre-populate fields from detection or invoice
+          const code = data.info?.lookupCode || invoice.lookupCode || '';
+          if (code) setCustomLookupCode(code);
+          const secret = data.info?.secretCode || invoice.secretCode || '';
+          if (secret) setCustomSecretCode(secret);
+          const url = data.info?.lookupUrl || invoice.lookupUrl || '';
+          if (url) setCustomLookupUrl(url);
+          setCustomSellerTaxCode(invoice.nbmst || '');
         }
       })
       .catch(err => {
@@ -120,6 +230,55 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       })
       .finally(() => setIsDetecting(false));
   }, [invoice]);
+
+  // Handle manual provider selection from chips
+  const handleSelectProvider = (code: string) => {
+    setSelectedProviderOverride(code);
+    if (code === 'AUTO') {
+      const autoUrl = detectedProvider?.info?.lookupUrl || invoice?.lookupUrl || '';
+      setCustomLookupUrl(autoUrl);
+    } else {
+      const preset = SUPPORTED_PROVIDERS.find(p => p.code === code);
+      if (preset && !customLookupUrl) {
+        setCustomLookupUrl(preset.portalUrl);
+      }
+    }
+  };
+
+  // Reset lookup parameters to values detected in XML
+  const handleResetLookupInfo = () => {
+    const code = detectedProvider?.info?.lookupCode || invoice?.lookupCode || '';
+    setCustomLookupCode(code);
+    const secret = detectedProvider?.info?.secretCode || invoice?.secretCode || '';
+    setCustomSecretCode(secret);
+    const url = detectedProvider?.info?.lookupUrl || invoice?.lookupUrl || '';
+    setCustomLookupUrl(url);
+    setCustomSellerTaxCode(invoice?.nbmst || '');
+    setSelectedProviderOverride('AUTO');
+  };
+
+  // Quick paste lookup code from clipboard
+  const handlePasteLookupCode = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setCustomLookupCode(text.trim());
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  // Open provider portal in new window
+  const handleOpenPortal = () => {
+    let url = customLookupUrl;
+    if (!url) {
+      const activeCode = selectedProviderOverride !== 'AUTO' ? selectedProviderOverride : detectedProvider?.provider;
+      const preset = SUPPORTED_PROVIDERS.find(p => p.code === activeCode);
+      url = preset?.portalUrl || 'https://tracuuhoadon.gdt.gov.vn';
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   if (!invoice) return null;
 
@@ -134,16 +293,34 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!invoice) return;
     setIsEngineDownloading(true);
     setEngineResult(null);
+
+    const activeTarget = forceFallback 
+      ? 'GENERIC (Safeguard)' 
+      : (selectedProviderOverride !== 'AUTO' ? selectedProviderOverride : (detectedProvider?.provider || 'UNKNOWN'));
+
     setEngineLogs([
       `[${new Date().toLocaleTimeString('vi-VN')}] [Khởi động] Đang kết nối đến Multi-Provider Adapter Engine...`,
-      `[${new Date().toLocaleTimeString('vi-VN')}] [Tham số] Chế độ fallback ép buộc: ${forceFallback ? 'CÓ' : 'TỰ ĐỘNG'}`
+      `[${new Date().toLocaleTimeString('vi-VN')}] [Mục tiêu tải]: ${activeTarget} ${selectedProviderOverride !== 'AUTO' ? '(Người dùng chỉ định)' : '(Tự động phát hiện)'}`,
+      `[${new Date().toLocaleTimeString('vi-VN')}] [Mã tra cứu]: ${customLookupCode || '(Trích xuất từ XML)'}`,
+      `[${new Date().toLocaleTimeString('vi-VN')}] [Cổng tra cứu]: ${customLookupUrl || '(Mặc định theo driver)'}`
     ]);
+
     try {
       const xml = invoice.rawXml || generateGDTInvoiceXml(invoice);
       const res = await fetch('/api/invoice-downloader/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xml, forceFallback })
+        body: JSON.stringify({
+          xml,
+          forceFallback,
+          overrideProvider: selectedProviderOverride !== 'AUTO' ? selectedProviderOverride : undefined,
+          customInfo: {
+            lookupCode: customLookupCode.trim() || undefined,
+            secretCode: customSecretCode.trim() || customLookupCode.trim() || undefined,
+            lookupUrl: customLookupUrl.trim() || undefined,
+            sellerTaxCode: customSellerTaxCode.trim() || invoice.nbmst || undefined
+          }
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -939,19 +1116,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                MULTI-PROVIDER ADAPTER ENGINE & OCR CAPTCHA TAB
                ============================================================ */
             <div className="w-full max-w-4xl space-y-5 animate-in fade-in duration-200">
-              {/* Architecture Intro Banner */}
-              <div className="bg-linear-to-r from-amber-950/50 via-slate-900 to-slate-900 border border-amber-500/30 p-4 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
+              {/* Architecture & Intent Notification Banner */}
+              <div className="bg-linear-to-r from-amber-950/60 via-slate-900 to-slate-900 border border-amber-500/40 p-4 rounded-lg flex flex-col md:flex-row md:items-start justify-between gap-3">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2">
                     <span className="p-1.5 bg-amber-500/20 text-amber-400 rounded-md border border-amber-500/30">
                       <Layers className="w-4 h-4" />
                     </span>
                     <h4 className="text-sm font-bold text-amber-300">
-                      Hệ Thống Tải PDF Gốc Nhà Cung Cấp (Adapter Pattern)
+                      Hệ Thống Tải PDF Gốc Nhà Cung Cấp & Bộ Nhận Diện Nghiêm Ngặt
                     </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Chuẩn Nghị định 123
+                    </span>
                   </div>
-                  <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                    Tự động nhận diện nhà cung cấp giải pháp HĐĐT (MISA, Viettel, 4Si, VNPT...), giải Captcha bằng OCR Tesseract và tự động fallback về bản dựng nội bộ nếu cổng nhà cung cấp bảo trì.
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    Theo quy tắc an toàn nghiêm ngặt: nếu tệp XML không chứa domain tra cứu hoặc thẻ nhà cung cấp giải pháp hợp lệ, hệ thống sẽ trả về <strong className="text-amber-400 font-mono">UNKNOWN</strong> (tuyệt đối không đoán mò). Bạn có thể <strong className="text-emerald-300">chọn trực tiếp nhà cung cấp</strong> hoặc nhập mã tra cứu bên dưới để tải PDF gốc, hoặc bấm <strong className="text-cyan-300">Tải Bản Thể Hiện Chuẩn Hóa</strong> để tạo ngay file PDF sắc nét.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -962,73 +1142,328 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Provider Detection Card */}
+              {/* 3-Tier Detection Priority Inspector */}
               <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-amber-400" />
                     <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
-                      Kết quả nhận diện Driver tự động
+                      Phân tích nhận diện theo 3 thứ tự ưu tiên
                     </span>
                   </div>
                   {isDetecting ? (
                     <span className="text-xs text-gray-400 flex items-center gap-1.5 font-mono">
                       <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
-                      Đang phân tích XML...
+                      Đang quét XML...
                     </span>
                   ) : detectedProvider ? (
-                    <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded text-xs font-mono font-bold">
-                      {detectedProvider.driverName} ({detectedProvider.provider})
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">Kết quả tự động:</span>
+                      <span className={`px-2.5 py-0.5 rounded text-xs font-mono font-bold border ${
+                        detectedProvider.provider === 'UNKNOWN'
+                          ? 'bg-amber-950/70 text-amber-400 border-amber-600/50'
+                          : 'bg-emerald-950/70 text-emerald-300 border-emerald-600/50'
+                      }`}>
+                        {detectedProvider.provider === 'UNKNOWN' ? 'UNKNOWN (Chưa xác định)' : `${detectedProvider.driverName} (${detectedProvider.provider})`}
+                      </span>
+                    </div>
                   ) : (
                     <span className="text-xs text-gray-400 font-mono">Chưa nhận diện</span>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Nhà cung cấp</span>
-                    <span className="font-bold text-amber-300 text-sm mt-0.5 block">
-                      {detectedProvider?.provider || 'TỰ ĐỘNG'}
+                {/* Priority Levels Breakdown Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  {/* Priority 1 */}
+                  <div className={`p-3 rounded border transition-colors ${
+                    detectedProvider?.priorityTier === 1 
+                      ? 'bg-emerald-950/30 border-emerald-600/60' 
+                      : 'bg-gray-950 border-gray-800'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-400 uppercase font-mono font-bold">Ưu tiên 1: Domain URL</span>
+                      {detectedProvider?.priorityTier === 1 && (
+                        <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 font-mono font-bold rounded">KHỚP</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-200 mt-1 block leading-snug">
+                      Quét Regex domain URL tra cứu trong toàn bộ XML (meinvoice.vn, sinvoice.viettel.vn, vnpt-invoice, inv.4si.vn, easyinvoice, bkav...)
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-1 block">
-                      {detectedProvider?.driverName || 'Generic Fallback'}
-                    </span>
+                    <div className="mt-2 text-[11px] font-mono text-gray-400 bg-gray-900 px-2 py-1 rounded truncate" title={detectedProvider?.info?.lookupUrl || 'Không tìm thấy URL hợp lệ'}>
+                      URL: <span className={detectedProvider?.info?.lookupUrl ? 'text-cyan-300' : 'text-gray-500'}>
+                        {detectedProvider?.info?.lookupUrl || '(Không có)'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Mã tra cứu / Mã bí mật</span>
-                    <span className="font-mono font-bold text-emerald-400 text-sm mt-0.5 block truncate" title={detectedProvider?.info?.lookupCode || detectedProvider?.info?.secretCode || 'Tự động bóc tách'}>
-                      {detectedProvider?.info?.lookupCode || detectedProvider?.info?.secretCode || detectedProvider?.info?.fkey || '(Tự động bóc tách)'}
+                  {/* Priority 2 */}
+                  <div className={`p-3 rounded border transition-colors ${
+                    detectedProvider?.priorityTier === 2 
+                      ? 'bg-emerald-950/30 border-emerald-600/60' 
+                      : 'bg-gray-950 border-gray-800'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-400 uppercase font-mono font-bold">Ưu tiên 2: Thẻ TCGP</span>
+                      {detectedProvider?.priorityTier === 2 && (
+                        <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 font-mono font-bold rounded">KHỚP</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-200 mt-1 block leading-snug">
+                      Đọc thẻ &lt;MSTTCGP&gt; & &lt;TenTCGP&gt; của Tổ chức truyền nhận / giải pháp cung cấp hóa đơn điện tử
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-1 block">
-                      Bóc tách từ thẻ XML gốc
-                    </span>
+                    <div className="mt-2 text-[11px] font-mono text-gray-400 bg-gray-900 px-2 py-1 rounded truncate" title={detectedProvider?.details?.reason || invoice?.msttcgp || 'Không có thẻ TCGP'}>
+                      MST: <span className={invoice?.msttcgp ? 'text-amber-300' : 'text-gray-500'}>
+                        {invoice?.msttcgp ? `${invoice.msttcgp} (${invoice.tentcgp || ''})` : '(Không có)'}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Giải mã Captcha</span>
-                    <span className="font-bold text-blue-300 text-sm mt-0.5 block flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                      {detectedProvider?.supportsCaptcha ? 'Tesseract OCR' : 'API Token'}
+                  {/* Priority 3 */}
+                  <div className={`p-3 rounded border transition-colors ${
+                    detectedProvider?.priorityTier === 3 
+                      ? 'bg-emerald-950/30 border-emerald-600/60' 
+                      : 'bg-gray-950 border-gray-800'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-gray-400 uppercase font-mono font-bold">Ưu tiên 3: Chữ ký số CA</span>
+                      {detectedProvider?.priorityTier === 3 && (
+                        <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 font-mono font-bold rounded">KHỚP</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-gray-200 mt-1 block leading-snug">
+                      Đọc thẻ &lt;X509IssuerName&gt; nhận diện tổ chức chứng thực CA bên bán phát hành (MISA-CA, VIETTEL-CA, VNPT-CA...)
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-1 block">
-                      {detectedProvider?.supportsCaptcha ? 'Hỗ trợ OCR ký tự tự động' : 'Không yêu cầu Captcha'}
+                    <div className="mt-2 text-[11px] font-mono text-gray-400 bg-gray-900 px-2 py-1 rounded truncate" title={invoice?.caProvider || 'Không có thông tin CA'}>
+                      CA: <span className={invoice?.caProvider ? 'text-emerald-300' : 'text-gray-500'}>
+                        {invoice?.caProvider || '(Không có)'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Safe Fallback Notice if UNKNOWN */}
+                {detectedProvider?.provider === 'UNKNOWN' && (
+                  <div className="p-3 bg-amber-950/40 border border-amber-600/40 rounded flex items-start gap-2.5 text-xs text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-amber-300">
+                        Chưa phát hiện được nhà cung cấp từ file XML gốc (Đúng chuẩn an toàn: không đoán mò)
+                      </p>
+                      <p className="text-gray-300 mt-0.5">
+                        Tệp XML này không chứa đường link domain của 6 đơn vị phổ biến và không có thẻ MSTTCGP. Hãy bấm chọn một trong các Nhà cung cấp bên dưới để tải trực tiếp từ cổng tương ứng, hoặc bấm <strong>"Tải Bản Thể Hiện Chuẩn Hóa"</strong> để kết xuất ngay PDF A4 hoàn hảo.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* MANUAL INTERVENTION: Choose Provider */}
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3.5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                      Chỉ định Nhà cung cấp Hóa đơn điện tử (Manual Override)
                     </span>
                   </div>
+                  <span className="text-[11px] text-gray-400">
+                    Đang chọn:{' '}
+                    <strong className="text-amber-300 font-mono">
+                      {selectedProviderOverride === 'AUTO' 
+                        ? `TỰ ĐỘNG [${detectedProvider?.provider || 'UNKNOWN'}]` 
+                        : selectedProviderOverride === 'GENERIC'
+                        ? 'GENERIC FALLBACK (Chuẩn NĐ 123)'
+                        : selectedProviderOverride
+                      }
+                    </strong>
+                  </span>
+                </div>
 
-                  <div className="bg-gray-950 p-3 rounded border border-gray-800">
-                    <span className="text-[10px] text-gray-500 uppercase font-mono block">Cơ chế Safeguard</span>
-                    <span className="font-bold text-emerald-400 text-sm mt-0.5 block">
+                <p className="text-xs text-gray-400">
+                  Nhấp vào một nhà cung cấp để ép dùng driver chuyên biệt hoặc tra cứu thủ công:
+                </p>
+
+                {/* Provider Chips Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
+                  {/* Auto option */}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectProvider('AUTO')}
+                    className={`px-3 py-2 rounded-md border text-left flex flex-col justify-between transition-all ${
+                      selectedProviderOverride === 'AUTO'
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200 shadow-sm'
+                        : 'bg-gray-950 border-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-bold text-[11px]">Tự Động (XML)</span>
+                      {selectedProviderOverride === 'AUTO' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                    </div>
+                    <span className="text-[10px] text-gray-500 font-mono mt-1">
+                      {detectedProvider?.provider || 'Quét XML'}
+                    </span>
+                  </button>
+
+                  {/* Standard provider options */}
+                  {SUPPORTED_PROVIDERS.map(prov => {
+                    const isSelected = selectedProviderOverride === prov.code;
+                    return (
+                      <button
+                        key={prov.code}
+                        type="button"
+                        onClick={() => handleSelectProvider(prov.code)}
+                        className={`px-3 py-2 rounded-md border text-left flex flex-col justify-between transition-all ${
+                          isSelected
+                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-sm'
+                            : 'bg-gray-950 border-gray-800 text-gray-300 hover:text-white hover:border-gray-700'
+                        }`}
+                        title={prov.description}
+                      >
+                        <div className="flex items-center justify-between w-full">
+                          <span className="font-bold text-[11px] truncate">{prov.badge}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                        </div>
+                        <span className="text-[10px] text-gray-500 font-mono mt-1 truncate">
+                          {prov.shortName}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  {/* Generic Fallback Option */}
+                  <button
+                    type="button"
+                    onClick={() => handleSelectProvider('GENERIC')}
+                    className={`px-3 py-2 rounded-md border text-left flex flex-col justify-between transition-all ${
+                      selectedProviderOverride === 'GENERIC'
+                        ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 shadow-sm'
+                        : 'bg-gray-950 border-gray-800 text-gray-300 hover:text-white hover:border-gray-700'
+                    }`}
+                    title="Bản thể hiện chuẩn hóa nội bộ NĐ 123"
+                  >
+                    <div className="flex items-center justify-between w-full">
+                      <span className="font-bold text-[11px]">Bản Chuẩn Hóa</span>
+                      {selectedProviderOverride === 'GENERIC' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                    </div>
+                    <span className="text-[10px] text-emerald-400 font-mono mt-1">
                       Generic Fallback
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-1 block">
-                      Dựng PDF nội bộ chuẩn NĐ 123
+                  </button>
+                </div>
+
+                {/* Info about selected provider */}
+                {selectedProviderOverride !== 'AUTO' && selectedProviderOverride !== 'GENERIC' && (
+                  <div className="p-3 bg-gray-950 rounded border border-gray-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-gray-300">
+                    <div>
+                      <span className="font-bold text-cyan-300">
+                        {SUPPORTED_PROVIDERS.find(p => p.code === selectedProviderOverride)?.name}:
+                      </span>{' '}
+                      <span>
+                        {SUPPORTED_PROVIDERS.find(p => p.code === selectedProviderOverride)?.description}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenPortal}
+                      className="inline-flex items-center gap-1 text-[11px] font-mono text-cyan-400 hover:text-cyan-300 hover:underline shrink-0"
+                    >
+                      <span>Mở cổng tra cứu</span>
+                      <ArrowUpRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* INTERACTIVE LOOKUP PARAMETERS & CUSTOM FIELDS */}
+              <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3.5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                      Thông tin tra cứu hóa đơn & Cổng kết nối
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleResetLookupInfo}
+                      className="text-[11px] text-gray-400 hover:text-gray-200 flex items-center gap-1 font-mono transition-colors"
+                      title="Phục hồi thông tin bóc tách từ XML"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Đặt lại theo XML</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  {/* Field 1: Lookup Code / Secret Code */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-300 flex items-center justify-between">
+                      <span>Mã tra cứu / Fkey / Bí mật</span>
+                      <button
+                        type="button"
+                        onClick={handlePasteLookupCode}
+                        className="text-[10px] text-amber-400 hover:underline font-normal"
+                      >
+                        Dán Clipboard
+                      </button>
+                    </label>
+                    <input
+                      type="text"
+                      value={customLookupCode}
+                      onChange={(e) => setCustomLookupCode(e.target.value)}
+                      placeholder="VD: 7G8X9K2M hoặc FKEY123"
+                      className="w-full bg-gray-950 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-emerald-400 font-mono placeholder:text-gray-600 focus:outline-hidden focus:border-amber-500"
+                    />
+                    <span className="text-[10px] text-gray-500 block">
+                      In trên hóa đơn, email hoặc SMS từ bên bán
+                    </span>
+                  </div>
+
+                  {/* Field 2: Lookup Portal URL */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-300 flex items-center justify-between">
+                      <span>Cổng web tra cứu (URL)</span>
+                      <button
+                        type="button"
+                        onClick={handleOpenPortal}
+                        className="text-[10px] text-cyan-400 hover:underline font-normal flex items-center gap-0.5"
+                      >
+                        Mở cổng <ExternalLink className="w-2.5 h-2.5" />
+                      </button>
+                    </label>
+                    <input
+                      type="text"
+                      value={customLookupUrl}
+                      onChange={(e) => setCustomLookupUrl(e.target.value)}
+                      placeholder="https://meinvoice.vn/tra-cuu"
+                      className="w-full bg-gray-950 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-cyan-300 font-mono placeholder:text-gray-600 focus:outline-hidden focus:border-cyan-500"
+                    />
+                    <span className="text-[10px] text-gray-500 block">
+                      Link tra cứu do nhà cung cấp hoặc bên bán phát hành
+                    </span>
+                  </div>
+
+                  {/* Field 3: Seller Tax Code */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-300 block">
+                      Mã số thuế bên bán (MST)
+                    </label>
+                    <input
+                      type="text"
+                      value={customSellerTaxCode}
+                      onChange={(e) => setCustomSellerTaxCode(e.target.value)}
+                      placeholder="0101243150"
+                      className="w-full bg-gray-950 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-amber-300 font-mono placeholder:text-gray-600 focus:outline-hidden focus:border-amber-500"
+                    />
+                    <span className="text-[10px] text-gray-500 block">
+                      Dùng để tra cứu tại Viettel, Thái Sơn, Bkav...
                     </span>
                   </div>
                 </div>
 
-                {/* Action Buttons */}
+                {/* Primary Action Buttons */}
                 <div className="flex flex-wrap items-center gap-3 pt-2">
                   <button
                     onClick={() => handleEngineDownload(false)}
@@ -1038,12 +1473,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     {isEngineDownloading ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Đang thực thi Crawl & OCR...</span>
+                        <span>Đang thực thi Crawl & Tải PDF...</span>
                       </>
                     ) : (
                       <>
                         <Layers className="w-4 h-4" />
-                        <span>Tải PDF Gốc (Adapter Driver + OCR)</span>
+                        <span>
+                          Tải PDF Gốc (
+                          {selectedProviderOverride === 'AUTO' 
+                            ? (detectedProvider?.provider || 'Theo XML') 
+                            : selectedProviderOverride
+                          }
+                          )
+                        </span>
                       </>
                     )}
                   </button>
@@ -1051,11 +1493,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <button
                     onClick={() => handleEngineDownload(true)}
                     disabled={isEngineDownloading}
-                    className="inline-flex items-center gap-2 px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 font-semibold text-xs rounded-md transition-colors disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-3.5 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-emerald-700/60 font-semibold text-xs rounded-md transition-colors disabled:opacity-50"
                     title="Bỏ qua crawl máy chủ nhà cung cấp và tạo PDF thể hiện nội bộ ngay lập tức"
                   >
                     <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>Thử nghiệm chế độ Fallback Nội bộ</span>
+                    <span>Tải Bản Thể Hiện Chuẩn Hóa (Generic Safeguard)</span>
+                  </button>
+
+                  <button
+                    onClick={handleOpenPortal}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-medium text-xs rounded-md transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Mở Cổng Tra Cứu Ngoài</span>
                   </button>
                 </div>
               </div>

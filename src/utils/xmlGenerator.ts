@@ -89,7 +89,20 @@ export function generateGDTInvoiceXml(invoice: GDTInvoice): string {
       <DVTTe>${invoice.dvtte || 'VND'}</DVTTe>
       <TGia>${invoice.tygia || 1}</TGia>
       <HTTToan>${invoice.htttoan || 'TM/CK'}</HTTToan>
-      <MSTTCGP>0100109106</MSTTCGP>
+      ${(() => {
+        let msttcgp = invoice.msttcgp;
+        if (!msttcgp) {
+          if (invoice.provider === 'MISA') msttcgp = '0101243150';
+          else if (invoice.provider === 'VIETTEL') msttcgp = '0100109106';
+          else if (invoice.provider === 'VNPT') msttcgp = '0100684378';
+          else if (invoice.provider === '4SI') msttcgp = '0315744883';
+          else if (invoice.provider === 'EASYINVOICE') msttcgp = '0105987432';
+          else if (invoice.provider === 'BKAV') msttcgp = '0101360697';
+          else if (invoice.provider === 'THAISON') msttcgp = '0101300842';
+          else if (invoice.provider === 'CYBERBILL') msttcgp = '0107871301';
+        }
+        return msttcgp ? `<MSTTCGP>${msttcgp}</MSTTCGP>` : '';
+      })()}
     </TTChung>
     <NDHDon>
       <NBan>
@@ -133,6 +146,18 @@ ${taxSummaryXml}
         <KDLieu>string</KDLieu>
         <DLieu>${maCqt}</DLieu>
       </TTin>
+      ${invoice.lookupCode ? `
+      <TTin>
+        <TTruong>MaTraCuu</TTruong>
+        <KDLieu>string</KDLieu>
+        <DLieu>${escapeXml(invoice.lookupCode)}</DLieu>
+      </TTin>` : ''}
+      ${invoice.lookupUrl ? `
+      <TTin>
+        <TTruong>Website</TTruong>
+        <KDLieu>string</KDLieu>
+        <DLieu>${escapeXml(invoice.lookupUrl)}</DLieu>
+      </TTin>` : ''}
     </TTKhac>
   </DLHDon>
   <DSCKS>
@@ -154,7 +179,7 @@ ${taxSummaryXml}
           <X509Data>
             <X509SubjectName>CN=${escapeXml(invoice.signerName || invoice.nbten)}, OID.0.9.2342.19200300.100.1.1=MST:${invoice.nbmst}, C=VN</X509SubjectName>
             <X509Certificate>MIIFuzCCA6OgAwIBAgIUQW5kcm9pZFZpZXRuYW1URFMwDQYJKoZIhvcNAQELBQAw...</X509Certificate>
-            <X509IssuerName>C=VN, O=${invoice.caProvider || 'VNPT-CA'}, CN=${invoice.caProvider || 'VNPT'} Timestamping CA</X509IssuerName>
+            <X509IssuerName>C=VN, O=${invoice.caProvider || 'MISA-CA'}, CN=${invoice.caProvider || 'MISA'} Timestamping CA</X509IssuerName>
           </X509Data>
         </KeyInfo>
         <Object>

@@ -636,6 +636,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
           signedDate: item.tdlap,
           caProvider: 'Tổng cục Thuế CQT',
+          msttcgp: item.msttcgp || item.mst_tcgp || '',
+          tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
+          lookupCode: item.mtcuu || item.matracuu || item.lookupCode || item.fkey || '',
+          lookupUrl: item.lookupUrl || '',
           items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
             id: `item_${idx + 1}`,
             lineNo: idx + 1,
@@ -948,14 +952,16 @@ app.post('/api/invoice-downloader/detect', async (req, res) => {
 // 14. Multi-provider Invoice Downloader API: Download Original PDF / Fallback
 app.post('/api/invoice-downloader/download', async (req, res) => {
   try {
-    const { xml, forceFallback, timeoutMs } = req.body;
+    const { xml, forceFallback, timeoutMs, overrideProvider, customInfo } = req.body;
     if (!xml) {
       return res.status(400).json({ error: 'Nội dung XML không được để trống' });
     }
 
     const result = await invoiceManager.downloadInvoicePdf(xml, {
       forceFallback: Boolean(forceFallback),
-      timeoutMs: timeoutMs ? Number(timeoutMs) : undefined
+      timeoutMs: timeoutMs ? Number(timeoutMs) : undefined,
+      overrideProvider,
+      customInfo
     });
 
     if (req.query.format === 'binary') {

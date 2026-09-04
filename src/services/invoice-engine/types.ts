@@ -46,6 +46,8 @@ export interface DownloadOptions {
   forceFallback?: boolean; // Ép dùng GenericFallbackDriver
   ocrLanguage?: string; // Ngôn ngữ OCR (mặc định 'eng')
   customHeaders?: Record<string, string>; // Headers bổ sung khi crawl
+  overrideProvider?: string; // Ép dùng một Provider Driver cụ thể ('MISA' | 'VIETTEL' | 'VNPT' | '4SI' | 'EASYINVOICE' | 'BKAV' | 'THAISON' | 'CYBERBILL' | 'GENERIC' | string)
+  customInfo?: Partial<ExtractedInvoiceInfo>; // Thông tin tùy chỉnh do người dùng nhập (lookupCode, secretCode, lookupUrl, sellerTaxCode, v.v.)
 }
 
 export interface CaptchaSolveOptions {
