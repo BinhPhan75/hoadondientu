@@ -58,10 +58,13 @@ export interface GDTInvoice {
   nbemail?: string; // Email bên bán
   nbstk?: string; // Số tài khoản bên bán
   nbnhang?: string; // Ngân hàng bên bán
+  stknh?: string; // Alias số tài khoản
+  tnhanh?: string; // Alias tên ngân hàng
 
   // Thông tin bên mua (Buyer)
   nmmst: string; // MST bên mua
   nmten: string; // Tên bên mua
+  nmtendv?: string; // Tên đơn vị bên mua
   nmdchi: string; // Địa chỉ bên mua
   nmsdt?: string;
   nmemail?: string;

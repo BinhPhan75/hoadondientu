@@ -1,21 +1,47 @@
 import { GDTInvoice } from '../types';
 import { numberToVietnameseWords, parseGDTInvoiceXml } from './xmlParser';
+import {
+  detectInvoiceProvider,
+  renderInvoiceHtml,
+  InvoiceProviderId,
+  renderMisaTemplate,
+  renderViettelTemplate,
+  renderEasyInvoiceTemplate,
+  render4SiTemplate,
+  renderVnptTemplate,
+  renderBkavTemplate,
+  renderDefaultTemplate
+} from './multiTemplateRenderer';
+
+export {
+  detectInvoiceProvider,
+  renderInvoiceHtml,
+  renderMisaTemplate,
+  renderViettelTemplate,
+  renderEasyInvoiceTemplate,
+  render4SiTemplate,
+  renderVnptTemplate,
+  renderBkavTemplate,
+  renderDefaultTemplate
+};
+export type { InvoiceProviderId };
 
 export interface InvoiceHtmlOptions {
   theme?: 'red' | 'blue';
   qrCodeDataUrl?: string;
   showPrintControls?: boolean;
+  provider?: InvoiceProviderId;
+  templateId?: InvoiceProviderId;
+  watermarkText?: string;
+  disableAutoDetect?: boolean;
 }
 
 /**
  * Generates an authentic, standalone, pixel-perfect Vietnamese E-Invoice HTML document 
  * conforming to Decree 123/2020/ND-CP, Circular 78/2021/TT-BTC, and Decisions 1450 & 1510/QD-TCT.
  * 
- * Features:
- * - Dual Themes: 'red' (Đỏ truyền thống Tổng cục Thuế) or 'blue' (Xanh hiện đại Doanh nghiệp).
- * - Full E-Invoice sections: Header, Tax Authority Code & QR, Seller/Buyer, Items table with column numbers,
- *   Tax Breakdown (THTTLTSuat), Totals & Words, Digital Signatures (Seller & Buyer), and Legal Footers.
- * - Print Media CSS (@media print) strictly calibrated for A4 Portrait with zero-margin print perfection.
+ * Supports Multi-Template architecture:
+ * - Automatically detects or routes to specific layout (MISA meInvoice, Viettel S-Invoice, Softdreams EasyInvoice, 4Si, VNPT, BKAV, or DEFAULT)
  */
 export function generateOfficialInvoiceHtml(
   invoiceOrXml: GDTInvoice | string,
@@ -24,6 +50,23 @@ export function generateOfficialInvoiceHtml(
   const invoice: GDTInvoice = typeof invoiceOrXml === 'string'
     ? parseGDTInvoiceXml(invoiceOrXml)
     : invoiceOrXml;
+
+  const rawXml = typeof invoiceOrXml === 'string' ? invoiceOrXml : invoice.rawXml;
+
+  // Check if a specific template or provider was requested
+  const specifiedProvider = options?.provider || options?.templateId;
+  
+  if (specifiedProvider && specifiedProvider !== 'AUTO') {
+    return renderInvoiceHtml(invoice, specifiedProvider, rawXml, options);
+  }
+
+  // Auto-detect provider if rawXml is available and auto-detection is not disabled
+  if (!options?.disableAutoDetect && rawXml) {
+    const detected = detectInvoiceProvider(rawXml);
+    if (detected !== 'DEFAULT') {
+      return renderInvoiceHtml(invoice, detected, rawXml, options);
+    }
+  }
 
   const theme = options?.theme || 'red';
   const showControls = options?.showPrintControls !== false;

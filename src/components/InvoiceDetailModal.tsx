@@ -160,6 +160,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [engineLogs, setEngineLogs] = useState<string[]>([]);
   const [detectedProvider, setDetectedProvider] = useState<any>(null);
   const [isDetecting, setIsDetecting] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('AUTO');
 
   // Manual Override & Custom Lookup Parameters States
   const [selectedProviderOverride, setSelectedProviderOverride] = useState<string>('AUTO');
@@ -286,7 +287,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const standaloneHtml = generateOfficialInvoiceHtml(invoice, {
     theme,
     qrCodeDataUrl: qrCodeUrl,
-    showPrintControls: true
+    showPrintControls: true,
+    templateId: selectedTemplateId !== 'AUTO' ? selectedTemplateId : undefined
   });
 
   const handleEngineDownload = async (forceFallback = false) => {
@@ -1002,17 +1004,34 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                STANDALONE HTML TRANSFORM VIEW & CODE
                ============================================================ */
             <div className="w-full max-w-4xl space-y-4">
-              <div className="bg-gray-800 p-4 rounded border border-gray-700 flex items-center justify-between gap-4">
+              <div className="bg-gray-800 p-4 rounded border border-gray-700 flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h4 className="text-white font-bold text-sm flex items-center gap-2">
                     <Code2 className="w-4 h-4 text-emerald-400" />
-                    Tệp HTML Hóa Đơn Điện Tử Độc Lập
+                    Bản Thể Hiện HTML Đa Giao Diện (Multi-Template)
                   </h4>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Mã HTML kèm CSS nội tuyến chuẩn A4, hiển thị hoàn chỉnh trên mọi trình duyệt mà không cần kết nối mạng.
+                    Hỗ trợ hiển thị chuẩn theo nhà cung cấp (MISA meInvoice, Softdreams EasyInvoice, 4Si, Viettel, NĐ 123).
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 bg-gray-900/90 px-3 py-1.5 rounded border border-gray-700">
+                    <span className="text-xs text-gray-300 font-medium whitespace-nowrap">Mẫu giao diện:</span>
+                    <select
+                      value={selectedTemplateId}
+                      onChange={(e) => setSelectedTemplateId(e.target.value)}
+                      className="bg-gray-800 text-white text-xs font-semibold px-2 py-1 rounded border border-gray-600 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="AUTO">✨ Tự động nhận diện theo XML</option>
+                      <option value="MISA">🏢 MISA meInvoice (Xuân Vinh)</option>
+                      <option value="EASYINVOICE">🏪 Softdreams EasyInvoice (Kim Loan Tuấn)</option>
+                      <option value="4SI">💎 4Si E-Invoice / LCS (PNJ Jewelry)</option>
+                      <option value="VIETTEL">🔴 Viettel S-Invoice</option>
+                      <option value="VNPT">🔵 VNPT Invoice</option>
+                      <option value="BKAV">🟠 BKAV eHoadon</option>
+                      <option value="DEFAULT">📋 Mẫu Chuẩn Nghị định 123</option>
+                    </select>
+                  </div>
                   <button
                     onClick={handleCopyHtml}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-200 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
