@@ -925,13 +925,19 @@ app.post('/api/invoice-downloader/detect', async (req, res) => {
     if (!xml) {
       return res.status(400).json({ error: 'Nội dung XML không được để trống' });
     }
+    const details = invoiceManager.detectProviderDetails(xml);
     const driver = await invoiceManager.selectDriver(xml);
     const info = await driver.extractInfo(xml);
     res.json({
       success: true,
-      provider: driver.providerCode,
+      provider: details.provider,
+      detectedProvider: details.provider,
+      priority: details.priority,
+      matchedPattern: details.matchedPattern,
+      sourceDescription: details.sourceDescription,
       driverName: driver.name,
       supportsCaptcha: driver.metadata.supportsCaptcha,
+      isFallback: details.provider === 'UNKNOWN' || driver.providerCode === 'GENERIC',
       info
     });
   } catch (error: any) {

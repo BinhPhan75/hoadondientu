@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
+import { detectProvider } from '../providerDetector';
 
 export class VnptDriver extends BaseInvoiceProviderDriver {
   readonly name = 'VNPT Invoice Driver';
@@ -19,28 +20,15 @@ export class VnptDriver extends BaseInvoiceProviderDriver {
     requiredFields: ['sellerTaxCode', 'lookupCode']
   };
 
+  /**
+   * Nhận diện hóa đơn VNPT theo đúng thứ tự ưu tiên nghiêm ngặt
+   */
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
-      return xmlData.provider === 'VNPT' || 
-             Boolean(xmlData.lookupUrl?.includes('vnpt-invoice.com.vn')) ||
-             Boolean(xmlData.additionalData?.msttcgp === '0100686209');
+      return xmlData.provider === 'VNPT';
     }
 
-    const xml = xmlData;
-    const msttcgp = this.extractXmlTag(xml, 'MSTTCGP');
-    const website = this.extractXmlTag(xml, 'Website').toLowerCase();
-    const signature = this.extractXmlTag(xml, 'X509IssuerName').toUpperCase() + 
-                      this.extractXmlTag(xml, 'X509SubjectName').toUpperCase();
-
-    if (msttcgp === '0100686209') return true;
-    if (website.includes('vnpt-invoice') || website.includes('vnpt.vn')) return true;
-    if (signature.includes('VNPT')) return true;
-    if (xml.includes('vnpt-invoice.com.vn')) return true;
-
-    const fkey = this.extractCustomField(xml, ['Fkey', 'Mã tra cứu', 'MaTraCuu', 'Mã Fkey']);
-    if (fkey && xml.includes('VNPT')) return true;
-
-    return false;
+    return detectProvider(xmlData) === 'VNPT';
   }
 
   extractInfo(xmlData: string): ExtractedInvoiceInfo {

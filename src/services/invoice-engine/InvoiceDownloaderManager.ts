@@ -18,7 +18,10 @@ import { MisaDriver } from './drivers/MisaDriver';
 import { ViettelDriver } from './drivers/ViettelDriver';
 import { FourSiDriver } from './drivers/FourSiDriver';
 import { VnptDriver } from './drivers/VnptDriver';
+import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
+import { BkavDriver } from './drivers/BkavDriver';
 import { GenericFallbackDriver } from './drivers/GenericFallbackDriver';
+import { detectProvider, detectProviderWithDetails, DetectedInvoiceProvider, DetectionResultDetails } from './providerDetector';
 
 export class InvoiceDownloaderManager {
   private static instance: InvoiceDownloaderManager | null = null;
@@ -36,6 +39,8 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new ViettelDriver());
     this.registerDriver(new FourSiDriver());
     this.registerDriver(new VnptDriver());
+    this.registerDriver(new EasyInvoiceDriver());
+    this.registerDriver(new BkavDriver());
   }
 
   /**
@@ -46,6 +51,20 @@ export class InvoiceDownloaderManager {
       this.instance = new InvoiceDownloaderManager();
     }
     return this.instance;
+  }
+
+  /**
+   * Nhận diện nhà cung cấp từ chuỗi XML theo quy tắc ưu tiên nghiêm ngặt
+   */
+  public detectProvider(xmlContent: string): DetectedInvoiceProvider {
+    return detectProvider(xmlContent);
+  }
+
+  /**
+   * Nhận diện chi tiết kèm cấp độ ưu tiên và lý do
+   */
+  public detectProviderDetails(xmlContent: string): DetectionResultDetails {
+    return detectProviderWithDetails(xmlContent);
   }
 
   /**
@@ -74,21 +93,26 @@ export class InvoiceDownloaderManager {
   }
 
   /**
-   * Tự động quét và chọn Driver phù hợp nhất với dữ liệu XML
+   * Tự động quét và chọn Driver phù hợp nhất theo thứ tự ưu tiên nghiêm ngặt:
+   * - Nếu detectProvider(xmlContent) trả về 'UNKNOWN' -> Trả về ngay fallbackDriver (GenericFallbackDriver)
+   *   (Tuyệt đối không đoán mò thành Viettel hay MISA)
+   * - Nếu khớp nhà cung cấp hợp lệ ('MISA', 'VIETTEL', 'VNPT', '4SI', 'EASYINVOICE', 'BKAV') -> Chọn Driver tương ứng
    */
   public async selectDriver(xmlContent: string): Promise<InvoiceProviderDriver> {
-    for (const driver of this.drivers) {
-      try {
-        const canHandle = await driver.canHandle(xmlContent);
-        if (canHandle) {
-          return driver;
-        }
-      } catch (err) {
-        console.warn(`[InvoiceDownloaderManager] Lỗi khi kiểm tra driver ${driver.name}:`, err);
-      }
+    const detected = detectProvider(xmlContent);
+
+    // Fallback an toàn: Nếu là UNKNOWN, không đoán mò mà chuyển thẳng sang GenericFallbackDriver
+    if (detected === 'UNKNOWN') {
+      return this.fallbackDriver;
     }
 
-    // Không tìm thấy driver đặc thù, dùng Fallback
+    // Tìm driver đã đăng ký tương ứng với nhà cung cấp được nhận diện chính xác
+    const matched = this.drivers.find(d => d.providerCode === detected);
+    if (matched) {
+      return matched;
+    }
+
+    // Nếu đã nhận diện nhưng driver đặc thù chưa hỗ trợ tải trực tiếp, dùng Fallback chuẩn NĐ 123
     return this.fallbackDriver;
   }
 

@@ -6,6 +6,7 @@
 import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
+import { detectProvider } from '../providerDetector';
 
 export class MisaDriver extends BaseInvoiceProviderDriver {
   readonly name = 'MISA meInvoice Driver';
@@ -20,41 +21,14 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
   };
 
   /**
-   * Nhận diện hóa đơn MISA thông qua:
-   * - Mã số thuế đơn vị giải pháp (MSTTCGP = 0101243150)
-   * - Tên tổ chức chứng thư số có chữ "MISA"
-   * - URL tra cứu chứa "meinvoice.vn" hoặc "misa.vn"
-   * - Thẻ TTin có Mã tra cứu định dạng MISA
+   * Nhận diện hóa đơn MISA theo đúng thứ tự ưu tiên nghiêm ngặt
    */
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
-      return xmlData.provider === 'MISA' || 
-             Boolean(xmlData.lookupUrl?.includes('meinvoice.vn')) ||
-             Boolean(xmlData.additionalData?.msttcgp === '0101243150');
+      return xmlData.provider === 'MISA';
     }
 
-    const xml = xmlData;
-    const msttcgp = this.extractXmlTag(xml, 'MSTTCGP');
-    const website = this.extractXmlTag(xml, 'Website').toLowerCase();
-    const signature = this.extractXmlTag(xml, 'X509IssuerName').toUpperCase() + 
-                      this.extractXmlTag(xml, 'X509SubjectName').toUpperCase();
-
-    if (msttcgp === '0101243150') return true;
-    if (website.includes('meinvoice.vn') || website.includes('misa.vn') || website.includes('misa.com.vn')) return true;
-    if (signature.includes('MISA')) return true;
-    if (xml.includes('meinvoice.vn') || xml.includes('meInvoice')) return true;
-
-    // Kiểm tra trường tùy biến trong <TTKhac> hoặc tên nhà cung cấp
-    const lookupCustom = this.extractCustomField(xml, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'MTC']);
-    if (lookupCustom && (xml.includes('MISA') || xml.includes('meInvoice') || lookupCustom.startsWith('MS'))) {
-      return true;
-    }
-
-    if (xml.toUpperCase().includes('MISA')) {
-      return true;
-    }
-
-    return false;
+    return detectProvider(xmlData) === 'MISA';
   }
 
   /**

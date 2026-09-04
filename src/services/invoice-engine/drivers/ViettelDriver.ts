@@ -8,6 +8,7 @@ import axios, { AxiosInstance } from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
+import { detectProvider } from '../providerDetector';
 
 export class ViettelDriver extends BaseInvoiceProviderDriver {
   readonly name = 'Viettel S-Invoice Driver';
@@ -22,35 +23,14 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
   };
 
   /**
-   * Nhận diện hóa đơn Viettel S-Invoice thông qua:
-   * - MSTTCGP = 0100109106 (Tập đoàn Viettel)
-   * - Chữ ký số VIETTEL-CA
-   * - URL chứa sinvoice.viettel.vn
-   * - Thẻ Mã số bí mật (ReservationCode / MaBiMat)
+   * Nhận diện hóa đơn Viettel S-Invoice theo đúng thứ tự ưu tiên nghiêm ngặt
    */
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
-      return xmlData.provider === 'VIETTEL' || 
-             Boolean(xmlData.secretCode) || 
-             Boolean(xmlData.additionalData?.msttcgp === '0100109106');
+      return xmlData.provider === 'VIETTEL';
     }
 
-    const xml = xmlData;
-    const msttcgp = this.extractXmlTag(xml, 'MSTTCGP');
-    const website = this.extractXmlTag(xml, 'Website').toLowerCase();
-    const signature = this.extractXmlTag(xml, 'X509IssuerName').toUpperCase() + 
-                      this.extractXmlTag(xml, 'X509SubjectName').toUpperCase();
-
-    if (msttcgp === '0100109106') return true;
-    if (website.includes('sinvoice') || website.includes('viettel.vn')) return true;
-    if (signature.includes('VIETTEL')) return true;
-    if (xml.includes('sinvoice.viettel.vn')) return true;
-
-    // Kiểm tra trường Mã bí mật đặc trưng của Viettel
-    const secret = this.extractCustomField(xml, ['Mã số bí mật', 'MaBiMat', 'Mã bí mật', 'ReservationCode', 'SecretCode']);
-    if (secret) return true;
-
-    return false;
+    return detectProvider(xmlData) === 'VIETTEL';
   }
 
   /**

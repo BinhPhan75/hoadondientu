@@ -5,11 +5,14 @@
 
 export * from './types';
 export * from './captcha/CaptchaSolver';
+export * from './providerDetector';
 export * from './drivers/InvoiceProviderDriver';
 export * from './drivers/MisaDriver';
 export * from './drivers/ViettelDriver';
 export * from './drivers/FourSiDriver';
 export * from './drivers/VnptDriver';
+export * from './drivers/EasyInvoiceDriver';
+export * from './drivers/BkavDriver';
 export * from './drivers/GenericFallbackDriver';
 export * from './InvoiceDownloaderManager';
 

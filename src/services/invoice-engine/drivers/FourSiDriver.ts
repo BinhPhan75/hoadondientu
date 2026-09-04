@@ -9,6 +9,7 @@ import * as cheerio from 'cheerio';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
+import { detectProvider } from '../providerDetector';
 
 export class FourSiDriver extends BaseInvoiceProviderDriver {
   readonly name = '4Si E-Invoice Driver';
@@ -23,34 +24,14 @@ export class FourSiDriver extends BaseInvoiceProviderDriver {
   };
 
   /**
-   * Nhận diện hóa đơn 4Si thông qua:
-   * - URL chứa "inv.4si.vn" hoặc "4si.vn"
-   * - MST tổ chức giải pháp: 0313463990 (4SI)
-   * - Chữ ký số chứa "4SI"
+   * Nhận diện hóa đơn 4Si theo đúng thứ tự ưu tiên nghiêm ngặt
    */
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
-      return xmlData.provider === '4SI' || 
-             Boolean(xmlData.lookupUrl?.includes('4si.vn')) ||
-             Boolean(xmlData.additionalData?.msttcgp === '0313463990');
+      return xmlData.provider === '4SI';
     }
 
-    const xml = xmlData;
-    const msttcgp = this.extractXmlTag(xml, 'MSTTCGP');
-    const website = this.extractXmlTag(xml, 'Website').toLowerCase();
-    const signature = this.extractXmlTag(xml, 'X509IssuerName').toUpperCase() + 
-                      this.extractXmlTag(xml, 'X509SubjectName').toUpperCase();
-
-    if (msttcgp === '0313463990') return true;
-    if (website.includes('4si.vn') || website.includes('inv.4si.vn')) return true;
-    if (signature.includes('4SI') || signature.includes('4-SI')) return true;
-    if (xml.includes('inv.4si.vn') || xml.includes('4si.vn')) return true;
-
-    // Kiểm tra trường tùy biến Mã hóa đơn 4Si
-    const fourSiCode = this.extractCustomField(xml, ['Mã hóa đơn 4Si', 'Mã tra cứu 4Si', '4Si', 'inv.4si.vn']);
-    if (fourSiCode) return true;
-
-    return false;
+    return detectProvider(xmlData) === '4SI';
   }
 
   /**
