@@ -817,47 +817,84 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       </div>
                     </div>
 
-                    {/* LINE ITEMS TABLE (BẢNG CHI TIẾT HÀNG HÓA) */}
-                    <div className="overflow-x-auto mb-4 border border-gray-300 rounded">
+                    {/* LINE ITEMS TABLE (BẢNG CHI TIẾT HÀNG HÓA CHUẨN NGHỊ ĐỊNH 123/TT 78) */}
+                    <div className="overflow-x-auto mb-4 border border-gray-300 rounded shadow-xs">
                       <table className="w-full text-left border-collapse text-[11px]">
                         <thead>
-                          <tr className="bg-slate-100 text-gray-800 border-b border-gray-300 uppercase font-bold text-[10px]">
-                            <th className="py-2 px-2 border-r border-gray-300 text-center w-8">STT</th>
-                            <th className="py-2 px-3 border-r border-gray-300">Tên hàng hóa, dịch vụ</th>
-                            <th className="py-2 px-2 border-r border-gray-300 text-center w-14">ĐVT</th>
-                            <th className="py-2 px-2 border-r border-gray-300 text-right w-16">Số lượng</th>
-                            <th className="py-2 px-2 border-r border-gray-300 text-right w-24">Đơn giá</th>
-                            <th className="py-2 px-2 border-r border-gray-300 text-center w-16">Thuế suất</th>
-                            <th className="py-2 px-3 text-right w-28">Thành tiền</th>
+                          <tr className="bg-slate-100 text-gray-800 border-b border-gray-300 uppercase font-bold text-[10px] tracking-wide">
+                            <th className="py-2.5 px-2 border-r border-gray-300 text-center w-8">STT</th>
+                            <th className="py-2.5 px-3 border-r border-gray-300">Tên hàng hóa, dịch vụ</th>
+                            <th className="py-2.5 px-2 border-r border-gray-300 text-center w-16">ĐVT</th>
+                            <th className="py-2.5 px-2 border-r border-gray-300 text-right w-20">Số lượng</th>
+                            <th className="py-2.5 px-2 border-r border-gray-300 text-right w-28">Đơn giá</th>
+                            <th className="py-2.5 px-2 border-r border-gray-300 text-center w-16">Thuế suất</th>
+                            <th className="py-2.5 px-3 text-right w-32">Thành tiền</th>
+                          </tr>
+                          <tr className="bg-slate-50 text-[9px] text-gray-500 border-b border-gray-300 text-center italic">
+                            <td className="py-0.5 px-1 border-r border-gray-300">(1)</td>
+                            <td className="py-0.5 px-1 border-r border-gray-300 text-left pl-3">(2)</td>
+                            <td className="py-0.5 px-1 border-r border-gray-300">(3)</td>
+                            <td className="py-0.5 px-1 border-r border-gray-300 text-right pr-2">(4)</td>
+                            <td className="py-0.5 px-1 border-r border-gray-300 text-right pr-2">(5)</td>
+                            <td className="py-0.5 px-1 border-r border-gray-300">(6)</td>
+                            <td className="py-0.5 px-1 text-right pr-3">(7 = 4 x 5)</td>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
                           {invoice.items && invoice.items.length > 0 ? (
-                            invoice.items.map((item, idx) => (
-                              <tr key={idx} className="hover:bg-gray-50/80">
-                                <td className="py-2 px-2 border-r border-gray-300 text-center font-mono text-gray-500">
-                                  {item.stt || idx + 1}
-                                </td>
-                                <td className="py-2 px-3 border-r border-gray-300 font-medium text-gray-900">
-                                  {item.ten}
-                                </td>
-                                <td className="py-2 px-2 border-r border-gray-300 text-center text-gray-600">
-                                  {item.dvt || '-'}
-                                </td>
-                                <td className="py-2 px-2 border-r border-gray-300 text-right font-mono text-gray-700">
-                                  {formatNumber(item.sluong || 0)}
-                                </td>
-                                <td className="py-2 px-2 border-r border-gray-300 text-right font-mono text-gray-700">
-                                  {formatNumber(item.dgia || 0)}
-                                </td>
-                                <td className="py-2 px-2 border-r border-gray-300 text-center font-semibold text-gray-700">
-                                  {item.tsuat || '10%'}
-                                </td>
-                                <td className="py-2 px-3 text-right font-mono font-semibold text-gray-900">
-                                  {formatNumber(item.thtien || 0)}
-                                </td>
-                              </tr>
-                            ))
+                            invoice.items.map((item, idx) => {
+                              const lineNo = item.lineNo || item.stt || idx + 1;
+                              const itemName = item.itemName || item.ten || `Hàng hóa / Dịch vụ ${lineNo}`;
+                              const unit = item.unit || item.dvt || '-';
+                              const quantity = item.quantity ?? item.sluong ?? 0;
+                              const unitPrice = item.unitPrice ?? item.dgia ?? 0;
+                              const taxRate = item.taxRate || item.tsuat || '10%';
+                              const amount = item.amount ?? item.thtien ?? item.tthtien ?? 0;
+                              const code = item.itemCode || item.mhhdvu;
+
+                              return (
+                                <tr key={idx} className="hover:bg-amber-50/40 transition-colors">
+                                  <td className="py-2 px-2 border-r border-gray-300 text-center font-mono text-gray-600 text-xs">
+                                    {lineNo}
+                                  </td>
+                                  <td className="py-2 px-3 border-r border-gray-300 text-gray-900 leading-snug">
+                                    <div className="font-semibold text-xs text-gray-900 break-words">
+                                      {itemName}
+                                    </div>
+                                    {code && (
+                                      <div className="text-[10px] text-gray-500 font-mono mt-0.5">
+                                        Mã hàng: <span className="font-semibold text-gray-700">{code}</span>
+                                      </div>
+                                    )}
+                                    {item.nature === 2 && (
+                                      <span className="inline-block mt-0.5 px-1.5 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 rounded">
+                                        Hàng khuyến mại
+                                      </span>
+                                    )}
+                                    {item.nature === 3 && (
+                                      <span className="inline-block mt-0.5 px-1.5 py-0.2 text-[9px] font-semibold bg-rose-100 text-rose-800 rounded">
+                                        Dòng chiết khấu
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-gray-300 text-center text-gray-700 font-medium">
+                                    {unit}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-gray-300 text-right font-mono text-gray-800">
+                                    {formatNumber(quantity)}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-gray-300 text-right font-mono text-gray-800">
+                                    {formatNumber(unitPrice)}
+                                  </td>
+                                  <td className="py-2 px-2 border-r border-gray-300 text-center font-bold text-gray-800">
+                                    {taxRate}
+                                  </td>
+                                  <td className="py-2 px-3 text-right font-mono font-bold text-gray-950">
+                                    {formatNumber(amount)}
+                                  </td>
+                                </tr>
+                              );
+                            })
                           ) : (
                             <tr>
                               <td colSpan={7} className="py-4 text-center text-gray-400 italic">
@@ -881,13 +918,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                             </tr>
                           </thead>
                           <tbody>
-                            {invoice.vatBreakdown.map((vat, vIdx) => (
-                              <tr key={vIdx} className="border-b border-gray-200">
-                                <td className="py-1 px-3 font-semibold text-gray-800">{vat.tsuat}</td>
-                                <td className="py-1 px-3 text-right font-mono text-gray-700">{formatVND(vat.thtien)}</td>
-                                <td className="py-1 px-3 text-right font-mono text-amber-700 font-semibold">{formatVND(vat.tthue)}</td>
-                              </tr>
-                            ))}
+                            {invoice.vatBreakdown.map((vat, vIdx) => {
+                              const vRate = vat.taxRate || (vat as any).tsuat || '10%';
+                              const vAmount = vat.amount ?? (vat as any).thtien ?? 0;
+                              const vTax = vat.taxAmount ?? (vat as any).tthue ?? 0;
+                              return (
+                                <tr key={vIdx} className="border-b border-gray-200 hover:bg-gray-100/50">
+                                  <td className="py-1 px-3 font-semibold text-gray-800">{vRate}</td>
+                                  <td className="py-1 px-3 text-right font-mono text-gray-700">{formatVND(vAmount)}</td>
+                                  <td className="py-1 px-3 text-right font-mono text-amber-700 font-semibold">{formatVND(vTax)}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

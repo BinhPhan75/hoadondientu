@@ -22,6 +22,25 @@ export interface InvoiceItem {
   taxRatePercent: number; // 0, 5, 8, 10
   taxAmount: number; // Tiền thuế GTGT
   totalAmount: number; // Tổng cộng thành tiền sau thuế
+
+  // Thông tin mở rộng & Trường tiếng Việt tương thích theo NĐ 123/TT 78
+  itemCode?: string; // Mã hàng hóa (MHHDVu)
+  discountAmount?: number; // Tiền chiết khấu (STCKhau)
+  discountRate?: number; // Tỷ lệ chiết khấu (TLCKhau)
+  nature?: number; // Tính chất dòng hàng (TChat: 1 Hàng hóa/DV, 2 Khuyến mại, 3 Chiết khấu, 4 Ghi chú)
+  stt?: number;
+  ten?: string;
+  dvt?: string;
+  sluong?: number;
+  dgia?: number;
+  thtien?: number;
+  tthtien?: number;
+  tsuat?: string;
+  tthue?: number;
+  mhhdvu?: string;
+  tchat?: number;
+  stckhau?: number;
+  tlckhau?: number;
 }
 
 export interface GDTInvoice {

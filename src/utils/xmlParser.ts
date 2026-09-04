@@ -111,6 +111,467 @@ function extractTagBlocks(xml: string, tagName: string): string[] {
 }
 
 /**
+ * Làm sạch và giải mã tên hàng hóa, dịch vụ chi tiết từ XML
+ * - Loại bỏ toàn bộ các thẻ bao CDATA: <![CDATA[...]]>
+ * - Giải mã ký tự HTML/XML entities (&amp;, &lt;, &gt;, &quot;, &#39;, &#039;, v.v.)
+ * - Giữ nguyên tên chi tiết đầy đủ (mã quy cách, thông số, nhãn hiệu), không cắt bớt thành chuỗi tóm tắt
+ */
+export function cleanDetailedItemName(raw: string): string {
+  if (!raw) return '';
+  let str = String(raw).trim();
+
+  // Xóa bỏ vỏ bọc CDATA (kể cả lồng nhau hoặc thừa ký tự)
+  while (str.startsWith('<![CDATA[') && str.endsWith(']]>')) {
+    str = str.substring(9, str.length - 3).trim();
+  }
+
+  // Giải mã các thực thể ký tự XML đặc biệt
+  str = str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#039;/g, "'")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  return str.replace(/[ \t]+/g, ' ').trim();
+}
+
+/**
+ * Chuyển đổi an toàn chuỗi số (số lượng, đơn giá, thành tiền) từ XML sang number.
+ * Tương thích linh hoạt với cả quy ước phân cách số thập phân dấu chấm (.) và dấu phẩy (,).
+ */
+export function parseInvoiceNumber(val: any, defaultVal: number = 0): number {
+  if (typeof val === 'number') return isNaN(val) ? defaultVal : val;
+  if (!val || typeof val !== 'string') return defaultVal;
+  let str = val.trim();
+  if (!str) return defaultVal;
+
+  // Bỏ khoảng trắng phân cách hàng nghìn nếu có
+  str = str.replace(/\s+/g, '');
+
+  if (str.includes('.') && str.includes(',')) {
+    if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
+      // Định dạng VN: 1.000.000,50 -> bỏ dấu chấm, đổi dấu phẩy thành dấu chấm
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Định dạng US: 1,000,000.50 -> bỏ dấu phẩy
+      str = str.replace(/,/g, '');
+    }
+  } else if (str.includes(',')) {
+    // Chỉ có dấu phẩy: "1,5" hoặc "1250000,00"
+    str = str.replace(',', '.');
+  }
+
+  const num = parseFloat(str);
+  return isNaN(num) ? defaultVal : num;
+}
+
+/**
+ * Tìm thẻ XML theo danh sách tên thẻ (hỗ trợ namespace, không phân biệt hoa thường)
+ */
+function findXmlTagElement(parent: Element | Document, tagNames: string[]): Element | null {
+  if (!parent) return null;
+  const children = 'children' in parent ? Array.from(parent.children) : [];
+
+  for (const tag of tagNames) {
+    const lower = tag.toLowerCase();
+
+    // 1. Kiểm tra trực tiếp các thẻ con trước để đảm bảo cấu trúc phân cấp
+    for (const child of children) {
+      const local = (child.localName || child.nodeName || '').replace(/^[a-zA-Z0-9_]+:/, '').toLowerCase();
+      if (local === lower) {
+        return child;
+      }
+    }
+
+    // 2. Sử dụng getElementsByTagName
+    const list = parent.getElementsByTagName(tag);
+    if (list && list.length > 0) return list[0];
+
+    const listLower = parent.getElementsByTagName(lower);
+    if (listLower && listLower.length > 0) return listLower[0];
+
+    // 3. Sử dụng getElementsByTagNameNS với wildcard namespace
+    if ('getElementsByTagNameNS' in parent) {
+      try {
+        const nsList = parent.getElementsByTagNameNS('*', tag);
+        if (nsList && nsList.length > 0) return nsList[0];
+      } catch {}
+    }
+  }
+  return null;
+}
+
+/**
+ * Lấy nội dung chuỗi của thẻ XML từ danh sách tên thẻ ưu tiên
+ */
+function getXmlTagText(parent: Element, tagNames: string[]): string {
+  if (!parent) return '';
+  const children = Array.from(parent.children);
+
+  for (const tag of tagNames) {
+    const lower = tag.toLowerCase();
+
+    // Kiểm tra con trực tiếp trước
+    for (const child of children) {
+      const local = (child.localName || child.nodeName || '').replace(/^[a-zA-Z0-9_]+:/, '').toLowerCase();
+      if (local === lower) {
+        const txt = child.textContent || '';
+        return cleanDetailedItemName(txt);
+      }
+    }
+
+    // Kiểm tra hậu duệ
+    const el = parent.getElementsByTagName(tag)[0] || parent.getElementsByTagName(lower)[0];
+    if (el && el.textContent) {
+      return cleanDetailedItemName(el.textContent);
+    }
+
+    if ('getElementsByTagNameNS' in parent) {
+      try {
+        const nsList = parent.getElementsByTagNameNS('*', tag);
+        if (nsList && nsList.length > 0 && nsList[0].textContent) {
+          return cleanDetailedItemName(nsList[0].textContent);
+        }
+      } catch {}
+    }
+  }
+  return '';
+}
+
+/**
+ * Trích xuất khối XML theo tên thẻ bằng biểu thức chính quy (Regex)
+ */
+function extractTaggedBlock(source: string, tagName: string): string | null {
+  if (!source) return null;
+  const clean = tagName.replace(/[^a-zA-Z0-9_]/g, '');
+  const regex = new RegExp(`<(?:[a-zA-Z0-9_]+:)?${clean}(?:\\s+[^>]*)?>([\\s\\S]*?)<\\/(?:[a-zA-Z0-9_]+:)?${clean}>`, 'i');
+  const match = source.match(regex);
+  return match ? match[1] : null;
+}
+
+/**
+ * Lấy giá trị chuỗi của một thẻ từ khối XML qua mảng các tên thẻ ưu tiên
+ */
+function extractTagValueByKeys(block: string, tagNames: string[], defaultValue: string = ''): string {
+  for (const tag of tagNames) {
+    const val = extractTagValue(block, tag, '');
+    if (val) {
+      return cleanDetailedItemName(val);
+    }
+  }
+  return defaultValue;
+}
+
+/**
+ * Trích xuất toàn bộ các trường của một thẻ <HHDVu> từ DOM Element
+ */
+function parseHHDVuFromElement(el: Element, idx: number): InvoiceItem {
+  // <STT>: Số thứ tự
+  const rawStt = getXmlTagText(el, ['STT', 'stt', 'SoTT']);
+  const lineNo = parseInt(rawStt, 10) || (idx + 1);
+
+  // <THHDVu>: Tên hàng hóa, dịch vụ (Lấy đúng tên chi tiết, không lấy chuỗi tóm tắt)
+  const rawName = getXmlTagText(el, ['THHDVu', 'thhdvu', 'TenHHDVu', 'Ten', 'ten']);
+  const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
+
+  // <DVTinh>: Đơn vị tính
+  const rawUnit = getXmlTagText(el, ['DVTinh', 'dvtinh', 'DVT', 'dvt', 'DonViTinh']);
+  const unit = rawUnit || 'Cái';
+
+  // <SLuong>: Số lượng
+  const rawQty = getXmlTagText(el, ['SLuong', 'sluong', 'SoLuong']);
+  const quantity = parseInvoiceNumber(rawQty, 1);
+
+  // <DGia>: Đơn giá
+  const rawPrice = getXmlTagText(el, ['DGia', 'dgia', 'DonGia']);
+  const unitPrice = parseInvoiceNumber(rawPrice, 0);
+
+  // <TTHTien> / <ThTien>: Thành tiền
+  const rawAmount = getXmlTagText(el, ['TTHTien', 'tthtien', 'ThTien', 'thtien', 'THTien', 'ThanhTien']);
+  let amount = parseInvoiceNumber(rawAmount, 0);
+  if (amount === 0 && quantity > 0 && unitPrice > 0) {
+    amount = Math.round(quantity * unitPrice);
+  }
+
+  // <TSuat>: Thuế suất GTGT
+  const rawRate = getXmlTagText(el, ['TSuat', 'tsuat', 'ThueSuat']);
+  const taxRate = rawRate || '10%';
+  let taxPercent = 10;
+  const upperRate = taxRate.toUpperCase();
+  if (upperRate.includes('8')) taxPercent = 8;
+  else if (upperRate.includes('5')) taxPercent = 5;
+  else if (upperRate.includes('0')) taxPercent = 0;
+  else if (upperRate.includes('KCT') || upperRate.includes('KKKNT')) taxPercent = 0;
+  else {
+    const match = taxRate.match(/(\d+)/);
+    if (match) taxPercent = parseFloat(match[1]) || 10;
+  }
+
+  // Các trường bổ trợ theo chuẩn NĐ 123
+  const itemCode = getXmlTagText(el, ['MHHDVu', 'mhhdvu', 'MaHHDVu', 'Ma', 'ma']);
+  const rawNature = getXmlTagText(el, ['TChat', 'tchat', 'TinhChat']);
+  const nature = parseInt(rawNature, 10) || 1;
+
+  const rawTax = getXmlTagText(el, ['TThue', 'tthue', 'TienThue']);
+  let taxAmount = parseInvoiceNumber(rawTax, 0);
+  if (taxAmount === 0 && taxPercent > 0 && amount > 0) {
+    taxAmount = Math.round((amount * taxPercent) / 100);
+  }
+
+  const discountAmount = parseInvoiceNumber(getXmlTagText(el, ['STCKhau', 'stckhau']), 0);
+  const discountRate = parseInvoiceNumber(getXmlTagText(el, ['TLCKhau', 'tlckhau']), 0);
+  const totalAmount = amount + taxAmount;
+
+  return {
+    id: `item_${lineNo}_${Math.random().toString(36).substring(2, 7)}`,
+    lineNo,
+    itemName,
+    unit,
+    quantity,
+    unitPrice,
+    amount,
+    taxRate,
+    taxRatePercent: taxPercent,
+    taxAmount,
+    totalAmount,
+    itemCode: itemCode || undefined,
+    nature,
+    discountAmount: discountAmount || undefined,
+    discountRate: discountRate || undefined,
+    // Thuộc tính tương thích tiếng Việt
+    stt: lineNo,
+    ten: itemName,
+    dvt: unit,
+    sluong: quantity,
+    dgia: unitPrice,
+    thtien: amount,
+    tthtien: amount,
+    tsuat: taxRate,
+    tthue: taxAmount,
+    mhhdvu: itemCode || undefined,
+    tchat: nature,
+    stckhau: discountAmount || undefined,
+    tlckhau: discountRate || undefined
+  };
+}
+
+/**
+ * Trích xuất toàn bộ các trường của một thẻ <HHDVu> từ Regex String Block
+ */
+function parseHHDVuFromBlock(block: string, idx: number): InvoiceItem {
+  // <STT>: Số thứ tự
+  const rawStt = extractTagValueByKeys(block, ['STT', 'stt', 'SoTT']);
+  const lineNo = parseInt(rawStt, 10) || (idx + 1);
+
+  // <THHDVu>: Tên hàng hóa, dịch vụ (Lấy đúng tên chi tiết, không lấy chuỗi tóm tắt)
+  const rawName = extractTagValueByKeys(block, ['THHDVu', 'thhdvu', 'TenHHDVu', 'Ten', 'ten']);
+  const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
+
+  // <DVTinh>: Đơn vị tính
+  const rawUnit = extractTagValueByKeys(block, ['DVTinh', 'dvtinh', 'DVT', 'dvt', 'DonViTinh']);
+  const unit = rawUnit || 'Cái';
+
+  // <SLuong>: Số lượng
+  const rawQty = extractTagValueByKeys(block, ['SLuong', 'sluong', 'SoLuong']);
+  const quantity = parseInvoiceNumber(rawQty, 1);
+
+  // <DGia>: Đơn giá
+  const rawPrice = extractTagValueByKeys(block, ['DGia', 'dgia', 'DonGia']);
+  const unitPrice = parseInvoiceNumber(rawPrice, 0);
+
+  // <TTHTien> / <ThTien>: Thành tiền
+  const rawAmount = extractTagValueByKeys(block, ['TTHTien', 'tthtien', 'ThTien', 'thtien', 'THTien', 'ThanhTien']);
+  let amount = parseInvoiceNumber(rawAmount, 0);
+  if (amount === 0 && quantity > 0 && unitPrice > 0) {
+    amount = Math.round(quantity * unitPrice);
+  }
+
+  // <TSuat>: Thuế suất GTGT
+  const rawRate = extractTagValueByKeys(block, ['TSuat', 'tsuat', 'ThueSuat']);
+  const taxRate = rawRate || '10%';
+  let taxPercent = 10;
+  const upperRate = taxRate.toUpperCase();
+  if (upperRate.includes('8')) taxPercent = 8;
+  else if (upperRate.includes('5')) taxPercent = 5;
+  else if (upperRate.includes('0')) taxPercent = 0;
+  else if (upperRate.includes('KCT') || upperRate.includes('KKKNT')) taxPercent = 0;
+  else {
+    const match = taxRate.match(/(\d+)/);
+    if (match) taxPercent = parseFloat(match[1]) || 10;
+  }
+
+  // Các trường bổ trợ theo chuẩn NĐ 123
+  const itemCode = extractTagValueByKeys(block, ['MHHDVu', 'mhhdvu', 'MaHHDVu', 'Ma', 'ma']);
+  const rawNature = extractTagValueByKeys(block, ['TChat', 'tchat', 'TinhChat']);
+  const nature = parseInt(rawNature, 10) || 1;
+
+  const rawTax = extractTagValueByKeys(block, ['TThue', 'tthue', 'TienThue']);
+  let taxAmount = parseInvoiceNumber(rawTax, 0);
+  if (taxAmount === 0 && taxPercent > 0 && amount > 0) {
+    taxAmount = Math.round((amount * taxPercent) / 100);
+  }
+
+  const discountAmount = parseInvoiceNumber(extractTagValueByKeys(block, ['STCKhau', 'stckhau']), 0);
+  const discountRate = parseInvoiceNumber(extractTagValueByKeys(block, ['TLCKhau', 'tlckhau']), 0);
+  const totalAmount = amount + taxAmount;
+
+  return {
+    id: `item_${lineNo}_${Math.random().toString(36).substring(2, 7)}`,
+    lineNo,
+    itemName,
+    unit,
+    quantity,
+    unitPrice,
+    amount,
+    taxRate,
+    taxRatePercent: taxPercent,
+    taxAmount,
+    totalAmount,
+    itemCode: itemCode || undefined,
+    nature,
+    discountAmount: discountAmount || undefined,
+    discountRate: discountRate || undefined,
+    // Thuộc tính tương thích tiếng Việt
+    stt: lineNo,
+    ten: itemName,
+    dvt: unit,
+    sluong: quantity,
+    dgia: unitPrice,
+    thtien: amount,
+    tthtien: amount,
+    tsuat: taxRate,
+    tthue: taxAmount,
+    mhhdvu: itemCode || undefined,
+    tchat: nature,
+    stckhau: discountAmount || undefined,
+    tlckhau: discountRate || undefined
+  };
+}
+
+/**
+ * HÀM BÓC TÁCH DỮ LIỆU DANH SÁCH HÀNG HÓA TỪ FILE XML GỐC
+ * (Nghị định 123/2020/NĐ-CP & Thông tư 78/2021/TT-BTC)
+ *
+ * Truy cập chính xác vào mảng các thẻ:
+ *   <DLHDon> -> <NDHDon> -> <DSHHDVu> -> <HHDVu>
+ *
+ * Bóc tách đầy đủ các trường:
+ *   + <STT>: Số thứ tự
+ *   + <THHDVu>: Tên hàng hóa, dịch vụ (Lấy đúng tên chi tiết, không lấy chuỗi tóm tắt)
+ *   + <DVTinh>: Đơn vị tính
+ *   + <SLuong>: Số lượng
+ *   + <DGia>: Đơn giá
+ *   + <TTHTien>: Thành tiền
+ *   + <TSuat>: Thuế suất GTGT
+ */
+export function extractInvoiceItemsFromXml(xmlSource: string | Document): InvoiceItem[] {
+  if (!xmlSource) return [];
+
+  const isBrowser = typeof window !== 'undefined' && typeof window.DOMParser !== 'undefined';
+  let domDoc: Document | null = null;
+  let rawXmlString = '';
+
+  if (typeof xmlSource === 'string') {
+    rawXmlString = xmlSource;
+    if (isBrowser) {
+      try {
+        const parser = new DOMParser();
+        const parsed = parser.parseFromString(xmlSource, 'application/xml');
+        if (!parsed.getElementsByTagName('parsererror')[0]) {
+          domDoc = parsed;
+        }
+      } catch {
+        domDoc = null;
+      }
+    }
+  } else {
+    domDoc = xmlSource;
+  }
+
+  // =========================================================================
+  // PHƯƠNG THỨC 1: DOM TREE NAVIGATION (Khi chạy trên Browser hoặc có DOM Document)
+  // Truy cập chính xác: <DLHDon> -> <NDHDon> -> <DSHHDVu> -> <HHDVu>
+  // =========================================================================
+  if (domDoc) {
+    try {
+      // 1. Thẻ <DLHDon> (Dữ liệu hóa đơn)
+      const dlhdonNode = findXmlTagElement(domDoc, ['DLHDon', 'dlhdon']) || domDoc.documentElement;
+
+      // 2. Thẻ <NDHDon> (Nội dung hóa đơn) nằm trong <DLHDon>
+      const ndhdonNode = dlhdonNode ? findXmlTagElement(dlhdonNode, ['NDHDon', 'ndhdon']) : null;
+
+      // 3. Thẻ <DSHHDVu> (Danh sách hàng hóa, dịch vụ) nằm trong <NDHDon>
+      const parentOfDshhdvu = ndhdonNode || dlhdonNode || domDoc;
+      const dshhdvuNode = findXmlTagElement(parentOfDshhdvu, ['DSHHDVu', 'dshhdvu']);
+
+      if (dshhdvuNode) {
+        // 4. Lấy mảng thẻ <HHDVu>
+        let hhdvuList: Element[] = [];
+        const dshChildren = Array.from(dshhdvuNode.children);
+        for (const ch of dshChildren) {
+          const local = (ch.localName || ch.nodeName || '').replace(/^[a-zA-Z0-9_]+:/, '').toLowerCase();
+          if (local === 'hhdvu') {
+            hhdvuList.push(ch);
+          }
+        }
+
+        if (hhdvuList.length === 0) {
+          const tagged = dshhdvuNode.getElementsByTagName('HHDVu');
+          if (tagged && tagged.length > 0) {
+            hhdvuList = Array.from(tagged);
+          }
+        }
+
+        if (hhdvuList.length > 0) {
+          return hhdvuList.map((el, idx) => parseHHDVuFromElement(el, idx));
+        }
+      }
+
+      // Fallback tìm trực tiếp thẻ <HHDVu> nếu cấu trúc cây bị bao bọc đặc thù
+      const allHhdvu = domDoc.getElementsByTagName('HHDVu');
+      if (allHhdvu && allHhdvu.length > 0) {
+        return Array.from(allHhdvu).map((el, idx) => parseHHDVuFromElement(el, idx));
+      }
+    } catch (err) {
+      console.warn('Lỗi khi phân tích DOM DSHHDVu, tiếp tục với bộ phân tích Regex:', err);
+    }
+  }
+
+  // =========================================================================
+  // PHƯƠNG THỨC 2: REGEX HIERARCHY PARSER (Dành cho Node.js hoặc fallback)
+  // Truy cập chính xác: <DLHDon> -> <NDHDon> -> <DSHHDVu> -> <HHDVu>
+  // =========================================================================
+  const xmlText = rawXmlString || (domDoc ? new XMLSerializer().serializeToString(domDoc) : '');
+  if (!xmlText) return [];
+
+  // Bước 1: Trích xuất khối <DLHDon>
+  const dlhdonContent = extractTaggedBlock(xmlText, 'DLHDon') || xmlText;
+
+  // Bước 2: Trích xuất khối <NDHDon> bên trong <DLHDon>
+  const ndhdonContent = extractTaggedBlock(dlhdonContent, 'NDHDon') || dlhdonContent;
+
+  // Bước 3: Trích xuất khối <DSHHDVu> bên trong <NDHDon>
+  const dshhdvuContent = extractTaggedBlock(ndhdonContent, 'DSHHDVu') || 
+                         extractTaggedBlock(xmlText, 'DSHHDVu') || 
+                         ndhdonContent;
+
+  // Bước 4: Trích xuất từng thẻ <HHDVu> trong <DSHHDVu>
+  const hhdvuBlocks = extractTagBlocks(dshhdvuContent, 'HHDVu');
+  if (hhdvuBlocks.length > 0) {
+    return hhdvuBlocks.map((block, idx) => parseHHDVuFromBlock(block, idx));
+  }
+
+  // Fallback toàn văn bản nếu không tìm thấy trong dshhdvuContent
+  const globalHhdvuBlocks = extractTagBlocks(xmlText, 'HHDVu');
+  return globalHhdvuBlocks.map((block, idx) => parseHHDVuFromBlock(block, idx));
+}
+
+/**
  * Parses an entire Vietnamese E-Invoice XML file according to:
  * - Decision 1450/QĐ-TCT & 1510/QĐ-TCT
  * - Decree 123/2020/ND-CP & Circular 78/2021/TT-BTC
@@ -193,83 +654,17 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   const nmsdt = getTag(nmuaSource, 'SDThoai') || '';
   const nmemail = getTag(nmuaSource, 'DCTDTu') || '';
 
-  // 4. DSHHDVu (Invoice Items List)
-  const items: InvoiceItem[] = [];
-  if (domDoc) {
-    const hhdvuNodes = domDoc.getElementsByTagName('HHDVu');
-    for (let i = 0; i < hhdvuNodes.length; i++) {
-      const node = hhdvuNodes[i];
-      const lineNo = parseInt(getTag(node, 'STT') || `${i + 1}`, 10) || i + 1;
-      const itemName = getTag(node, 'THHDVu') || getTag(node, 'ten') || `Hàng hóa / Dịch vụ ${i + 1}`;
-      const unit = getTag(node, 'DVTinh') || getTag(node, 'dvt') || 'Cái';
-      const quantity = parseFloat(getTag(node, 'SLuong') || '1') || 1;
-      const unitPrice = parseFloat(getTag(node, 'DGia') || '0') || 0;
-      const amount = parseFloat(getTag(node, 'ThTien') || '0') || (quantity * unitPrice);
-      const taxRate = getTag(node, 'TSuat') || '10%';
-      
-      let taxPercent = 10;
-      if (taxRate.includes('8')) taxPercent = 8;
-      else if (taxRate.includes('5')) taxPercent = 5;
-      else if (taxRate.includes('0')) taxPercent = 0;
-      else if (taxRate.toUpperCase().includes('KCT') || taxRate.toUpperCase().includes('KKKNT')) taxPercent = 0;
-
-      const taxAmount = Math.round((amount * taxPercent) / 100);
-      const totalAmount = amount + taxAmount;
-
-      items.push({
-        id: `item_${i + 1}`,
-        lineNo,
-        itemName,
-        unit,
-        quantity,
-        unitPrice,
-        amount,
-        taxRate,
-        taxRatePercent: taxPercent,
-        taxAmount,
-        totalAmount
-      });
-    }
-  } else {
-    // Regex item blocks extraction
-    const itemBlocks = extractTagBlocks(xmlSource, 'HHDVu');
-    itemBlocks.forEach((block, idx) => {
-      const lineNo = parseInt(extractTagValue(block, 'STT', `${idx + 1}`), 10) || idx + 1;
-      const itemName = extractTagValue(block, 'THHDVu') || `Hàng hóa / Dịch vụ ${idx + 1}`;
-      const unit = extractTagValue(block, 'DVTinh') || 'Cái';
-      const quantity = parseFloat(extractTagValue(block, 'SLuong', '1')) || 1;
-      const unitPrice = parseFloat(extractTagValue(block, 'DGia', '0')) || 0;
-      const amount = parseFloat(extractTagValue(block, 'ThTien', '0')) || (quantity * unitPrice);
-      const taxRate = extractTagValue(block, 'TSuat') || '10%';
-
-      let taxPercent = 10;
-      if (taxRate.includes('8')) taxPercent = 8;
-      else if (taxRate.includes('5')) taxPercent = 5;
-      else if (taxRate.includes('0')) taxPercent = 0;
-      else if (taxRate.toUpperCase().includes('KCT') || taxRate.toUpperCase().includes('KKKNT')) taxPercent = 0;
-
-      const taxAmount = Math.round((amount * taxPercent) / 100);
-      const totalAmount = amount + taxAmount;
-
-      items.push({
-        id: `item_${idx + 1}`,
-        lineNo,
-        itemName,
-        unit,
-        quantity,
-        unitPrice,
-        amount,
-        taxRate,
-        taxRatePercent: taxPercent,
-        taxAmount,
-        totalAmount
-      });
-    });
+  // 4. DSHHDVu (Invoice Items List) - Bóc tách chuẩn Nghị định 123/2020/NĐ-CP & Thông tư 78/2021/TT-BTC
+  // Đường dẫn: <DLHDon> -> <NDHDon> -> <DSHHDVu> -> <HHDVu>
+  let items: InvoiceItem[] = extractInvoiceItemsFromXml(domDoc || xmlSource);
+  if (items.length === 0 && typeof xmlSource === 'string') {
+    // Fallback thử bóc tách trực tiếp chuỗi XML nếu DOM ban đầu không đủ context
+    items = extractInvoiceItemsFromXml(xmlSource);
   }
 
   // 5. TToan (Totals and Tax Summary)
-  const tgtcthue = parseFloat(getTag(domDoc || xmlSource, 'TgTCThue') || '0') || items.reduce((s, it) => s + it.amount, 0);
-  const tgtthue = parseFloat(getTag(domDoc || xmlSource, 'TgTThue') || '0') || items.reduce((s, it) => s + it.taxAmount, 0);
+  const tgtcthue = parseFloat(getTag(domDoc || xmlSource, 'TgTCThue') || '0') || items.reduce((s, it) => s + (it.amount || 0), 0);
+  const tgtthue = parseFloat(getTag(domDoc || xmlSource, 'TgTThue') || '0') || items.reduce((s, it) => s + (it.taxAmount || 0), 0);
   const tgtttbso = parseFloat(getTag(domDoc || xmlSource, 'TgTTTBSo') || '0') || (tgtcthue + tgtthue);
   let tgtttbchu = getTag(domDoc || xmlSource, 'TgTTTBChu') || '';
   if (!tgtttbchu) {
@@ -277,26 +672,40 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   }
 
   // Tax Breakdown (THTTLTSuat)
-  const vatBreakdown: Array<{ taxRate: string; amount: number; taxAmount: number }> = [];
+  const vatBreakdown: Array<{ taxRate: string; amount: number; taxAmount: number; tsuat?: string; thtien?: number; tthue?: number }> = [];
   const ltSuatBlocks = extractTagBlocks(xmlSource, 'LTSuat');
   if (ltSuatBlocks.length > 0) {
     for (const b of ltSuatBlocks) {
       const r = extractTagValue(b, 'TSuat') || '10%';
-      const a = parseFloat(extractTagValue(b, 'ThTien') || '0') || 0;
+      const a = parseFloat(extractTagValue(b, 'TTHTien') || extractTagValue(b, 'ThTien') || '0') || 0;
       const t = parseFloat(extractTagValue(b, 'TThue') || '0') || 0;
-      vatBreakdown.push({ taxRate: r, amount: a, taxAmount: t });
+      vatBreakdown.push({
+        taxRate: r,
+        amount: a,
+        taxAmount: t,
+        tsuat: r,
+        thtien: a,
+        tthue: t
+      });
     }
   } else if (items.length > 0) {
     const mapRates = new Map<string, { amount: number; taxAmount: number }>();
     items.forEach(it => {
       const r = it.taxRate || '10%';
       const curr = mapRates.get(r) || { amount: 0, taxAmount: 0 };
-      curr.amount += it.amount;
-      curr.taxAmount += it.taxAmount;
+      curr.amount += (it.amount || 0);
+      curr.taxAmount += (it.taxAmount || 0);
       mapRates.set(r, curr);
     });
     mapRates.forEach((val, key) => {
-      vatBreakdown.push({ taxRate: key, amount: val.amount, taxAmount: val.taxAmount });
+      vatBreakdown.push({
+        taxRate: key,
+        amount: val.amount,
+        taxAmount: val.taxAmount,
+        tsuat: key,
+        thtien: val.amount,
+        tthue: val.taxAmount
+      });
     });
   }
 

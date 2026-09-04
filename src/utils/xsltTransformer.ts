@@ -143,7 +143,7 @@ export const OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
                         <xsl:value-of select="TSuat | inv:TSuat"/>
                       </td>
                       <td style="text-align: right; font-family: monospace; font-weight: bold;">
-                        <xsl:value-of select="ThTien | inv:ThTien"/>
+                        <xsl:value-of select="TTHTien | inv:TTHTien | ThTien | inv:ThTien"/>
                       </td>
                     </tr>
                   </xsl:for-each>

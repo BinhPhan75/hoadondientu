@@ -671,17 +671,30 @@ export function generateOfficialInvoiceHtml(
             </tr>
           </thead>
           <tbody>
-            ${items.map((it, idx) => `
+            ${items.map((it, idx) => {
+              const lineNo = it.lineNo || (it as any).stt || idx + 1;
+              const name = it.itemName || (it as any).ten || `Hàng hóa / Dịch vụ ${lineNo}`;
+              const unit = it.unit || (it as any).dvt || 'Cái';
+              const qty = it.quantity ?? (it as any).sluong ?? 0;
+              const price = it.unitPrice ?? (it as any).dgia ?? 0;
+              const rate = it.taxRate || (it as any).tsuat || '10%';
+              const amt = it.amount ?? (it as any).thtien ?? (it as any).tthtien ?? 0;
+              const code = it.itemCode || (it as any).mhhdvu;
+
+              return `
             <tr>
-              <td class="text-center font-mono">${it.lineNo || idx + 1}</td>
-              <td class="font-bold">${escapeHtml(it.itemName)}</td>
-              <td class="text-center">${escapeHtml(it.unit || 'Cái')}</td>
-              <td class="text-right font-mono">${formatNum(it.quantity)}</td>
-              <td class="text-right font-mono">${formatNum(it.unitPrice)}</td>
-              <td class="text-center font-bold">${it.taxRate || '10%'}</td>
-              <td class="text-right font-bold font-mono">${formatNum(it.amount)}</td>
-            </tr>
-            `).join('')}
+              <td class="text-center font-mono">${lineNo}</td>
+              <td class="font-bold">
+                <div>${escapeHtml(name)}</div>
+                ${code ? `<div style="font-size: 9.5px; font-weight: normal; color: #64748b; font-family: monospace; margin-top: 1px;">Mã hàng: ${escapeHtml(code)}</div>` : ''}
+              </td>
+              <td class="text-center">${escapeHtml(unit)}</td>
+              <td class="text-right font-mono">${formatNum(qty)}</td>
+              <td class="text-right font-mono">${formatNum(price)}</td>
+              <td class="text-center font-bold">${escapeHtml(rate)}</td>
+              <td class="text-right font-bold font-mono">${formatNum(amt)}</td>
+            </tr>`;
+            }).join('')}
           </tbody>
         </table>
 
@@ -697,13 +710,17 @@ export function generateOfficialInvoiceHtml(
               </tr>
             </thead>
             <tbody>
-              ${vatRows.map(vr => `
+              ${vatRows.map(vr => {
+                const r = vr.taxRate || (vr as any).tsuat || '10%';
+                const a = vr.amount ?? (vr as any).thtien ?? 0;
+                const t = vr.taxAmount ?? (vr as any).tthue ?? 0;
+                return `
               <tr>
-                <td class="text-center font-bold">${vr.taxRate}</td>
-                <td class="text-right font-mono">${formatVND(vr.amount)}</td>
-                <td class="text-right font-mono">${formatVND(vr.taxAmount)}</td>
-              </tr>
-              `).join('')}
+                <td class="text-center font-bold">${escapeHtml(r)}</td>
+                <td class="text-right font-mono">${formatVND(a)}</td>
+                <td class="text-right font-mono">${formatVND(t)}</td>
+              </tr>`;
+              }).join('')}
             </tbody>
           </table>
           ` : ''}
