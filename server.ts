@@ -3,7 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
-import { normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
@@ -638,9 +638,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           caProvider: 'Tổng cục Thuế CQT',
           msttcgp: item.msttcgp || item.mst_tcgp || '',
           tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
-          lookupCode: item.mtcuu || item.matracuu || item.lookupCode || item.fkey || '',
-          lookupUrl: item.lookupUrl || '',
-          items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
+          lookupCode: getLookupCodeFromPayload(item),
+          lookupUrl: item.lookupUrl || item.lookup_url || item.linkTraCuu || item.websiteTraCuu || '',
+          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
         }));
       } catch (err: any) {
         console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
