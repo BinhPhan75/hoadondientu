@@ -3,7 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
-import { parseGDTInvoiceXml } from './src/utils/xmlParser';
+import { normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
@@ -640,19 +640,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
           lookupCode: item.mtcuu || item.matracuu || item.lookupCode || item.fkey || '',
           lookupUrl: item.lookupUrl || '',
-          items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
-            id: `item_${idx + 1}`,
-            lineNo: idx + 1,
-            itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
-            unit: it.dvtinh || it.unit || 'Lô',
-            quantity: Number(it.sluong || it.quantity || 1),
-            unitPrice: Number(it.dgia || it.unitPrice || 0),
-            amount: Number(it.thtien || it.amount || 0),
-            taxRate: it.tsuat || it.taxRate || '10%',
-            taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
-            taxAmount: Number(it.tthue || it.taxAmount || 0),
-            totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
-          }))
+          items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
         }));
       } catch (err: any) {
         console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
