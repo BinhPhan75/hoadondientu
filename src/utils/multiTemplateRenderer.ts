@@ -11,7 +11,7 @@
  */
 
 import { GDTInvoice, InvoiceItem } from '../types';
-import { numberToVietnameseWords, parseGDTInvoiceXml } from './xmlParser';
+import { numberToVietnameseWords, parseGDTInvoiceXml, ensureInvoiceItems } from './xmlParser';
 
 export type InvoiceProviderId = 
   | 'MISA' 
@@ -34,10 +34,10 @@ export interface RenderTemplateOptions {
  * ============================================================================
  * 1. HÀM DETECT PROVIDER (detectInvoiceProvider)
  * ============================================================================
- * Nhận vào chuỗi XML Hóa đơn điện tử và trả về Mã Template (Template ID) tương ứng.
+ * Nhận vào chuỗi XML Hóa đơn điện tử hoặc đối tượng GDTInvoice và trả về Mã Template tương ứng.
  * 
- * Quy tắc:
- * 1. Quét toàn bộ XML để tìm domain trong thẻ ghi chú/link:
+ * Quy tắc ưu tiên nhận diện:
+ * 1. Quét toàn bộ XML để tìm domain trong thẻ ghi chú / đường link tra cứu:
  *    - Chứa "meinvoice.vn" hoặc "misa.vn" -> "MISA"
  *    - Chứa "sinvoice.viettel" -> "VIETTEL"
  *    - Chứa "vnpt-invoice" -> "VNPT"
@@ -45,99 +45,124 @@ export interface RenderTemplateOptions {
  *    - Chứa "easyinvoice" -> "EASYINVOICE"
  *    - Chứa "bkav" -> "BKAV"
  * 
- * 2. Nếu không có domain, đọc thẻ <Signature> -> <X509IssuerName>:
+ * 2. Đọc thẻ MSTTCGP (Mã số thuế tổ chức cung cấp giải pháp HĐĐT theo QĐ 1450/TCT)
+ *    - 0100684378 -> VNPT
+ *    - 0101243150 -> MISA
+ *    - 0105987432 -> EASYINVOICE
+ *    - 0315744883 -> 4SI
+ *    - 0100109106 -> VIETTEL
+ *    - 0101360697 -> BKAV
+ * 
+ * 3. Đọc thẻ <Signature> -> <X509IssuerName> hoặc <X509SubjectName>:
+ *    - Chứa "VNPT" -> "VNPT"
  *    - Chứa "MISA" -> "MISA"
  *    - Chứa "VIETTEL" -> "VIETTEL"
- *    - Chứa "VNPT" -> "VNPT"
  *    - Chứa "BKAV" -> "BKAV"
- *    - Chứa "EASYCA" -> "EASYINVOICE"
- *    - Chứa "4SI" -> "4SI"
+ *    - Chứa "EASYCA" hoặc "SOFTDREAMS" -> "EASYINVOICE"
+ *    - Chứa "4SI" hoặc "LCS" -> "4SI"
  * 
- * 3. Nếu không tìm thấy bất kỳ dấu vết nào -> "DEFAULT"
+ * 4. Nếu không có XML, nhận diện qua các trường đã bóc tách của invoice (msttcgp, tentcgp, lookupUrl, caProvider)
+ * 5. Nếu không tìm thấy bất kỳ dấu vết nào -> Return "DEFAULT"
  */
-export function detectInvoiceProvider(xmlString: string | null | undefined): InvoiceProviderId {
-  if (!xmlString || typeof xmlString !== 'string' || !xmlString.trim()) {
-    return 'DEFAULT';
-  }
-
-  const raw = xmlString;
-
-  // --------------------------------------------------------------------------
-  // BƯỚC 1: Quét toàn bộ XML để tìm domain trong thẻ ghi chú / đường link tra cứu
-  // --------------------------------------------------------------------------
-  if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
-    return 'MISA';
-  }
-
-  if (/sinvoice\.viettel/i.test(raw)) {
-    return 'VIETTEL';
-  }
-
-  if (/vnpt-invoice/i.test(raw)) {
-    return 'VNPT';
-  }
-
-  if (/inv\.4si\.vn/i.test(raw)) {
-    return '4SI';
-  }
-
-  if (/easyinvoice/i.test(raw)) {
-    return 'EASYINVOICE';
-  }
-
-  if (/bkav/i.test(raw)) {
-    return 'BKAV';
-  }
-
-  // Quét thêm thẻ MSTTCGP (Mã số thuế Tổ chức giải pháp theo chuẩn QĐ 1450/TCT)
-  const msttcgpMatch = raw.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
-  if (msttcgpMatch && msttcgpMatch[1]) {
-    const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-    if (msttcgp === '0101243150') return 'MISA';
-    if (msttcgp === '0100109106') return 'VIETTEL';
-    if (msttcgp === '0100684378') return 'VNPT';
-    if (msttcgp === '0105987432') return 'EASYINVOICE';
-    if (msttcgp === '0315744883') return '4SI';
-    if (msttcgp === '0101360697') return 'BKAV';
-  }
+export function detectInvoiceProvider(
+  xmlString?: string | null,
+  invoice?: GDTInvoice | null
+): InvoiceProviderId {
+  const raw = xmlString || (invoice?.rawXml || '');
 
   // --------------------------------------------------------------------------
-  // BƯỚC 2: Nếu không có domain, đọc thẻ <Signature> -> <X509IssuerName>
+  // BƯỚC 1: Quét toàn bộ XML để tìm domain trong link tra cứu hoặc nội dung
   // --------------------------------------------------------------------------
-  const signatureBlocks: string[] = [];
-  const sigRegex = /<(?:[a-zA-Z0-9_]+:)?Signature(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?Signature>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = sigRegex.exec(raw)) !== null) {
-    if (match[1]) signatureBlocks.push(match[1]);
-  }
-
-  const searchScope = signatureBlocks.length > 0 ? signatureBlocks.join('\n') : raw;
-  const issuerRegex = /<(?:[a-zA-Z0-9_]+:)?X509IssuerName(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?X509IssuerName>/gi;
-  let issuerMatch: RegExpExecArray | null;
-
-  while ((issuerMatch = issuerRegex.exec(searchScope)) !== null) {
-    const issuerContent = (issuerMatch[1] || '')
-      .replace(/<!\[CDATA\[|\]\]>/g, '')
-      .toUpperCase();
-
-    if (issuerContent.includes('MISA')) {
+  if (raw && typeof raw === 'string') {
+    if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return 'MISA';
     }
-    if (issuerContent.includes('VIETTEL')) {
+    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom/i.test(raw)) {
       return 'VIETTEL';
     }
-    if (issuerContent.includes('VNPT')) {
+    if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
       return 'VNPT';
     }
-    if (issuerContent.includes('BKAV')) {
-      return 'BKAV';
-    }
-    if (issuerContent.includes('EASYCA') || issuerContent.includes('SOFTDREAMS')) {
-      return 'EASYINVOICE';
-    }
-    if (issuerContent.includes('4SI')) {
+    if (/inv\.4si\.vn|4si\.vn|4si/i.test(raw)) {
       return '4SI';
     }
+    if (/easyinvoice|softdreams/i.test(raw)) {
+      return 'EASYINVOICE';
+    }
+    if (/bkav|ehoadon/i.test(raw)) {
+      return 'BKAV';
+    }
+
+    // Quét thêm thẻ MSTTCGP (Mã số thuế Tổ chức giải pháp theo chuẩn QĐ 1450/TCT)
+    const msttcgpMatch = raw.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
+    if (msttcgpMatch && msttcgpMatch[1]) {
+      const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+      if (msttcgp === '0100684378') return 'VNPT';
+      if (msttcgp === '0101243150') return 'MISA';
+      if (msttcgp === '0100109106') return 'VIETTEL';
+      if (msttcgp === '0105987432') return 'EASYINVOICE';
+      if (msttcgp === '0315744883') return '4SI';
+      if (msttcgp === '0101360697') return 'BKAV';
+    }
+
+    // Quét chữ ký số và nhà cung cấp CA từ XML
+    const sigMatches = raw.match(/<(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)>/gi);
+    if (sigMatches) {
+      const sigText = sigMatches.join(' ').toUpperCase();
+      if (sigText.includes('VNPT')) return 'VNPT';
+      if (sigText.includes('MISA')) return 'MISA';
+      if (sigText.includes('VIETTEL')) return 'VIETTEL';
+      if (sigText.includes('BKAV')) return 'BKAV';
+      if (sigText.includes('EASYCA') || sigText.includes('SOFTDREAMS')) return 'EASYINVOICE';
+      if (sigText.includes('4SI') || sigText.includes('LCS')) return '4SI';
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // BƯỚC 2: Kiểm tra từ đối tượng invoice nếu có
+  // --------------------------------------------------------------------------
+  if (invoice) {
+    if (invoice.provider && invoice.provider !== 'DEFAULT' && invoice.provider !== 'UNKNOWN') {
+      const p = String(invoice.provider).toUpperCase();
+      if (p.includes('VNPT')) return 'VNPT';
+      if (p.includes('MISA')) return 'MISA';
+      if (p.includes('VIETTEL')) return 'VIETTEL';
+      if (p.includes('EASY') || p.includes('SOFTDREAMS')) return 'EASYINVOICE';
+      if (p.includes('4SI') || p.includes('LCS')) return '4SI';
+      if (p.includes('BKAV')) return 'BKAV';
+    }
+
+    const msttcgp = (invoice.msttcgp || '').trim();
+    if (msttcgp === '0100684378') return 'VNPT';
+    if (msttcgp === '0101243150') return 'MISA';
+    if (msttcgp === '0105987432') return 'EASYINVOICE';
+    if (msttcgp === '0315744883') return '4SI';
+    if (msttcgp === '0100109106') return 'VIETTEL';
+    if (msttcgp === '0101360697') return 'BKAV';
+
+    const tentcgp = (invoice.tentcgp || '').toUpperCase();
+    if (tentcgp.includes('VNPT')) return 'VNPT';
+    if (tentcgp.includes('MISA')) return 'MISA';
+    if (tentcgp.includes('EASY') || tentcgp.includes('SOFTDREAMS')) return 'EASYINVOICE';
+    if (tentcgp.includes('4SI') || tentcgp.includes('LCS')) return '4SI';
+    if (tentcgp.includes('VIETTEL')) return 'VIETTEL';
+    if (tentcgp.includes('BKAV')) return 'BKAV';
+
+    const lookupUrl = (invoice.lookupUrl || '').toLowerCase();
+    if (lookupUrl.includes('vnpt')) return 'VNPT';
+    if (lookupUrl.includes('meinvoice') || lookupUrl.includes('misa')) return 'MISA';
+    if (lookupUrl.includes('easyinvoice') || lookupUrl.includes('softdreams')) return 'EASYINVOICE';
+    if (lookupUrl.includes('4si')) return '4SI';
+    if (lookupUrl.includes('sinvoice') || lookupUrl.includes('viettel')) return 'VIETTEL';
+    if (lookupUrl.includes('bkav') || lookupUrl.includes('ehoadon')) return 'BKAV';
+
+    const ca = (invoice.caProvider || '').toUpperCase();
+    if (ca.includes('VNPT')) return 'VNPT';
+    if (ca.includes('MISA')) return 'MISA';
+    if (ca.includes('VIETTEL')) return 'VIETTEL';
+    if (ca.includes('BKAV')) return 'BKAV';
+    if (ca.includes('EASY') || ca.includes('SOFTDREAMS')) return 'EASYINVOICE';
+    if (ca.includes('4SI') || ca.includes('LCS')) return '4SI';
   }
 
   // --------------------------------------------------------------------------
@@ -192,6 +217,101 @@ export function extractLookupDetails(rawXml?: string): { lookupCode: string; loo
   return { lookupCode, lookupUrl };
 }
 
+export interface ProviderMeta {
+  id: string;
+  name: string;
+  shortName: string;
+  domain: string;
+  badge: string;
+  color: string;
+  portalUrl: string;
+  description: string;
+}
+
+export function getProviderMeta(providerId?: string): ProviderMeta {
+  const normalized = (providerId || 'DEFAULT').toUpperCase();
+  switch (normalized) {
+    case 'MISA':
+      return {
+        id: 'MISA',
+        name: 'MISA meInvoice',
+        shortName: 'MISA',
+        domain: 'meinvoice.vn',
+        badge: '🏢 MISA meInvoice',
+        color: '#2563eb',
+        portalUrl: 'https://www.meinvoice.vn/tra-cuu',
+        description: 'Giải pháp Hóa đơn điện tử MISA meInvoice (Công ty Cổ phần MISA - MST 0101243150)'
+      };
+    case 'VIETTEL':
+      return {
+        id: 'VIETTEL',
+        name: 'Viettel S-Invoice',
+        shortName: 'Viettel',
+        domain: 'sinvoice.viettel.vn',
+        badge: '🔴 Viettel S-Invoice',
+        color: '#dc2626',
+        portalUrl: 'https://sinvoice.viettel.vn/tracuuhoadon',
+        description: 'Giải pháp HĐĐT S-Invoice Tập đoàn Công nghiệp - Viễn thông Quân đội (MST 0100109106)'
+      };
+    case 'VNPT':
+      return {
+        id: 'VNPT',
+        name: 'VNPT Invoice',
+        shortName: 'VNPT',
+        domain: 'vnpt-invoice.com.vn',
+        badge: '🔵 VNPT Invoice',
+        color: '#0284c7',
+        portalUrl: 'https://portal.vnpt-invoice.com.vn',
+        description: 'Giải pháp HĐĐT Tập đoàn Bưu chính Viễn thông Việt Nam VNPT (MST 0100684378)'
+      };
+    case 'EASYINVOICE':
+      return {
+        id: 'EASYINVOICE',
+        name: 'Softdreams EasyInvoice',
+        shortName: 'EasyInvoice',
+        domain: 'easyinvoice.vn',
+        badge: '🏪 Softdreams EasyInvoice',
+        color: '#16a34a',
+        portalUrl: 'https://tracuu.easyinvoice.vn',
+        description: 'Hóa đơn điện tử Softdreams EasyInvoice (Công ty CP Đầu tư công nghệ Softdreams - MST 0105987432)'
+      };
+    case '4SI':
+      return {
+        id: '4SI',
+        name: '4Si E-Invoice / LCS',
+        shortName: '4Si (PNJ)',
+        domain: 'inv.4si.vn',
+        badge: '💎 4Si E-Invoice (PNJ)',
+        color: '#0891b2',
+        portalUrl: 'https://inv.4si.vn',
+        description: 'Giải pháp HĐĐT 4Si / LCS (Công ty TNHH 4Si - MST 0315744883, chuẩn hệ thống PNJ Jewelry)'
+      };
+    case 'BKAV':
+      return {
+        id: 'BKAV',
+        name: 'Bkav eHoadon',
+        shortName: 'Bkav',
+        domain: 'ehoadon.bkav.com',
+        badge: '🟠 Bkav eHoadon',
+        color: '#ea580c',
+        portalUrl: 'https://ehoadon.bkav.com/tra-cuu',
+        description: 'Hóa đơn điện tử Bkav eHoadon (Tập đoàn Công nghệ Bkav - MST 0101360697)'
+      };
+    case 'DEFAULT':
+    default:
+      return {
+        id: 'DEFAULT',
+        name: 'Chuẩn Nghị định 123 / Thông tư 78',
+        shortName: 'Mẫu Chuẩn NĐ 123',
+        domain: 'hoadondientu.gdt.gov.vn',
+        badge: '📋 Mẫu Chuẩn NĐ 123',
+        color: '#dc2626',
+        portalUrl: 'https://hoadondientu.gdt.gov.vn',
+        description: 'Mẫu chuẩn hóa theo Nghị định 123/2020/NĐ-CP & Thông tư 78/2021/TT-BTC của Tổng cục Thuế'
+      };
+  }
+}
+
 /**
  * ============================================================================
  * 2. HÀM ĐIỀU PHỐI TEMPLATE (renderInvoiceHtml)
@@ -218,8 +338,10 @@ export function renderInvoiceHtml(
     }
   }
 
-  // Tự động nhận diện nếu providerId chưa được truyền vào
-  const resolvedProvider: InvoiceProviderId = providerId || (rawXml ? detectInvoiceProvider(rawXml) : 'DEFAULT');
+  // Tự động nhận diện nếu providerId chưa được truyền vào hoặc là 'AUTO'
+  const resolvedProvider: InvoiceProviderId = (!providerId || providerId === 'AUTO')
+    ? detectInvoiceProvider(rawXml, invoice)
+    : providerId;
 
   switch (resolvedProvider) {
     case 'MISA':
@@ -325,7 +447,7 @@ export function renderMisaTemplate(
   const mCode = lookupCode || '1ZF5CWVBQZJ5';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '006BFBDE319939417F9B4EE5AE3AE75AD7';
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const sellerName = invoice.nbten || 'CÔNG TY TNHH XUÂN VINH';
   const watermark = options?.watermarkText || sellerName.split(' ').slice(-2).join(' ') || 'meInvoice';
 
@@ -703,7 +825,7 @@ export function renderEasyInvoiceTemplate(
   const mUrl = lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || 'M2-26-KET3U-65650003078';
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
   const qrSrc = options?.qrCodeDataUrl || 
@@ -1067,7 +1189,7 @@ export function render4SiTemplate(
   const mCode = lookupCode || 'PYRMYQQMZMRL9';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0050A3B99A5BD44558A15F25CFEDC94091';
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
   const qrSrc = options?.qrCodeDataUrl || 
@@ -1436,7 +1558,7 @@ export function renderViettelTemplate(
   const mCode = lookupCode || 'VTT893849120';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
   return `<!DOCTYPE html>
@@ -1674,8 +1796,15 @@ export function renderViettelTemplate(
 
 /**
  * ============================================================================
- * TEMPLATE 5: VNPT Invoice
+ * TEMPLATE 5: VNPT Invoice (Tập đoàn Bưu chính Viễn thông Việt Nam)
  * ============================================================================
+ * Đặc điểm nhận diện chuẩn VNPT-Invoice:
+ * - Khung viền kép hoa văn xanh dương đặc trưng VNPT (#005baa / #0284c7)
+ * - Huy hiệu / Tiêu đề thương hiệu VNPT Invoice
+ * - Tiêu đề: "HÓA ĐƠN GIÁ TRỊ GIA TĂNG (Bản thể hiện của hóa đơn điện tử)"
+ * - Bảng danh mục hàng hóa chuẩn 6 cột: STT (1), Tên hàng hóa, dịch vụ (2), ĐVT (3), Số lượng (4), Đơn giá (5), Thành tiền (6 = 4 x 5)
+ * - Con dấu Chữ ký điện tử VNPT-CA màu xanh dương hợp lệ
+ * - Footer: Cần kiểm tra, đối chiếu khi lập giao nhận hóa đơn - Tra cứu tại https://vnpt-invoice.com.vn
  */
 export function renderVnptTemplate(
   invoice: GDTInvoice,
@@ -1683,12 +1812,16 @@ export function renderVnptTemplate(
   options?: RenderTemplateOptions
 ): string {
   const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || 'VNPT202611894';
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
+  const mCode = lookupCode || 'VNPT78-9821045';
+  const mUrl = lookupUrl || 'https://vnpt-invoice.com.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0011B88299A1209384B2C89';
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
+
+  const qrSrc = options?.qrCodeDataUrl || 
+    `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`${mUrl}?code=${mCode}`)}`;
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -1699,12 +1832,13 @@ export function renderVnptTemplate(
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     body {
-      font-family: Arial, sans-serif;
-      background: #f8fafc;
+      font-family: 'Times New Roman', Times, serif, Arial;
+      background: #f1f5f9;
       margin: 0;
       padding: 16px;
       color: #0f172a;
-      font-size: 12.5px;
+      font-size: 13px;
+      line-height: 1.4;
     }
     .print-actions {
       max-width: 820px;
@@ -1712,7 +1846,7 @@ export function renderVnptTemplate(
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #0369a1;
+      background: #005baa;
       color: #fff;
       padding: 10px 16px;
       border-radius: 8px;
@@ -1720,32 +1854,255 @@ export function renderVnptTemplate(
     .print-btn {
       background: #0284c7;
       color: white;
-      border: none;
+      border: 1px solid #bae6fd;
       padding: 6px 16px;
       border-radius: 6px;
       font-weight: 600;
       cursor: pointer;
     }
-    .vnpt-box {
+    .print-btn:hover {
+      background: #0369a1;
+    }
+    .vnpt-page {
       max-width: 820px;
       margin: 0 auto;
       background: #fff;
-      border: 1.5px solid #0284c7;
+      border: 2px solid #005baa;
+      outline: 1px dashed #0284c7;
+      outline-offset: -5px;
       padding: 24px 28px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+      position: relative;
     }
-    .vnpt-banner {
-      color: #0369a1;
-      font-size: 18px;
-      font-weight: bold;
-      text-transform: uppercase;
+    .vnpt-header-grid {
+      display: grid;
+      grid-template-columns: 100px 1fr 200px;
+      gap: 12px;
+      border-bottom: 1.5px solid #005baa;
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+      align-items: start;
+    }
+    .vnpt-brand-logo {
       text-align: center;
-      margin-bottom: 2px;
+      padding-top: 4px;
+    }
+    .vnpt-brand-badge {
+      display: inline-block;
+      background: #005baa;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      font-size: 14px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      letter-spacing: 1px;
+    }
+    .vnpt-brand-badge span {
+      display: block;
+      font-size: 9px;
+      letter-spacing: 0.5px;
+      font-weight: normal;
+      color: #bae6fd;
+    }
+    .seller-info {
+      font-size: 12.5px;
+    }
+    .seller-name {
+      font-size: 15px;
+      font-weight: bold;
+      color: #005baa;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .meta-box {
+      border: 1px solid #005baa;
+      background: #f0f9ff;
+      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 3px;
+    }
+    .meta-row:last-child {
+      margin-bottom: 0;
+    }
+    .meta-val {
+      font-weight: bold;
+      color: #005baa;
+    }
+    .title-banner {
+      text-align: center;
+      margin: 10px 0 14px 0;
+    }
+    .invoice-title {
+      font-size: 20px;
+      font-weight: bold;
+      color: #005baa;
+      text-transform: uppercase;
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+    .invoice-subtitle {
+      font-style: italic;
+      font-size: 12px;
+      color: #475569;
+      margin-top: 2px;
+    }
+    .invoice-date {
+      font-style: italic;
+      font-size: 12.5px;
+      margin-top: 2px;
+    }
+    .cqt-code-bar {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 10px;
+      background: #e0f2fe;
+      border: 1px solid #7dd3fc;
+      border-radius: 4px;
+      font-size: 11.5px;
+      font-weight: bold;
+      color: #0369a1;
+    }
+    .buyer-card {
+      border: 1px solid #cbd5e1;
+      background: #fafafa;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      font-size: 12.5px;
+      border-radius: 4px;
+    }
+    .buyer-field {
+      margin-bottom: 4px;
+      display: flex;
+    }
+    .buyer-label {
+      width: 170px;
+      flex-shrink: 0;
+      color: #334155;
+    }
+    .buyer-value {
+      flex: 1;
+      font-weight: 500;
+    }
+    /* BẢNG CHI TIẾT HÀNG HÓA VNPT */
+    table.vnpt-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #005baa;
+      margin-bottom: 12px;
+    }
+    table.vnpt-table th {
+      background: #005baa;
+      color: #ffffff;
+      border: 1px solid #0284c7;
+      padding: 6px 4px;
+      font-size: 12px;
+      font-weight: bold;
+      text-align: center;
+    }
+    table.vnpt-table td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 6px;
+      font-size: 12px;
+    }
+    .col-idx {
+      background: #f8fafc;
+      text-align: center;
+      font-size: 10px;
+      color: #64748b;
+    }
+    .totals-area {
+      margin-top: 10px;
+      border-top: 1px solid #005baa;
+      padding-top: 8px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+      font-size: 13px;
+    }
+    .total-final {
+      font-size: 14px;
+      font-weight: bold;
+      color: #005baa;
+      border-top: 1px dashed #cbd5e1;
+      padding-top: 4px;
+      margin-top: 4px;
+    }
+    .words-box {
+      font-style: italic;
+      margin-top: 6px;
+      font-size: 12.5px;
+      background: #f8fafc;
+      padding: 6px 10px;
+      border-left: 3px solid #005baa;
+    }
+    /* Chữ ký VNPT-CA */
+    .signatures-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .sign-title {
+      font-weight: bold;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+    .sign-sub {
+      font-size: 11.5px;
+      font-style: italic;
+      color: #64748b;
+      margin-bottom: 8px;
+    }
+    .vnpt-ca-box {
+      margin: 10px auto 0 auto;
+      max-width: 280px;
+      border: 1.5px solid #005baa;
+      background: #f0f9ff;
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 11px;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,91,170,0.15);
+    }
+    .vnpt-ca-title {
+      color: #005baa;
+      font-weight: bold;
+      font-size: 11.5px;
+      border-bottom: 1px solid #bae6fd;
+      padding-bottom: 3px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .vnpt-footer {
+      border-top: 1.5px solid #005baa;
+      padding-top: 10px;
+      text-align: center;
+      font-size: 11px;
+      color: #475569;
     }
     @media print {
       body { background: #fff; padding: 0; }
       .print-actions { display: none !important; }
-      .vnpt-box { border: 1px solid #0284c7; box-shadow: none; width: 100%; max-width: 100%; }
+      .vnpt-page {
+        border: 1px solid #005baa;
+        outline: none;
+        box-shadow: none;
+        max-width: 100%;
+        width: 100%;
+        padding: 10mm;
+      }
     }
   </style>
 </head>
@@ -1753,70 +2110,181 @@ export function renderVnptTemplate(
   ${showControls ? `
   <div class="print-actions">
     <div>
-      <span style="font-weight: bold; color: #bae6fd;">[Giao diện VNPT Invoice]</span>
+      <span style="font-weight: bold; color: #bae6fd;">[Giao diện VNPT-Invoice]</span>
       <span style="font-size: 12px; color: #e0f2fe; margin-left: 8px;">Mã tra cứu: ${escapeHtml(mCode)}</span>
     </div>
     <button class="print-btn" onclick="window.print()">In Hóa Đơn (A4)</button>
   </div>
   ` : ''}
 
-  <div class="vnpt-box">
-    <div class="vnpt-banner">${escapeHtml(invoice.thdon || 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG')}</div>
-    <div style="text-align: center; font-style: italic; margin-bottom: 12px;">Ngày ${day} tháng ${month} năm ${year}</div>
+  <div class="vnpt-page">
+    <!-- HEADER VNPT -->
+    <div class="vnpt-header-grid">
+      <div class="vnpt-brand-logo">
+        <div class="vnpt-brand-badge">
+          VNPT
+          <span>INVOICE</span>
+        </div>
+        <img src="${qrSrc}" alt="QR" style="width: 80px; height: 80px; margin-top: 8px; border: 1px solid #e2e8f0; padding: 2px;">
+      </div>
 
-    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #0284c7; padding-bottom: 10px; margin-bottom: 12px;">
-      <div>
-        <div style="font-size: 15px; font-weight: bold; color: #0369a1;">${escapeHtml(invoice.nbten)}</div>
+      <div class="seller-info">
+        <div class="seller-name">${escapeHtml(invoice.nbten)}</div>
         <div>Mã số thuế: <b>${escapeHtml(invoice.nbmst)}</b></div>
         <div>Địa chỉ: ${escapeHtml(invoice.nbdchi)}</div>
+        ${(invoice.nbsdt || (invoice as any).nbphone) ? `<div>Điện thoại: ${escapeHtml(invoice.nbsdt || (invoice as any).nbphone)}</div>` : ''}
+        ${invoice.nbemail ? `<div>Email: ${escapeHtml(invoice.nbemail)}</div>` : ''}
+        ${(invoice.nbstk || invoice.stknh) ? `<div>Số tài khoản: <b>${escapeHtml(invoice.nbstk || invoice.stknh)}</b> ${(invoice.nbnhang || invoice.tnhanh) ? `tại ${escapeHtml(invoice.nbnhang || invoice.tnhanh)}` : ''}</div>` : ''}
       </div>
-      <div style="text-align: right;">
-        <div>Ký hiệu: <b>${escapeHtml(invoice.khhdon)}</b></div>
-        <div>Số: <b style="color: #0369a1; font-size: 15px;">${escapeHtml(invoice.shdon)}</b></div>
-        <div>Mã CQT: <b>${escapeHtml(maCqt)}</b></div>
+
+      <div class="meta-box">
+        <div class="meta-row">
+          <span>Ký hiệu:</span>
+          <span class="meta-val">${escapeHtml(invoice.khhdon)}</span>
+        </div>
+        <div class="meta-row">
+          <span>Số hóa đơn:</span>
+          <span class="meta-val" style="font-size: 14px;">${escapeHtml(invoice.shdon)}</span>
+        </div>
+        <div class="meta-row">
+          <span>Mẫu số:</span>
+          <span class="meta-val">${escapeHtml(invoice.khmshdon || '1')}</span>
+        </div>
+        <div class="meta-row">
+          <span>Ngày lập:</span>
+          <span class="meta-val">${day}/${month}/${year}</span>
+        </div>
       </div>
     </div>
 
-    <div style="margin-bottom: 12px;">
-      <div>Đơn vị mua hàng: <b>${escapeHtml(invoice.nmtendv || invoice.nmten || '')}</b></div>
-      <div>Mã số thuế: <b>${escapeHtml(invoice.nmmst || '')}</b></div>
-      <div>Địa chỉ: ${escapeHtml(invoice.nmdchi || '')}</div>
+    <!-- TITLE BANNER -->
+    <div class="title-banner">
+      <h1 class="invoice-title">${escapeHtml(invoice.thdon || 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG')}</h1>
+      <div class="invoice-subtitle">(Bản thể hiện của hóa đơn điện tử)</div>
+      <div class="invoice-date">Ngày ${day} tháng ${month} năm ${year}</div>
+      ${maCqt ? `<div class="cqt-code-bar">Mã của Cơ quan Thuế: ${escapeHtml(maCqt)}</div>` : ''}
     </div>
 
-    <table style="width: 100%; border-collapse: collapse; border: 1px solid #0284c7; margin-bottom: 12px;">
+    <!-- BUYER INFO -->
+    <div class="buyer-card">
+      <div class="buyer-field">
+        <span class="buyer-label">Họ tên người mua hàng:</span>
+        <span class="buyer-value">${escapeHtml(invoice.nmten || '')}</span>
+      </div>
+      <div class="buyer-field">
+        <span class="buyer-label">Tên đơn vị:</span>
+        <span class="buyer-value">${escapeHtml(invoice.nmtendv || invoice.nmten || '')}</span>
+      </div>
+      <div class="buyer-field">
+        <span class="buyer-label">Mã số thuế:</span>
+        <span class="buyer-value"><b>${escapeHtml(invoice.nmmst || '')}</b></span>
+      </div>
+      <div class="buyer-field">
+        <span class="buyer-label">Địa chỉ:</span>
+        <span class="buyer-value">${escapeHtml(invoice.nmdchi || '')}</span>
+      </div>
+      <div style="display: flex; gap: 20px;">
+        <div class="buyer-field" style="margin-bottom: 0;">
+          <span class="buyer-label">Hình thức thanh toán:</span>
+          <span class="buyer-value">${escapeHtml(invoice.htttoan || 'TM/CK')}</span>
+        </div>
+        ${(invoice.stknh || (invoice as any).stknghang) ? `
+        <div class="buyer-field" style="margin-bottom: 0;">
+          <span class="buyer-label" style="width: auto; margin-right: 8px;">Số tài khoản:</span>
+          <span class="buyer-value">${escapeHtml(invoice.stknh || (invoice as any).stknghang)}</span>
+        </div>
+        ` : ''}
+      </div>
+    </div>
+
+    <!-- ITEMS TABLE -->
+    <table class="vnpt-table">
       <thead>
-        <tr style="background: #e0f2fe; color: #0369a1;">
-          <th style="border: 1px solid #bae6fd; padding: 5px;">STT</th>
-          <th style="border: 1px solid #bae6fd; padding: 5px;">Tên hàng hóa, dịch vụ</th>
-          <th style="border: 1px solid #bae6fd; padding: 5px;">ĐVT</th>
-          <th style="border: 1px solid #bae6fd; padding: 5px;">Số lượng</th>
-          <th style="border: 1px solid #bae6fd; padding: 5px;">Đơn giá</th>
-          <th style="border: 1px solid #bae6fd; padding: 5px;">Thành tiền</th>
+        <tr>
+          <th style="width: 42px;">STT</th>
+          <th>Tên hàng hóa, dịch vụ</th>
+          <th style="width: 70px;">ĐVT</th>
+          <th style="width: 80px;">Số lượng</th>
+          <th style="width: 100px;">Đơn giá</th>
+          <th style="width: 120px;">Thành tiền</th>
+        </tr>
+        <tr class="col-idx">
+          <td>(1)</td>
+          <td>(2)</td>
+          <td>(3)</td>
+          <td>(4)</td>
+          <td>(5)</td>
+          <td>(6 = 4 x 5)</td>
         </tr>
       </thead>
       <tbody>
-        ${items.map((it, idx) => `
-        <tr>
-          <td style="border: 1px solid #cbd5e1; text-align: center;">${it.lineNo || (it as any).stt || idx + 1}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 5px;">${escapeHtml(it.itemName || (it as any).ten)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: center;">${escapeHtml(it.unit || (it as any).dvt || 'Cái')}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right;">${formatNum(it.quantity ?? (it as any).sluong ?? 0)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right;">${formatNum(it.unitPrice ?? (it as any).dgia ?? 0)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${formatNum(it.amount ?? (it as any).thtien ?? 0)}</td>
-        </tr>
-        `).join('')}
+        ${items.map((it, idx) => {
+          const lineNo = it.lineNo || (it as any).stt || idx + 1;
+          const itemName = it.itemName || (it as any).ten || `Hàng hóa / Dịch vụ ${lineNo}`;
+          const unit = it.unit || (it as any).dvt || '-';
+          const qty = it.quantity ?? (it as any).sluong ?? 0;
+          const price = it.unitPrice ?? (it as any).dgia ?? 0;
+          const amt = it.amount ?? (it as any).thtien ?? (it as any).tthtien ?? 0;
+
+          return `
+          <tr>
+            <td style="text-align: center;">${lineNo}</td>
+            <td style="font-weight: 500;">${escapeHtml(itemName)}</td>
+            <td style="text-align: center;">${escapeHtml(unit)}</td>
+            <td style="text-align: right;">${formatNum(qty)}</td>
+            <td style="text-align: right;">${formatNum(price)}</td>
+            <td style="text-align: right; font-weight: bold;">${formatNum(amt)}</td>
+          </tr>
+          `;
+        }).join('')}
       </tbody>
     </table>
 
-    <div style="text-align: right; margin-bottom: 14px;">
-      <div>Cộng tiền hàng: <b>${formatVND(invoice.tgtcthue)}</b></div>
-      <div>Tiền thuế GTGT: <b>${formatVND(invoice.tgtthue)}</b></div>
-      <div style="font-size: 14px; color: #0369a1; font-weight: bold;">Tổng tiền thanh toán: ${formatVND(invoice.tgtttbso)}</div>
-      <div style="font-style: italic; margin-top: 4px;">Số tiền bằng chữ: ${escapeHtml(wordsAmount)}</div>
+    <!-- TOTALS AREA -->
+    <div class="totals-area">
+      <div class="total-row">
+        <span>Cộng tiền hàng (chưa có thuế GTGT):</span>
+        <span style="font-weight: 600;">${formatVND(invoice.tgtcthue)} VNĐ</span>
+      </div>
+      <div class="total-row">
+        <span>Thuế suất GTGT: <b>10%</b> &nbsp;&nbsp;|&nbsp;&nbsp; Tiền thuế GTGT:</span>
+        <span style="font-weight: 600;">${formatVND(invoice.tgtthue)} VNĐ</span>
+      </div>
+      <div class="total-row total-final">
+        <span>TỔNG CỘNG TIỀN THANH TOÁN:</span>
+        <span>${formatVND(invoice.tgtttbso)} VNĐ</span>
+      </div>
+      <div class="words-box">
+        Số tiền viết bằng chữ: <b>${escapeHtml(wordsAmount)}</b>
+      </div>
     </div>
 
-    <div style="border-top: 1px solid #0284c7; padding-top: 8px; text-align: center; font-size: 11px; color: #64748b;">
-      Tra cứu trực tuyến tại: <a href="https://vnpt-invoice.com.vn" target="_blank" style="color: #0369a1;">https://vnpt-invoice.com.vn</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b>
+    <!-- SIGNATURES -->
+    <div class="signatures-grid">
+      <div>
+        <div class="sign-title">Người mua hàng</div>
+        <div class="sign-sub">(Ký, ghi rõ họ tên)</div>
+      </div>
+      <div>
+        <div class="sign-title">Người bán hàng</div>
+        <div class="sign-sub">(Ký điện tử, đóng dấu)</div>
+        <div class="vnpt-ca-box">
+          <div class="vnpt-ca-title">
+            <span style="color: #16a34a; font-size: 13px;">✔</span>
+            <span>CHỮ KÝ SỐ HỢP LỆ - VNPT-CA</span>
+          </div>
+          <div>Ký bởi: <b>${escapeHtml(invoice.nbten)}</b></div>
+          <div>Ngày ký: <b>${day}/${month}/${year}</b></div>
+          <div>Tổ chức chứng thực: <b>VNPT-CA</b></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="vnpt-footer">
+      <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
+      <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
+      <div>Tra cứu trực tuyến tại: <a href="https://vnpt-invoice.com.vn" target="_blank" style="color: #005baa; font-weight: bold;">https://vnpt-invoice.com.vn</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>
@@ -1837,7 +2305,7 @@ export function renderBkavTemplate(
   const { lookupCode } = extractLookupDetails(rawXml);
   const mCode = lookupCode || 'BKAV88910023';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
   return `<!DOCTYPE html>
@@ -1927,7 +2395,7 @@ export function renderDefaultTemplate(
   const mUrl = lookupUrl || 'https://hoadondientu.gdt.gov.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || (invoice.hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : '');
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+  const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
   const isBlue = options?.theme === 'blue';

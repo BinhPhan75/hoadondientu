@@ -34,7 +34,8 @@ export async function exportInvoiceToPdfFile(
   invoice: GDTInvoice, 
   element?: HTMLElement | null,
   fileName?: string,
-  theme: 'red' | 'blue' = 'red'
+  theme: 'red' | 'blue' = 'red',
+  templateId?: string
 ): Promise<boolean> {
   try {
     const cleanShd = String(invoice.shdon).padStart(7, '0');
@@ -44,12 +45,13 @@ export async function exportInvoiceToPdfFile(
     let tempContainer: HTMLDivElement | null = null;
 
     if (!targetElement) {
-      // Create offscreen container with official invoice HTML
+      // Create offscreen container with official invoice HTML based on provider template
       const qrCode = await generateInvoiceQrCode(invoice);
       const htmlString = generateOfficialInvoiceHtml(invoice, {
         theme,
         qrCodeDataUrl: qrCode,
-        showPrintControls: false
+        showPrintControls: false,
+        templateId: (templateId && templateId !== 'AUTO') ? templateId as any : undefined
       });
       
       tempContainer = document.createElement('div');
@@ -60,7 +62,7 @@ export async function exportInvoiceToPdfFile(
       tempContainer.style.background = '#ffffff';
       tempContainer.innerHTML = htmlString;
       document.body.appendChild(tempContainer);
-      targetElement = tempContainer.querySelector('.invoice-container') as HTMLElement || tempContainer;
+      targetElement = tempContainer.querySelector('.invoice-container, .misa-invoice-page, .sinvoice-paper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card') as HTMLElement || tempContainer;
     }
 
     // High resolution canvas options for crisp text & borders
@@ -109,13 +111,15 @@ export async function exportInvoiceToPdfFile(
  */
 export async function downloadStandaloneHtmlFile(
   invoice: GDTInvoice,
-  theme: 'red' | 'blue' = 'red'
+  theme: 'red' | 'blue' = 'red',
+  templateId?: string
 ): Promise<void> {
   const qrCode = await generateInvoiceQrCode(invoice);
   const htmlContent = generateOfficialInvoiceHtml(invoice, {
     theme,
     qrCodeDataUrl: qrCode,
-    showPrintControls: true
+    showPrintControls: true,
+    templateId: (templateId && templateId !== 'AUTO') ? templateId as any : undefined
   });
 
   const cleanShd = String(invoice.shdon).padStart(7, '0');
@@ -137,13 +141,15 @@ export async function downloadStandaloneHtmlFile(
  */
 export async function openInvoicePrintWindow(
   invoice: GDTInvoice,
-  theme: 'red' | 'blue' = 'red'
+  theme: 'red' | 'blue' = 'red',
+  templateId?: string
 ): Promise<void> {
   const qrCode = await generateInvoiceQrCode(invoice);
   const invoiceHtmlContent = generateOfficialInvoiceHtml(invoice, {
     theme,
     qrCodeDataUrl: qrCode,
-    showPrintControls: true
+    showPrintControls: true,
+    templateId: (templateId && templateId !== 'AUTO') ? templateId as any : undefined
   });
 
   const printWindow = window.open('', '_blank', 'width=900,height=1000');
