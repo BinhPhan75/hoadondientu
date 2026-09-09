@@ -12,6 +12,7 @@ import {
   FolderArchive
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
+import { detectPartnerTemplate, getPartnerMeta } from '../templates';
 
 interface InvoiceTableProps {
   invoices: GDTInvoice[];
@@ -227,10 +228,35 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
                     {/* Bên bán */}
                     <td>
-                      <div className="font-semibold text-gray-900 truncate max-w-[280px] text-xs" title={inv.nbten}>
-                        {inv.nbten}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-gray-900 truncate max-w-[240px] text-xs" title={inv.nbten}>
+                          {inv.nbten}
+                        </span>
+                        {(() => {
+                          const pId = detectPartnerTemplate(inv);
+                          const pMeta = getPartnerMeta(pId);
+                          if (pMeta.isCustomPartner) {
+                            return (
+                              <span 
+                                className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0"
+                                style={{ color: pMeta.color, backgroundColor: `${pMeta.color}15`, border: `1px solid ${pMeta.color}35` }}
+                                title={`Mẫu hóa đơn thiết kế chính xác riêng cho ${pMeta.shortName}`}
+                              >
+                                {pMeta.badge}
+                              </span>
+                            );
+                          }
+                          return (
+                            <span 
+                              className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-medium text-gray-500 bg-gray-100 border border-gray-200 shrink-0"
+                              title="Sử dụng mẫu mặc định chuẩn Nghị định 123"
+                            >
+                              Mặc định
+                            </span>
+                          );
+                        })()}
                       </div>
-                      <div className="flex items-center gap-1 text-[11px] text-gray-500 font-mono">
+                      <div className="flex items-center gap-1 text-[11px] text-gray-500 font-mono mt-0.5">
                         <span>MST: <strong className="text-gray-700">{inv.nbmst}</strong></span>
                         <button
                           onClick={(e) => handleCopyMst(inv.nbmst, e)}

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { parseGDTInvoiceXml, parseInvoicesFromZip } from '../utils/xmlParser';
+import { SAMPLE_PARTNER_INVOICES } from '../data/samplePartnerInvoices';
 
 interface ImportXmlModalProps {
   isOpen: boolean;
@@ -153,11 +154,30 @@ export const ImportXmlModal: React.FC<ImportXmlModalProps> = ({
               </div>
               <button
                 type="button"
-                className="mt-2 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded hover:bg-gray-100 shadow-2xs"
+                className="mt-2 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 font-semibold rounded hover:bg-gray-100 shadow-2xs cursor-pointer"
               >
                 Chọn tệp từ máy tính
               </button>
             </div>
+          </div>
+
+          {/* Quick load 7 main partners */}
+          <div className="flex items-center justify-between p-3 bg-amber-50/80 border border-amber-200 rounded-lg text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+              <span className="font-bold text-amber-900">Mẫu 7 đối tác chính:</span>
+              <span className="text-amber-800 text-[11px]">Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setParsedList(SAMPLE_PARTNER_INVOICES);
+                setErrors([]);
+              }}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-bold text-[11px] shrink-0 cursor-pointer shadow-2xs transition-colors"
+              title="Nạp ngay 8 hóa đơn mẫu chuẩn xác của 7 đối tác chính và 1 đơn vị mặc định để kiểm tra giao diện"
+            >
+              Nạp mẫu 7 đối tác chính
+            </button>
           </div>
 
           {/* Loading Indicator */}

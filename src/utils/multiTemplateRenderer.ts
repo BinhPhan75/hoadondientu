@@ -12,8 +12,27 @@
 
 import { GDTInvoice, InvoiceItem } from '../types';
 import { numberToVietnameseWords, parseGDTInvoiceXml, ensureInvoiceItems } from './xmlParser';
+import {
+  renderBaoDuyTemplate,
+  renderPnjTemplate,
+  renderTaiTramAnhTemplate,
+  renderXuanVinhTemplate,
+  renderKimLoanTuanTemplate,
+  renderTkjTemplate,
+  renderNghiaSonTemplate,
+  detectPartnerTemplate,
+  PARTNER_METAS,
+  PartnerInvoiceTemplateId
+} from '../templates';
 
 export type InvoiceProviderId = 
+  | 'BAO_DUY'
+  | 'PNJ'
+  | 'TAI_TRAM_ANH'
+  | 'XUAN_VINH'
+  | 'KIM_LOAN_TUAN'
+  | 'TKJ'
+  | 'NGHIA_SON'
   | 'MISA' 
   | 'VIETTEL' 
   | 'VNPT' 
@@ -69,6 +88,17 @@ export function detectInvoiceProvider(
   invoice?: GDTInvoice | null
 ): InvoiceProviderId {
   const raw = xmlString || (invoice?.rawXml || '');
+
+  // --------------------------------------------------------------------------
+  // BƯỚC 0: Ưu tiên nhận diện 7 đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn)
+  // --------------------------------------------------------------------------
+  if (invoice || raw) {
+    const mockInvoice: GDTInvoice = invoice || (raw ? parseGDTInvoiceXml(raw) : ({} as GDTInvoice));
+    const partnerId = detectPartnerTemplate(mockInvoice, raw);
+    if (partnerId && partnerId !== 'DEFAULT') {
+      return partnerId;
+    }
+  }
 
   // --------------------------------------------------------------------------
   // BƯỚC 1: Quét toàn bộ XML để tìm domain trong link tra cứu hoặc nội dung
@@ -231,6 +261,83 @@ export interface ProviderMeta {
 export function getProviderMeta(providerId?: string): ProviderMeta {
   const normalized = (providerId || 'DEFAULT').toUpperCase();
   switch (normalized) {
+    case 'BAO_DUY':
+      return {
+        id: 'BAO_DUY',
+        name: 'Trang Sức Bảo Duy (EasyInvoice)',
+        shortName: 'Bảo Duy',
+        domain: '0318657735hd.easyinvoice.com.vn',
+        badge: '💎 Bảo Duy',
+        color: '#db2777',
+        portalUrl: 'http://0318657735hd.easyinvoice.com.vn',
+        description: 'Mẫu hóa đơn khởi tạo từ máy tính tiền - CÔNG TY TNHH THƯƠNG MẠI TRANG SỨC BẢO DUY'
+      };
+    case 'PNJ':
+      return {
+        id: 'PNJ',
+        name: 'PNJ Production (4Si / LCS)',
+        shortName: 'Trang Sức PNJ',
+        domain: 'inv.4si.vn',
+        badge: '👑 PNJ Jewelry',
+        color: '#d97706',
+        portalUrl: 'https://inv.4si.vn/tra-cuu-hoa-don',
+        description: 'Mẫu hóa đơn bán hàng 7 cột kèm trọng lượng - CÔNG TY TNHH MTV CHẾ TÁC VÀ KINH DOANH TRANG SỨC PNJ'
+      };
+    case 'TAI_TRAM_ANH':
+      return {
+        id: 'TAI_TRAM_ANH',
+        name: 'Gia Công Trang Sức Tài Trâm Anh (MISA)',
+        shortName: 'Tài Trâm Anh',
+        domain: 'meinvoice.vn',
+        badge: '💍 Tài Trâm Anh',
+        color: '#1e40af',
+        portalUrl: 'https://www.meinvoice.vn/tra-cuu',
+        description: 'Mẫu hóa đơn bán hàng MISA meInvoice - DNTN GIA CÔNG TRANG SỨC TÀI TRÂM ANH'
+      };
+    case 'XUAN_VINH':
+      return {
+        id: 'XUAN_VINH',
+        name: 'Xuân Vinh Computer (MISA)',
+        shortName: 'Xuân Vinh',
+        domain: 'meinvoice.vn',
+        badge: '💻 Xuân Vinh',
+        color: '#dc2626',
+        portalUrl: 'https://www.meinvoice.vn/tra-cuu',
+        description: 'Mẫu hóa đơn GTGT 1C26TXV - CÔNG TY TNHH XUÂN VINH'
+      };
+    case 'KIM_LOAN_TUAN':
+      return {
+        id: 'KIM_LOAN_TUAN',
+        name: 'Vàng Bạc Kim Loan Tuấn (EasyInvoice)',
+        shortName: 'Kim Loan Tuấn',
+        domain: '0318391940hd.easyinvoice.com.vn',
+        badge: '✨ Kim Loan Tuấn',
+        color: '#b45309',
+        portalUrl: 'http://0318391940hd.easyinvoice.com.vn',
+        description: 'Mẫu hóa đơn máy tính tiền 7 cột vàng bạc - CÔNG TY TNHH KINH DOANH VÀNG BẠC KIM LOAN TUẤN'
+      };
+    case 'TKJ':
+      return {
+        id: 'TKJ',
+        name: 'Vàng Bạc TKJ (EasyInvoice)',
+        shortName: 'Vàng Bạc TKJ',
+        domain: '0318443500hd.easyinvoice.com.vn',
+        badge: '⚜️ Vàng Bạc TKJ',
+        color: '#15803d',
+        portalUrl: 'http://0318443500hd.easyinvoice.com.vn',
+        description: 'Mẫu hóa đơn bán hàng máy tính tiền Softdreams - CÔNG TY TNHH TM DV VÀNG BẠC TKJ'
+      };
+    case 'NGHIA_SON':
+      return {
+        id: 'NGHIA_SON',
+        name: 'Nghĩa Sơn (VNPT Invoice)',
+        shortName: 'Nghĩa Sơn',
+        domain: '4000344946-tt78.vnpt-invoice.com.vn',
+        badge: '🌐 Nghĩa Sơn',
+        color: '#0284c7',
+        portalUrl: 'https://4000344946-tt78.vnpt-invoice.com.vn',
+        description: 'Mẫu hóa đơn GTGT VNPT Invoice 3 ô chữ ký - CÔNG TY TNHH NGHĨA SƠN'
+      };
     case 'MISA':
       return {
         id: 'MISA',
@@ -344,6 +451,27 @@ export function renderInvoiceHtml(
     : providerId;
 
   switch (resolvedProvider) {
+    case 'BAO_DUY':
+      return renderBaoDuyTemplate(invoice, rawXml, options);
+
+    case 'PNJ':
+      return renderPnjTemplate(invoice, rawXml, options);
+
+    case 'TAI_TRAM_ANH':
+      return renderTaiTramAnhTemplate(invoice, rawXml, options);
+
+    case 'XUAN_VINH':
+      return renderXuanVinhTemplate(invoice, rawXml, options);
+
+    case 'KIM_LOAN_TUAN':
+      return renderKimLoanTuanTemplate(invoice, rawXml, options);
+
+    case 'TKJ':
+      return renderTkjTemplate(invoice, rawXml, options);
+
+    case 'NGHIA_SON':
+      return renderNghiaSonTemplate(invoice, rawXml, options);
+
     case 'MISA':
       return renderMisaTemplate(invoice, rawXml, options);
 

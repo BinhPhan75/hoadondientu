@@ -21,6 +21,7 @@ import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
+import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
 
 export default function App() {
   // Account Configuration State (from localStorage or default)
@@ -46,15 +47,24 @@ export default function App() {
   });
 
   // Master Invoices State (Real Data from Live GDT or Imported XML)
-  const [invoices, setInvoices] = useState<GDTInvoice[]>([]);
+  const [invoices, setInvoices] = useState<GDTInvoice[]>(() => {
+    const saved = localStorage.getItem('gdt_saved_invoices');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    return SAMPLE_PARTNER_INVOICES;
+  });
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
-  const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('live_gdt');
+  const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('imported_xml');
 
   // Filter Parameters State
   const [filters, setFilters] = useState<FilterParams>({
     invoiceType: 'purchase',
     fromDate: '2025-01-01',
-    toDate: '2025-12-31',
+    toDate: '2026-12-31',
     status: 'all',
     cqtCodeStatus: 'all',
     sellerTaxCode: '',
@@ -934,7 +944,7 @@ export default function App() {
     setFilters({
       invoiceType: 'purchase',
       fromDate: '2025-01-01',
-      toDate: '2025-12-31',
+      toDate: '2026-12-31',
       status: 'all',
       cqtCodeStatus: 'all',
       sellerTaxCode: '',

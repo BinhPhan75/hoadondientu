@@ -328,16 +328,27 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   className="bg-transparent text-xs font-bold text-emerald-400 focus:outline-hidden cursor-pointer"
                   title="Chuyển đổi sang mẫu giao diện của nhà cung cấp HĐĐT tương ứng"
                 >
-                  <option value="AUTO" className="bg-gray-900 text-emerald-300">
+                  <option value="AUTO" className="bg-gray-900 text-emerald-300 font-bold">
                     ✨ Tự động nhận diện ({autoDetectedMeta.shortName})
                   </option>
-                  <option value="MISA" className="bg-gray-900 text-white">🏢 MISA meInvoice (meinvoice.vn)</option>
-                  <option value="VIETTEL" className="bg-gray-900 text-white">🔴 Viettel S-Invoice (sinvoice.viettel.vn)</option>
-                  <option value="EASYINVOICE" className="bg-gray-900 text-white">🏪 Softdreams EasyInvoice (easyinvoice.vn)</option>
-                  <option value="4SI" className="bg-gray-900 text-white">💎 4Si E-Invoice / LCS (PNJ Jewelry)</option>
-                  <option value="VNPT" className="bg-gray-900 text-white">🔵 VNPT Invoice (vnpt-invoice.com.vn)</option>
-                  <option value="BKAV" className="bg-gray-900 text-white">🟠 Bkav eHoadon (ehoadon.bkav.com)</option>
-                  <option value="DEFAULT" className="bg-gray-900 text-white">📋 Mẫu Chuẩn Nghị định 123 / Thông tư 78</option>
+                  <optgroup label="── 7 ĐỐI TÁC CHÍNH ──" className="bg-gray-900 text-amber-300 font-bold">
+                    <option value="BAO_DUY" className="bg-gray-900 text-white">💎 Bảo Duy (Trang Sức Bảo Duy)</option>
+                    <option value="PNJ" className="bg-gray-900 text-white">👑 PNJ (Chế Tác & KD Trang Sức PNJ)</option>
+                    <option value="TAI_TRAM_ANH" className="bg-gray-900 text-white">💍 Tài Trâm Anh (Gia Công Trang Sức)</option>
+                    <option value="XUAN_VINH" className="bg-gray-900 text-white">💻 Xuân Vinh (Cty TNHH Xuân Vinh)</option>
+                    <option value="KIM_LOAN_TUAN" className="bg-gray-900 text-white">✨ Kim Loan Tuấn (KD Vàng Bạc)</option>
+                    <option value="TKJ" className="bg-gray-900 text-white">⚜️ TKJ (TM DV Vàng Bạc TKJ)</option>
+                    <option value="NGHIA_SON" className="bg-gray-900 text-white">🌐 Nghĩa Sơn (Cty TNHH Nghĩa Sơn)</option>
+                  </optgroup>
+                  <optgroup label="── MẪU MẶC ĐỊNH & KHÁC ──" className="bg-gray-900 text-gray-400 font-normal">
+                    <option value="DEFAULT" className="bg-gray-900 text-white font-semibold">📋 Mẫu Mặc Định (Chuẩn NĐ 123/TT 78)</option>
+                    <option value="MISA" className="bg-gray-900 text-gray-300">🏢 MISA meInvoice</option>
+                    <option value="VIETTEL" className="bg-gray-900 text-gray-300">🔴 Viettel S-Invoice</option>
+                    <option value="EASYINVOICE" className="bg-gray-900 text-gray-300">🏪 Softdreams EasyInvoice</option>
+                    <option value="4SI" className="bg-gray-900 text-gray-300">💎 4Si E-Invoice / LCS</option>
+                    <option value="VNPT" className="bg-gray-900 text-gray-300">🔵 VNPT Invoice</option>
+                    <option value="BKAV" className="bg-gray-900 text-gray-300">🟠 Bkav eHoadon</option>
+                  </optgroup>
                 </select>
               </div>
 
