@@ -1,5 +1,5 @@
 import { GDTInvoice } from '../types';
-import { numberToVietnameseWords } from '../utils/xmlParser';
+import { extractLookupDetailsFromXml, numberToVietnameseWords } from '../utils/xmlParser';
 
 export { numberToVietnameseWords };
 
@@ -56,44 +56,7 @@ export function renderSpacedTaxCode(taxCode: string): string {
 }
 
 export function extractLookupDetails(rawXml?: string): { lookupCode: string; lookupUrl: string } {
-  let lookupCode = '';
-  let lookupUrl = '';
-
-  if (!rawXml) return { lookupCode, lookupUrl };
-
-  const codePatterns = [
-    /<(?:[a-zA-Z0-9_]+:)?(?:MaTraCuu|Matracuu|MTC|LookupCode|SecretCode)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:MaTraCuu|Matracuu|MTC|LookupCode|SecretCode)>/i,
-    /Mã tra cứu\s*[:：]\s*([A-Za-z0-9_-]+)/i,
-    /Mã nhận hóa đơn\s*[:：]\s*([A-Za-z0-9_-]+)/i,
-    /tra-cuu[?\/=]([A-Za-z0-9_-]{6,30})/i
-  ];
-
-  for (const p of codePatterns) {
-    const m = rawXml.match(p);
-    if (m && m[1]) {
-      const val = m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-      if (val && val.length >= 4) {
-        lookupCode = val;
-        break;
-      }
-    }
-  }
-
-  const urlPatterns = [
-    /https?:\/\/[a-zA-Z0-9\.\-]+\/tra-cuu[^\s<>"']*/i,
-    /https?:\/\/[a-zA-Z0-9\.\-]+(?:meinvoice\.vn|sinvoice\.viettel\.vn|easyinvoice\.com\.vn|4si\.vn|vnpt-invoice)[^\s<>"']*/i,
-    /<(?:[a-zA-Z0-9_]+:)?(?:LinkTraCuu|WebsiteTraCuu|PortalUrl)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:LinkTraCuu|WebsiteTraCuu|PortalUrl)>/i
-  ];
-
-  for (const p of urlPatterns) {
-    const m = rawXml.match(p);
-    if (m) {
-      lookupUrl = (m[1] || m[0]).replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-      break;
-    }
-  }
-
-  return { lookupCode, lookupUrl };
+  return extractLookupDetailsFromXml(rawXml);
 }
 
 export function generateDefaultQrSvg(dataText: string = 'HOADON'): string {
