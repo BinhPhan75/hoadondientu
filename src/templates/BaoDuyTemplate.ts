@@ -21,8 +21,8 @@ export function renderBaoDuyTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || 'evliq2zrtmso';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'http://0318657735hd.easyinvoice.com.vn';
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || '';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318657735;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
   
   const items = ensureInvoiceItems(invoice);

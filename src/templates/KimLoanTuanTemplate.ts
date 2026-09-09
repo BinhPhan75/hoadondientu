@@ -21,8 +21,8 @@ export function renderKimLoanTuanTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || 'hf7fyg3c2b87';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'http://0318391940hd.easyinvoice.com.vn';
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || '';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318391940;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);

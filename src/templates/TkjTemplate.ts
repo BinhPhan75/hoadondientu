@@ -21,8 +21,8 @@ export function renderTkjTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || 'zr673r0vcf9v';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'http://0318443500hd.easyinvoice.com.vn';
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || '';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318443500;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);

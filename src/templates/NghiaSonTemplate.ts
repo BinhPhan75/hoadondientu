@@ -20,8 +20,8 @@ export function renderNghiaSonTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || '20260716-160100-249591';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://4000344946-tt78.vnpt-invoice.com.vn';
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || '';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:4000344946;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);

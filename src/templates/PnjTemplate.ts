@@ -21,8 +21,8 @@ export function renderPnjTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || '3PVLZX9WW5QV8';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://inv.4si.vn/tra-cuu-hoa-don';
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || '';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0315018466;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
