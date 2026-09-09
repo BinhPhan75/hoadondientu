@@ -1,5 +1,5 @@
 import { GDTInvoice } from '../types';
-import { numberToVietnameseWords } from './xmlParser';
+import { numberToVietnameseWords, ensureInvoiceItems } from './xmlParser';
 
 /**
  * Generates an authentic Vietnamese E-Invoice XML strictly conforming to 
@@ -18,22 +18,7 @@ export function generateGDTInvoiceXml(invoice: GDTInvoice): string {
 
   // Group items by Tax Rate for THTTLTSuat (Mandatory in Decision 1450 & Decision 1510)
   const taxGroupMap = new Map<string, { thtien: number; tthue: number }>();
-
-  const items = invoice.items && invoice.items.length > 0 ? invoice.items : [
-    {
-      id: 'item_1',
-      lineNo: 1,
-      itemName: 'Hàng hóa, dịch vụ theo bảng kê hóa đơn điện tử',
-      unit: 'Gói',
-      quantity: 1,
-      unitPrice: invoice.tgtcthue,
-      amount: invoice.tgtcthue,
-      taxRate: invoice.tgtthue > 0 ? '10%' : 'KCT',
-      taxRatePercent: invoice.tgtthue > 0 ? 10 : 0,
-      taxAmount: invoice.tgtthue,
-      totalAmount: invoice.tgtttbso
-    }
-  ];
+  const items = ensureInvoiceItems(invoice);
 
   items.forEach(item => {
     const rate = item.taxRate || (item.taxRatePercent ? `${item.taxRatePercent}%` : '10%');

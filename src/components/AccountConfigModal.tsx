@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { GDTAccountConfig } from '../types';
+import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
 
 interface AccountConfigModalProps {
   isOpen: boolean;
@@ -44,13 +45,14 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
   // AI OCR Scanner helper for modal
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
-    const targetImg = imgToScan || captchaImg;
+    const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
-    if (!targetImg && !targetKey) return;
+    if (!rawImg && !targetKey) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
     try {
+      const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,21 +131,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           setIsRealGDT(true);
 
           // Auto-OCR scan
-          try {
-            const ocrRes = await fetch('/api/gdt/ocr-captcha', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ captchaImage: imgUrl, captchaKey: directData.key })
-            });
-            const ocrRaw = await ocrRes.text();
-            try {
-              const ocrJson = JSON.parse(ocrRaw);
-              if (ocrJson?.success && ocrJson?.captchaCode) {
-                setCaptchaCode(ocrJson.captchaCode);
-                setOcrSuccess(true);
-              }
-            } catch {}
-          } catch {}
+          handleScanOcr(imgUrl, directData.key);
 
           setIsLoadingCaptcha(false);
           return;

@@ -9,6 +9,7 @@ interface SearchFilterBarProps {
   filters: FilterParams;
   onFilterChange: (newFilters: FilterParams) => void;
   onResetFilters: () => void;
+  onResetToPartnerSamples?: () => void;
   totalFilteredCount: number;
 }
 
@@ -16,6 +17,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
   filters,
   onFilterChange,
   onResetFilters,
+  onResetToPartnerSamples,
   totalFilteredCount
 }) => {
   return (
@@ -103,10 +105,21 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             type="button"
             onClick={onResetFilters}
             className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded border border-gray-300 transition-colors cursor-pointer shrink-0"
-            title="Đặt lại bộ lọc"
+            title="Đặt lại bộ lọc về mặc định"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
+
+          {onResetToPartnerSamples && (
+            <button
+              type="button"
+              onClick={onResetToPartnerSamples}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded transition-colors cursor-pointer shrink-0"
+              title="Tải lại 7 hóa đơn mẫu chuẩn xác của các đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn)"
+            >
+              <span>Mẫu 7 đối tác</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

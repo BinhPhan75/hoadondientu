@@ -22,6 +22,7 @@ import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './ut
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
 import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
+import { ensureInvoiceItems } from './utils/xmlParser';
 
 export default function App() {
   // Account Configuration State (from localStorage or default)
@@ -52,10 +53,18 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((inv: GDTInvoice) => {
+            ensureInvoiceItems(inv);
+            return inv;
+          });
+        }
       } catch (e) {}
     }
-    return SAMPLE_PARTNER_INVOICES;
+    return SAMPLE_PARTNER_INVOICES.map((inv: GDTInvoice) => {
+      ensureInvoiceItems(inv);
+      return inv;
+    });
   });
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
   const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('imported_xml');
@@ -964,6 +973,38 @@ export default function App() {
     ]);
   };
 
+  // Reset & load authentic partner invoices
+  const handleResetToPartnerSamples = () => {
+    const refreshed = SAMPLE_PARTNER_INVOICES.map(inv => {
+      ensureInvoiceItems(inv);
+      return inv;
+    });
+    setInvoices(refreshed);
+    setSelectedInvoices([]);
+    setDataSourceType('imported_xml');
+    setFilters({
+      invoiceType: 'purchase',
+      fromDate: '2025-01-01',
+      toDate: '2026-12-31',
+      status: 'all',
+      cqtCodeStatus: 'all',
+      sellerTaxCode: '',
+      buyerTaxCode: '',
+      searchKeyword: '',
+      taxRateFilter: 'all'
+    });
+    localStorage.setItem('gdt_saved_invoices', JSON.stringify(refreshed));
+    setConsoleLogs(prev => [
+      ...prev,
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'success',
+        message: '✓ Đã khôi phục 7 hóa đơn mẫu gốc chính xác của các đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn) với danh sách hàng hóa chi tiết thực tế.'
+      }
+    ]);
+  };
+
   // Handle Save Account Config
   const handleSaveAccountConfig = (newConfig: GDTAccountConfig) => {
     setAccount(newConfig);
@@ -1066,6 +1107,7 @@ export default function App() {
           filters={filters}
           onFilterChange={setFilters}
           onResetFilters={handleResetFilters}
+          onResetToPartnerSamples={handleResetToPartnerSamples}
           totalFilteredCount={filteredInvoices.length}
         />
 

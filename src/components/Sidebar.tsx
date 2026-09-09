@@ -18,6 +18,7 @@ import {
   Database
 } from 'lucide-react';
 import { GDTAccountConfig, FilterParams } from '../types';
+import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
 
 export interface CrawlerCredentials {
   taxCode: string;
@@ -75,13 +76,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // AI OCR Scanner helper with safe text-to-JSON parsing
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
-    const targetImg = imgToScan || captchaImg;
+    const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
-    if (!targetImg && !targetKey) return;
+    if (!rawImg && !targetKey) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
     try {
+      const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,23 +181,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           setAuthError(null);
 
           // Trigger AI OCR on server for this captcha
-          try {
-            const ocrRes = await fetch('/api/gdt/ocr-captcha', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ captchaImage: imgUrl, captchaKey: directData.key })
-            });
-            const ocrRaw = await ocrRes.text();
-            try {
-              const ocrJson = JSON.parse(ocrRaw);
-              if (ocrJson?.success && ocrJson?.captchaCode) {
-                setCaptchaCode(ocrJson.captchaCode);
-                setOcrSuccess(true);
-              }
-            } catch {}
-          } catch (ocrErr) {
-            console.warn('[Auto-OCR On Direct Captcha]:', ocrErr);
-          }
+          handleScanOcr(imgUrl, directData.key);
 
           setIsLoadingCaptcha(false);
           return;
@@ -269,10 +255,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (!activeCaptchaCode && captchaImg) {
         setIsScanningOcr(true);
         try {
+          const sharpImg = await convertSvgToSharpPng(captchaImg);
           const res = await fetch('/api/gdt/ocr-captcha', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ captchaImage: captchaImg, captchaKey })
+            body: JSON.stringify({ captchaImage: sharpImg, captchaKey })
           });
           const rawOcr = await res.text();
           let ocrData: any = null;
