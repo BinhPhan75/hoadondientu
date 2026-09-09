@@ -317,12 +317,12 @@ export function renderPnjTemplate(
       </div>
 
       <div class="seller-text-block">
-        <div class="seller-company-name">Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ</div>
-        <div>Địa chỉ : Số 23 Đường số 14, Phường An Nhơn, Thành Phố Hồ Chí Minh, Việt Nam</div>
-        <div>Mã số thuế : <strong>0315018466</strong></div>
-        <div style="margin-top:2px;">Đơn vị bán hàng : <strong>Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ</strong></div>
-        <div>Địa chỉ : Số 23 Đường số 14, Phường An Nhơn, Thành Phố Hồ Chí Minh, Việt Nam</div>
-        <div>Mã số thuế : <strong>0315018466</strong> &nbsp;&nbsp;&nbsp;&nbsp; SĐT : <strong>028 3588 8125</strong></div>
+        <div class="seller-company-name">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</div>
+        <div>Địa chỉ : ${escapeHtml(invoice.nbdchi || '')}</div>
+        <div>Mã số thuế : <strong>${escapeHtml(invoice.nbmst || '')}</strong></div>
+        <div style="margin-top:2px;">Đơn vị bán hàng : <strong>${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</strong></div>
+        <div>Địa chỉ : ${escapeHtml(invoice.nbdchi || '')}</div>
+        <div>Mã số thuế : <strong>${escapeHtml(invoice.nbmst || '')}</strong> &nbsp;&nbsp;&nbsp;&nbsp; SĐT : <strong>${escapeHtml(invoice.nbsdt || '')}</strong></div>
       </div>
     </div>
 

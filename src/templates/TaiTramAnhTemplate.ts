@@ -280,9 +280,9 @@ export function renderTaiTramAnhTemplate(
         </svg>
 
         <div class="seller-details">
-          <div class="company-title">${escapeHtml(invoice.nbten || 'DOANH NGHIỆP TƯ NHÂN GIA CÔNG TRANG SỨC TÀI TRÂM ANH')}</div>
-          <div>Mã số thuế: <strong>${escapeHtml(invoice.nbmst || '0312105174')}</strong></div>
-          <div>Địa chỉ: ${escapeHtml(invoice.nbdchi || '272-274-276-278 Đường 490, ấp 1, Xã Nhuận Đức, Thành phố Hồ Chí Minh, Việt Nam.')}</div>
+          <div class="company-title">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</div>
+          <div>Mã số thuế: <strong>${escapeHtml(invoice.nbmst || '')}</strong></div>
+          <div>Địa chỉ: ${escapeHtml(invoice.nbdchi || '')}</div>
           <div>Điện thoại: ${escapeHtml(invoice.nbsdt || '(028) 3820 5096')}</div>
           <div>Số tài khoản: <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ''}` : '199228689 - NGÂN HÀNG TMCP Á CHÂU - PGD BÌNH ĐĂNG')}</strong></div>
         </div>
@@ -378,7 +378,7 @@ export function renderTaiTramAnhTemplate(
               <span style="color:#15803d;font-size:14px;">✔</span>
               <span>Signature Valid</span>
             </div>
-            <div><strong>Ký bởi:</strong> DOANH NGHIỆP TƯ NHÂN GIA CÔNG TRANG SỨC TÀI TRÂM ANH</div>
+            <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
             <div><strong>Ký ngày:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
           </div>
         </div>

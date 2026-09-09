@@ -280,9 +280,9 @@ export function renderXuanVinhTemplate(
         </svg>
 
         <div class="seller-details">
-          <div class="company-title">${escapeHtml(invoice.nbten || 'CÔNG TY TNHH XUÂN VINH')}</div>
-          <div>Mã số thuế: <strong>${escapeHtml(invoice.nbmst || '0400557356')}</strong></div>
-          <div>Địa chỉ: ${escapeHtml(invoice.nbdchi || '92-94 Hàm Nghi, Phường Thanh Khê, Thành phố Đà Nẵng, Việt Nam.')}</div>
+          <div class="company-title">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</div>
+          <div>Mã số thuế: <strong>${escapeHtml(invoice.nbmst || '')}</strong></div>
+          <div>Địa chỉ: ${escapeHtml(invoice.nbdchi || '')}</div>
           <div>Điện thoại: ${escapeHtml(invoice.nbsdt || '0236 3868 888')}</div>
           <div>Số tài khoản: <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ''}` : '55185259 - Ngân hàng ACB Đà Nẵng / 0041000120221 - Vietcombank')}</strong></div>
         </div>
@@ -391,7 +391,7 @@ export function renderXuanVinhTemplate(
               <span style="color:#15803d;font-size:14px;">✔</span>
               <span>Signature Valid</span>
             </div>
-            <div><strong>Ký bởi:</strong> CÔNG TY TNHH XUÂN VINH</div>
+            <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
             <div><strong>Ký ngày:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
           </div>
         </div>

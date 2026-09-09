@@ -347,15 +347,15 @@ export function renderBaoDuyTemplate(
         <div class="seller-info">
           <div class="info-row">
             <span class="info-label">Đơn vị bán hàng (Seller):</span>
-            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || 'CÔNG TY TNHH THƯƠNG MẠI TRANG SỨC BẢO DUY')}</span>
+            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Mã số thuế (Tax code):</span>
-            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || '0318657735'))}</span>
+            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || ''))}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Địa chỉ (Address):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || '324/2 Ấp Chánh 1, Xã Hóc Môn, Thành phố Hồ Chí Minh, Việt Nam')}</span>
+            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || '')}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Tài khoản (A/C number):</span>
@@ -465,7 +465,7 @@ export function renderBaoDuyTemplate(
             <div class="sig-valid-tag">
               <span>✔</span> Signature Valid
             </div>
-            <div><strong>Ký bởi:</strong> CÔNG TY TNHH THƯƠNG MẠI TRANG SỨC BẢO DUY</div>
+            <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
             <div><strong>Ký ngày:</strong> ${escapeHtml(day)}-${escapeHtml(month)}-${escapeHtml(year)}</div>
           </div>
         </div>

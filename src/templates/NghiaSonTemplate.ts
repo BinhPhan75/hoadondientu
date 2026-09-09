@@ -292,9 +292,9 @@ export function renderNghiaSonTemplate(
       </div>
 
       <div class="seller-text-box">
-        <div class="seller-title">${escapeHtml(invoice.nbten || 'CÔNG TY TNHH NGHĨA SƠN')}</div>
-        <div>Mã số thuế (Tax code): <strong>${escapeHtml(invoice.nbmst || '4000344946')}</strong></div>
-        <div>Địa chỉ (Address): ${escapeHtml(invoice.nbdchi || '68 Trần Quý Cáp, Phường Tân Thạnh, Thành phố Tam Kỳ, Tỉnh Quảng Nam, Việt Nam')}</div>
+        <div class="seller-title">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</div>
+        <div>Mã số thuế (Tax code): <strong>${escapeHtml(invoice.nbmst || '')}</strong></div>
+        <div>Địa chỉ (Address): ${escapeHtml(invoice.nbdchi || '')}</div>
         <div>Điện thoại (Tel): ${escapeHtml(invoice.nbsdt || '0921143577')}</div>
         <div>Số tài khoản (Account No.): <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ''}` : '040092309799 - Ngân hàng Sacombank -Chi nhánh Quảng Nam')}</strong></div>
       </div>
@@ -410,7 +410,7 @@ export function renderNghiaSonTemplate(
         <div class="sign-desc">(Ký điện tử)</div>
         <div class="vnpt-sig-box">
           <div class="sig-valid-tag"><span>✔</span> Signature Valid</div>
-          <div><strong>Ký bởi:</strong> CÔNG TY TNHH NGHĨA SƠN</div>
+          <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
           <div><strong>Ký ngày:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
         </div>
       </div>

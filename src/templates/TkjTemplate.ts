@@ -335,15 +335,15 @@ export function renderTkjTemplate(
         <div class="seller-info">
           <div class="info-row">
             <span class="info-label">Đơn vị bán hàng (Seller):</span>
-            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || 'CÔNG TY TNHH TM DV VÀNG BẠC TKJ')}</span>
+            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Mã số thuế (Tax code):</span>
-            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || '0318443500'))}</span>
+            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || ''))}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Địa chỉ (Address):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || '854-856 Trần Hưng Đạo, Phường An Đông, Thành phố Hồ Chí Minh, Việt Nam')}</span>
+            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || '')}</span>
           </div>
         </div>
 
@@ -446,7 +446,7 @@ export function renderTkjTemplate(
             <div class="sig-valid-tag">
               <span>✔</span> Signature Valid
             </div>
-            <div><strong>Ký bởi:</strong> CÔNG TY TNHH TM DV VÀNG BẠC TKJ</div>
+            <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
             <div><strong>Ký ngày:</strong> ${escapeHtml(day)}-${escapeHtml(month)}-${escapeHtml(year)}</div>
           </div>
         </div>
