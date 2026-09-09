@@ -3,7 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
@@ -614,9 +614,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           khhdon: item.khhdon || '',
           shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
           tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
-          nbmst: item.nbmst || '',
-          nbten: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người bán',
-          nbdchi: item.nbdchi || '',
+          nbmst: getSellerFromPayload(item).taxCode,
+          nbten: getSellerFromPayload(item).name || 'Người bán',
+          nbdchi: getSellerFromPayload(item).address,
           nmmst: item.nmmst || '',
           nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
           nmdchi: item.nmdchi || '',
