@@ -177,24 +177,38 @@ export function parseInvoiceNumber(val: any, defaultVal: number = 0): number {
  * (tên chi tiết). Nếu giá trị đầu tiên chỉ là placeholder thì phải tiếp tục
  * tìm ở các khóa còn lại, tránh làm mất tên thật của dòng hàng.
  */
+function getPayloadValue(source: any, keys: string[]): any {
+  if (!source || typeof source !== 'object') return undefined;
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null && source[key] !== '') return source[key];
+  }
+  const lowerKeys = Object.keys(source);
+  for (const key of keys) {
+    const actualKey = lowerKeys.find(candidate => candidate.toLowerCase() === key.toLowerCase());
+    if (actualKey && source[actualKey] !== undefined && source[actualKey] !== null && source[actualKey] !== '') {
+      return source[actualKey];
+    }
+  }
+  return undefined;
+}
+
 function pickItemName(source: any): string {
   const candidates = [
-    source?.itemName,
-    source?.ten,
-    source?.tenhh,
-    source?.tensp,
-    source?.tenSp,
-    source?.tenHHDVu,
-    source?.thhdvu,
-    source?.tenhanghoa,
-    source?.tenhang,
-    source?.productName,
-    source?.serviceName,
-    source?.goodsName,
-    source?.goodsDescription,
-    source?.itemDescription,
-    source?.description,
-    source?.name
+    getPayloadValue(source, ['itemName', 'ItemName']),
+    getPayloadValue(source, ['ten', 'Ten']),
+    getPayloadValue(source, ['tenhh', 'TenHH']),
+    getPayloadValue(source, ['tensp', 'TenSP']),
+    getPayloadValue(source, ['tenHHDVu', 'TenHHDVu']),
+    getPayloadValue(source, ['thhdvu', 'THHDVu']),
+    getPayloadValue(source, ['tenhanghoa', 'TenHangHoa']),
+    getPayloadValue(source, ['tenhang', 'TenHang']),
+    getPayloadValue(source, ['productName', 'ProductName']),
+    getPayloadValue(source, ['serviceName', 'ServiceName']),
+    getPayloadValue(source, ['goodsName', 'GoodsName']),
+    getPayloadValue(source, ['goodsDescription', 'GoodsDescription']),
+    getPayloadValue(source, ['itemDescription', 'ItemDescription']),
+    getPayloadValue(source, ['description', 'Description']),
+    getPayloadValue(source, ['name', 'Name'])
   ];
 
   const cleaned = candidates
@@ -211,18 +225,18 @@ function pickItemName(source: any): string {
  * tên hàng hóa.
  */
 export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem {
-  const lineNo = parseInt(String(source?.lineNo ?? source?.stt ?? source?.STT ?? idx + 1), 10) || idx + 1;
+  const lineNo = parseInt(String(getPayloadValue(source, ['lineNo', 'stt', 'STT', 'SoTT', 'Idx']) ?? idx + 1), 10) || idx + 1;
   const itemName = pickItemName(source) || 'Hàng hóa, dịch vụ theo hóa đơn';
-  const unit = cleanDetailedItemName(String(source?.unit ?? source?.dvtinh ?? source?.dvt ?? source?.DVTinh ?? 'Lô')) || 'Lô';
-  const quantity = parseInvoiceNumber(source?.quantity ?? source?.sluong ?? source?.SLuong, 1);
-  const unitPrice = parseInvoiceNumber(source?.unitPrice ?? source?.dgia ?? source?.DGia, 0);
-  const amount = parseInvoiceNumber(source?.amount ?? source?.thtien ?? source?.ThTien, quantity * unitPrice);
-  const taxRate = cleanDetailedItemName(String(source?.taxRate ?? source?.tsuat ?? source?.TSuat ?? '10%')) || '10%';
+  const unit = cleanDetailedItemName(String(getPayloadValue(source, ['unit', 'dvtinh', 'dvt', 'DVTinh', 'DonViTinh']) ?? 'Lô')) || 'Lô';
+  const quantity = parseInvoiceNumber(getPayloadValue(source, ['quantity', 'sluong', 'SLuong', 'SoLuong']), 1);
+  const unitPrice = parseInvoiceNumber(getPayloadValue(source, ['unitPrice', 'dgia', 'DGia', 'DonGia']), 0);
+  const amount = parseInvoiceNumber(getPayloadValue(source, ['amount', 'thtien', 'ThTien', 'ThanhTien']), quantity * unitPrice);
+  const taxRate = cleanDetailedItemName(String(getPayloadValue(source, ['taxRate', 'tsuat', 'TSuat', 'ThueSuat']) ?? '10%')) || '10%';
   const taxRatePercent = /KCT|KKKNT/i.test(taxRate) ? 0 : (parseFloat(taxRate.replace(',', '.').replace(/[^0-9.]/g, '')) || 0);
-  const taxAmount = parseInvoiceNumber(source?.taxAmount ?? source?.tthue ?? source?.TThue, 0);
+  const taxAmount = parseInvoiceNumber(getPayloadValue(source, ['taxAmount', 'tthue', 'TThue', 'TienThue']), 0);
 
   return {
-    id: source?.id || `item_${lineNo}`,
+    id: getPayloadValue(source, ['id', 'ID']) || `item_${lineNo}`,
     lineNo,
     itemName,
     unit,
@@ -232,8 +246,8 @@ export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem 
     taxRate,
     taxRatePercent,
     taxAmount,
-    totalAmount: parseInvoiceNumber(source?.totalAmount, amount + taxAmount),
-    itemCode: source?.itemCode || source?.mhhdvu || source?.mahh || undefined,
+    totalAmount: parseInvoiceNumber(getPayloadValue(source, ['totalAmount', 'TongTien']), amount + taxAmount),
+    itemCode: getPayloadValue(source, ['itemCode', 'mhhdvu', 'mahh', 'MHHDVu', 'MaHHDVu']) || undefined,
     stt: lineNo,
     ten: itemName,
     dvt: unit,
@@ -243,7 +257,7 @@ export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem 
     tthtien: amount,
     tsuat: taxRate,
     tthue: taxAmount,
-    mhhdvu: source?.itemCode || source?.mhhdvu || source?.mahh || undefined
+    mhhdvu: getPayloadValue(source, ['itemCode', 'mhhdvu', 'mahh', 'MHHDVu', 'MaHHDVu']) || undefined
   };
 }
 
@@ -288,18 +302,26 @@ export function getLookupCodeFromPayload(source: any): string {
 /** Chọn đúng danh sách dòng hàng dù API trả mảng hay bọc trong object. */
 export function getInvoiceItemListFromPayload(source: any): any[] {
   const candidates = [
-    source?.hdhhdvus,
-    source?.hdhhdvu,
-    source?.items,
-    source?.invoiceItems,
-    source?.products,
-    source?.details,
-    source?.hangHoa
+    getPayloadValue(source, ['hdhhdvus', 'HDHHDVUs']),
+    getPayloadValue(source, ['hdhhdvu', 'HDHHDVu']),
+    getPayloadValue(source, ['items', 'Items']),
+    getPayloadValue(source, ['invoiceItems', 'InvoiceItems']),
+    getPayloadValue(source, ['products', 'Products']),
+    getPayloadValue(source, ['details', 'Details']),
+    getPayloadValue(source, ['hangHoa', 'HangHoa'])
   ];
   for (const candidate of candidates) {
     if (Array.isArray(candidate)) return candidate;
     if (candidate && typeof candidate === 'object') {
-      for (const nested of [candidate.items, candidate.item, candidate.products, candidate.product, candidate.detail, candidate.details]) {
+      for (const nested of [
+        getPayloadValue(candidate, ['items', 'Items']),
+        getPayloadValue(candidate, ['item', 'Item']),
+        getPayloadValue(candidate, ['products', 'Products']),
+        getPayloadValue(candidate, ['product', 'Product']),
+        getPayloadValue(candidate, ['detail', 'Detail']),
+        getPayloadValue(candidate, ['details', 'Details']),
+        getPayloadValue(candidate, ['hdhhdvu', 'HDHHDVu'])
+      ]) {
         if (Array.isArray(nested)) return nested;
         if (nested && typeof nested === 'object') return [nested];
       }
@@ -307,6 +329,19 @@ export function getInvoiceItemListFromPayload(source: any): any[] {
     }
   }
   return [];
+}
+
+export function getSellerFromPayload(source: any): { name: string; taxCode: string; address: string } {
+  const name = cleanDetailedItemName(String(getPayloadValue(source, [
+    'nbten', 'nbtnnt', 'nbtlhdon', 'sellerName', 'supplierName', 'tenNguoiBan', 'tenNban'
+  ]) ?? ''));
+  const taxCode = cleanDetailedItemName(String(getPayloadValue(source, [
+    'nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'mstNguoiBan'
+  ]) ?? ''));
+  const address = cleanDetailedItemName(String(getPayloadValue(source, [
+    'nbdchi', 'sellerAddress', 'supplierAddress', 'diaChiNguoiBan'
+  ]) ?? ''));
+  return { name, taxCode, address };
 }
 
 /**
@@ -475,7 +510,8 @@ function parseHHDVuFromElement(el: Element, idx: number): InvoiceItem {
   const rawName = [
     'THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten',
     'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang',
-    'TenHangHoa', 'tenhanghoa', 'Description', 'description', 'Name', 'name'
+    'TenHangHoa', 'tenhanghoa', 'TenSP', 'tensp', 'TSPH',
+    'DienGiai', 'DienGiaiHH', 'NoiDung', 'Description', 'description', 'Name', 'name'
   ].map(tag => getXmlTagText(el, [tag])).find(value => value && !isPlaceholderItemName(value))
     || getXmlTagText(el, ['THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten', 'ProdName', 'ItemName', 'TenHangHoa', 'Description', 'Name']);
   const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
@@ -573,7 +609,8 @@ function parseHHDVuFromBlock(block: string, idx: number): InvoiceItem {
   const nameCandidates = [
     'THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten',
     'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang',
-    'TenHangHoa', 'tenhanghoa', 'Description', 'description', 'Name', 'name'
+    'TenHangHoa', 'tenhanghoa', 'TenSP', 'tensp', 'TSPH', 'DienGiai',
+    'DienGiaiHH', 'NoiDung', 'Description', 'description', 'Name', 'name'
   ].map(tag => extractTagValueByKeys(block, [tag])).filter(Boolean);
   const rawName = nameCandidates.find(value => !isPlaceholderItemName(value)) || nameCandidates[0] || '';
   const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
@@ -1527,30 +1564,38 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   const htttoan = getTag(domDoc || xmlSource, 'HTTToan') || getTag(domDoc || xmlSource, 'htttoan') || 'TM/CK';
 
   // 2. NBan (Seller Info)
-  let nbanSource: any = domDoc ? (domDoc.getElementsByTagName('NBan')[0] || domDoc) : xmlSource;
+  let nbanSource: any = domDoc
+    ? (findXmlTagElement(domDoc, ['NBan', 'Seller', 'Supplier', 'NguoiBan']) || domDoc)
+    : xmlSource;
   if (typeof nbanSource === 'string') {
-    const nbanBlock = extractTagBlocks(xmlSource, 'NBan')[0];
+    const nbanBlock = ['NBan', 'Seller', 'Supplier', 'NguoiBan']
+      .map(tag => extractTagBlocks(xmlSource, tag)[0])
+      .find(Boolean);
     if (nbanBlock) nbanSource = nbanBlock;
   }
-  const nbten = getTag(nbanSource, 'Ten') || getTag(domDoc || xmlSource, 'nbten') || 'CÔNG TY TNHH BÁN HÀNG';
-  const nbmst = getTag(nbanSource, 'MST') || getTag(domDoc || xmlSource, 'nbmst') || '0100109106';
-  const nbdchi = getTag(nbanSource, 'DChi') || getTag(domDoc || xmlSource, 'nbdchi') || '';
-  const nbsdt = getTag(nbanSource, 'SDThoai') || getTag(nbanSource, 'sdt') || '';
-  const nbemail = getTag(nbanSource, 'DCTDTu') || getTag(nbanSource, 'email') || '';
-  const nbstk = getTag(nbanSource, 'STKNHang') || getTag(nbanSource, 'stk') || '';
-  const nbnhang = getTag(nbanSource, 'TNHang') || getTag(nbanSource, 'nhang') || '';
+  const nbten = getTag(nbanSource, 'Ten') || getTag(nbanSource, 'TenNBan') || getTag(nbanSource, 'TenNguoiBan') || getTag(domDoc || xmlSource, 'nbten') || '';
+  const nbmst = getTag(nbanSource, 'MST') || getTag(nbanSource, 'MSTNBan') || getTag(nbanSource, 'MSTNguoiBan') || getTag(domDoc || xmlSource, 'nbmst') || '';
+  const nbdchi = getTag(nbanSource, 'DChi') || getTag(nbanSource, 'DiaChi') || getTag(domDoc || xmlSource, 'nbdchi') || '';
+  const nbsdt = getTag(nbanSource, 'SDThoai') || getTag(nbanSource, 'SDT') || getTag(nbanSource, 'sdt') || '';
+  const nbemail = getTag(nbanSource, 'DCTDTu') || getTag(nbanSource, 'Email') || getTag(nbanSource, 'email') || '';
+  const nbstk = getTag(nbanSource, 'STKNHang') || getTag(nbanSource, 'STK') || getTag(nbanSource, 'stk') || '';
+  const nbnhang = getTag(nbanSource, 'TNHang') || getTag(nbanSource, 'TenNH') || getTag(nbanSource, 'nhang') || '';
 
   // 3. NMua (Buyer Info)
-  let nmuaSource: any = domDoc ? (domDoc.getElementsByTagName('NMua')[0] || domDoc) : xmlSource;
+  let nmuaSource: any = domDoc
+    ? (findXmlTagElement(domDoc, ['NMua', 'Buyer', 'Customer', 'NguoiMua']) || domDoc)
+    : xmlSource;
   if (typeof nmuaSource === 'string') {
-    const nmuaBlock = extractTagBlocks(xmlSource, 'NMua')[0];
+    const nmuaBlock = ['NMua', 'Buyer', 'Customer', 'NguoiMua']
+      .map(tag => extractTagBlocks(xmlSource, tag)[0])
+      .find(Boolean);
     if (nmuaBlock) nmuaSource = nmuaBlock;
   }
-  const nmten = getTag(nmuaSource, 'Ten') || getTag(domDoc || xmlSource, 'nmten') || 'NGƯỜI MUA HÀNG';
-  const nmmst = getTag(nmuaSource, 'MST') || getTag(domDoc || xmlSource, 'nmmst') || '';
-  const nmdchi = getTag(nmuaSource, 'DChi') || getTag(domDoc || xmlSource, 'nmdchi') || '';
-  const nmsdt = getTag(nmuaSource, 'SDThoai') || '';
-  const nmemail = getTag(nmuaSource, 'DCTDTu') || '';
+  const nmten = getTag(nmuaSource, 'Ten') || getTag(nmuaSource, 'TenNMua') || getTag(nmuaSource, 'TenNguoiMua') || getTag(domDoc || xmlSource, 'nmten') || 'NGƯỜI MUA HÀNG';
+  const nmmst = getTag(nmuaSource, 'MST') || getTag(nmuaSource, 'MSTNMua') || getTag(domDoc || xmlSource, 'nmmst') || '';
+  const nmdchi = getTag(nmuaSource, 'DChi') || getTag(nmuaSource, 'DiaChi') || getTag(domDoc || xmlSource, 'nmdchi') || '';
+  const nmsdt = getTag(nmuaSource, 'SDThoai') || getTag(nmuaSource, 'SDT') || '';
+  const nmemail = getTag(nmuaSource, 'DCTDTu') || getTag(nmuaSource, 'Email') || '';
 
   // 4. DSHHDVu (Invoice Items List) - Bóc tách chuẩn Nghị định 123/2020/NĐ-CP & Thông tư 78/2021/TT-BTC
   // Đường dẫn: <DLHDon> -> <NDHDon> -> <DSHHDVu> -> <HHDVu>
