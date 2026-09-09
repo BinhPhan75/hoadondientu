@@ -182,6 +182,8 @@ function pickItemName(source: any): string {
     source?.itemName,
     source?.ten,
     source?.tenhh,
+    source?.tensp,
+    source?.tenSp,
     source?.tenHHDVu,
     source?.thhdvu,
     source?.tenhanghoa,
@@ -189,6 +191,8 @@ function pickItemName(source: any): string {
     source?.productName,
     source?.serviceName,
     source?.goodsName,
+    source?.goodsDescription,
+    source?.itemDescription,
     source?.description,
     source?.name
   ];
@@ -241,6 +245,125 @@ export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem 
     tthue: taxAmount,
     mhhdvu: source?.itemCode || source?.mhhdvu || source?.mahh || undefined
   };
+}
+
+function cleanLookupValue(value: any): string {
+  return cleanDetailedItemName(String(value ?? ''))
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+}
+
+function normalizeLookupLabel(value: string): string {
+  return cleanLookupValue(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+}
+
+function isLookupCodeCandidate(value: string): boolean {
+  if (!value || value.length < 4 || value.length > 120) return false;
+  if (/^https?:\/\//i.test(value)) return false;
+  if (/^[0-9]{10,14}$/.test(value)) return false; // MST, not mã tra cứu
+  if (/^[0-9a-f]{32,}$/i.test(value)) return false; // thường là mã CQT/hash
+  return true;
+}
+
+/** Lấy mã tra cứu từ payload JSON của Cổng Thuế/API. */
+export function getLookupCodeFromPayload(source: any): string {
+  const values = [
+    source?.lookupCode,
+    source?.lookup_code,
+    source?.mtcuu,
+    source?.maTraCuu,
+    source?.matracuu,
+    source?.fkey,
+    source?.FKey,
+    source?.invoiceLookupCode,
+    source?.invoiceCode
+  ];
+  return values.map(cleanLookupValue).find(isLookupCodeCandidate) || '';
+}
+
+/** Chọn đúng danh sách dòng hàng dù API trả mảng hay bọc trong object. */
+export function getInvoiceItemListFromPayload(source: any): any[] {
+  const candidates = [
+    source?.hdhhdvus,
+    source?.hdhhdvu,
+    source?.items,
+    source?.invoiceItems,
+    source?.products,
+    source?.details,
+    source?.hangHoa
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+    if (candidate && typeof candidate === 'object') {
+      for (const nested of [candidate.items, candidate.item, candidate.products, candidate.product, candidate.detail, candidate.details]) {
+        if (Array.isArray(nested)) return nested;
+        if (nested && typeof nested === 'object') return [nested];
+      }
+      return [candidate];
+    }
+  }
+  return [];
+}
+
+/**
+ * Trích xuất chính xác mã/URL tra cứu từ XML. Chỉ nhận các thẻ có ngữ nghĩa
+ * tra cứu hoặc trường TTin tương ứng; không dùng SecretCode, MCCQT hay URL
+ * đầu tiên trong tài liệu làm mã tra cứu.
+ */
+export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: string; lookupUrl: string } {
+  if (!rawXml) return { lookupCode: '', lookupUrl: '' };
+
+  const tagValue = (tagNames: string[]): string => {
+    for (const tag of tagNames) {
+      const value = extractTagValue(rawXml, tag, '');
+      if (value) return cleanLookupValue(value);
+    }
+    return '';
+  };
+
+  const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'MTC', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode', 'InvoiceCode'];
+  let lookupCode = tagValue(codeTags);
+
+  const ttinBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
+  for (const block of ttinBlocks) {
+    const label = normalizeLookupLabel(
+      extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name')
+    );
+    if (!label || label.includes('bi mat') || label.includes('secret')) continue;
+    if (label.includes('tra cuu') || label.includes('tracuu') || label.includes('matracuu') || label.includes('fkey') || label.includes('lookupcode')) {
+      const value = cleanLookupValue(extractTagValue(block, 'DLieu') || extractTagValue(block, 'Data') || extractTagValue(block, 'Value'));
+      if (isLookupCodeCandidate(value)) {
+        lookupCode = value;
+        break;
+      }
+    }
+  }
+
+  if (lookupCode && /^https?:\/\//i.test(lookupCode)) {
+    try {
+      const url = new URL(lookupCode);
+      lookupCode = cleanLookupValue(url.searchParams.get('code') || url.searchParams.get('c') || url.searchParams.get('fkey') || '');
+    } catch {
+      lookupCode = '';
+    }
+  }
+
+  const urlTags = ['LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu', 'PortalUrl', 'Website'];
+  let lookupUrl = tagValue(urlTags);
+  if (!/^https?:\/\//i.test(lookupUrl)) {
+    lookupUrl = '';
+  }
+  if (!lookupUrl) {
+    const urlMatch = rawXml.match(/https?:\/\/[^\s<"']+/gi)?.map(cleanLookupValue)
+      .find(value => !/w3\.org|schema\.org/i.test(value) && /tra[-_]?cuu|invoice|einvoice|sinvoice|easyinvoice|4si/i.test(value));
+    lookupUrl = urlMatch || '';
+  }
+
+  return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : '', lookupUrl };
 }
 
 /**
@@ -580,11 +703,19 @@ export function extractInvoiceItemsFromXml(xmlSource: string | Document): Invoic
         'Items', 'items',
         'DSHangHoa', 'dshanghoa',
         'Details', 'details',
-        'ListProduct', 'listproduct'
+        'ListProduct', 'listproduct',
+        'InvoiceDetails', 'invoicedetails',
+        'InvoiceItems', 'invoiceitems',
+        'GoodsDetails', 'goodsdetails',
+        'DSHHDV', 'dshhdv',
+        'ChiTiet', 'chitiet',
+        'CTietHHDVu', 'ctiethhdvu'
       ];
 
       const itemTagCandidates = [
-        'hhdvu', 'product', 'item', 'hanghoa', 'detail', 'row'
+        'hhdvu', 'product', 'item', 'hanghoa', 'detail', 'row',
+        'invoicedetail', 'invoiceitem', 'productdetail', 'goods',
+        'goodsitem', 'chitiethanghoa', 'ctiet', 'line'
       ];
 
       // 1. Thẻ <DLHDon> (Dữ liệu hóa đơn)
@@ -605,7 +736,7 @@ export function extractInvoiceItemsFromXml(xmlSource: string | Document): Invoic
         }
 
         if (hhdvuList.length === 0) {
-          for (const cand of ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail', 'Row']) {
+            for (const cand of ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail', 'Row', 'InvoiceDetail', 'InvoiceItem', 'ProductDetail', 'GoodsItem', 'Line']) {
             const tagged = dshhdvuNode.getElementsByTagName(cand);
             if (tagged && tagged.length > 0) {
               hhdvuList = Array.from(tagged);
@@ -620,7 +751,7 @@ export function extractInvoiceItemsFromXml(xmlSource: string | Document): Invoic
       }
 
       // Fallback quét toàn bộ DOM doc cho các thẻ item
-      for (const cand of ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail']) {
+      for (const cand of ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail', 'InvoiceDetail', 'InvoiceItem', 'ProductDetail', 'GoodsItem', 'Line']) {
         const allItems = domDoc.getElementsByTagName(cand);
         if (allItems && allItems.length > 0) {
           return Array.from(allItems).map((el, idx) => parseHHDVuFromElement(el, idx));
@@ -637,8 +768,8 @@ export function extractInvoiceItemsFromXml(xmlSource: string | Document): Invoic
   const xmlText = rawXmlString || (domDoc ? new XMLSerializer().serializeToString(domDoc) : '');
   if (!xmlText) return [];
 
-  const containerRegexes = ['DSHHDVu', 'Products', 'Items', 'DSHangHoa', 'Details'];
-  const itemTagNames = ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail', 'Row'];
+  const containerRegexes = ['DSHHDVu', 'Products', 'Items', 'DSHangHoa', 'Details', 'InvoiceDetails', 'InvoiceItems', 'GoodsDetails', 'DSHHDV', 'ChiTiet', 'CTietHHDVu'];
+  const itemTagNames = ['HHDVu', 'Product', 'Item', 'HangHoa', 'Detail', 'Row', 'InvoiceDetail', 'InvoiceItem', 'ProductDetail', 'GoodsItem', 'Line'];
 
   // Thử tìm trong từng container
   for (const cTag of containerRegexes) {
@@ -1521,31 +1652,7 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   const msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
   const tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
 
-  // Bóc tách mã tra cứu từ <MTCuu>, <MaTraCuu>, <TTin>
-  let lookupCode = getTag(domDoc || xmlSource, 'MTCuu') || getTag(domDoc || xmlSource, 'MaTraCuu') || '';
-  let lookupUrl = getTag(domDoc || xmlSource, 'Website') || getTag(domDoc || xmlSource, 'WebTraCuu') || '';
-
-  if (!lookupCode || !lookupUrl) {
-    const ttinBlocks = extractTagBlocks(xmlSource, 'TTin');
-    for (const block of ttinBlocks) {
-      const truong = extractTagValue(block, 'TTruong').toLowerCase();
-      const dlieu = extractTagValue(block, 'DLieu');
-      if (!lookupCode && (truong.includes('tra cuu') || truong.includes('tracuu') || truong.includes('matracuu') || truong.includes('fkey') || truong.includes('mã tra cứu'))) {
-        lookupCode = dlieu;
-      }
-      if (!lookupUrl && (truong.includes('link') || truong.includes('url') || truong.includes('website') || truong.includes('cổng tra cứu') || dlieu.startsWith('http'))) {
-        lookupUrl = dlieu;
-      }
-    }
-  }
-
-  // Nếu lookupUrl chưa có, trích xuất URL http/https bất kỳ trong XML
-  if (!lookupUrl) {
-    const urlMatch = xmlSource.match(/https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:\/[^\s<"']*)?/i);
-    if (urlMatch && urlMatch[0] && !urlMatch[0].includes('w3.org')) {
-      lookupUrl = urlMatch[0];
-    }
-  }
+  const { lookupCode, lookupUrl } = extractLookupDetailsFromXml(xmlSource);
 
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;
 
