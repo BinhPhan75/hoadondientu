@@ -172,6 +172,78 @@ export function parseInvoiceNumber(val: any, defaultVal: number = 0): number {
 }
 
 /**
+ * Lấy tên hàng hóa từ payload API của các cổng hóa đơn khác nhau.
+ * Một số cổng trả đồng thời `THHDVu` (tên chuẩn) và `TenHH`/`ItemName`
+ * (tên chi tiết). Nếu giá trị đầu tiên chỉ là placeholder thì phải tiếp tục
+ * tìm ở các khóa còn lại, tránh làm mất tên thật của dòng hàng.
+ */
+function pickItemName(source: any): string {
+  const candidates = [
+    source?.itemName,
+    source?.ten,
+    source?.tenhh,
+    source?.tenHHDVu,
+    source?.thhdvu,
+    source?.tenhanghoa,
+    source?.tenhang,
+    source?.productName,
+    source?.serviceName,
+    source?.goodsName,
+    source?.description,
+    source?.name
+  ];
+
+  const cleaned = candidates
+    .filter(value => value !== undefined && value !== null)
+    .map(value => cleanDetailedItemName(String(value)))
+    .filter(Boolean);
+
+  return cleaned.find(value => !isPlaceholderItemName(value)) || cleaned[0] || '';
+}
+
+/**
+ * Chuẩn hóa một dòng hàng từ dữ liệu danh sách hóa đơn của Cổng Thuế/API.
+ * Dùng chung cho server và API serverless để hai đường lấy dữ liệu không lệch
+ * tên hàng hóa.
+ */
+export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem {
+  const lineNo = parseInt(String(source?.lineNo ?? source?.stt ?? source?.STT ?? idx + 1), 10) || idx + 1;
+  const itemName = pickItemName(source) || 'Hàng hóa, dịch vụ theo hóa đơn';
+  const unit = cleanDetailedItemName(String(source?.unit ?? source?.dvtinh ?? source?.dvt ?? source?.DVTinh ?? 'Lô')) || 'Lô';
+  const quantity = parseInvoiceNumber(source?.quantity ?? source?.sluong ?? source?.SLuong, 1);
+  const unitPrice = parseInvoiceNumber(source?.unitPrice ?? source?.dgia ?? source?.DGia, 0);
+  const amount = parseInvoiceNumber(source?.amount ?? source?.thtien ?? source?.ThTien, quantity * unitPrice);
+  const taxRate = cleanDetailedItemName(String(source?.taxRate ?? source?.tsuat ?? source?.TSuat ?? '10%')) || '10%';
+  const taxRatePercent = /KCT|KKKNT/i.test(taxRate) ? 0 : (parseFloat(taxRate.replace(',', '.').replace(/[^0-9.]/g, '')) || 0);
+  const taxAmount = parseInvoiceNumber(source?.taxAmount ?? source?.tthue ?? source?.TThue, 0);
+
+  return {
+    id: source?.id || `item_${lineNo}`,
+    lineNo,
+    itemName,
+    unit,
+    quantity,
+    unitPrice,
+    amount,
+    taxRate,
+    taxRatePercent,
+    taxAmount,
+    totalAmount: parseInvoiceNumber(source?.totalAmount, amount + taxAmount),
+    itemCode: source?.itemCode || source?.mhhdvu || source?.mahh || undefined,
+    stt: lineNo,
+    ten: itemName,
+    dvt: unit,
+    sluong: quantity,
+    dgia: unitPrice,
+    thtien: amount,
+    tthtien: amount,
+    tsuat: taxRate,
+    tthue: taxAmount,
+    mhhdvu: source?.itemCode || source?.mhhdvu || source?.mahh || undefined
+  };
+}
+
+/**
  * Tìm thẻ XML theo danh sách tên thẻ (hỗ trợ namespace, không phân biệt hoa thường)
  */
 function findXmlTagElement(parent: Element | Document, tagNames: string[]): Element | null {
@@ -277,7 +349,12 @@ function parseHHDVuFromElement(el: Element, idx: number): InvoiceItem {
   const lineNo = parseInt(rawStt, 10) || (idx + 1);
 
   // <THHDVu>: Tên hàng hóa, dịch vụ (Lấy đúng tên chi tiết, không lấy chuỗi tóm tắt)
-  const rawName = getXmlTagText(el, ['THHDVu', 'thhdvu', 'TenHHDVu', 'Ten', 'ten', 'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang', 'TenHangHoa', 'tenhanghoa', 'Name', 'name']);
+  const rawName = [
+    'THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten',
+    'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang',
+    'TenHangHoa', 'tenhanghoa', 'Description', 'description', 'Name', 'name'
+  ].map(tag => getXmlTagText(el, [tag])).find(value => value && !isPlaceholderItemName(value))
+    || getXmlTagText(el, ['THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten', 'ProdName', 'ItemName', 'TenHangHoa', 'Description', 'Name']);
   const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
 
   // <DVTinh>: Đơn vị tính
@@ -370,7 +447,12 @@ function parseHHDVuFromBlock(block: string, idx: number): InvoiceItem {
   const lineNo = parseInt(rawStt, 10) || (idx + 1);
 
   // <THHDVu>: Tên hàng hóa, dịch vụ (Lấy đúng tên chi tiết, không lấy chuỗi tóm tắt)
-  const rawName = extractTagValueByKeys(block, ['THHDVu', 'thhdvu', 'TenHHDVu', 'Ten', 'ten', 'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang', 'TenHangHoa', 'tenhanghoa', 'Name', 'name']);
+  const nameCandidates = [
+    'THHDVu', 'thhdvu', 'TenHHDVu', 'TenHH', 'tenhh', 'Ten', 'ten',
+    'ProdName', 'prodname', 'ItemName', 'itemname', 'TenHang',
+    'TenHangHoa', 'tenhanghoa', 'Description', 'description', 'Name', 'name'
+  ].map(tag => extractTagValueByKeys(block, [tag])).filter(Boolean);
+  const rawName = nameCandidates.find(value => !isPlaceholderItemName(value)) || nameCandidates[0] || '';
   const itemName = rawName || `Hàng hóa / Dịch vụ ${lineNo}`;
 
   // <DVTinh>: Đơn vị tính
@@ -1206,18 +1288,17 @@ export function resolveAuthenticInvoiceItems(invoice: GDTInvoice, rawXml?: strin
 export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
   if (!invoice) return [];
 
-  // 1. Kiểm tra items hiện có: Phải có dòng thực tế và không phải tên placeholder
+  // 1. Giữ nguyên danh sách từ nguồn, kể cả khi nguồn chỉ cung cấp dòng tổng hợp.
+  // Không được thay tên nguồn bằng danh mục hàng mẫu của đối tác.
   if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
-    if (hasGenuineItems(invoice.items)) {
-      return invoice.items;
-    }
+    return invoice.items;
   }
 
   // 2. Thử bóc tách từ rawXml nếu có
   if (invoice.rawXml) {
     try {
       const parsed = extractInvoiceItemsFromXml(invoice.rawXml);
-      if (parsed && parsed.length > 0 && hasGenuineItems(parsed)) {
+      if (parsed && parsed.length > 0) {
         invoice.items = parsed;
         return parsed;
       }
@@ -1226,10 +1307,34 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
     }
   }
 
-  // 3. Tự động phân giải danh mục hàng hóa thực tế theo đúng đơn vị phát hành
-  const authenticItems = resolveAuthenticInvoiceItems(invoice, invoice.rawXml);
-  invoice.items = authenticItems;
-  return authenticItems;
+  // 3. Không có chi tiết thì trả về một dòng tổng hợp trung thực theo số tiền.
+  // Việc dựng tên sản phẩm cố định theo nhà cung cấp làm sai dữ liệu hóa đơn.
+  const amount = Number(invoice.tgtcthue || invoice.tgtttbso || 0);
+  const taxAmount = Number(invoice.tgtthue || 0);
+  const summaryItem: InvoiceItem = {
+    id: `summary_${invoice.id}`,
+    lineNo: 1,
+    itemName: 'Hàng hóa, dịch vụ theo hóa đơn',
+    unit: 'Lô',
+    quantity: 1,
+    unitPrice: amount,
+    amount,
+    taxRate: taxAmount > 0 ? '10%' : 'KCT',
+    taxRatePercent: taxAmount > 0 ? 10 : 0,
+    taxAmount,
+    totalAmount: amount + taxAmount,
+    stt: 1,
+    ten: 'Hàng hóa, dịch vụ theo hóa đơn',
+    dvt: 'Lô',
+    sluong: 1,
+    dgia: amount,
+    thtien: amount,
+    tthtien: amount,
+    tsuat: taxAmount > 0 ? '10%' : 'KCT',
+    tthue: taxAmount
+  };
+  invoice.items = [summaryItem];
+  return invoice.items;
 }
 
 
@@ -1493,9 +1598,9 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     rawXml: xmlString
   };
 
-  const finalItems = (items.length > 0 && hasGenuineItems(items))
+  const finalItems = items.length > 0
     ? items
-    : resolveAuthenticInvoiceItems(draftInvoice, xmlSource);
+    : ensureInvoiceItems(draftInvoice);
 
   draftInvoice.items = finalItems;
   return draftInvoice;
