@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 import { invoiceManager, CaptchaSolver } from '../src/services/invoice-engine';
+import { normalizeInvoiceItem } from '../src/utils/xmlParser';
 
 const app = express();
 
@@ -613,19 +614,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
         signedDate: item.tdlap,
         caProvider: 'Tổng cục Thuế CQT',
-        items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => ({
-          id: `item_${idx + 1}`,
-          lineNo: idx + 1,
-          itemName: it.thhdvu || it.itemName || it.tenhh || 'Hàng hóa dịch vụ',
-          unit: it.dvtinh || it.unit || 'Lô',
-          quantity: Number(it.sluong || it.quantity || 1),
-          unitPrice: Number(it.dgia || it.unitPrice || 0),
-          amount: Number(it.thtien || it.amount || 0),
-          taxRate: it.tsuat || it.taxRate || '10%',
-          taxRatePercent: parseInt(it.tsuat || '10', 10) || 10,
-          taxAmount: Number(it.tthue || it.taxAmount || 0),
-          totalAmount: Number((it.thtien || 0) + (it.tthue || 0))
-        }))
+          items: (item.hdhhdvus || item.items || item.hdhhdvu || []).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
       }));
     } catch (e) {
       return [];
