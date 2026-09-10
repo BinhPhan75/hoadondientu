@@ -302,6 +302,10 @@ export default function App() {
           updates.forEach(item => map.set(item.id, item));
           return Array.from(map.values());
         });
+        setSelectedInvoiceForDetail(prev => {
+          if (!prev) return prev;
+          return updates.find(item => item.id === prev.id) || prev;
+        });
       }
       if (i + 4 < eligible.length) await new Promise(resolve => setTimeout(resolve, 250));
     }
