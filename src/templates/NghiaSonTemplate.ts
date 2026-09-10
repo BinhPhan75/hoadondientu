@@ -21,7 +21,7 @@ export function renderNghiaSonTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn`;
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:4000344946;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);

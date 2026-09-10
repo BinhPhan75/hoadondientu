@@ -22,7 +22,7 @@ export function renderTkjTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318443500;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);

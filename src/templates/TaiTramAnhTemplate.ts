@@ -20,7 +20,7 @@ export function renderTaiTramAnhTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu';
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0312105174;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
