@@ -3,7 +3,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
@@ -639,7 +639,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           msttcgp: item.msttcgp || item.mst_tcgp || '',
           tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
           lookupCode: getLookupCodeFromPayload(item),
-          lookupUrl: item.lookupUrl || item.lookup_url || item.linkTraCuu || item.websiteTraCuu || '',
+          lookupUrl: getLookupUrlFromPayload(item),
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
         }));
       } catch (err: any) {
