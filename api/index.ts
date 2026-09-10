@@ -577,12 +577,12 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
 
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
 
-  const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string) => {
+  const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
-    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
     try {
       const resp = await fetch(url, {
         headers: {
@@ -611,7 +611,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
 
       const list = extractGdtInvoiceList(data);
       
-      return list.map((item: any) => ({
+      const normalizedPage = list.map((item: any) => ({
         id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
         khmshdon: item.khmshdon || item.khmhd || '1',
         khhdon: item.khhdon || '',
@@ -646,6 +646,15 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
           sourceCompleteness: 'summary'
       }));
+      const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
+      const firstPageId = normalizedPage[0]?.id;
+      const repeatedPage = Boolean(firstPageId && accumulated[0]?.id === firstPageId);
+      const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
+      if (hasNextPage) {
+        await new Promise(resolve => setTimeout(resolve, 250));
+        return fetchChunk(type, chunkFrom, chunkTo, page + 1, accumulated.concat(normalizedPage));
+      }
+      return accumulated.concat(normalizedPage);
     } catch (e) {
       return [];
     }
@@ -653,10 +662,12 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
 
   const fetchAllChunksForType = async (type: 'purchase' | 'sold') => {
     let allInvoices: any[] = [];
-    const chunkPromises = dateChunks.map(chunk => fetchChunk(type, chunk.from, chunk.to));
-    const chunkResults = await Promise.all(chunkPromises);
-
-    for (const chunkResult of chunkResults) {
+    // GDT rate-limits the public endpoint. Sequential monthly requests avoid
+    // losing pages when several months are queried at once.
+    for (let i = 0; i < dateChunks.length; i++) {
+      const chunk = dateChunks[i];
+      if (i > 0) await new Promise(resolve => setTimeout(resolve, 300));
+      const chunkResult = await fetchChunk(type, chunk.from, chunk.to);
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
