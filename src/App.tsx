@@ -280,9 +280,13 @@ export default function App() {
   // This keeps the month progress responsive while replacing summary rows in-place.
   const enrichInvoiceDetails = async (sourceInvoices: GDTInvoice[], token: string, cookie: string) => {
     const eligible = sourceInvoices.filter(inv => inv.sourceCompleteness !== 'detail');
-    for (let i = 0; i < eligible.length; i += 4) {
-      const batch = eligible.slice(i, i + 4);
-      const results = await Promise.all(batch.map(async invoice => {
+    // GDT throttles detail/XML requests more aggressively than list queries.
+    // Four simultaneous detail requests often return an empty success payload,
+    // which left product names unresolved. Fetch one invoice at a time so a
+    // successful update always represents extracted line-item data.
+    for (let i = 0; i < eligible.length; i++) {
+      const invoice = eligible[i];
+      const result = await (async () => {
         try {
           const response = await fetch('/api/gdt/invoice-detail', {
             method: 'POST',
@@ -298,12 +302,13 @@ export default function App() {
               bytes: data.xmlExport.bytes
             });
           }
-          return data.success && data.invoice ? data.invoice as GDTInvoice : null;
+          const resolved = data.success && data.invoice ? data.invoice as GDTInvoice : null;
+          return resolved?.sourceCompleteness === 'detail' ? resolved : null;
         } catch {
           return null;
         }
-      }));
-      const updates = results.filter(Boolean) as GDTInvoice[];
+      })();
+      const updates = result ? [result] as GDTInvoice[] : [];
       if (updates.length) {
         setInvoices(prev => {
           const map = new Map(prev.map(item => [item.id, item]));
@@ -315,7 +320,7 @@ export default function App() {
           return updates.find(item => item.id === prev.id) || prev;
         });
       }
-      if (i + 4 < eligible.length) await new Promise(resolve => setTimeout(resolve, 250));
+      if (i < eligible.length - 1) await new Promise(resolve => setTimeout(resolve, 450));
     }
   };
 
