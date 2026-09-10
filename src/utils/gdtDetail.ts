@@ -6,6 +6,7 @@ type GdtInvoiceKey = {
   shdon?: string | number;
   khmshdon?: string;
   isPos?: boolean;
+  loaiHdon?: 'purchase' | 'sold';
 };
 
 const value = (source: any, keys: string[]): string => {
@@ -39,10 +40,16 @@ export async function fetchGdtInvoiceDetail(
     khmshdon: invoice.khmshdon || '1'
   });
   const path = invoice.isPos ? '/api/sco-query/invoices/detail' : '/api/query/invoices/detail';
+  const action = invoice.isPos
+    ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)'
+    : invoice.loaiHdon === 'sold'
+      ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20b%C3%A1n%20ra)'
+      : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20mua%20v%C3%A0o)';
   const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
     headers: {
       Accept: 'application/json, text/plain, */*',
       'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+      Action: action,
       ...headers
     },
     signal: signal || AbortSignal.timeout(20000)
