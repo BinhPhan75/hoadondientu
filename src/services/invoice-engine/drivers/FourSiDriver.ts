@@ -60,11 +60,6 @@ export class FourSiDriver extends BaseInvoiceProviderDriver {
       lookupCode = this.extractXmlTag(xmlData, 'MTCuu') || this.extractXmlTag(xmlData, 'InvoiceCode');
     }
 
-    // Nếu không có mã tra cứu riêng, dùng Số hóa đơn làm fallback
-    if (!lookupCode) {
-      lookupCode = invoiceNo;
-    }
-
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTThue') || '0') || 0;
 
