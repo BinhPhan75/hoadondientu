@@ -7,7 +7,7 @@ import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFr
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
-import { fetchGdtInvoiceDetail, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
+import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 
 const app = express();
 const PORT = 3000;
@@ -538,8 +538,12 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
   if (!authHeader || !invoice) return res.status(400).json({ success: false, message: 'Thiếu phiên hoặc thông tin hóa đơn.' });
   try {
     const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
-    const detail = await fetchGdtInvoiceDetail(invoice, { Authorization: tokenHeader, ...(cookieHeader ? { Cookie: cookieHeader } : {}) });
-    return res.json({ success: true, invoice: mergeGdtInvoiceDetail(invoice, detail) });
+    const gdtHeaders = { Authorization: tokenHeader, ...(cookieHeader ? { Cookie: cookieHeader } : {}) };
+    let detail = null;
+    try { detail = await fetchGdtInvoiceDetail(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
+    let exportedXml = '';
+    try { exportedXml = await fetchGdtInvoiceXml(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
+    return res.json({ success: true, invoice: mergeGdtInvoiceDetail(invoice, detail, exportedXml) });
   } catch (error: any) {
     return res.status(502).json({ success: false, message: `Không lấy được chi tiết hóa đơn: ${error.message}` });
   }
@@ -740,11 +744,15 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     if (includeDetails) for (let i = 0; i < dedupedResults.length; i++) {
       const invoice = dedupedResults[i];
       try {
-        const detail = await fetchGdtInvoiceDetail(invoice, {
+        const detailHeaders = {
           Authorization: tokenHeader,
           ...(cookieHeader ? { Cookie: cookieHeader } : {})
-        });
-        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail);
+        };
+        let detail = null;
+        try { detail = await fetchGdtInvoiceDetail(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
+        let exportedXml = '';
+        try { exportedXml = await fetchGdtInvoiceXml(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail, exportedXml);
         if (i < dedupedResults.length - 1) await sleep(300);
       } catch (detailError: any) {
         console.warn(`[GDT Detail] ${invoice.khhdon}/${invoice.shdon}: ${detailError.message}`);
