@@ -94,13 +94,22 @@ function findInvoiceDocument(source: any, seen = new Set<any>(), depth = 0): str
   return '';
 }
 
+export type GdtXmlExportResult = {
+  xml: string;
+  status: number;
+  contentType: string;
+  bytes: number;
+  url: string;
+};
+
 export async function fetchGdtInvoiceXml(
   invoice: GdtInvoiceKey,
   headers: Record<string, string>,
   signal?: AbortSignal
-): Promise<string> {
-  if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return '';
-  const response = await fetch(`${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}`, {
+): Promise<GdtXmlExportResult> {
+  const url = `${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}`;
+  if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return { xml: '', status: 0, contentType: '', bytes: 0, url };
+  const response = await fetch(url, {
     headers: {
       ...GDT_REQUEST_HEADERS,
       Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
@@ -110,11 +119,15 @@ export async function fetchGdtInvoiceXml(
     },
     signal: signal || AbortSignal.timeout(30000)
   });
+  const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     console.warn(`[GDT XML export] HTTP ${response.status} for ${invoice.khhdon}/${invoice.shdon}`);
-    return '';
+    return { xml: '', status: response.status, contentType, bytes: 0, url };
   }
-  return readXmlFromExport(new Uint8Array(await response.arrayBuffer()), response.headers.get('content-type') || '');
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const xml = await readXmlFromExport(bytes, contentType);
+  console.info(`[GDT XML export] ${invoice.khhdon}/${invoice.shdon}: HTTP ${response.status}, ${bytes.byteLength} bytes, ${contentType || 'unknown'}, XML=${xml ? 'yes' : 'no'}`);
+  return { xml, status: response.status, contentType, bytes: bytes.byteLength, url };
 }
 
 /**
