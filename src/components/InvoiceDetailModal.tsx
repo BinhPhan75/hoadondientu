@@ -301,6 +301,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         {/* Provider Detection & Control Sub-bar */}
         {activeTab === 'pdf' && (
           <div className="bg-[#111827] px-4 py-2 flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 text-xs text-gray-300">
+            {invoice.sourceCompleteness !== 'detail' && !invoice.rawXml && (
+              <div className="w-full rounded-md border border-amber-800/70 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+                Cổng Thuế chưa trả dữ liệu chi tiết/XML gốc cho hóa đơn này. Ứng dụng không tự suy đoán tên hàng hoặc mã tra cứu; hãy tải lại chi tiết sau hoặc nhập XML gốc.
+              </div>
+            )}
             {/* Left: Provider Auto-Detected Badge & Template Selector */}
             <div className="flex items-center gap-2.5 flex-wrap">
               {/* Provider Detection Info */}
@@ -581,8 +586,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="bg-gray-950 p-3.5 rounded-lg border border-gray-800 space-y-2">
                   <p className="font-bold text-gray-300 text-[11px] uppercase">Mã cấp từ Tổng cục Thuế</p>
                   <div className="text-gray-400 space-y-1 font-mono">
-                    <p>Mã CQT: <strong className="text-emerald-400">{invoice.mhdon || '00E9C762DA374972B621A0F9004B2C89'}</strong></p>
-                    <p>Trạng thái: <strong className="text-emerald-400">Hợp lệ / Đã cấp mã</strong></p>
+                    <p>Mã CQT: <strong className="text-emerald-400">{invoice.mhdon || 'Chưa có trong dữ liệu nguồn'}</strong></p>
+                    <p>Trạng thái: <strong className={invoice.mhdon ? 'text-emerald-400' : 'text-amber-400'}>{invoice.mhdon ? 'Đã cấp mã' : 'Chưa xác định'}</strong></p>
                     <p>Tính chất: <strong className="text-white">{invoice.tthdonLabel || 'Hóa đơn gốc'}</strong></p>
                   </div>
                 </div>
