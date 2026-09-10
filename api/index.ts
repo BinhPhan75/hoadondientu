@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 import { invoiceManager, CaptchaSolver } from '../src/services/invoice-engine';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getSellerFromPayload, normalizeInvoiceItem } from '../src/utils/xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem } from '../src/utils/xmlParser';
 
 const app = express();
 
@@ -617,7 +617,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         msttcgp: item.msttcgp || item.mst_tcgp || '',
         tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
         lookupCode: getLookupCodeFromPayload(item),
-        lookupUrl: item.lookupUrl || item.lookup_url || item.linkTraCuu || item.websiteTraCuu || '',
+        lookupUrl: getLookupUrlFromPayload(item),
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
       }));
     } catch (e) {
