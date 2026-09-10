@@ -1320,7 +1320,10 @@ export default function App() {
         onDownloadXml={handleDownloadXml}
         onUpdateInvoice={(enriched) => {
           setInvoices(prev => prev.map(inv => inv.id === enriched.id ? enriched : inv));
-          setSelectedInvoiceForDetail(enriched);
+          // Chỉ cập nhật hóa đơn đang xem nếu modal vẫn đang mở đúng hóa đơn
+          // đó - tránh việc dữ liệu tải về muộn (sau khi người dùng đã đóng
+          // modal) vô tình mở lại modal.
+          setSelectedInvoiceForDetail(prev => (prev && prev.id === enriched.id ? enriched : prev));
         }}
         token={gdtSession?.token}
         cookieHeader={gdtSession?.cookieHeader}
