@@ -115,6 +115,7 @@ export interface GDTInvoice {
   lookupCode?: string; // Mã tra cứu hóa đơn
   lookupUrl?: string; // Đường dẫn cổng tra cứu
   secretCode?: string; // Mã bí mật tra cứu
+  sourceCompleteness?: 'summary' | 'detail' | 'summary-detail'; // Mức độ hoàn thiện dữ liệu
 }
 
 export interface FilterParams {
