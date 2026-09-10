@@ -109,27 +109,65 @@ export async function fetchGdtInvoiceXml(
   headers: Record<string, string>,
   signal?: AbortSignal
 ): Promise<GdtXmlExportResult> {
-  const url = `${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}`;
-  if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return { xml: '', status: 0, contentType: '', bytes: 0, url };
-  const response = await fetch(url, {
-    headers: {
-      ...GDT_REQUEST_HEADERS,
-      Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
-      'End-Point': '/tra-cuu/tra-cuu-hoa-don',
-      Action: getInvoiceAction(invoice, true),
-      ...headers
-    },
-    signal: signal || AbortSignal.timeout(30000)
-  });
-  const contentType = response.headers.get('content-type') || '';
-  if (!response.ok) {
-    console.warn(`[GDT XML export] HTTP ${response.status} for ${invoice.khhdon}/${invoice.shdon}`);
-    return { xml: '', status: response.status, contentType, bytes: 0, url };
+  if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) {
+    return { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const xml = await readXmlFromExport(bytes, contentType);
-  console.info(`[GDT XML export] ${invoice.khhdon}/${invoice.shdon}: HTTP ${response.status}, ${bytes.byteLength} bytes, ${contentType || 'unknown'}, XML=${xml ? 'yes' : 'no'}`);
-  return { xml, status: response.status, contentType, bytes: bytes.byteLength, url };
+
+  const tryFetchXml = async (shdonVal: string): Promise<GdtXmlExportResult | null> => {
+    const params = new URLSearchParams({
+      nbmst: invoice.nbmst || '',
+      khhdon: invoice.khhdon || '',
+      shdon: shdonVal,
+      khmshdon: invoice.khmshdon || '1'
+    });
+    const url = `${getInvoiceEndpoint(invoice, 'export-xml')}?${params.toString()}`;
+    try {
+      const response = await fetch(url, {
+        headers: {
+          ...GDT_REQUEST_HEADERS,
+          Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
+          'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+          Action: getInvoiceAction(invoice, true),
+          ...headers
+        },
+        signal: signal || AbortSignal.timeout(25000)
+      });
+      const contentType = response.headers.get('content-type') || '';
+      if (!response.ok) {
+        return null;
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!bytes.byteLength) return null;
+      const xml = await readXmlFromExport(bytes, contentType);
+      return { xml, status: response.status, contentType, bytes: bytes.byteLength, url };
+    } catch {
+      return null;
+    }
+  };
+
+  const primaryShdon = String(invoice.shdon || '');
+  let res = await tryFetchXml(primaryShdon);
+  if (!res || !res.xml) {
+    if (primaryShdon.startsWith('0')) {
+      const unpadded = String(Number(primaryShdon) || primaryShdon.replace(/^0+/, ''));
+      if (unpadded && unpadded !== primaryShdon) {
+        const alt = await tryFetchXml(unpadded);
+        if (alt && alt.xml) res = alt;
+      }
+    } else if (primaryShdon.length < 7) {
+      const padded = primaryShdon.padStart(7, '0');
+      const alt = await tryFetchXml(padded);
+      if (alt && alt.xml) res = alt;
+    }
+  }
+
+  const finalRes = res || { xml: '', status: 0, contentType: '', bytes: 0, url: `${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}` };
+  if (finalRes.xml) {
+    console.info(`[GDT XML export] ${invoice.khhdon}/${invoice.shdon}: Success, ${finalRes.bytes} bytes, XML found.`);
+  } else {
+    console.warn(`[GDT XML export] ${invoice.khhdon}/${invoice.shdon}: No valid XML returned (HTTP ${finalRes.status})`);
+  }
+  return finalRes;
 }
 
 /**
@@ -144,22 +182,46 @@ export async function fetchGdtInvoiceDetail(
 ): Promise<any | null> {
   if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return null;
 
-  const params = getInvoiceParams(invoice);
-  const path = invoice.isPos ? '/api/sco-query/invoices/detail' : '/api/query/invoices/detail';
-  const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
-    headers: {
-      ...GDT_REQUEST_HEADERS,
-      Accept: 'application/json, text/plain, */*',
-      'End-Point': '/tra-cuu/tra-cuu-hoa-don',
-      Action: getInvoiceAction(invoice),
-      ...headers
-    },
-    signal: signal || AbortSignal.timeout(20000)
-  });
+  const tryFetch = async (shdonVal: string) => {
+    const params = new URLSearchParams({
+      nbmst: invoice.nbmst || '',
+      khhdon: invoice.khhdon || '',
+      shdon: shdonVal,
+      khmshdon: invoice.khmshdon || '1'
+    });
+    const path = invoice.isPos ? '/api/sco-query/invoices/detail' : '/api/query/invoices/detail';
+    try {
+      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
+        headers: {
+          ...GDT_REQUEST_HEADERS,
+          Accept: 'application/json, text/plain, */*',
+          'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+          Action: getInvoiceAction(invoice),
+          ...headers
+        },
+        signal: signal || AbortSignal.timeout(18000)
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data && typeof data === 'object' ? data : null;
+    } catch {
+      return null;
+    }
+  };
 
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data && typeof data === 'object' ? data : null;
+  const primaryShdon = String(invoice.shdon || '');
+  let result = await tryFetch(primaryShdon);
+  // Fallback: If 7-digit padded returned null, try unpadded (e.g. 546 instead of 0000546)
+  if (!result && primaryShdon.startsWith('0')) {
+    const unpadded = String(Number(primaryShdon) || primaryShdon.replace(/^0+/, ''));
+    if (unpadded && unpadded !== primaryShdon) {
+      result = await tryFetch(unpadded);
+    }
+  } else if (!result && !primaryShdon.startsWith('0') && primaryShdon.length < 7) {
+    const padded = primaryShdon.padStart(7, '0');
+    result = await tryFetch(padded);
+  }
+  return result;
 }
 
 export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = ''): any {

@@ -270,6 +270,24 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           )}
                         </button>
                       </div>
+
+                      {/* Hàng hóa / Dịch vụ tóm tắt */}
+                      {inv.items && inv.items.length > 0 ? (
+                        <div 
+                          className="text-[11px] text-emerald-800 line-clamp-1 mt-0.5" 
+                          title={inv.items.map(i => i.itemName).filter(Boolean).join(', ')}
+                        >
+                          <span className="font-semibold text-emerald-950">[{inv.items.length} mục]:</span>{' '}
+                          <span className="text-emerald-700">{inv.items.map(i => i.itemName).filter(Boolean).slice(0, 2).join(', ')}{inv.items.length > 2 ? '...' : ''}</span>
+                        </div>
+                      ) : inv.sourceCompleteness === 'detail' ? (
+                        <div className="text-[10px] text-gray-400 italic mt-0.5">Chưa có dòng hàng hóa</div>
+                      ) : (
+                        <div className="text-[10px] text-blue-600 flex items-center gap-1 mt-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 inline-block animate-pulse"></span>
+                          <span>Đang chờ tải tên hàng...</span>
+                        </div>
+                      )}
                     </td>
 
                     {/* Tiền chưa thuế */}

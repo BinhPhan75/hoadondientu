@@ -22,7 +22,8 @@ import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './ut
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
 import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
-import { ensureInvoiceItems } from './utils/xmlParser';
+import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
+import { RefreshCw } from 'lucide-react';
 
 export default function App() {
   // Account Configuration State (from localStorage or default)
@@ -276,52 +277,101 @@ export default function App() {
     window.location.href = '/api/gdt/download-python-package';
   };
 
-  // Load the authoritative per-invoice record after the fast summary query.
-  // This keeps the month progress responsive while replacing summary rows in-place.
-  const enrichInvoiceDetails = async (sourceInvoices: GDTInvoice[], token: string, cookie: string) => {
-    const eligible = sourceInvoices.filter(inv => inv.sourceCompleteness !== 'detail');
-    // GDT throttles detail/XML requests more aggressively than list queries.
-    // Four simultaneous detail requests often return an empty success payload,
-    // which left product names unresolved. Fetch one invoice at a time so a
-    // successful update always represents extracted line-item data.
-    for (let i = 0; i < eligible.length; i++) {
-      const invoice = eligible[i];
-      const result = await (async () => {
-        try {
-          const response = await fetch('/api/gdt/invoice-detail', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': token, 'x-gdt-cookie': cookie },
-            body: JSON.stringify({ invoice, token, cookieHeader: cookie })
-          });
-          const data = await response.json();
-          if (data.xmlExport && (!data.xmlExport.hasXml || !data.xmlExport.bytes)) {
-            console.warn('[GDT XML] Không nhận được XML gốc', {
-              invoice: `${invoice.khhdon}/${invoice.shdon}`,
-              status: data.xmlExport.status,
-              contentType: data.xmlExport.contentType,
-              bytes: data.xmlExport.bytes
-            });
-          }
-          const resolved = data.success && data.invoice ? data.invoice as GDTInvoice : null;
-          return resolved?.sourceCompleteness === 'detail' ? resolved : null;
-        } catch {
-          return null;
-        }
-      })();
-      const updates = result ? [result] as GDTInvoice[] : [];
-      if (updates.length) {
-        setInvoices(prev => {
-          const map = new Map(prev.map(item => [item.id, item]));
-          updates.forEach(item => map.set(item.id, item));
-          return Array.from(map.values());
-        });
-        setSelectedInvoiceForDetail(prev => {
-          if (!prev) return prev;
-          return updates.find(item => item.id === prev.id) || prev;
-        });
-      }
-      if (i < eligible.length - 1) await new Promise(resolve => setTimeout(resolve, 450));
+  // Automated background enrichment status for goods/services line items
+  const [enrichStatus, setEnrichStatus] = useState<{
+    total: number;
+    completed: number;
+    currentInvoice: string;
+    isEnriching: boolean;
+  }>({
+    total: 0,
+    completed: 0,
+    currentInvoice: '',
+    isEnriching: false
+  });
+
+  const enrichQueueRef = React.useRef<GDTInvoice[]>([]);
+  const isEnrichingRef = React.useRef<boolean>(false);
+
+  // Automated sequential queue to retrieve item names & goods from GDT
+  // Uses polite delays and sequential requests so GDT portal never throttles (429)
+  const enqueueInvoicesForEnrichment = (newInvoices: GDTInvoice[], token: string, cookie: string) => {
+    const toAdd = newInvoices.filter(inv => {
+      const isAlreadyInQueue = enrichQueueRef.current.some(q => q.id === inv.id);
+      return !isAlreadyInQueue && (!hasGenuineItems(inv.items) || inv.sourceCompleteness !== 'detail');
+    });
+    if (toAdd.length === 0) return;
+
+    enrichQueueRef.current.push(...toAdd);
+    setEnrichStatus(prev => ({
+      ...prev,
+      total: prev.total + toAdd.length,
+      isEnriching: true
+    }));
+
+    if (!isEnrichingRef.current) {
+      void processEnrichQueue(token, cookie);
     }
+  };
+
+  const processEnrichQueue = async (token: string, cookie: string) => {
+    if (isEnrichingRef.current) return;
+    isEnrichingRef.current = true;
+    setEnrichStatus(prev => ({ ...prev, isEnriching: true }));
+
+    while (enrichQueueRef.current.length > 0) {
+      const invoice = enrichQueueRef.current.shift();
+      if (!invoice) continue;
+
+      setEnrichStatus(prev => ({
+        ...prev,
+        currentInvoice: `HĐ ${invoice.shdon || ''} (${invoice.khhdon || ''})`
+      }));
+
+      try {
+        const response = await fetch('/api/gdt/invoice-detail', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': token } : {}),
+            ...(cookie ? { 'x-gdt-cookie': cookie } : {})
+          },
+          body: JSON.stringify({ invoice, token, cookieHeader: cookie })
+        });
+        const data = await response.json();
+        if (data.success && data.invoice) {
+          const enriched = data.invoice as GDTInvoice;
+          setInvoices(prev => {
+            const index = prev.findIndex(item => item.id === enriched.id);
+            if (index === -1) return prev;
+            const updated = [...prev];
+            updated[index] = enriched;
+            return updated;
+          });
+          setSelectedInvoiceForDetail(prev => {
+            if (!prev || prev.id !== enriched.id) return prev;
+            return enriched;
+          });
+        }
+      } catch (err) {
+        console.warn('Enrichment error for invoice:', invoice.shdon, err);
+      }
+
+      setEnrichStatus(prev => ({
+        ...prev,
+        completed: prev.completed + 1
+      }));
+
+      // Polite 250ms spacing between GDT calls to respect rate limits
+      await new Promise(r => setTimeout(r, 250));
+    }
+
+    isEnrichingRef.current = false;
+    setEnrichStatus(prev => ({
+      ...prev,
+      isEnriching: false,
+      currentInvoice: ''
+    }));
   };
 
   // Multi-Month Sequential Execution
@@ -472,7 +522,7 @@ export default function App() {
             return Array.from(map.values());
           });
           setDataSourceType('live_gdt');
-          void enrichInvoiceDetails(monthInvoices, activeToken, activeCookie);
+          enqueueInvoicesForEnrichment(monthInvoices, activeToken, activeCookie);
 
           // Update syncState chunk
           setSyncState(prev => {
@@ -654,7 +704,7 @@ export default function App() {
           monthInvoices.forEach(item => map.set(item.id, item));
           return Array.from(map.values());
         });
-        void enrichInvoiceDetails(monthInvoices, activeToken, activeCookie);
+        enqueueInvoicesForEnrichment(monthInvoices, activeToken, activeCookie);
 
         setSyncState(prev => {
           const updatedChunks = prev.chunks.map((c, idx) => {
@@ -938,7 +988,7 @@ export default function App() {
         setInvoices(data.invoices);
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
-        void enrichInvoiceDetails(data.invoices, activeToken, activeCookie);
+        enqueueInvoicesForEnrichment(data.invoices, activeToken, activeCookie);
         setConsoleLogs(prev => [
           ...prev,
           {
@@ -1191,6 +1241,31 @@ export default function App() {
           totalFilteredCount={filteredInvoices.length}
         />
 
+        {/* Background Item & Service Enrichment Indicator */}
+        {enrichStatus.isEnriching && (
+          <div className="bg-emerald-50 border-y border-emerald-200 px-4 py-2 flex items-center justify-between text-xs text-emerald-900 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <RefreshCw className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-emerald-950">
+                  Đang tự động lấy tên hàng hóa, dịch vụ và XML từ Tổng cục Thuế:
+                </span>
+                <span className="bg-emerald-200/90 text-emerald-900 px-2 py-0.5 rounded text-[11px] font-bold font-mono">
+                  {enrichStatus.completed} / {enrichStatus.total} hóa đơn
+                </span>
+                {enrichStatus.currentInvoice && (
+                  <span className="text-emerald-700 text-[11px] font-mono">
+                    ({enrichStatus.currentInvoice})
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="text-[11px] text-emerald-700 hidden md:block">
+              (Dữ liệu cập nhật trực tiếp vào danh sách và xuất Excel chuẩn)
+            </div>
+          </div>
+        )}
+
         {/* High Density Scrollable Data Grid Container */}
         <div className="flex-1 overflow-y-auto bg-[#f9fafb]">
           <InvoiceTable
@@ -1243,6 +1318,12 @@ export default function App() {
         onSelectInvoice={(inv) => setSelectedInvoiceForDetail(inv)}
         onClose={() => setSelectedInvoiceForDetail(null)}
         onDownloadXml={handleDownloadXml}
+        onUpdateInvoice={(enriched) => {
+          setInvoices(prev => prev.map(inv => inv.id === enriched.id ? enriched : inv));
+          setSelectedInvoiceForDetail(enriched);
+        }}
+        token={gdtSession?.token}
+        cookieHeader={gdtSession?.cookieHeader}
       />
 
       {/* Python Selenium Execution Modal */}

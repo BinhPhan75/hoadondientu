@@ -533,18 +533,46 @@ function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string)
 // Fetch one invoice detail without delaying the list endpoint.
 app.post('/api/gdt/invoice-detail', async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
-  const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
-  const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
-  if (!authHeader || !invoice) return res.status(400).json({ success: false, message: 'Thiếu phiên hoặc thông tin hóa đơn.' });
+  const rawAuth = (req.headers.authorization as string) || bodyToken || '';
+  const authHeader = (rawAuth && rawAuth.trim() && rawAuth.trim() !== 'Bearer') ? rawAuth.trim() : (currentSession?.token || '');
+  const rawCookie = (req.headers['x-gdt-cookie'] as string) || bodyCookie || '';
+  const cookieHeader = (rawCookie && rawCookie.trim()) ? rawCookie.trim() : (currentSession?.cookieHeader || '');
+
+  if (!authHeader || !invoice) {
+    return res.status(400).json({ success: false, message: 'Thiếu phiên đăng nhập hoặc thông tin hóa đơn.' });
+  }
+
   try {
     const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
     const gdtHeaders = { Authorization: tokenHeader, ...(cookieHeader ? { Cookie: cookieHeader } : {}) };
-    let detail = null;
-    try { detail = await fetchGdtInvoiceDetail(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
-    let xmlExport = { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
-    try { xmlExport = await fetchGdtInvoiceXml(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
+    
+    // Fetch both JSON detail and XML export in parallel to halve response time
+    const [detailRes, xmlExportRes] = await Promise.allSettled([
+      fetchGdtInvoiceDetail(invoice, gdtHeaders),
+      fetchGdtInvoiceXml(invoice, gdtHeaders)
+    ]);
+
+    const detail = detailRes.status === 'fulfilled' ? detailRes.value : null;
+    const xmlExport = xmlExportRes.status === 'fulfilled' ? xmlExportRes.value : { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
+
+    if (detailRes.status === 'rejected') {
+      console.warn('[GDT detail rejected]', detailRes.reason?.message || detailRes.reason);
+    }
+    if (xmlExportRes.status === 'rejected') {
+      console.warn('[GDT XML export rejected]', xmlExportRes.reason?.message || xmlExportRes.reason);
+    }
+
     const mergedInvoice = mergeGdtInvoiceDetail(invoice, detail, xmlExport.xml);
-    return res.json({ success: true, invoice: mergedInvoice, xmlExport: { status: xmlExport.status, contentType: xmlExport.contentType, bytes: xmlExport.bytes, hasXml: !!xmlExport.xml } });
+    return res.json({ 
+      success: true, 
+      invoice: mergedInvoice, 
+      xmlExport: { 
+        status: xmlExport.status, 
+        contentType: xmlExport.contentType, 
+        bytes: xmlExport.bytes, 
+        hasXml: !!xmlExport.xml 
+      } 
+    });
   } catch (error: any) {
     return res.status(502).json({ success: false, message: `Không lấy được chi tiết hóa đơn: ${error.message}` });
   }
