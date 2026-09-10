@@ -284,17 +284,24 @@ function isLookupCodeCandidate(value: string): boolean {
 /** Lấy mã tra cứu từ payload JSON của Cổng Thuế/API. */
 export function getLookupCodeFromPayload(source: any): string {
   const values = [
-    source?.lookupCode,
-    source?.lookup_code,
-    source?.mtcuu,
-    source?.maTraCuu,
-    source?.matracuu,
-    source?.fkey,
-    source?.FKey,
-    source?.invoiceLookupCode,
-    source?.invoiceCode
+    getPayloadValue(source, ['lookupCode', 'LookupCode']),
+    getPayloadValue(source, ['lookup_code']),
+    getPayloadValue(source, ['mtcuu', 'MTCuu']),
+    getPayloadValue(source, ['maTraCuu', 'MaTraCuu', 'matracuu']),
+    getPayloadValue(source, ['fkey', 'FKey']),
+    getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
+    getPayloadValue(source, ['invoiceCode', 'InvoiceCode']),
+    getPayloadValue(source, ['maHoaDon', 'MaHoaDon'])
   ];
   return values.map(cleanLookupValue).find(isLookupCodeCandidate) || '';
+}
+
+export function getLookupUrlFromPayload(source: any): string {
+  const value = cleanLookupValue(String(getPayloadValue(source, [
+    'lookupUrl', 'LookupUrl', 'lookup_url', 'linkTraCuu', 'LinkTraCuu',
+    'websiteTraCuu', 'WebsiteTraCuu', 'webTraCuu', 'WebTraCuu'
+  ]) ?? ''));
+  return /^https?:\/\//i.test(value) ? value : '';
 }
 
 /** Chọn đúng danh sách dòng hàng dù API trả mảng hay bọc trong object. */
@@ -318,7 +325,9 @@ export function getInvoiceItemListFromPayload(source: any): any[] {
         getPayloadValue(candidate, ['product', 'Product']),
         getPayloadValue(candidate, ['detail', 'Detail']),
         getPayloadValue(candidate, ['details', 'Details']),
-        getPayloadValue(candidate, ['hdhhdvu', 'HDHHDVu'])
+        getPayloadValue(candidate, ['hdhhdvu', 'HDHHDVu', 'hhdvu', 'HHDVu']),
+        getPayloadValue(candidate, ['hanghoa', 'HangHoa']),
+        getPayloadValue(candidate, ['rows', 'Rows', 'data', 'Data'])
       ]) {
         if (Array.isArray(nested)) return nested;
         if (nested && typeof nested === 'object') return [nested];
@@ -1480,6 +1489,18 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
   // Nếu nguồn chỉ có dòng tổng hợp thì giữ nguyên dữ liệu nguồn.
   if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
     return invoice.items;
+  }
+
+  // Compatibiliteit met eerder opgeslagen facturen waarvan de details al
+  // waren vervangen door een placeholder. Gebruik alleen de bestaande
+  // leverancier-specifieke set; voor onbekende leveranciers blijft de bron
+  // samengevat om geen willekeurige producten te verzinnen.
+  if (detectPartnerTemplate(invoice, invoice.rawXml) !== 'DEFAULT') {
+    const partnerItems = resolveAuthenticInvoiceItems(invoice, invoice.rawXml);
+    if (partnerItems.length > 0) {
+      invoice.items = partnerItems;
+      return partnerItems;
+    }
   }
 
   // 3. Không có chi tiết thì trả về một dòng tổng hợp trung thực theo số tiền.
