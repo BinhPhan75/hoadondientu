@@ -116,6 +116,11 @@ export interface GDTInvoice {
   lookupUrl?: string; // Đường dẫn cổng tra cứu
   secretCode?: string; // Mã bí mật tra cứu
   sourceCompleteness?: 'summary' | 'detail' | 'summary-detail'; // Mức độ hoàn thiện dữ liệu
+
+  // true nếu đây là hóa đơn điện tử khởi tạo từ máy tính tiền (POS). GDT trả
+  // về nhóm hóa đơn này qua endpoint /api/sco-query riêng (khác /api/query
+  // dùng cho hóa đơn thông thường) - xem server.ts và utils/gdtDetail.ts.
+  isPos?: boolean;
 }
 
 export interface FilterParams {
