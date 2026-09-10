@@ -523,7 +523,7 @@ apiRouter.post('/gdt/login', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 apiRouter.post('/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50, token: bodyToken, cookieHeader: bodyCookie } = req.body;
+  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie } = req.body;
 
   // Extract auth from header or body or in-memory session
   const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
@@ -667,7 +667,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       }
     }
     const dedupedResults = Array.from(seenMap.values());
-    for (let i = 0; i < dedupedResults.length; i++) {
+    if (includeDetails) for (let i = 0; i < dedupedResults.length; i++) {
       const invoice = dedupedResults[i];
       try {
         const detail = await fetchGdtInvoiceDetail(invoice, {
@@ -688,7 +688,9 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       invoices: dedupedResults,
       count: dedupedResults.length,
       chunksQueried: dateChunks.length,
-      message: `Đã truy xuất ${dedupedResults.length} hóa đơn và tải bổ sung dữ liệu chi tiết từ Cổng Tổng cục Thuế.`
+      message: includeDetails
+        ? `Đã truy xuất ${dedupedResults.length} hóa đơn và tải bổ sung dữ liệu chi tiết từ Cổng Tổng cục Thuế.`
+        : `Đã truy xuất ${dedupedResults.length} hóa đơn từ Cổng Tổng cục Thuế.`
     });
   } catch (err: any) {
     return res.status(500).json({
