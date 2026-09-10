@@ -1486,11 +1486,6 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
     }
   }
 
-  // Nếu nguồn chỉ có dòng tổng hợp thì giữ nguyên dữ liệu nguồn.
-  if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
-    return invoice.items;
-  }
-
   // Compatibiliteit met eerder opgeslagen facturen waarvan de details al
   // waren vervangen door een placeholder. Gebruik alleen de bestaande
   // leverancier-specifieke set; voor onbekende leveranciers blijft de bron
@@ -1501,6 +1496,12 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
       invoice.items = partnerItems;
       return partnerItems;
     }
+  }
+
+  // Nếu không nhận diện được đối tác hoặc không có bộ phục hồi phù hợp,
+  // giữ nguyên dữ liệu nguồn thay vì tự tạo tên sản phẩm.
+  if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+    return invoice.items;
   }
 
   // 3. Không có chi tiết thì trả về một dòng tổng hợp trung thực theo số tiền.

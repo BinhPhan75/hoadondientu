@@ -911,7 +911,7 @@ export function renderEasyInvoiceTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const mUrl = lookupUrl || invoice.lookupUrl || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || 'M2-26-KET3U-65650003078';
   const items = ensureInvoiceItems(invoice);
@@ -1903,7 +1903,7 @@ export function renderVnptTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const mUrl = lookupUrl || invoice.lookupUrl || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || 'https://vnpt-invoice.com.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0011B88299A1209384B2C89';
   const items = ensureInvoiceItems(invoice);
@@ -2481,7 +2481,7 @@ export function renderDefaultTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const mUrl = lookupUrl || invoice.lookupUrl || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || 'https://hoadondientu.gdt.gov.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || (invoice.hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : '');
   const items = ensureInvoiceItems(invoice);
