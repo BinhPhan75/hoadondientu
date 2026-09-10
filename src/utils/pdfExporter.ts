@@ -10,7 +10,7 @@ import { generateOfficialInvoiceHtml } from './officialInvoiceHtml';
  */
 export async function generateInvoiceQrCode(invoice: GDTInvoice): Promise<string> {
   try {
-    const maCqt = invoice.mhdon || (invoice.hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : '');
+    const maCqt = invoice.mhdon || '';
     const qrData = `https://hoadondientu.gdt.gov.vn/tra-cuu?mst=${invoice.nbmst}&kh=${invoice.khhdon}&so=${invoice.shdon}&tong=${invoice.tgtttbso}&cqt=${maCqt}`;
     return await QRCode.toDataURL(qrData, {
       width: 160,

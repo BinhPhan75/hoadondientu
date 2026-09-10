@@ -2483,7 +2483,7 @@ export function renderDefaultTemplate(
   const mCode = lookupCode || invoice.lookupCode || '';
   const mUrl = lookupUrl || invoice.lookupUrl || 'https://hoadondientu.gdt.gov.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || (invoice.hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : '');
+  const maCqt = invoice.mhdon || '';
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 

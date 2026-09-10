@@ -56,7 +56,7 @@ export function generateGDTInvoiceXml(invoice: GDTInvoice): string {
 
   // Total in words
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || (invoice.hsgcma ? '00' + Math.random().toString(16).toUpperCase().substring(2, 34) : '00E9C762DA374972B621A0F9004B2C89');
+  const maCqt = invoice.mhdon || '';
 
   // Construct XML adhering strictly to GDT Schema (Decision 1450/QĐ-TCT)
   return `<?xml version="1.0" encoding="UTF-8"?>

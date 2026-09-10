@@ -94,7 +94,7 @@ export const OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
                 <div>
                   <strong>MÃ CỦA CƠ QUAN THUẾ: </strong>
                   <span style="font-family: monospace; font-weight: bold; font-size: 12px;">
-                    <xsl:value-of select="//MCCQT | //inv:MCCQT | '00E9C762DA374972B621A0F9004B2C89'"/>
+                    <xsl:value-of select="//MCCQT | //inv:MCCQT"/>
                   </span>
                   <div style="font-size: 10px; color: #15803d; margin-top: 2px;">
                     ✓ Đã cấp mã hợp lệ trên Cổng thông tin Hóa đơn điện tử Tổng cục Thuế

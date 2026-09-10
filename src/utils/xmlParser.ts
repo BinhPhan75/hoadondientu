@@ -288,10 +288,9 @@ export function getLookupCodeFromPayload(source: any): string {
     getPayloadValue(source, ['lookup_code']),
     getPayloadValue(source, ['mtcuu', 'MTCuu']),
     getPayloadValue(source, ['maTraCuu', 'MaTraCuu', 'matracuu']),
+    getPayloadValue(source, ['mtdtchieu', 'MTDTCChieu', 'maDoiChieu', 'MaDoiChieu']),
     getPayloadValue(source, ['fkey', 'FKey']),
-    getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
-    getPayloadValue(source, ['invoiceCode', 'InvoiceCode']),
-    getPayloadValue(source, ['maHoaDon', 'MaHoaDon'])
+    getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode'])
   ];
   return values.map(cleanLookupValue).find(isLookupCodeCandidate) || '';
 }
@@ -1490,7 +1489,9 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
   // waren vervangen door een placeholder. Gebruik alleen de bestaande
   // leverancier-specifieke set; voor onbekende leveranciers blijft de bron
   // samengevat om geen willekeurige producten te verzinnen.
-  if (detectPartnerTemplate(invoice, invoice.rawXml) !== 'DEFAULT') {
+  // Never replace a live GDT summary with a hardcoded partner catalog. That
+  // catalog is kept only for legacy invoices imported before source tracking.
+  if (!invoice.sourceCompleteness && detectPartnerTemplate(invoice, invoice.rawXml) !== 'DEFAULT') {
     const partnerItems = resolveAuthenticInvoiceItems(invoice, invoice.rawXml);
     if (partnerItems.length > 0) {
       invoice.items = partnerItems;
@@ -1761,7 +1762,7 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     tthdonLabel: 'Hóa đơn gốc',
     ttxly: hsgcma ? 1 : 2,
     ttxlyLabel: hsgcma ? 'Đã cấp mã CQT' : 'Không mã CQT',
-    mhdon: mhdon || (hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : undefined),
+    mhdon: mhdon || undefined,
     hsgcma,
     loaiHdon: 'purchase',
     hasDigitalSignature,
@@ -1779,7 +1780,7 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     rawXml: xmlString
   };
 
-  const finalItems = items.length > 0
+  const finalItems = items.length > 0 && hasGenuineItems(items)
     ? items
     : ensureInvoiceItems(draftInvoice);
 
