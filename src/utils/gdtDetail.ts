@@ -169,14 +169,20 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
   detail = detail || {};
 
   // Depending on the portal version, detail is returned directly or wrapped
-  // under data/result/invoice. Always parse the object that owns hdhhdvu.
+  // several layers below data/result/invoice. Always inspect the full detail
+  // payload: limiting this to three known wrappers silently lost HHDVu rows
+  // for providers that add a `content` or `payload` object.
   const candidates: any[] = [];
   const visit = (candidate: any, depth: number) => {
-    if (!candidate || typeof candidate !== 'object' || candidates.includes(candidate) || depth > 3) return;
+    if (!candidate || typeof candidate !== 'object' || candidates.includes(candidate) || depth > 7) return;
     candidates.push(candidate);
-    visit(candidate.data, depth + 1);
-    visit(candidate.result, depth + 1);
-    visit(candidate.invoice, depth + 1);
+    if (Array.isArray(candidate)) {
+      candidate.forEach(value => visit(value, depth + 1));
+      return;
+    }
+    Object.values(candidate).forEach(value => {
+      if (value && typeof value === 'object') visit(value, depth + 1);
+    });
   };
   visit(detail, 0);
   const hasNamedItems = (candidate: any) => getInvoiceItemListFromPayload(candidate)
@@ -191,7 +197,9 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     || candidates.find(candidate => getLookupCodeFromPayload(candidate) || value(candidate, ['mtdtchieu', 'mhdon', 'nbmst']))
     || detail;
   const seller = getSellerFromPayload(detailSource);
-  const detailItems = getInvoiceItemListFromPayload(detailSource)
+  // Extract from the entire payload, not only the selected metadata object.
+  // The latter can own the invoice header while lines live in a sibling node.
+  const detailItems = getInvoiceItemListFromPayload(detail)
     .map((item: any, index: number) => normalizeInvoiceItem(item, index))
     .filter(item => !isPlaceholderItemName(item.itemName));
   const detailXml = exportedXml || findInvoiceDocument(detail);
@@ -219,6 +227,8 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     lookupUrl: detailUrl || invoice.lookupUrl || undefined,
     items: authoritativeItems,
     ...(detailXml ? { rawXml: detailXml } : {}),
-    sourceCompleteness: authoritativeItems.length || detailXml ? 'detail' : 'summary-detail'
+    // A downloaded XML alone is not evidence that line descriptions were
+    // extracted. Keep this retryable until at least one genuine name exists.
+    sourceCompleteness: authoritativeItems.length ? 'detail' : 'summary-detail'
   };
 }

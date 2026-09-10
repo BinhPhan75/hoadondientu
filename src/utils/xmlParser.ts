@@ -183,8 +183,9 @@ function getPayloadValue(source: any, keys: string[]): any {
     if (source[key] !== undefined && source[key] !== null && source[key] !== '') return source[key];
   }
   const lowerKeys = Object.keys(source);
+  const normalizedKey = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
   for (const key of keys) {
-    const actualKey = lowerKeys.find(candidate => candidate.toLowerCase() === key.toLowerCase());
+    const actualKey = lowerKeys.find(candidate => normalizedKey(candidate) === normalizedKey(key));
     if (actualKey && source[actualKey] !== undefined && source[actualKey] !== null && source[actualKey] !== '') {
       return source[actualKey];
     }
@@ -200,6 +201,11 @@ function pickItemName(source: any): string {
     getPayloadValue(source, ['tensp', 'TenSP']),
     getPayloadValue(source, ['tenHHDVu', 'TenHHDVu']),
     getPayloadValue(source, ['thhdvu', 'THHDVu']),
+    // GDT and invoice providers use several near-identical abbreviations.
+    // Normalising only the common spelling caused valid descriptions to be
+    // discarded when the field was named TenHHDV/THHHDVu instead.
+    getPayloadValue(source, ['tenhhdv', 'TenHHDV', 'thhhdvu', 'THHHDVu']),
+    getPayloadValue(source, ['tenhanghoadichvu', 'TenHangHoaDichVu']),
     getPayloadValue(source, ['tenhanghoa', 'TenHangHoa']),
     getPayloadValue(source, ['tenhang', 'TenHang']),
     getPayloadValue(source, ['productName', 'ProductName']),
@@ -315,27 +321,45 @@ export function getInvoiceItemListFromPayload(source: any): any[] {
     getPayloadValue(source, ['details', 'Details']),
     getPayloadValue(source, ['hangHoa', 'HangHoa'])
   ];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate;
-    if (candidate && typeof candidate === 'object') {
-      for (const nested of [
-        getPayloadValue(candidate, ['items', 'Items']),
-        getPayloadValue(candidate, ['item', 'Item']),
-        getPayloadValue(candidate, ['products', 'Products']),
-        getPayloadValue(candidate, ['product', 'Product']),
-        getPayloadValue(candidate, ['detail', 'Detail']),
-        getPayloadValue(candidate, ['details', 'Details']),
-        getPayloadValue(candidate, ['hdhhdvu', 'HDHHDVu', 'hhdvu', 'HHDVu']),
-        getPayloadValue(candidate, ['hanghoa', 'HangHoa']),
-        getPayloadValue(candidate, ['rows', 'Rows', 'data', 'Data'])
-      ]) {
-        if (Array.isArray(nested)) return nested;
-        if (nested && typeof nested === 'object') return [nested];
-      }
-      return [candidate];
+  const collections: any[][] = [];
+  const addCollection = (candidate: any) => {
+    if (Array.isArray(candidate) && candidate.length) collections.push(candidate);
+    else if (candidate && typeof candidate === 'object') collections.push([candidate]);
+  };
+
+  // The detail endpoint has changed wrappers several times (data -> result ->
+  // invoice -> hdhhdvus, for example). Walk only fields that semantically mean
+  // "line items"; never treat a general data/results array as invoice lines.
+  const collectionKeys = [
+    'hdhhdvus', 'hdhhdvu', 'hhdvus', 'hhdvu', 'items', 'item',
+    'invoiceitems', 'invoiceitem', 'products', 'product', 'details', 'detail',
+    'hanghoa', 'hanghoadichvu', 'goods', 'goodsitems', 'rows'
+  ];
+  const wrapperKeys = ['data', 'result', 'invoice', 'content', 'response', 'payload'];
+  const seen = new Set<any>();
+  const visit = (node: any, depth: number) => {
+    if (!node || typeof node !== 'object' || seen.has(node) || depth > 7) return;
+    seen.add(node);
+    for (const key of collectionKeys) {
+      const collection = getPayloadValue(node, [key]);
+      addCollection(collection);
+      // Some versions return { hdhhdvus: { hdhhdvu: [...] } }.
+      if (collection && typeof collection === 'object' && !Array.isArray(collection)) visit(collection, depth + 1);
     }
-  }
-  return [];
+    for (const key of wrapperKeys) visit(getPayloadValue(node, [key]), depth + 1);
+  };
+
+  candidates.forEach(addCollection);
+  visit(source, 0);
+  if (!collections.length) return [];
+
+  // Prefer the collection containing actual descriptions. This is important
+  // when a response includes both a summary row and the full HHDVu list.
+  const score = (items: any[]) => items.reduce((total, item, index) => {
+    const name = normalizeInvoiceItem(item, index).itemName;
+    return total + (name && !isPlaceholderItemName(name) ? 100 : 0) + 1;
+  }, 0);
+  return collections.sort((a, b) => score(b) - score(a))[0];
 }
 
 export function getSellerFromPayload(source: any): { name: string; taxCode: string; address: string } {
