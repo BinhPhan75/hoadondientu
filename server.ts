@@ -612,12 +612,13 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 1, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
+  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, source: 'query' | 'sco-query' = 'query', maxRetries = 1, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
-    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
+    const apiBase = source === 'sco-query' ? 'sco-query' : 'query';
+    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -631,25 +632,25 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         });
         
         if (resp.status === 401 || resp.status === 403) {
-          console.warn(`[GDT Query ${type} Unauthorized]: Session token expired.`);
+          console.warn(`[GDT Query ${source}/${type} Unauthorized]: Session token expired.`);
           return { error: 'AUTH_EXPIRED' };
         }
 
         if (resp.status === 429) {
-          console.warn(`[GDT Query ${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
+          console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
           if (attempt < maxRetries) {
             const backoffMs = (attempt + 1) * 1200;
             await sleep(backoffMs);
             continue;
           } else {
-            console.warn(`[GDT Query ${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
+            console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
             return [];
           }
         }
 
         if (!resp.ok) {
           const errText = await resp.text();
-          console.warn(`[GDT Query ${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
+          console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
           return [];
         }
 
@@ -658,13 +659,13 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         try {
           data = JSON.parse(rawText);
         } catch {
-          console.warn(`[GDT Query ${type} Non-JSON]:`, rawText.substring(0, 200));
+          console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
           return [];
         }
 
         const list = extractGdtInvoiceList(data);
         
-        console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
+        console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
 
         // Normalize GDT invoice payload
         const normalizedPage = list.map((item: any) => ({
@@ -700,7 +701,11 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           lookupCode: getLookupCodeFromPayload(item),
           lookupUrl: getLookupUrlFromPayload(item),
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
-          sourceCompleteness: 'summary'
+          sourceCompleteness: 'summary',
+          // Hóa đơn khởi tạo từ máy tính tiền dùng endpoint /api/sco-query riêng
+          // của GDT; đánh dấu để các bước lấy chi tiết/xuất XML sau này gọi
+          // đúng endpoint (xem getInvoiceEndpoint trong utils/gdtDetail.ts).
+          isPos: source === 'sco-query'
         }));
         const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
         const firstPageId = normalizedPage[0]?.id;
@@ -708,11 +713,11 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
         if (hasNextPage) {
           await sleep(250);
-          return fetchChunkWithRetry(type, chunkFrom, chunkTo, maxRetries, page + 1, accumulated.concat(normalizedPage));
+          return fetchChunkWithRetry(type, chunkFrom, chunkTo, source, maxRetries, page + 1, accumulated.concat(normalizedPage));
         }
         return accumulated.concat(normalizedPage);
       } catch (err: any) {
-        console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
+        console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
         if (attempt < maxRetries) {
           await sleep(1000);
           continue;
@@ -723,7 +728,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     return [];
   };
 
-  const fetchAllChunksForType = async (type: 'purchase' | 'sold') => {
+  const fetchAllChunksForType = async (type: 'purchase' | 'sold', source: 'query' | 'sco-query' = 'query') => {
     let allInvoices: any[] = [];
     for (let i = 0; i < dateChunks.length; i++) {
       const chunk = dateChunks[i];
@@ -731,7 +736,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         // Pacing delay between sequential requests to prevent 429 Too Many Requests
         await sleep(250);
       }
-      const chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to);
+      const chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source);
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
@@ -745,7 +750,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
   try {
     let results: any[] = [];
     // User requirement: "Phần mềm chỉ cần chức năng lấy hóa đơn mua vào ko cần bán ra"
-    const purchaseList = await fetchAllChunksForType('purchase');
+    const purchaseList = await fetchAllChunksForType('purchase', 'query');
     if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
       currentSession = null;
       return res.status(401).json({
@@ -758,10 +763,27 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       results = results.concat(purchaseList);
     }
 
+    // Hóa đơn khởi tạo từ máy tính tiền (POS) nằm ở một cổng dữ liệu riêng
+    // của GDT (/api/sco-query) và KHÔNG xuất hiện trong /api/query ở trên.
+    // Gọi thêm nguồn này để không bỏ sót hóa đơn bán hàng từ máy tính tiền.
+    await sleep(250);
+    const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query');
+    if ((posPurchaseList as any)?.error === 'AUTH_EXPIRED') {
+      currentSession = null;
+      return res.status(401).json({
+        success: false,
+        isExpired: true,
+        message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+      });
+    }
+    if (Array.isArray(posPurchaseList)) {
+      results = results.concat(posPurchaseList);
+    }
+
     // Deduplicate by unique invoice key
     const seenMap = new Map<string, any>();
     for (const inv of results) {
-      const key = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.loaiHdon}`;
+      const key = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.loaiHdon}_${inv.isPos ? 'pos' : 'std'}`;
       if (!seenMap.has(key)) {
         seenMap.set(key, inv);
       }
