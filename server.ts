@@ -7,6 +7,7 @@ import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFr
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
+import { fetchGdtInvoiceDetail, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 
 const app = express();
 const PORT = 3000;
@@ -521,7 +522,7 @@ function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string)
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50, token: bodyToken, cookieHeader: bodyCookie } = req.body;
+  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie } = req.body;
 
   const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
   const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
@@ -640,7 +641,8 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
           lookupCode: getLookupCodeFromPayload(item),
           lookupUrl: getLookupUrlFromPayload(item),
-          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
+          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
+          sourceCompleteness: 'summary'
         }));
       } catch (err: any) {
         console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
@@ -699,6 +701,23 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     }
     const dedupedResults = Array.from(seenMap.values());
 
+    // The list API does not contain reliable HHDVu/seller/reference fields.
+    // Fetch the same detail record used by the GDT web portal before returning data.
+    if (includeDetails) for (let i = 0; i < dedupedResults.length; i++) {
+      const invoice = dedupedResults[i];
+      try {
+        const detail = await fetchGdtInvoiceDetail(invoice, {
+          Authorization: tokenHeader,
+          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        });
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail);
+        if (i < dedupedResults.length - 1) await sleep(300);
+      } catch (detailError: any) {
+        console.warn(`[GDT Detail] ${invoice.khhdon}/${invoice.shdon}: ${detailError.message}`);
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, null);
+      }
+    }
+
     // Sort descending by date
     dedupedResults.sort((a, b) => new Date(b.tdlap).getTime() - new Date(a.tdlap).getTime());
 
@@ -708,7 +727,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       invoices: dedupedResults,
       count: dedupedResults.length,
       chunksQueried: dateChunks.length,
-      message: `Đã truy xuất ${dedupedResults.length} hóa đơn thực tế từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
+      message: includeDetails
+        ? `Đã truy xuất ${dedupedResults.length} hóa đơn và tải bổ sung dữ liệu chi tiết từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
+        : `Đã truy xuất ${dedupedResults.length} hóa đơn từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
     });
   } catch (err: any) {
     return res.status(500).json({
