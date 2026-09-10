@@ -348,6 +348,39 @@ function cleanLookupValue(value: any): string {
     .trim();
 }
 
+/**
+ * Nhiều cổng HĐĐT (ví dụ EasyInvoice/SOFTDREAMS - thấy ở hóa đơn máy tính
+ * tiền) không trả các trường như "Mã tra cứu"/"Trang tra cứu" như field
+ * phẳng, mà bọc trong một mảng dạng [{ ttruong, kdlieu, dlieu }] (thường ở
+ * khóa `ttkhac`, đôi khi `nbttkhac`/`nmttkhac`/`cttkhac`). Hàm này quét các
+ * mảng đó và trả về `dlieu` của mục có `ttruong` khớp tên cần tìm.
+ * Ví dụ thực tế: { ttruong: "Fkey", dlieu: "evliq2zrtmso" } chính là mã tra
+ * cứu thật in trên hóa đơn, trong khi field phẳng `mtdtchieu` lại là một mã
+ * nội bộ khác không khớp với mã in trên hóa đơn.
+ */
+function getFromStructuredArrays(source: any, fieldNames: string[]): string {
+  if (!source || typeof source !== 'object') return '';
+  const arrayKeys = ['ttkhac', 'TTKhac', 'nbttkhac', 'NBTTKhac', 'nmttkhac', 'NMTTKhac', 'cttkhac', 'CTTKhac'];
+  const normalized = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const wanted = fieldNames.map(normalized);
+  for (const arrKey of arrayKeys) {
+    const arr = getPayloadValue(source, [arrKey]);
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (!entry || typeof entry !== 'object') continue;
+      const label = getPayloadValue(entry, ['ttruong', 'TTruong', 'Ttruong']);
+      if (!label) continue;
+      if (wanted.includes(normalized(String(label)))) {
+        const value = getPayloadValue(entry, ['dlieu', 'DLieu', 'Dlieu']);
+        if (value !== undefined && value !== null && String(value).trim()) {
+          return String(value).trim();
+        }
+      }
+    }
+  }
+  return '';
+}
+
 function normalizeLookupLabel(value: string): string {
   return cleanLookupValue(value)
     .toLowerCase()
@@ -372,14 +405,23 @@ export function getLookupCodeFromPayload(source: any): string {
     getPayloadValue(source, ['lookup_code']),
     getPayloadValue(source, ['mtcuu', 'MTCuu']),
     getPayloadValue(source, ['maTraCuu', 'MaTraCuu', 'matracuu']),
+    // Cấu trúc mảng { ttruong: "Fkey", dlieu: "..." } - đã xác nhận đây là
+    // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
+    // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
+    getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode']),
     getPayloadValue(source, ['fkey', 'FKey']),
-    getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode'])
+    getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
+    // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
+    // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
+    // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
+    getPayloadValue(source, ['mtdtchieu', 'MTDTCChieu', 'maDoiChieu', 'MaDoiChieu'])
   ];
   return values.map(cleanLookupValue).find(isLookupCodeCandidate) || '';
 }
 
 export function getLookupUrlFromPayload(source: any): string {
-  const value = cleanLookupValue(String(getPayloadValue(source, [
+  const structured = getFromStructuredArrays(source, ['PortalLink', 'LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu']);
+  const value = cleanLookupValue(structured || String(getPayloadValue(source, [
     'lookupUrl', 'LookupUrl', 'lookup_url', 'linkTraCuu', 'LinkTraCuu',
     'websiteTraCuu', 'WebsiteTraCuu', 'webTraCuu', 'WebTraCuu'
   ]) ?? ''));
