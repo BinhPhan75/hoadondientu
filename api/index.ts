@@ -541,9 +541,10 @@ apiRouter.post('/gdt/invoice-detail', async (req, res) => {
     const gdtHeaders = { Authorization: tokenHeader, ...(cookieHeader ? { Cookie: cookieHeader } : {}) };
     let detail = null;
     try { detail = await fetchGdtInvoiceDetail(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
-    let exportedXml = '';
-    try { exportedXml = await fetchGdtInvoiceXml(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
-    return res.json({ success: true, invoice: mergeGdtInvoiceDetail(invoice, detail, exportedXml) });
+    let xmlExport = { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
+    try { xmlExport = await fetchGdtInvoiceXml(invoice, gdtHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
+    const mergedInvoice = mergeGdtInvoiceDetail(invoice, detail, xmlExport.xml);
+    return res.json({ success: true, invoice: mergedInvoice, xmlExport: { status: xmlExport.status, contentType: xmlExport.contentType, bytes: xmlExport.bytes, hasXml: !!xmlExport.xml } });
   } catch (error: any) {
     return res.status(502).json({ success: false, message: `Không lấy được chi tiết hóa đơn: ${error.message}` });
   }
@@ -715,9 +716,9 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         };
         let detail = null;
         try { detail = await fetchGdtInvoiceDetail(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
-        let exportedXml = '';
-        try { exportedXml = await fetchGdtInvoiceXml(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
-        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail, exportedXml);
+        let xmlExport = { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
+        try { xmlExport = await fetchGdtInvoiceXml(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT XML export]', error?.message || error); }
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail, xmlExport.xml);
         if (i < dedupedResults.length - 1) await new Promise(resolve => setTimeout(resolve, 300));
       } catch {
         dedupedResults[i] = mergeGdtInvoiceDetail(invoice, null);
