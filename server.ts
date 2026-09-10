@@ -69,6 +69,16 @@ const GDT_HEADERS: Record<string, string> = {
   'Sec-Fetch-Site': 'same-origin'
 };
 
+function extractGdtInvoiceList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  const candidates = [
+    data?.datas, data?.rows, data?.content, data?.items, data?.results, data?.result, data?.dshdon,
+    data?.data?.datas, data?.data?.rows, data?.data?.content, data?.data?.items,
+    data?.data?.results, data?.data?.result, data?.data?.dshdon, data?.data
+  ];
+  return candidates.find(Array.isArray) || [];
+}
+
 // Robust Cookie Extractor
 function extractCookies(res: any): string {
   let cookieList: string[] = [];
@@ -554,7 +564,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 3): Promise<any[] | { error: string }> => {
+  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 1): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
@@ -569,7 +579,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
             'Authorization': tokenHeader,
             ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
           },
-          signal: AbortSignal.timeout(20000)
+            signal: AbortSignal.timeout(15000)
         });
         
         if (resp.status === 401 || resp.status === 403) {
@@ -604,7 +614,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           return [];
         }
 
-        const list = data.datas || data.data || data.rows || data.content || data.items || data.results || data.result || data.dshdon || (Array.isArray(data) ? data : []);
+        const list = extractGdtInvoiceList(data);
         
         console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
 
