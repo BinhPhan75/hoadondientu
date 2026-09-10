@@ -232,6 +232,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                         <span className="font-semibold text-gray-900 truncate max-w-[240px] text-xs" title={inv.nbten}>
                           {inv.nbten}
                         </span>
+                        {inv.isPos && (
+                          <span
+                            className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-bold shrink-0 text-indigo-700 bg-indigo-50 border border-indigo-200"
+                            title="Hóa đơn điện tử khởi tạo từ máy tính tiền (lấy qua cổng /api/sco-query riêng của GDT)"
+                          >
+                            Máy tính tiền
+                          </span>
+                        )}
                         {(() => {
                           const pId = detectPartnerTemplate(inv);
                           const pMeta = getPartnerMeta(pId);
