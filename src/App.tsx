@@ -290,6 +290,14 @@ export default function App() {
             body: JSON.stringify({ invoice, token, cookieHeader: cookie })
           });
           const data = await response.json();
+          if (data.xmlExport && (!data.xmlExport.hasXml || !data.xmlExport.bytes)) {
+            console.warn('[GDT XML] Không nhận được XML gốc', {
+              invoice: `${invoice.khhdon}/${invoice.shdon}`,
+              status: data.xmlExport.status,
+              contentType: data.xmlExport.contentType,
+              bytes: data.xmlExport.bytes
+            });
+          }
           return data.success && data.invoice ? data.invoice as GDTInvoice : null;
         } catch {
           return null;
