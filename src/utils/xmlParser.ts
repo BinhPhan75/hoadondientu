@@ -226,7 +226,8 @@ function pickItemName(source: any): string {
  */
 export function normalizeInvoiceItem(source: any, idx: number = 0): InvoiceItem {
   const lineNo = parseInt(String(getPayloadValue(source, ['lineNo', 'stt', 'STT', 'SoTT', 'Idx']) ?? idx + 1), 10) || idx + 1;
-  const itemName = pickItemName(source) || 'Hàng hóa, dịch vụ theo hóa đơn';
+  // Missing source detail must remain missing; do not turn it into a fake item.
+  const itemName = pickItemName(source);
   const unit = cleanDetailedItemName(String(getPayloadValue(source, ['unit', 'dvtinh', 'dvt', 'DVTinh', 'DonViTinh']) ?? 'Lô')) || 'Lô';
   const quantity = parseInvoiceNumber(getPayloadValue(source, ['quantity', 'sluong', 'SLuong', 'SoLuong']), 1);
   const unitPrice = parseInvoiceNumber(getPayloadValue(source, ['unitPrice', 'dgia', 'DGia', 'DonGia']), 0);
@@ -1505,8 +1506,14 @@ export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
     return invoice.items;
   }
 
-  // 3. Không có chi tiết thì trả về một dòng tổng hợp trung thực theo số tiền.
-  // Việc dựng tên sản phẩm cố định theo nhà cung cấp làm sai dữ liệu hóa đơn.
+  // Live GDT summaries do not contain line descriptions. Return no item rather
+  // than inventing a product name from the invoice total.
+  if (invoice.sourceCompleteness) {
+    invoice.items = [];
+    return invoice.items;
+  }
+
+  // Legacy/imported invoices still get the old summary row for compatibility.
   const amount = Number(invoice.tgtcthue || invoice.tgtttbso || 0);
   const taxAmount = Number(invoice.tgtthue || 0);
   const summaryItem: InvoiceItem = {

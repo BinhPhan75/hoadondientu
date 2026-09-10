@@ -1,4 +1,4 @@
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem } from './xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, normalizeInvoiceItem } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -74,7 +74,9 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
       value(candidate, ['mtdtchieu', 'mhdon', 'nbmst'])
     )) || detail;
   const seller = getSellerFromPayload(detailSource);
-  const detailItems = getInvoiceItemListFromPayload(detailSource);
+  const detailItems = getInvoiceItemListFromPayload(detailSource)
+    .map((item: any, index: number) => normalizeInvoiceItem(item, index))
+    .filter(item => !isPlaceholderItemName(item.itemName));
   const detailXml = [detailSource.xml, detailSource.xmlData, detailSource.dataXml, detailSource.invoiceXml]
     .find(v => typeof v === 'string' && isXml(v));
   const detailLookup = getLookupCodeFromPayload(detailSource);
@@ -91,9 +93,7 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
     mhdon: value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
     lookupCode: detailLookup || invoice.lookupCode || undefined,
     lookupUrl: detailUrl || invoice.lookupUrl || undefined,
-    items: detailItems.length
-      ? detailItems.map((item: any, index: number) => normalizeInvoiceItem(item, index))
-      : invoice.items,
+    items: detailItems.length ? detailItems : [],
     ...(detailXml ? { rawXml: detailXml } : {}),
     sourceCompleteness: detailItems.length || detailXml ? 'detail' : 'summary-detail'
   };
