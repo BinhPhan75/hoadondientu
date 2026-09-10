@@ -1,4 +1,5 @@
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, normalizeInvoiceItem } from './xmlParser';
+import JSZip from 'jszip';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -21,6 +22,85 @@ const value = (source: any, keys: string[]): string => {
 
 const isXml = (source: string) => /^\s*(?:<\?xml|<[^>]+>)/i.test(source);
 
+const getInvoiceParams = (invoice: GdtInvoiceKey) => new URLSearchParams({
+  nbmst: invoice.nbmst || '',
+  khhdon: invoice.khhdon || '',
+  shdon: String(invoice.shdon || '').replace(/^0+(?=\d)/, ''),
+  khmshdon: invoice.khmshdon || '1'
+});
+
+const getInvoiceEndpoint = (invoice: GdtInvoiceKey, action: string) =>
+  `https://hoadondientu.gdt.gov.vn${invoice.isPos ? '/api/sco-query' : '/api/query'}/invoices/${action}`;
+
+const getInvoiceAction = (invoice: GdtInvoiceKey, exportAction = false) => {
+  const prefix = exportAction ? 'Xu%E1%BA%A5t' : 'Xem';
+  if (invoice.isPos) return `${prefix}%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)`;
+  return invoice.loaiHdon === 'sold'
+    ? `${prefix}%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20b%C3%A1n%20ra)`
+    : `${prefix}%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20mua%20v%C3%A0o)`;
+};
+
+async function readXmlFromExport(bytes: Uint8Array, contentType: string): Promise<string> {
+  const text = new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '').trim();
+  if (isXml(text) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(text)) return text;
+  if (!contentType.toLowerCase().includes('zip') && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) return '';
+  const zip = await JSZip.loadAsync(bytes);
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    const entryText = (await entry.async('text')).replace(/^\uFEFF/, '').trim();
+    if (isXml(entryText) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(entryText)) return entryText;
+  }
+  return '';
+}
+
+function findInvoiceDocument(source: any, seen = new Set<any>(), depth = 0): string {
+  if (!source || depth > 5 || seen.has(source)) return '';
+  if (typeof source === 'string') {
+    const value = source.trim();
+    if (isXml(value) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(value)) return value;
+    // Some responses carry the XML as base64 in a document/content field.
+    if (value.length > 200 && /^[A-Za-z0-9+/=\r\n]+$/.test(value)) {
+      try {
+        const decoded = Buffer.from(value, 'base64').toString('utf8').trim();
+        if (isXml(decoded) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(decoded)) return decoded;
+      } catch { /* not a base64 document */ }
+    }
+    return '';
+  }
+  if (typeof source !== 'object') return '';
+  seen.add(source);
+  const preferredKeys = ['xml', 'xmlData', 'dataXml', 'invoiceXml', 'document', 'documentXml', 'content', 'fileContent', 'html'];
+  for (const key of preferredKeys) {
+    const actual = Object.keys(source).find(k => k.toLowerCase() === key.toLowerCase());
+    const found = actual ? findInvoiceDocument(source[actual], seen, depth + 1) : '';
+    if (found) return found;
+  }
+  for (const value of Object.values(source)) {
+    const found = findInvoiceDocument(value, seen, depth + 1);
+    if (found) return found;
+  }
+  return '';
+}
+
+export async function fetchGdtInvoiceXml(
+  invoice: GdtInvoiceKey,
+  headers: Record<string, string>,
+  signal?: AbortSignal
+): Promise<string> {
+  if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return '';
+  const response = await fetch(`${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}`, {
+    headers: {
+      Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
+      'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+      Action: getInvoiceAction(invoice, true),
+      ...headers
+    },
+    signal: signal || AbortSignal.timeout(30000)
+  });
+  if (!response.ok) return '';
+  return readXmlFromExport(new Uint8Array(await response.arrayBuffer()), response.headers.get('content-type') || '');
+}
+
 /**
  * The list endpoint is intentionally small. The GDT web UI makes a second
  * request for each invoice before it displays line items and the reference
@@ -33,23 +113,13 @@ export async function fetchGdtInvoiceDetail(
 ): Promise<any | null> {
   if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return null;
 
-  const params = new URLSearchParams({
-    nbmst: invoice.nbmst,
-    khhdon: invoice.khhdon,
-    shdon: String(invoice.shdon).replace(/^0+(?=\d)/, ''),
-    khmshdon: invoice.khmshdon || '1'
-  });
+  const params = getInvoiceParams(invoice);
   const path = invoice.isPos ? '/api/sco-query/invoices/detail' : '/api/query/invoices/detail';
-  const action = invoice.isPos
-    ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)'
-    : invoice.loaiHdon === 'sold'
-      ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20b%C3%A1n%20ra)'
-      : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20mua%20v%C3%A0o)';
   const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
     headers: {
       Accept: 'application/json, text/plain, */*',
       'End-Point': '/tra-cuu/tra-cuu-hoa-don',
-      Action: action,
+      Action: getInvoiceAction(invoice),
       ...headers
     },
     signal: signal || AbortSignal.timeout(20000)
@@ -60,10 +130,11 @@ export async function fetchGdtInvoiceDetail(
   return data && typeof data === 'object' ? data : null;
 }
 
-export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
-  if (!detail) {
+export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = ''): any {
+  if (!detail && !exportedXml) {
     return { ...invoice, sourceCompleteness: 'summary' };
   }
+  detail = detail || {};
 
   // Depending on the portal version, detail is returned directly or wrapped
   // under data/result/invoice. Always parse the object that owns hdhhdvu.
@@ -91,8 +162,15 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
   const detailItems = getInvoiceItemListFromPayload(detailSource)
     .map((item: any, index: number) => normalizeInvoiceItem(item, index))
     .filter(item => !isPlaceholderItemName(item.itemName));
-  const detailXml = [detailSource.xml, detailSource.xmlData, detailSource.dataXml, detailSource.invoiceXml]
-    .find(v => typeof v === 'string' && isXml(v));
+  const detailXml = exportedXml || findInvoiceDocument(detail);
+  let xmlItems: any[] = [];
+  if (detailXml) {
+    try {
+      xmlItems = parseGDTInvoiceXml(detailXml).items
+        .filter(item => !isPlaceholderItemName(item.itemName));
+    } catch { /* keep JSON detail if XML is not a supported invoice document */ }
+  }
+  const authoritativeItems = xmlItems.length ? xmlItems : detailItems;
   const detailLookup = getLookupCodeFromPayload(detailSource);
   const detailUrl = getLookupUrlFromPayload(detailSource);
 
@@ -107,8 +185,8 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
     mhdon: value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
     lookupCode: detailLookup || invoice.lookupCode || undefined,
     lookupUrl: detailUrl || invoice.lookupUrl || undefined,
-    items: detailItems.length ? detailItems : [],
+    items: authoritativeItems,
     ...(detailXml ? { rawXml: detailXml } : {}),
-    sourceCompleteness: detailItems.length || detailXml ? 'detail' : 'summary-detail'
+    sourceCompleteness: authoritativeItems.length || detailXml ? 'detail' : 'summary-detail'
   };
 }
