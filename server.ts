@@ -579,12 +579,12 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 1): Promise<any[] | { error: string }> => {
+  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, maxRetries = 1, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
-    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -634,7 +634,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         console.log(`[GDT Query ${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
 
         // Normalize GDT invoice payload
-        return list.map((item: any) => ({
+        const normalizedPage = list.map((item: any) => ({
           id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
           khmshdon: item.khmshdon || item.khmhd || '1',
           khhdon: item.khhdon || '',
@@ -669,6 +669,15 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
           sourceCompleteness: 'summary'
         }));
+        const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
+        const firstPageId = normalizedPage[0]?.id;
+        const repeatedPage = Boolean(firstPageId && accumulated[0]?.id === firstPageId);
+        const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
+        if (hasNextPage) {
+          await sleep(250);
+          return fetchChunkWithRetry(type, chunkFrom, chunkTo, maxRetries, page + 1, accumulated.concat(normalizedPage));
+        }
+        return accumulated.concat(normalizedPage);
       } catch (err: any) {
         console.warn(`[GDT Query ${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
         if (attempt < maxRetries) {
