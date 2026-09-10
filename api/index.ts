@@ -5,6 +5,7 @@ import fs from 'fs';
 import { GoogleGenAI } from '@google/genai';
 import { invoiceManager, CaptchaSolver } from '../src/services/invoice-engine';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem } from '../src/utils/xmlParser';
+import { fetchGdtInvoiceDetail, mergeGdtInvoiceDetail } from '../src/utils/gdtDetail';
 
 const app = express();
 
@@ -618,7 +619,8 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
         lookupCode: getLookupCodeFromPayload(item),
         lookupUrl: getLookupUrlFromPayload(item),
-          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx))
+          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
+          sourceCompleteness: 'summary'
       }));
     } catch (e) {
       return [];
@@ -665,6 +667,19 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       }
     }
     const dedupedResults = Array.from(seenMap.values());
+    for (let i = 0; i < dedupedResults.length; i++) {
+      const invoice = dedupedResults[i];
+      try {
+        const detail = await fetchGdtInvoiceDetail(invoice, {
+          Authorization: tokenHeader,
+          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        });
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, detail);
+        if (i < dedupedResults.length - 1) await new Promise(resolve => setTimeout(resolve, 300));
+      } catch {
+        dedupedResults[i] = mergeGdtInvoiceDetail(invoice, null);
+      }
+    }
     dedupedResults.sort((a, b) => new Date(b.tdlap).getTime() - new Date(a.tdlap).getTime());
 
     return res.json({
@@ -673,7 +688,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       invoices: dedupedResults,
       count: dedupedResults.length,
       chunksQueried: dateChunks.length,
-      message: `Đã truy xuất thành công ${dedupedResults.length} hóa đơn thực tế từ Cổng Tổng cục Thuế.`
+      message: `Đã truy xuất ${dedupedResults.length} hóa đơn và tải bổ sung dữ liệu chi tiết từ Cổng Tổng cục Thuế.`
     });
   } catch (err: any) {
     return res.status(500).json({
