@@ -677,10 +677,24 @@ export default function App() {
 
     // Step 1: Check if we need to authenticate with GDT
     const hasCaptcha = Boolean(credentials?.captchaCode?.trim());
-    const needLogin = !account.isRealGDT || (credentials && credentials.taxCode !== account.taxCode) || hasCaptcha;
-
     let activeToken = gdtSession?.token || '';
     let activeCookie = gdtSession?.cookieHeader || '';
+    // localStorage may still say "connected" after sessionStorage was cleared.
+    // Never query GDT with an empty or stale local session.
+    const needLogin = !account.isRealGDT || !activeToken.trim() || (credentials && credentials.taxCode !== account.taxCode) || hasCaptcha;
+
+    if (needLogin && !hasCaptcha) {
+      const message = 'Phiên Cổng Thuế đã mất hoặc hết hạn. Vui lòng nhập lại Captcha để đăng nhập lại trước khi tra cứu.';
+      setAccount(prev => ({ ...prev, isRealGDT: false }));
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'warning',
+        message: `[PHIÊN CỔNG THUẾ] ${message}`
+      }]);
+      setIsRefreshing(false);
+      return { success: false, error: message };
+    }
 
     if (needLogin && hasCaptcha) {
       setConsoleLogs(prev => [
