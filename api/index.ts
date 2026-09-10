@@ -582,12 +582,13 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
 
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
 
-  const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
+  const fetchChunk = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, source: 'query' | 'sco-query' = 'query', page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
 
-    const url = `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
+    const apiBase = source === 'sco-query' ? 'sco-query' : 'query';
+    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
     try {
       const resp = await fetch(url, {
         headers: {
@@ -649,7 +650,8 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         lookupCode: getLookupCodeFromPayload(item),
         lookupUrl: getLookupUrlFromPayload(item),
           items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
-          sourceCompleteness: 'summary'
+          sourceCompleteness: 'summary',
+          isPos: source === 'sco-query'
       }));
       const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
       const firstPageId = normalizedPage[0]?.id;
@@ -657,7 +659,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
       if (hasNextPage) {
         await new Promise(resolve => setTimeout(resolve, 250));
-        return fetchChunk(type, chunkFrom, chunkTo, page + 1, accumulated.concat(normalizedPage));
+        return fetchChunk(type, chunkFrom, chunkTo, source, page + 1, accumulated.concat(normalizedPage));
       }
       return accumulated.concat(normalizedPage);
     } catch (e) {
@@ -665,14 +667,14 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
     }
   };
 
-  const fetchAllChunksForType = async (type: 'purchase' | 'sold') => {
+  const fetchAllChunksForType = async (type: 'purchase' | 'sold', source: 'query' | 'sco-query' = 'query') => {
     let allInvoices: any[] = [];
     // GDT rate-limits the public endpoint. Sequential monthly requests avoid
     // losing pages when several months are queried at once.
     for (let i = 0; i < dateChunks.length; i++) {
       const chunk = dateChunks[i];
       if (i > 0) await new Promise(resolve => setTimeout(resolve, 300));
-      const chunkResult = await fetchChunk(type, chunk.from, chunk.to);
+      const chunkResult = await fetchChunk(type, chunk.from, chunk.to, source);
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
@@ -686,7 +688,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
   try {
     let results: any[] = [];
     // User requirement: Only fetch purchase invoices (Hóa đơn mua vào)
-    const purchaseList = await fetchAllChunksForType('purchase');
+    const purchaseList = await fetchAllChunksForType('purchase', 'query');
     if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
       currentSession = null;
       return res.status(401).json({
@@ -699,9 +701,25 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
       results = results.concat(purchaseList);
     }
 
+    // Hóa đơn khởi tạo từ máy tính tiền (POS) nằm ở cổng dữ liệu riêng của
+    // GDT (/api/sco-query), không xuất hiện trong /api/query ở trên.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query');
+    if ((posPurchaseList as any)?.error === 'AUTH_EXPIRED') {
+      currentSession = null;
+      return res.status(401).json({
+        success: false,
+        isExpired: true,
+        message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+      });
+    }
+    if (Array.isArray(posPurchaseList)) {
+      results = results.concat(posPurchaseList);
+    }
+
     const seenMap = new Map<string, any>();
     for (const inv of results) {
-      const key = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.loaiHdon}`;
+      const key = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.loaiHdon}_${inv.isPos ? 'pos' : 'std'}`;
       if (!seenMap.has(key)) {
         seenMap.set(key, inv);
       }
