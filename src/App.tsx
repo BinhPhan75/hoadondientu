@@ -708,6 +708,11 @@ export default function App() {
   // Run Crawler / Query real invoices from GDT
   const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
     setIsRefreshing(true);
+    // A refresh starts a new result set immediately, including when login fails.
+    setInvoices([]);
+    setSelectedInvoices([]);
+    setDataSourceType('live_gdt');
+    try { localStorage.removeItem('gdt_saved_invoices'); } catch {}
     const mst = credentials?.taxCode?.trim() || account.taxCode?.trim() || '';
     const pwd = credentials?.password?.trim() || account.password?.trim() || '';
 
