@@ -58,22 +58,30 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
     return { ...invoice, sourceCompleteness: 'summary' };
   }
 
-  const seller = getSellerFromPayload(detail);
-  const detailItems = getInvoiceItemListFromPayload(detail);
-  const detailXml = [detail.xml, detail.xmlData, detail.dataXml, detail.invoiceXml]
+  // Depending on the portal version, detail is returned directly or wrapped
+  // under data/result/invoice. Always parse the object that owns hdhhdvu.
+  const detailSource = [detail, detail.data, detail.result, detail.invoice]
+    .find(candidate => candidate && typeof candidate === 'object' && (
+      getInvoiceItemListFromPayload(candidate).length > 0 ||
+      getLookupCodeFromPayload(candidate) ||
+      value(candidate, ['mtdtchieu', 'mhdon', 'nbmst'])
+    )) || detail;
+  const seller = getSellerFromPayload(detailSource);
+  const detailItems = getInvoiceItemListFromPayload(detailSource);
+  const detailXml = [detailSource.xml, detailSource.xmlData, detailSource.dataXml, detailSource.invoiceXml]
     .find(v => typeof v === 'string' && isXml(v));
-  const detailLookup = getLookupCodeFromPayload(detail);
-  const detailUrl = getLookupUrlFromPayload(detail);
+  const detailLookup = getLookupCodeFromPayload(detailSource);
+  const detailUrl = getLookupUrlFromPayload(detailSource);
 
   return {
     ...invoice,
-    nbmst: seller.taxCode || value(detail, ['nbmst']) || invoice.nbmst,
-    nbten: seller.name || value(detail, ['nbten', 'nbtnnt', 'nbtlhdon']) || invoice.nbten,
-    nbdchi: seller.address || value(detail, ['nbdchi']) || invoice.nbdchi,
-    nmmst: value(detail, ['nmmst', 'nmtnnt']) || invoice.nmmst,
-    nmten: value(detail, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
-    nmdchi: value(detail, ['nmdchi']) || invoice.nmdchi,
-    mhdon: value(detail, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
+    nbmst: seller.taxCode || value(detailSource, ['nbmst']) || invoice.nbmst,
+    nbten: seller.name || value(detailSource, ['nbten', 'nbtnnt', 'nbtlhdon']) || invoice.nbten,
+    nbdchi: seller.address || value(detailSource, ['nbdchi']) || invoice.nbdchi,
+    nmmst: value(detailSource, ['nmmst', 'nmtnnt']) || invoice.nmmst,
+    nmten: value(detailSource, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
+    nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
+    mhdon: value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
     lookupCode: detailLookup || invoice.lookupCode || undefined,
     lookupUrl: detailUrl || invoice.lookupUrl || undefined,
     items: detailItems.length
