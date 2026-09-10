@@ -22,6 +22,18 @@ const value = (source: any, keys: string[]): string => {
 
 const isXml = (source: string) => /^\s*(?:<\?xml|<[^>]+>)/i.test(source);
 
+const GDT_REQUEST_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Referer': 'https://hoadondientu.gdt.gov.vn/',
+  'Origin': 'https://hoadondientu.gdt.gov.vn',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin'
+};
+
 const getInvoiceParams = (invoice: GdtInvoiceKey) => new URLSearchParams({
   nbmst: invoice.nbmst || '',
   khhdon: invoice.khhdon || '',
@@ -90,6 +102,7 @@ export async function fetchGdtInvoiceXml(
   if (!invoice.nbmst || !invoice.khhdon || !invoice.shdon) return '';
   const response = await fetch(`${getInvoiceEndpoint(invoice, 'export-xml')}?${getInvoiceParams(invoice).toString()}`, {
     headers: {
+      ...GDT_REQUEST_HEADERS,
       Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
       'End-Point': '/tra-cuu/tra-cuu-hoa-don',
       Action: getInvoiceAction(invoice, true),
@@ -97,7 +110,10 @@ export async function fetchGdtInvoiceXml(
     },
     signal: signal || AbortSignal.timeout(30000)
   });
-  if (!response.ok) return '';
+  if (!response.ok) {
+    console.warn(`[GDT XML export] HTTP ${response.status} for ${invoice.khhdon}/${invoice.shdon}`);
+    return '';
+  }
   return readXmlFromExport(new Uint8Array(await response.arrayBuffer()), response.headers.get('content-type') || '');
 }
 
@@ -117,6 +133,7 @@ export async function fetchGdtInvoiceDetail(
   const path = invoice.isPos ? '/api/sco-query/invoices/detail' : '/api/query/invoices/detail';
   const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
     headers: {
+      ...GDT_REQUEST_HEADERS,
       Accept: 'application/json, text/plain, */*',
       'End-Point': '/tra-cuu/tra-cuu-hoa-don',
       Action: getInvoiceAction(invoice),
