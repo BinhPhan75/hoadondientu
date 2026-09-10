@@ -312,6 +312,11 @@ export default function App() {
     const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
     if (chunks.length === 0) return { success: false, error: 'Khoảng thời gian không hợp lệ' };
 
+    // A live query must never retain sample or previous-session invoices.
+    setInvoices([]);
+    setSelectedInvoices([]);
+    setDataSourceType('live_gdt');
+
     isSyncPausedRef.current = false;
     isSyncCancelledRef.current = false;
 
@@ -859,6 +864,11 @@ export default function App() {
         return { success: false, error: `Lỗi kết nối: ${authErr.message}` };
       }
     }
+
+    // Start every live search from a clean result set; never mix old/sample data.
+    setInvoices([]);
+    setSelectedInvoices([]);
+    setDataSourceType('live_gdt');
 
     // Step 2: Check if multi-month range is requested (> 1 month)
     if (isMultiMonthRange(filters.fromDate, filters.toDate)) {
