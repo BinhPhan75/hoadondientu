@@ -67,12 +67,26 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any): any {
 
   // Depending on the portal version, detail is returned directly or wrapped
   // under data/result/invoice. Always parse the object that owns hdhhdvu.
-  const detailSource = [detail, detail.data, detail.result, detail.invoice]
-    .find(candidate => candidate && typeof candidate === 'object' && (
-      getInvoiceItemListFromPayload(candidate).length > 0 ||
-      getLookupCodeFromPayload(candidate) ||
-      value(candidate, ['mtdtchieu', 'mhdon', 'nbmst'])
-    )) || detail;
+  const candidates: any[] = [];
+  const visit = (candidate: any, depth: number) => {
+    if (!candidate || typeof candidate !== 'object' || candidates.includes(candidate) || depth > 3) return;
+    candidates.push(candidate);
+    visit(candidate.data, depth + 1);
+    visit(candidate.result, depth + 1);
+    visit(candidate.invoice, depth + 1);
+  };
+  visit(detail, 0);
+  const hasNamedItems = (candidate: any) => getInvoiceItemListFromPayload(candidate)
+    .some((item: any, index: number) => !isPlaceholderItemName(normalizeInvoiceItem(item, index).itemName));
+  // Prefer the object that actually owns named hdhhdvu rows. The outer
+  // response often has mhdon but only the nested data object has item names.
+  const detailSource = candidates.find(hasNamedItems)
+    || candidates.find(candidate => {
+      const xml = [candidate.xml, candidate.xmlData, candidate.dataXml, candidate.invoiceXml];
+      return xml.some(v => typeof v === 'string' && isXml(v));
+    })
+    || candidates.find(candidate => getLookupCodeFromPayload(candidate) || value(candidate, ['mtdtchieu', 'mhdon', 'nbmst']))
+    || detail;
   const seller = getSellerFromPayload(detailSource);
   const detailItems = getInvoiceItemListFromPayload(detailSource)
     .map((item: any, index: number) => normalizeInvoiceItem(item, index))
