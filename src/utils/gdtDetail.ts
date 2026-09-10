@@ -37,7 +37,9 @@ const GDT_REQUEST_HEADERS: Record<string, string> = {
 const getInvoiceParams = (invoice: GdtInvoiceKey) => new URLSearchParams({
   nbmst: invoice.nbmst || '',
   khhdon: invoice.khhdon || '',
-  shdon: String(invoice.shdon || '').replace(/^0+(?=\d)/, ''),
+  // GDT identifies an invoice by the displayed serial number, including
+  // leading zeroes (for example 0000237). Do not convert it to 237.
+  shdon: String(invoice.shdon || ''),
   khmshdon: invoice.khmshdon || '1'
 });
 
