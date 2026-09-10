@@ -531,6 +531,20 @@ apiRouter.post('/gdt/login', async (req, res) => {
   }
 });
 
+apiRouter.post('/gdt/invoice-detail', async (req, res) => {
+  const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
+  const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
+  const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
+  if (!authHeader || !invoice) return res.status(400).json({ success: false, message: 'Thiếu phiên hoặc thông tin hóa đơn.' });
+  try {
+    const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
+    const detail = await fetchGdtInvoiceDetail(invoice, { Authorization: tokenHeader, ...(cookieHeader ? { Cookie: cookieHeader } : {}) });
+    return res.json({ success: true, invoice: mergeGdtInvoiceDetail(invoice, detail) });
+  } catch (error: any) {
+    return res.status(502).json({ success: false, message: `Không lấy được chi tiết hóa đơn: ${error.message}` });
+  }
+});
+
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 apiRouter.post('/gdt/query-invoices', async (req, res) => {
   const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie } = req.body;
