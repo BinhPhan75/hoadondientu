@@ -276,6 +276,37 @@ export default function App() {
     window.location.href = '/api/gdt/download-python-package';
   };
 
+  // Load the authoritative per-invoice record after the fast summary query.
+  // This keeps the month progress responsive while replacing summary rows in-place.
+  const enrichInvoiceDetails = async (sourceInvoices: GDTInvoice[], token: string, cookie: string) => {
+    const eligible = sourceInvoices.filter(inv => inv.sourceCompleteness !== 'detail');
+    for (let i = 0; i < eligible.length; i += 4) {
+      const batch = eligible.slice(i, i + 4);
+      const results = await Promise.all(batch.map(async invoice => {
+        try {
+          const response = await fetch('/api/gdt/invoice-detail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': token, 'x-gdt-cookie': cookie },
+            body: JSON.stringify({ invoice, token, cookieHeader: cookie })
+          });
+          const data = await response.json();
+          return data.success && data.invoice ? data.invoice as GDTInvoice : null;
+        } catch {
+          return null;
+        }
+      }));
+      const updates = results.filter(Boolean) as GDTInvoice[];
+      if (updates.length) {
+        setInvoices(prev => {
+          const map = new Map(prev.map(item => [item.id, item]));
+          updates.forEach(item => map.set(item.id, item));
+          return Array.from(map.values());
+        });
+      }
+      if (i + 4 < eligible.length) await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  };
+
   // Multi-Month Sequential Execution
   const runMultiMonthQuery = async (activeToken: string, activeCookie: string, mst: string) => {
     const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
@@ -419,6 +450,7 @@ export default function App() {
             return Array.from(map.values());
           });
           setDataSourceType('live_gdt');
+          void enrichInvoiceDetails(monthInvoices, activeToken, activeCookie);
 
           // Update syncState chunk
           setSyncState(prev => {
@@ -600,6 +632,7 @@ export default function App() {
           monthInvoices.forEach(item => map.set(item.id, item));
           return Array.from(map.values());
         });
+        void enrichInvoiceDetails(monthInvoices, activeToken, activeCookie);
 
         setSyncState(prev => {
           const updatedChunks = prev.chunks.map((c, idx) => {
@@ -873,6 +906,7 @@ export default function App() {
         setInvoices(data.invoices);
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
+        void enrichInvoiceDetails(data.invoices, activeToken, activeCookie);
         setConsoleLogs(prev => [
           ...prev,
           {
