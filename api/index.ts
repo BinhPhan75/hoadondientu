@@ -66,6 +66,16 @@ const GDT_HEADERS: Record<string, string> = {
   'Sec-Fetch-Site': 'same-origin'
 };
 
+function extractGdtInvoiceList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  const candidates = [
+    data?.datas, data?.rows, data?.content, data?.items, data?.results, data?.result, data?.dshdon,
+    data?.data?.datas, data?.data?.rows, data?.data?.content, data?.data?.items,
+    data?.data?.results, data?.data?.result, data?.data?.dshdon, data?.data
+  ];
+  return candidates.find(Array.isArray) || [];
+}
+
 // Robust Cookie Extractor for Node.js / Vercel Serverless
 function extractCookies(res: any): string {
   let cookieList: string[] = [];
@@ -566,7 +576,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
           'Authorization': tokenHeader,
           ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
         },
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(15000)
       });
       
       if (resp.status === 401 || resp.status === 403) {
@@ -585,7 +595,7 @@ apiRouter.post('/gdt/query-invoices', async (req, res) => {
         return [];
       }
 
-      const list = data.datas || data.data || data.rows || data.content || data.items || data.results || data.dshdon || (Array.isArray(data) ? data : []);
+      const list = extractGdtInvoiceList(data);
       
       return list.map((item: any) => ({
         id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
