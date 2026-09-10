@@ -68,9 +68,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [currentInvoice, setCurrentInvoice] = useState<GDTInvoice | null>(invoice);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  // Theo dõi hóa đơn đang thực sự được mở để bỏ qua kết quả tải chi tiết trả
+  // về SAU KHI người dùng đã đóng modal hoặc chuyển sang xem hóa đơn khác -
+  // tránh việc áp dữ liệu cũ/không khớp vào state và làm crash giao diện.
+  const openInvoiceIdRef = useRef<string | null>(invoice?.id ?? null);
 
   useEffect(() => {
     setCurrentInvoice(invoice);
+    openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
   const effectiveInvoice = currentInvoice || invoice;
@@ -109,6 +114,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         })
       });
       const data = await response.json();
+      // Bỏ qua nếu người dùng đã đóng modal hoặc đã chuyển sang xem hóa đơn
+      // khác trong lúc request này đang chạy (tránh áp dữ liệu lạc vào state
+      // sau khi đóng, nguyên nhân từng gây crash/trang trắng khi đóng modal).
+      if (openInvoiceIdRef.current !== targetInv.id) {
+        return;
+      }
       if (data.success && data.invoice) {
         const enriched = data.invoice as GDTInvoice;
         setCurrentInvoice(enriched);
@@ -117,9 +128,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         setDetailError(data.message || 'Cổng Thuế chưa phản hồi chi tiết mặt hàng.');
       }
     } catch (err: any) {
+      if (openInvoiceIdRef.current !== targetInv.id) return;
       setDetailError(err.message || 'Lỗi mạng khi kết nối tải chi tiết.');
     } finally {
-      setIsLoadingDetail(false);
+      if (openInvoiceIdRef.current === targetInv.id) {
+        setIsLoadingDetail(false);
+      }
     }
   };
 
@@ -160,10 +174,26 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   if (!effectiveInvoice) return null;
 
-  // Dò tìm tự động nhà cung cấp HĐĐT từ XML hoặc dữ liệu bóc tách
-  const xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
-  const autoDetectedProvider: InvoiceProviderId = detectInvoiceProvider(xmlContent, effectiveInvoice);
-  const lookupDetails = extractLookupDetails(xmlContent);
+  // Dò tìm tự động nhà cung cấp HĐĐT từ XML hoặc dữ liệu bóc tách.
+  // Bọc trong try/catch: nếu dữ liệu hóa đơn (ví dụ từ nguồn mới như hóa đơn
+  // máy tính tiền) có định dạng bất thường khiến các hàm này ném lỗi, tránh
+  // để lỗi văng ra ngoài render và làm crash toàn bộ trang (trang trắng).
+  let xmlContent = '';
+  let autoDetectedProvider: InvoiceProviderId = 'DEFAULT' as InvoiceProviderId;
+  let lookupDetails: { lookupCode?: string; lookupUrl?: string } = {};
+  let safeItems: ReturnType<typeof ensureInvoiceItems> = [];
+  let standaloneHtml = '';
+  let renderError: string | null = null;
+
+  try {
+    xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
+    autoDetectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
+    lookupDetails = extractLookupDetails(xmlContent);
+    safeItems = ensureInvoiceItems(effectiveInvoice);
+  } catch (err: any) {
+    console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);
+    renderError = err?.message || 'Không thể xử lý dữ liệu hóa đơn này.';
+  }
 
   // Template ID hiệu lực: Nếu người dùng chọn AUTO thì dùng kết quả dò tìm tự động
   const effectiveTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
@@ -173,16 +203,37 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const currentProviderMeta: ProviderMeta = getProviderMeta(effectiveTemplateId);
   const autoDetectedMeta: ProviderMeta = getProviderMeta(autoDetectedProvider);
 
-  // Đảm bảo dữ liệu hàng hóa đã sẵn sàng trước khi render
-  const safeItems = ensureInvoiceItems(effectiveInvoice);
+  if (!renderError) {
+    try {
+      // Tạo HTML chuẩn theo template của nhà cung cấp
+      standaloneHtml = generateOfficialInvoiceHtml(effectiveInvoice, {
+        theme,
+        qrCodeDataUrl: qrCodeUrl,
+        showPrintControls: false,
+        templateId: effectiveTemplateId
+      });
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi khi tạo HTML hóa đơn:', err);
+      renderError = err?.message || 'Không thể tạo bản xem trước hóa đơn này.';
+    }
+  }
 
-  // Tạo HTML chuẩn theo template của nhà cung cấp
-  const standaloneHtml = generateOfficialInvoiceHtml(effectiveInvoice, {
-    theme,
-    qrCodeDataUrl: qrCodeUrl,
-    showPrintControls: false,
-    templateId: effectiveTemplateId
-  });
+  if (renderError) {
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-center">
+          <h3 className="text-lg font-bold text-red-600 mb-2">Không thể hiển thị hóa đơn</h3>
+          <p className="text-sm text-gray-600 mb-4">{renderError}</p>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-md bg-gray-800 text-white text-sm font-medium hover:bg-gray-700"
+          >
+            Đóng
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleCopyXml = () => {
     navigator.clipboard.writeText(xmlContent);
