@@ -533,11 +533,11 @@ export function renderMisaTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
+  const mCode = lookupCode || invoice.lookupCode || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '006BFBDE319939417F9B4EE5AE3AE75AD7';
   const items = ensureInvoiceItems(invoice);
-  const sellerName = invoice.nbten || 'CÔNG TY TNHH XUÂN VINH';
+  const sellerName = invoice.nbten || 'Đơn vị bán hàng';
   const watermark = options?.watermarkText || sellerName.split(' ').slice(-2).join(' ') || 'meInvoice';
 
   const showControls = options?.showPrintControls !== false;
@@ -910,8 +910,8 @@ export function renderEasyInvoiceTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
-  const mUrl = lookupUrl;
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || 'M2-26-KET3U-65650003078';
   const items = ensureInvoiceItems(invoice);
@@ -1275,7 +1275,7 @@ export function render4SiTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
+  const mCode = lookupCode || invoice.lookupCode || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0050A3B99A5BD44558A15F25CFEDC94091';
   const items = ensureInvoiceItems(invoice);
@@ -1644,7 +1644,7 @@ export function renderViettelTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
+  const mCode = lookupCode || invoice.lookupCode || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
   const items = ensureInvoiceItems(invoice);
@@ -1902,8 +1902,8 @@ export function renderVnptTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
-  const mUrl = lookupUrl;
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0011B88299A1209384B2C89';
   const items = ensureInvoiceItems(invoice);
@@ -2392,7 +2392,7 @@ export function renderBkavTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
+  const mCode = lookupCode || invoice.lookupCode || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
@@ -2480,8 +2480,8 @@ export function renderDefaultTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode;
-  const mUrl = lookupUrl;
+  const mCode = lookupCode || invoice.lookupCode || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || '';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || (invoice.hsgcma ? '00E9C762DA374972B621A0F9004B2C89' : '');
   const items = ensureInvoiceItems(invoice);

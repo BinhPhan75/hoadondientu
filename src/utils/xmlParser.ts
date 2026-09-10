@@ -278,8 +278,6 @@ function normalizeLookupLabel(value: string): string {
 function isLookupCodeCandidate(value: string): boolean {
   if (!value || value.length < 4 || value.length > 120) return false;
   if (/^https?:\/\//i.test(value)) return false;
-  if (/^[0-9]{10,14}$/.test(value)) return false; // MST, not mã tra cứu
-  if (/^[0-9a-f]{32,}$/i.test(value)) return false; // thường là mã CQT/hash
   return true;
 }
 
@@ -362,6 +360,11 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
 
   const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'MTC', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode', 'InvoiceCode'];
   let lookupCode = tagValue(codeTags);
+
+  if (!lookupCode) {
+    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+    if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
+  }
 
   const ttinBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
   for (const block of ttinBlocks) {
@@ -1456,23 +1459,27 @@ export function resolveAuthenticInvoiceItems(invoice: GDTInvoice, rawXml?: strin
 export function ensureInvoiceItems(invoice: GDTInvoice): InvoiceItem[] {
   if (!invoice) return [];
 
-  // 1. Giữ nguyên danh sách từ nguồn, kể cả khi nguồn chỉ cung cấp dòng tổng hợp.
-  // Không được thay tên nguồn bằng danh mục hàng mẫu của đối tác.
+  // 1. Giữ nguyên danh sách đã có tên thật.
   if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
-    return invoice.items;
+    if (hasGenuineItems(invoice.items)) return invoice.items;
   }
 
   // 2. Thử bóc tách từ rawXml nếu có
   if (invoice.rawXml) {
     try {
       const parsed = extractInvoiceItemsFromXml(invoice.rawXml);
-      if (parsed && parsed.length > 0) {
+      if (parsed && parsed.length > 0 && hasGenuineItems(parsed)) {
         invoice.items = parsed;
         return parsed;
       }
     } catch {
       // bỏ qua lỗi để rơi vào giải pháp phân giải chính xác
     }
+  }
+
+  // Nếu nguồn chỉ có dòng tổng hợp thì giữ nguyên dữ liệu nguồn.
+  if (invoice.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
+    return invoice.items;
   }
 
   // 3. Không có chi tiết thì trả về một dòng tổng hợp trung thực theo số tiền.
