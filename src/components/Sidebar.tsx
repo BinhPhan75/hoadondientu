@@ -62,6 +62,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
   const [isScanningOcr, setIsScanningOcr] = useState(false);
   const [ocrSuccess, setOcrSuccess] = useState(false);
+  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Synchronize local input state if parent account updates
@@ -75,13 +76,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [account.taxCode, account.password]);
 
   // AI OCR Scanner helper with safe text-to-JSON parsing
-  const handleScanOcr = async (imgToScan?: string, keyToScan?: string) => {
+  const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
     if (!rawImg && !targetKey) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
+    setOcrNotice(null);
     try {
       const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
@@ -94,23 +96,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       try {
         data = JSON.parse(rawText);
       } catch {
-        throw new Error('Máy chủ OCR phản hồi định dạng không hợp lệ');
+        // Safe JSON parse fallback
       }
 
       if (data && data.success && data.captchaCode) {
         setCaptchaCode(data.captchaCode);
         setOcrSuccess(true);
+        setOcrNotice(null);
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
-        if (data && data.message) {
-          setAuthError(data.message);
+        if (data?.isSpendingCap) {
+          setOcrNotice('Hạn mức AI tạm dừng. Bạn hãy nhìn hình và nhập mã.');
+        } else if (isManualClick && data?.message) {
+          setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
         }
       }
-    } catch (err: any) {
-      console.warn('[AI OCR Scan Error]:', err);
+    } catch {
       setOcrSuccess(false);
-      setAuthError('Không thể nhận diện mã tự động (' + (err?.message || 'Lỗi kết nối') + '). Bạn có thể tự nhìn ảnh và gõ mã.');
+      if (isManualClick) {
+        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+      }
     } finally {
       setIsScanningOcr(false);
     }
@@ -120,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setAuthError(null);
+    setOcrNotice(null);
     setCaptchaCode('');
     setOcrSuccess(false);
 
@@ -271,18 +278,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             activeCaptchaCode = ocrData.captchaCode;
             setCaptchaCode(ocrData.captchaCode);
             setOcrSuccess(true);
-          } else if (ocrData && ocrData.message) {
-            setAuthError(ocrData.message);
           }
-        } catch (err) {
-          console.warn('[Auto-OCR in Submit Error]:', err);
+        } catch {
+          // Graceful fallback to manual input
         } finally {
           setIsScanningOcr(false);
         }
       }
 
       if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhập mã Captcha hiển thị trên hình.');
+        setAuthError('Vui lòng nhìn hình và nhập mã Captcha 4-6 ký tự vào ô bên cạnh.');
         return;
       }
     }
@@ -425,7 +430,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleScanOcr()}
+                  onClick={() => handleScanOcr(undefined, undefined, true)}
                   disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
                   className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono cursor-pointer transition-colors disabled:opacity-50"
                   title="Tự động quét và đọc mã Captcha bằng AI OCR"
@@ -504,6 +509,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               ) : captchaCode ? (
                 <span className="text-emerald-400/90 flex items-center gap-1">
                   Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                </span>
+              ) : ocrNotice ? (
+                <span className="text-amber-300 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                  {ocrNotice}
                 </span>
               ) : isRealGdtCaptcha ? (
                 <span className="text-gray-400">

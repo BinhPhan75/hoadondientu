@@ -146,6 +146,9 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
 import { GoogleGenAI } from '@google/genai';
 
 let geminiAiClient: GoogleGenAI | null = null;
+let geminiSpendingCapBlockedUntil = 0;
+let geminiRateLimitBlockedUntil = 0;
+
 function getGeminiClient(): GoogleGenAI | null {
   if (!geminiAiClient && process.env.GEMINI_API_KEY) {
     geminiAiClient = new GoogleGenAI({
@@ -161,6 +164,7 @@ interface OCRResult {
   modelUsed?: string;
   error?: string;
   isMissingApiKey?: boolean;
+  isSpendingCap?: boolean;
 }
 
 // AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.1 Flash Lite / Flash)
@@ -202,23 +206,38 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     }
   }
 
-  // 2. Check if GEMINI_API_KEY is configured
-  if (!process.env.GEMINI_API_KEY) {
-    console.warn('[Gemini OCR] GEMINI_API_KEY chưa được thiết lập trong Environment Variables.');
+  // 2. Check if circuit breaker is active for spending cap or rate limits
+  if (Date.now() < geminiSpendingCapBlockedUntil) {
     return {
       code: '',
-      isMissingApiKey: true,
-      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Vui lòng cấu hình GEMINI_API_KEY.'
+      isSpendingCap: true,
+      error: 'Dự án đã chạm hạn mức chi tiêu hàng tháng của API Gemini (Spending cap). Bạn có thể nhìn ảnh và nhập mã Captcha 4-6 ký tự.'
     };
   }
 
-  // 3. High-precision Gemini AI OCR with Gemini 3.1 Flash Lite / Gemini Flash
+  if (Date.now() < geminiRateLimitBlockedUntil) {
+    return {
+      code: '',
+      error: 'Hạn mức API tạm thời bận (Rate limit). Vui lòng nhập mã Captcha 4-6 ký tự.'
+    };
+  }
+
+  // 3. Check if GEMINI_API_KEY is configured
+  if (!process.env.GEMINI_API_KEY) {
+    return {
+      code: '',
+      isMissingApiKey: true,
+      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Bạn có thể nhập Captcha thủ công.'
+    };
+  }
+
+  // 4. High-precision Gemini AI OCR with Gemini 3.1 Flash Lite / Gemini Flash
   const ai = getGeminiClient();
   if (!ai) {
     return {
       code: '',
       isMissingApiKey: true,
-      error: 'Không thể khởi tạo Gemini AI Client. Vui lòng kiểm tra lại GEMINI_API_KEY.'
+      error: 'Không thể khởi tạo Gemini AI Client.'
     };
   }
 
@@ -278,26 +297,44 @@ ${svgSnippet}
         break; // Got response without error but no matching chars, fallback to next model
       } catch (err: any) {
         lastErrorMsg = err?.message || String(err);
+        const isSpendingCap = lastErrorMsg.includes('spending cap') || lastErrorMsg.includes('monthly spending cap');
         const isRateLimit = lastErrorMsg.includes('429') || lastErrorMsg.includes('RESOURCE_EXHAUSTED') || lastErrorMsg.includes('quota');
         const isUnavailable = lastErrorMsg.includes('503') || lastErrorMsg.includes('high demand') || lastErrorMsg.includes('UNAVAILABLE');
-        
-        console.warn(`[Gemini OCR (${modelName}) Warning, attempt ${attempt + 1}]:`, lastErrorMsg.substring(0, 120));
 
-        if ((isRateLimit || isUnavailable) && attempt === 0) {
+        if (isSpendingCap) {
+          geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1000;
+          console.log('[Gemini OCR] Monthly spending cap reached. OCR paused for 15 minutes.');
+          break; // Stop immediately without warning
+        }
+
+        if (isRateLimit) {
+          geminiRateLimitBlockedUntil = Date.now() + 60 * 1000;
+          console.log('[Gemini OCR] Rate limit (429) reached. OCR paused for 60 seconds.');
+          break;
+        }
+
+        if (isUnavailable && attempt === 0) {
           await new Promise(r => setTimeout(r, 600));
           continue; // Retry once on transient backpressure
         }
         break; // Move to next fallback candidate model
       }
     }
+    if (Date.now() < geminiSpendingCapBlockedUntil || Date.now() < geminiRateLimitBlockedUntil) {
+      break; // Do not try other models if project spending cap or rate limit is active
+    }
   }
 
-  const isRateLimitFinal = lastErrorMsg.includes('429') || lastErrorMsg.includes('quota') || lastErrorMsg.includes('RESOURCE_EXHAUSTED');
+  const isSpendingCapFinal = Date.now() < geminiSpendingCapBlockedUntil || lastErrorMsg.includes('spending cap') || lastErrorMsg.includes('monthly spending cap');
+  const isRateLimitFinal = Date.now() < geminiRateLimitBlockedUntil || lastErrorMsg.includes('429') || lastErrorMsg.includes('quota') || lastErrorMsg.includes('RESOURCE_EXHAUSTED');
   return {
     code: '',
-    error: isRateLimitFinal
-      ? 'Hạn mức API Gemini của bạn đã vượt quá (429 Rate Limit/Quota Exceeded). Hạn mức miễn phí sẽ tự reset sau 1 phút.'
-      : (lastErrorMsg ? `Lỗi Gemini API: ${lastErrorMsg.substring(0, 120)}` : 'Không nhận diện được mã Captcha.')
+    isSpendingCap: isSpendingCapFinal,
+    error: isSpendingCapFinal
+      ? 'Dự án đã chạm hạn mức chi tiêu hàng tháng của API Gemini (Spending cap). Bạn có thể nhìn hình và nhập mã Captcha thủ công.'
+      : isRateLimitFinal
+        ? 'Hạn mức API Gemini tạm thời bị giới hạn (429 Rate Limit). Vui lòng nhập Captcha thủ công hoặc thử lại sau 1 phút.'
+        : (lastErrorMsg ? `Lỗi Gemini API: ${lastErrorMsg.substring(0, 120)}` : 'Không nhận diện được mã Captcha.')
   };
 }
 
@@ -328,11 +365,13 @@ app.get('/api/gdt/captcha', async (req, res) => {
         const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`;
 
         let autoSolved = '';
-        try {
-          const ocrRes = await solveCaptchaOCR(data.content);
-          autoSolved = ocrRes.code;
-        } catch (ocrErr) {
-          console.warn('[Auto-OCR Warning]:', ocrErr);
+        if (Date.now() >= geminiSpendingCapBlockedUntil && Date.now() >= geminiRateLimitBlockedUntil) {
+          try {
+            const ocrRes = await solveCaptchaOCR(data.content);
+            autoSolved = ocrRes.code;
+          } catch {
+            // Quietly ignore auto-OCR background exceptions
+          }
         }
 
         return res.json({
@@ -395,13 +434,18 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
         success: false,
         captchaCode: '',
         isMissingApiKey: ocrResult.isMissingApiKey,
+        isSpendingCap: ocrResult.isSpendingCap,
         message: ocrResult.error || 'Không nhận diện được mã Captcha. Vui lòng nhập thủ công.',
         isRealGDT: Boolean(captchaKey && !captchaKey.startsWith('ckey_local_'))
       });
     }
   } catch (err: any) {
-    console.error('[OCR Endpoint Error]:', err);
-    return res.status(500).json({ success: false, message: 'Không thể quét mã Captcha: ' + err.message });
+    return res.json({ 
+      success: false, 
+      captchaCode: '',
+      isSpendingCap: true,
+      message: 'Không thể quét mã Captcha tự động. Vui lòng nhập thủ công từ ảnh.' 
+    });
   }
 });
 

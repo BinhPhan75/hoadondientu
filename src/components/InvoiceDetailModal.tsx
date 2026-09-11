@@ -78,7 +78,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
-  const effectiveInvoice = currentInvoice || invoice;
+  const effectiveInvoice = invoice
+    ? (currentInvoice && currentInvoice.id === invoice.id ? currentInvoice : invoice)
+    : null;
 
   const [activeTab, setActiveTab] = useState<'pdf' | 'html' | 'xslt' | 'xml' | 'meta'>('pdf');
   const [theme, setTheme] = useState<'red' | 'blue'>('red');
@@ -172,7 +174,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [effectiveInvoice]);
 
-  if (!effectiveInvoice) return null;
+  if (!invoice || !effectiveInvoice) return null;
 
   // Dò tìm tự động nhà cung cấp HĐĐT từ XML hoặc dữ liệu bóc tách.
   // Bọc trong try/catch: nếu dữ liệu hóa đơn (ví dụ từ nguồn mới như hóa đơn
@@ -290,9 +292,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-xs sm:text-sm font-mono uppercase tracking-wider text-white truncate">
-                  {invoice.thdon || 'HÓA ĐƠN ĐIỆN TỬ'}: {invoice.khhdon} - SỐ {invoice.shdon}
+                  {effectiveInvoice.thdon || 'HÓA ĐƠN ĐIỆN TỬ'}: {effectiveInvoice.khhdon} - SỐ {effectiveInvoice.shdon}
                 </h3>
-                {invoice.loaiHdon === 'purchase' ? (
+                {effectiveInvoice.loaiHdon === 'purchase' ? (
                   <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 text-[10px] font-bold border border-blue-700">
                     MUA VÀO
                   </span>
@@ -301,7 +303,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     BÁN RA
                   </span>
                 )}
-                {invoice.hsgcma && (
+                {effectiveInvoice.hsgcma && (
                   <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[10px] font-mono font-semibold border border-emerald-800 flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
                     ĐÃ CẤP MÃ CQT
@@ -314,7 +316,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">
-                Bên bán: <span className="text-gray-200 font-medium">{invoice.nbten}</span> (MST: <span className="text-amber-300 font-bold">{invoice.nbmst}</span>)
+                Bên bán: <span className="text-gray-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-amber-300 font-bold">{effectiveInvoice.nbmst}</span>)
               </p>
             </div>
           </div>
@@ -612,8 +614,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
                 Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • 
                 Đã nạp <span className="text-white font-bold">{safeItems.length}</span> dòng hàng hóa • 
-                Ký hiệu: <span className="text-amber-400">{invoice.khhdon}</span> • 
-                Số HĐ: <span className="text-cyan-400">{invoice.shdon}</span>
+                Ký hiệu: <span className="text-amber-400">{effectiveInvoice.khhdon}</span> • 
+                Số HĐ: <span className="text-cyan-400">{effectiveInvoice.shdon}</span>
               </div>
             </div>
           ) : activeTab === 'html' ? (
@@ -709,7 +711,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     <span>{isCopiedXml ? 'Đã sao chép' : 'Sao chép XML'}</span>
                   </button>
                   <button
-                    onClick={() => onDownloadXml(invoice)}
+                    onClick={() => onDownloadXml(effectiveInvoice)}
                     className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded transition-colors cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -739,18 +741,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="bg-gray-950 p-3.5 rounded-lg border border-gray-800 space-y-2">
                   <p className="font-bold text-gray-300 text-[11px] uppercase">Mã cấp từ Tổng cục Thuế</p>
                   <div className="text-gray-400 space-y-1 font-mono">
-                    <p>Mã CQT: <strong className="text-emerald-400">{invoice.mhdon || 'Chưa có trong dữ liệu nguồn'}</strong></p>
-                    <p>Trạng thái: <strong className={invoice.mhdon ? 'text-emerald-400' : 'text-amber-400'}>{invoice.mhdon ? 'Đã cấp mã' : 'Chưa xác định'}</strong></p>
-                    <p>Tính chất: <strong className="text-white">{invoice.tthdonLabel || 'Hóa đơn gốc'}</strong></p>
+                    <p>Mã CQT: <strong className="text-emerald-400">{effectiveInvoice.mhdon || 'Chưa có trong dữ liệu nguồn'}</strong></p>
+                    <p>Trạng thái: <strong className={effectiveInvoice.mhdon ? 'text-emerald-400' : 'text-amber-400'}>{effectiveInvoice.mhdon ? 'Đã cấp mã' : 'Chưa xác định'}</strong></p>
+                    <p>Tính chất: <strong className="text-white">{effectiveInvoice.tthdonLabel || 'Hóa đơn gốc'}</strong></p>
                   </div>
                 </div>
 
                 <div className="bg-gray-950 p-3.5 rounded-lg border border-gray-800 space-y-2">
                   <p className="font-bold text-gray-300 text-[11px] uppercase">Chứng thư số ký điện tử</p>
                   <div className="text-gray-400 space-y-1">
-                    <p>Đơn vị CA: <strong className="text-white">{invoice.caProvider || 'VNPT-CA / Viettel-CA / MISA-CA'}</strong></p>
-                    <p>Người ký số: <strong className="text-white">{invoice.signerName || invoice.nbten}</strong></p>
-                    <p>Thời điểm ký: <strong className="text-amber-400 font-mono">{invoice.signedDate || invoice.tdlap}</strong></p>
+                    <p>Đơn vị CA: <strong className="text-white">{effectiveInvoice.caProvider || 'VNPT-CA / Viettel-CA / MISA-CA'}</strong></p>
+                    <p>Người ký số: <strong className="text-white">{effectiveInvoice.signerName || effectiveInvoice.nbten}</strong></p>
+                    <p>Thời điểm ký: <strong className="text-amber-400 font-mono">{effectiveInvoice.signedDate || effectiveInvoice.tdlap}</strong></p>
                   </div>
                 </div>
               </div>
@@ -813,7 +815,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </button>
 
             <button
-              onClick={() => onDownloadXml(invoice)}
+              onClick={() => onDownloadXml(effectiveInvoice)}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors cursor-pointer"
               title="Tải tệp XML gốc để kê khai thuế hoặc lưu trữ"
             >

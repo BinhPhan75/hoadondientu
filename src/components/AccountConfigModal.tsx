@@ -68,8 +68,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         setCaptchaCode(data.captchaCode);
         setOcrSuccess(true);
       }
-    } catch (err) {
-      console.warn('[AI OCR Scan in Modal Error]:', err);
+    } catch {
+      // Quietly fall back to manual input
     } finally {
       setIsScanningOcr(false);
     }

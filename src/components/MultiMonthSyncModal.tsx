@@ -319,7 +319,7 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
 
                       {/* Purchase count */}
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">
-                        {chunk.status === 'completed' ? `${chunk.purchaseCount || chunk.totalInvoices} HĐ` : '-'}
+                        {chunk.status === 'completed' ? `${chunk.purchaseCount || chunk.totalCount} HĐ` : '-'}
                       </td>
 
                       {/* Purchase Amount */}
@@ -341,7 +341,7 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
                       <td className="py-2.5 px-3 text-center">
                         <button
                           onClick={() => handleExportMonth(chunk)}
-                          disabled={chunk.status !== 'completed' || (chunk.purchaseCount === 0 && chunk.totalInvoices === 0)}
+                          disabled={chunk.status !== 'completed' || (chunk.purchaseCount === 0 && chunk.totalCount === 0)}
                           className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:pointer-events-none rounded transition-colors cursor-pointer"
                           title={`Xuất Excel hóa đơn mua vào của ${chunk.label}`}
                         >
