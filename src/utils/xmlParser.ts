@@ -411,6 +411,11 @@ export function getLookupCodeFromPayload(source: any): string {
     getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode']),
     getPayloadValue(source, ['fkey', 'FKey']),
     getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
+    // MISA meInvoice: mã tra cứu THẬT in trên hóa đơn nằm trong mảng cttkhac
+    // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc,
+    // ví dụ hóa đơn Tài Trâm Anh C26TTA-273: TransactionID="JXFEULBJM7G7"
+    // == "Mã tra cứu hóa đơn" in trên PDF).
+    getFromStructuredArrays(source, ['TransactionID']),
     // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
     // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
     // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
