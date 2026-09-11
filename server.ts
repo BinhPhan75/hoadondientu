@@ -364,22 +364,12 @@ app.get('/api/gdt/captcha', async (req, res) => {
 
         const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`;
 
-        let autoSolved = '';
-        if (Date.now() >= geminiSpendingCapBlockedUntil && Date.now() >= geminiRateLimitBlockedUntil) {
-          try {
-            const ocrRes = await solveCaptchaOCR(data.content);
-            autoSolved = ocrRes.code;
-          } catch {
-            // Quietly ignore auto-OCR background exceptions
-          }
-        }
-
         return res.json({
           success: true,
           isRealGDT: true,
           captchaKey: data.key,
           captchaCookie: cookieStr,
-          captchaCode: autoSolved,
+          captchaCode: '',
           captchaImage: base64Image,
           rawSvg: data.content,
           source: 'hoadondientu.gdt.gov.vn'
@@ -461,14 +451,8 @@ app.post('/api/gdt/login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mật khẩu tài khoản Tổng cục Thuế cấp.' });
   }
 
-  if (!captchaCode && captchaKey && captchaContentMap.has(captchaKey)) {
-    const rawSvg = captchaContentMap.get(captchaKey)!;
-    const ocrRes = await solveCaptchaOCR(rawSvg);
-    captchaCode = ocrRes.code;
-  }
-
-  if (!captchaCode) {
-    return res.status(400).json({ success: false, message: 'Vui lòng nhập mã Captcha hoặc bấm nút quét tự động.' });
+  if (!captchaCode || !captchaCode.trim()) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhìn hình và nhập mã Captcha hiển thị trên ảnh.' });
   }
 
   const cookieHeader = captchaCookie || (captchaKey ? captchaCookieJar.get(captchaKey) || '' : '');

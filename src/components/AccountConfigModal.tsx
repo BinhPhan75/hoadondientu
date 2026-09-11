@@ -130,9 +130,6 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           setCaptchaKey(directData.key);
           setIsRealGDT(true);
 
-          // Auto-OCR scan
-          handleScanOcr(imgUrl, directData.key);
-
           setIsLoadingCaptcha(false);
           return;
         }
@@ -176,28 +173,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
 
     let activeCode = captchaCode.trim();
     if (!activeCode) {
-      setIsScanningOcr(true);
-      try {
-        const res = await fetch('/api/gdt/ocr-captcha', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ captchaImage: captchaImg, captchaKey })
-        });
-        const ocrData = await res.json();
-        if (ocrData && ocrData.success && ocrData.captchaCode) {
-          activeCode = ocrData.captchaCode;
-          setCaptchaCode(ocrData.captchaCode);
-          setOcrSuccess(true);
-        }
-      } catch (err) {
-        console.warn('[Auto-OCR Modal Error]:', err);
-      } finally {
-        setIsScanningOcr(false);
-      }
-    }
-
-    if (!activeCode) {
-      setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã Captcha hoặc bấm nút Quét OCR.' });
+      setStatusMessage({ type: 'error', text: 'Vui lòng nhìn hình và nhập mã Captcha (4-6 ký tự).' });
       return;
     }
 
@@ -442,21 +418,16 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
               </div>
             </div>
 
-            {/* OCR Helper status text */}
+            {/* Captcha guide status text */}
             <div className="flex items-center justify-between text-[10px] font-mono mt-1 px-0.5">
-              {isScanningOcr ? (
-                <span className="text-amber-700 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 animate-spin text-amber-600" />
-                  Đang nhận diện ký tự Captcha bằng AI OCR...
-                </span>
-              ) : ocrSuccess && captchaCode ? (
+              {captchaCode ? (
                 <span className="text-emerald-700 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                  AI đã tự động quét mã: <strong>{captchaCode}</strong>
+                  Mã đã nhập: <strong>{captchaCode}</strong>
                 </span>
               ) : (
                 <span className="text-gray-500">
-                  Phần mềm tự động quét và vượt Captcha khi kết nối
+                  Nhìn hình và nhập mã Captcha 4-6 ký tự vào ô (nhấn vào ảnh để đổi mã)
                 </span>
               )}
             </div>

@@ -148,10 +148,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setIsRealGdtCaptcha(true);
         setAuthError(null);
 
-        if (data.captchaCode) {
-          setCaptchaCode(data.captchaCode);
-          setOcrSuccess(true);
-        }
         setIsLoadingCaptcha(false);
         return;
       }
@@ -187,9 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           setIsRealGdtCaptcha(true);
           setAuthError(null);
 
-          // Trigger AI OCR on server for this captcha
-          handleScanOcr(imgUrl, directData.key);
-
+          // Manual input is prioritized - do not auto-run OCR to avoid delay/timeouts
           setIsLoadingCaptcha(false);
           return;
         }
@@ -258,36 +252,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return;
       }
       
-      // Auto-scan captcha on-the-fly if empty
-      if (!activeCaptchaCode && captchaImg) {
-        setIsScanningOcr(true);
-        try {
-          const sharpImg = await convertSvgToSharpPng(captchaImg);
-          const res = await fetch('/api/gdt/ocr-captcha', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ captchaImage: sharpImg, captchaKey })
-          });
-          const rawOcr = await res.text();
-          let ocrData: any = null;
-          try {
-            ocrData = JSON.parse(rawOcr);
-          } catch {}
-
-          if (ocrData && ocrData.success && ocrData.captchaCode) {
-            activeCaptchaCode = ocrData.captchaCode;
-            setCaptchaCode(ocrData.captchaCode);
-            setOcrSuccess(true);
-          }
-        } catch {
-          // Graceful fallback to manual input
-        } finally {
-          setIsScanningOcr(false);
-        }
-      }
-
       if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhìn hình và nhập mã Captcha 4-6 ký tự vào ô bên cạnh.');
+        setAuthError('Vui lòng nhìn hình và nhập mã Captcha (4-6 ký tự) vào ô bên cạnh.');
         return;
       }
     }
@@ -411,18 +377,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Captcha Section with Automated AI OCR Scanner */}
+          {/* Captcha Section with Direct Manual Input */}
           <div className="bg-gray-900/90 p-2.5 rounded border border-gray-800 space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                 <span>Mã Captcha</span>
-                {isRealGdtCaptcha ? (
+                <span className="text-[9px] bg-blue-950 text-blue-300 px-1 py-0.2 rounded border border-blue-800 font-mono">
+                  Nhập tay
+                </span>
+                {isRealGdtCaptcha && (
                   <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-800 font-mono">
-                    Cổng Thuế GDT
-                  </span>
-                ) : (
-                  <span className="text-[9px] bg-amber-950/80 text-amber-400 px-1 py-0.2 rounded border border-amber-800/80 font-mono">
-                    Chờ kết nối
+                    Cổng Thuế
                   </span>
                 )}
               </label>
@@ -430,23 +395,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleScanOcr(undefined, undefined, true)}
-                  disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
-                  className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono cursor-pointer transition-colors disabled:opacity-50"
-                  title="Tự động quét và đọc mã Captcha bằng AI OCR"
-                >
-                  <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
-                  <span>{isScanningOcr ? 'Đang quét...' : 'Quét OCR'}</span>
-                </button>
-                <button
-                  type="button"
                   onClick={fetchCaptcha}
                   disabled={isLoadingCaptcha || isScanningOcr}
-                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5 font-mono cursor-pointer transition-colors"
+                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono cursor-pointer transition-colors"
                   title="Đổi ảnh Captcha mới từ Cổng Thuế"
                 >
                   <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
                   <span>Đổi mã</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScanOcr(undefined, undefined, true)}
+                  disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
+                  className="text-[9px] text-gray-400 hover:text-amber-300 flex items-center gap-0.5 font-mono cursor-pointer transition-colors disabled:opacity-40"
+                  title="Thử quét OCR tự động (tùy chọn)"
+                >
+                  <Sparkles className={`w-2.5 h-2.5 ${isScanningOcr ? 'animate-spin text-amber-400' : ''}`} />
+                  <span>{isScanningOcr ? 'Quét...' : 'Thử OCR'}</span>
                 </button>
               </div>
             </div>
@@ -454,13 +419,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {/* Captcha Image Display & Input */}
             <div className="flex items-center gap-2">
               <div 
-                className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[125px] flex-1 relative group"
+                className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[120px] flex-1 relative group"
                 onClick={fetchCaptcha}
-                title="Nhấn vào hình để đổi mã Captcha khác"
+                title="Nhấn vào hình để đổi ảnh Captcha khác"
               >
                 {isLoadingCaptcha ? (
                   <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
-                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang kết nối...
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang tải...
                   </div>
                 ) : captchaImg ? (
                   <img
@@ -475,7 +440,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
 
-              {/* Captcha Input with auto-OCR indicator */}
+              {/* Captcha Input */}
               <div className="relative">
                 <input
                   type="text"
@@ -484,44 +449,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     setCaptchaCode(e.target.value.toUpperCase());
                     if (authError) setAuthError(null);
                   }}
-                  placeholder={isScanningOcr ? 'Quét...' : 'Mã...'}
+                  placeholder="Nhập mã"
                   maxLength={8}
-                  className={`w-24 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 border-gray-700 py-1.5 ${
-                    ocrSuccess ? 'text-emerald-300 border-emerald-700/80' : 'text-amber-300'
-                  } focus:border-amber-500`}
+                  className="w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 border-gray-600 py-1.5 text-amber-300 focus:border-amber-400"
                   required={!account.isRealGDT}
                 />
               </div>
             </div>
 
-            {/* OCR Status Line */}
+            {/* Manual Entry Status Line */}
             <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
-              {isScanningOcr ? (
-                <span className="text-amber-400 flex items-center gap-1 animate-pulse">
-                  <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
-                  AI OCR đang nhận diện mã...
-                </span>
-              ) : ocrSuccess && captchaCode ? (
+              {captchaCode ? (
                 <span className="text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Đã tự động đọc: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
-                </span>
-              ) : captchaCode ? (
-                <span className="text-emerald-400/90 flex items-center gap-1">
                   Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
                 </span>
-              ) : ocrNotice ? (
-                <span className="text-amber-300 flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-                  {ocrNotice}
-                </span>
-              ) : isRealGdtCaptcha ? (
-                <span className="text-gray-400">
-                  Nhìn hình nhập mã vào ô bên cạnh (hoặc bấm Quét OCR)
+              ) : isScanningOcr ? (
+                <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+                  <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
+                  Đang nhận diện...
                 </span>
               ) : (
-                <span className="text-amber-400 flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" /> Nhấn &quot;Đổi mã&quot; để kết nối Cổng Thuế
+                <span className="text-gray-400 text-[9.5px]">
+                  Nhìn ảnh và nhập 4-6 ký tự vào ô (nhấn ảnh để đổi)
                 </span>
               )}
             </div>
