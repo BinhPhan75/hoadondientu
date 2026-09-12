@@ -37,14 +37,17 @@ export function renderNghiaSonTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
 
-  // 1. Logic ưu tiên Mã CQT (invoice.mhdon) làm Mã tra cứu nếu lookupCode rỗng
+  // 1. Mã cơ quan thuế cấp cho HDDT
   const maCqt = invoice.mhdon || invoice.mhso || '';
-  const mCode = lookupCode || invoice.lookupCode || maCqt || '00BB3C25BCB8C74D908D5962B75A9ED39B';
+  
+  // Mã tra cứu VNPT chính là Mã cơ quan thuế cấp
+  const mCode = maCqt || lookupCode || invoice.lookupCode || '00BB3C25BCB8C74D908D5962B75A9ED39B';
   const displayMaCqt = maCqt || '00BB3C25BCB8C74D908D5962B75A9ED39B';
 
-  // 2. Tự động sinh Portal URL nếu rỗng
+  // 2. Tự động sinh Link tra cứu VNPT theo MST Bên bán (VD: https://4000344946-tt78.vnpt-invoice.com.vn)
   const sellerMST = invoice.nbmst || '4000344946';
-  const pUrl = lookupUrl || invoice.lookupUrl || `https://${sellerMST}-tt78.vnpt-invoice.com.vn`;
+  const defaultVnptUrl = `https://${sellerMST}-tt78.vnpt-invoice.com.vn`;
+  const pUrl = lookupUrl || invoice.lookupUrl || defaultVnptUrl;
 
   // 3. Format số hóa đơn đủ số 0
   const rawShdon = String(invoice.shdon || '9');
