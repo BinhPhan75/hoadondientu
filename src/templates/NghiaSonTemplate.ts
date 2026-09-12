@@ -12,6 +12,23 @@ import {
 } from './templateUtils';
 import { RenderTemplateOptions } from './types';
 
+// Helper parse thông tin Chữ ký số JSON (nbcks / cqtcks)
+function parseCertInfo(certStr?: string) {
+  if (!certStr) return null;
+  try {
+    const obj = typeof certStr === 'string' ? JSON.parse(certStr) : certStr;
+    let cn = '';
+    if (obj.Subject) {
+      const cnMatch = obj.Subject.match(/CN=([^,]+)/i);
+      if (cnMatch) cn = cnMatch[1].trim();
+    }
+    const signingTime = obj.SigningTime ? new Date(obj.SigningTime) : null;
+    return { cn, signingTime };
+  } catch {
+    return null;
+  }
+}
+
 export function renderNghiaSonTemplate(
   invoice: GDTInvoice,
   rawXml?: string,
@@ -19,29 +36,57 @@ export function renderNghiaSonTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  
-  const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn`;
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:4000344946;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
+  // 1. Logic ưu tiên Mã CQT (invoice.mhdon) làm Mã tra cứu nếu lookupCode rỗng
+  const maCqt = invoice.mhdon || invoice.mhso || '';
+  const mCode = lookupCode || invoice.lookupCode || maCqt || '00BB3C25BCB8C74D908D5962B75A9ED39B';
+  const displayMaCqt = maCqt || '00BB3C25BCB8C74D908D5962B75A9ED39B';
+
+  // 2. Tự động sinh Portal URL nếu rỗng
+  const sellerMST = invoice.nbmst || '4000344946';
+  const pUrl = lookupUrl || invoice.lookupUrl || `https://${sellerMST}-tt78.vnpt-invoice.com.vn`;
+
+  // 3. Format số hóa đơn đủ số 0
+  const rawShdon = String(invoice.shdon || '9');
+  const formattedShdon = rawShdon.padStart(8, '0');
+
+  // 4. QR Code & Items
+  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${sellerMST};KH:${invoice.khhdon || ''};SHD:${formattedShdon};MCCQT:${displayMaCqt}`);
   const items = ensureInvoiceItems(invoice);
+
+  // 5. Tính toán tài chính
   const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const subTotal = invoice.tgtcthue || Math.round(totalAmount / 1.1);
+  const subTotal = invoice.tgtcthue || (invoice.tgtthue ? totalAmount - invoice.tgtthue : Math.round(totalAmount / 1.1));
   const vatAmount = invoice.tgtthue || (totalAmount - subTotal > 0 ? totalAmount - subTotal : Math.round(subTotal * 0.1));
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const maCqt = invoice.mhdon || '00BB3C25BCB8C74D908D5962B75A9ED39B';
   const showControls = options?.showPrintControls !== false;
 
+  // 6. Thông tin bên mua & bên bán
+  const sellerName = invoice.nbten || 'CÔNG TY TNHH NGHĨA SƠN';
   const buyerName = invoice.nmten || 'CÔNG TY TNHH MỘT THÀNH VIÊN VÀNG BẠC NGHĨA TÍN';
   const buyerTaxCode = invoice.nmmst || '4000926165';
   const buyerAddress = invoice.nmdchi || '448 Phan Chu Trinh, Phường Tam Kỳ, Thành phố Tam Kỳ, Tỉnh Quảng Nam, Việt Nam';
-  const paymentMethod = invoice.htttoan || 'Chuyển khoản';
+  const paymentMethod = invoice.thtttoan || invoice.htttoan || 'Chuyển khoản';
+
+  // 7. Parse thông tin chữ ký thực tế
+  const sellerCert = parseCertInfo(invoice.nbcks);
+  const cqtCert = parseCertInfo(invoice.cqtcks);
+
+  const sellerSignName = sellerCert?.cn || sellerName;
+  const sellerSignDateStr = sellerCert?.signingTime 
+    ? `${String(sellerCert.signingTime.getDate()).padStart(2, '0')}/${String(sellerCert.signingTime.getMonth() + 1).padStart(2, '0')}/${sellerCert.signingTime.getFullYear()}`
+    : `${day}/${month}/${year}`;
+
+  const cqtSignName = cqtCert?.cn || 'CỤC THUẾ / TỔNG CỤC THUẾ';
+  const cqtSignDateStr = cqtCert?.signingTime 
+    ? `${String(cqtCert.signingTime.getDate()).padStart(2, '0')}/${String(cqtCert.signingTime.getMonth() + 1).padStart(2, '0')}/${cqtCert.signingTime.getFullYear()}`
+    : `${day}/${month}/${year}`;
 
   return `<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>HÓA ĐƠN GIÁ TRỊ GIA TĂNG - CÔNG TY TNHH NGHĨA SƠN - Số: ${escapeHtml(invoice.shdon)}</title>
+  <title>HÓA ĐƠN GIÁ TRỊ GIA TĂNG - ${escapeHtml(sellerName)} - Số: ${escapeHtml(formattedShdon)}</title>
   <style>
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -81,7 +126,6 @@ export function renderNghiaSonTemplate(
       padding-bottom: 4px;
       margin-bottom: 8px;
     }
-    /* Header */
     .header-grid {
       display: flex;
       gap: 14px;
@@ -112,7 +156,6 @@ export function renderNghiaSonTemplate(
       text-transform: uppercase;
       margin-bottom: 2px;
     }
-    /* Title block */
     .title-row {
       text-align: center;
       margin: 8px 0 10px 0;
@@ -140,6 +183,7 @@ export function renderNghiaSonTemplate(
       font-style: italic;
       font-size: 12px;
       margin-top: 2px;
+      word-break: break-all;
     }
     .meta-box-right {
       position: absolute;
@@ -163,7 +207,6 @@ export function renderNghiaSonTemplate(
       height: 100%;
       display: block;
     }
-    /* Buyer */
     .buyer-section {
       margin-top: 6px;
       margin-bottom: 10px;
@@ -174,7 +217,6 @@ export function renderNghiaSonTemplate(
     .buyer-line {
       margin-bottom: 2px;
     }
-    /* Goods table */
     table.ns-table {
       width: 100%;
       border-collapse: collapse;
@@ -202,7 +244,6 @@ export function renderNghiaSonTemplate(
     .col-qty { width: 68px; text-align: right; }
     .col-price { width: 95px; text-align: right; }
     .col-amount { width: 110px; text-align: right; }
-    /* Tax calculations */
     .calc-table {
       width: 100%;
       border-collapse: collapse;
@@ -222,7 +263,6 @@ export function renderNghiaSonTemplate(
       font-style: italic;
       margin-bottom: 12px;
     }
-    /* 3 Signatures */
     .sign-container {
       display: flex;
       justify-content: space-between;
@@ -261,7 +301,6 @@ export function renderNghiaSonTemplate(
       align-items: center;
       gap: 3px;
     }
-    /* Footer */
     .footer-area {
       border-top: 1px solid #000;
       padding-top: 6px;
@@ -272,7 +311,7 @@ export function renderNghiaSonTemplate(
   </style>
 </head>
 <body>
-  ${showControls ? getPrintControlsHtml('HÓA ĐƠN GIÁ TRỊ GIA TĂNG - CÔNG TY TNHH NGHĨA SƠN') : ''}
+  ${showControls ? getPrintControlsHtml(`HÓA ĐƠN GIÁ TRỊ GIA TĂNG - ${escapeHtml(sellerName)}`) : ''}
 
   <div class="invoice-outer">
     <div class="top-vnpt-banner">
@@ -292,41 +331,41 @@ export function renderNghiaSonTemplate(
       </div>
 
       <div class="seller-text-box">
-        <div class="seller-title">${escapeHtml(invoice.nbten || 'Đơn vị bán hàng')}</div>
-        <div>Mã số thuế (Tax code): <strong>${escapeHtml(invoice.nbmst || '')}</strong></div>
+        <div class="seller-title">${escapeHtml(sellerName)}</div>
+        <div>Mã số thuế (Tax code): <strong>${escapeHtml(sellerMST)}</strong></div>
         <div>Địa chỉ (Address): ${escapeHtml(invoice.nbdchi || '')}</div>
-        <div>Điện thoại (Tel): ${escapeHtml(invoice.nbsdt || '0921143577')}</div>
-        <div>Số tài khoản (Account No.): <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ''}` : '040092309799 - Ngân hàng Sacombank -Chi nhánh Quảng Nam')}</strong></div>
+        <div>Điện thoại (Tel): ${escapeHtml(invoice.nbsdthoai || invoice.nbsdt || '0856528777')}</div>
+        <div>Số tài khoản (Account No.): <strong>${escapeHtml(invoice.nbstkhoan ? `${invoice.nbstkhoan} - ${invoice.nbtnhang || ''}` : '040092309799 - Ngân hàng Sacombank - Chi nhánh Quảng Nam')}</strong></div>
       </div>
     </div>
 
     <!-- TITLE & META -->
     <div class="title-row">
-      <div class="main-title">HÓA ĐƠN GIÁ TRỊ GIA TĂNG</div>
+      <div class="main-title">${escapeHtml(invoice.thdon || 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG')}</div>
       <div class="en-title">(VAT INVOICE)</div>
       <div class="sub-date">Ngày (Date) ${escapeHtml(day)} tháng (month) ${escapeHtml(month)} năm (year) ${escapeHtml(year)}</div>
-      <div class="cqt-code">Mã CQT: <strong>${escapeHtml(maCqt)}</strong></div>
+      <div class="cqt-code">Mã của cơ quan thuế: <strong>${escapeHtml(displayMaCqt)}</strong></div>
 
       <div class="meta-box-right">
-        <div>Mẫu số (Form): <strong>${escapeHtml(invoice.khmshdon || '1')}</strong></div>
-        <div>Ký hiệu (Serial): <strong>${escapeHtml(invoice.khhdon || '1C26TNS')}</strong></div>
-        <div>Số (No.): <strong style="font-size:15px;color:#dc2626;">${escapeHtml(invoice.shdon || '00000010')}</strong></div>
+        <div>Mẫu số (Form): <strong>${escapeHtml(String(invoice.khmshdon || '1'))}</strong></div>
+        <div>Ký hiệu (Serial): <strong>${escapeHtml(invoice.khhdon || '1C25TNS')}</strong></div>
+        <div>Số (No.): <strong style="font-size:15px;color:#dc2626;">${escapeHtml(formattedShdon)}</strong></div>
       </div>
 
       <div class="qr-corner">
-        <img src="${qrImg}" alt="QR Tra cứu Nghĩa Sơn">
+        <img src="${qrImg}" alt="QR Tra cứu">
       </div>
     </div>
 
     <!-- BUYER SECTION -->
     <div class="buyer-section">
-      <div class="buyer-line">Họ tên người mua hàng (Buyer): <span>${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : '')}</span></div>
+      <div class="buyer-line">Họ tên người mua hàng (Buyer): <span>${escapeHtml(invoice.nmtnmua || '')}</span></div>
       <div class="buyer-line">Tên đơn vị (Company): <strong style="text-transform:uppercase;">${escapeHtml(buyerName)}</strong></div>
       <div class="buyer-line">Mã số thuế (Tax code): <strong>${escapeHtml(buyerTaxCode)}</strong></div>
       <div class="buyer-line">Địa chỉ (Address): ${escapeHtml(buyerAddress)}</div>
       <div class="buyer-line" style="display:flex;justify-content:space-between;">
         <div>Hình thức thanh toán (Payment method): <strong>${escapeHtml(paymentMethod)}</strong></div>
-        <div>Số tài khoản (Account No.): <span>${escapeHtml(invoice.nmstk || '')}</span></div>
+        <div>Số tài khoản (Account No.): <span>${escapeHtml(invoice.nmstkhoan || invoice.nmstk || '')}</span></div>
       </div>
     </div>
 
@@ -342,21 +381,21 @@ export function renderNghiaSonTemplate(
           <th class="col-amount">Thành tiền<br><span class="th-sub">(Amount)</span></th>
         </tr>
         <tr style="font-size:10px;text-align:center;font-style:italic;">
-          <td>(1)</td>
-          <td>(2)</td>
-          <td>(3)</td>
-          <td>(4)</td>
-          <td>(5)</td>
-          <td>(6=4x5)</td>
+          <td>1</td>
+          <td>2</td>
+          <td>3</td>
+          <td>4</td>
+          <td>5</td>
+          <td>6=4x5</td>
         </tr>
       </thead>
       <tbody>
         ${items.map((item, idx) => {
-          const qty = item.quantity || item.sluong || 0;
-          const price = item.unitPrice || item.dgia || 0;
-          const amt = item.amount || item.thtien || (qty * price);
-          const unit = item.unit || item.dvt || 'chỉ';
-          const name = item.itemName || item.ten || `Sản phẩm vàng trang sức Nghĩa Sơn #${idx + 1}`;
+          const qty = item.sluong ?? item.quantity ?? 0;
+          const price = item.dgia ?? item.unitPrice ?? 0;
+          const amt = item.thtien ?? item.amount ?? (qty * price);
+          const unit = item.dvtinh ?? item.dvt ?? item.unit ?? 'gram';
+          const name = item.ten ?? item.itemName ?? `Sản phẩm vàng #${idx + 1}`;
 
           return `
             <tr>
@@ -375,8 +414,12 @@ export function renderNghiaSonTemplate(
     <!-- TAX CALCULATIONS -->
     <table class="calc-table">
       <tr>
-        <td style="width:70%;font-weight:bold;">Thuế suất GTGT (VAT rate): 10%</td>
-        <td style="width:30%;text-align:right;">Tiền thuế GTGT: <strong>${formatVND(vatAmount)}</strong></td>
+        <td style="width:50%;font-weight:bold;">Cộng tiền hàng (Total amount):</td>
+        <td style="width:50%;text-align:right;font-weight:bold;">${formatVND(subTotal)}</td>
+      </tr>
+      <tr>
+        <td style="font-weight:bold;">Thuế suất thuế GTGT (VAT rate): 10%</td>
+        <td style="text-align:right;">Tiền thuế GTGT (VAT amount): <strong>${formatVND(vatAmount)}</strong></td>
       </tr>
       <tr style="background:#f0fdf4;">
         <td style="font-weight:bold;">Tổng cộng tiền thanh toán (Total payment):</td>
@@ -385,41 +428,40 @@ export function renderNghiaSonTemplate(
     </table>
 
     <div class="words-amount">
-      Số tiền viết bằng chữ (In words): <strong>${escapeHtml(wordsAmount)}</strong>
+      Số tiền viết bằng chữ (Amount in words): <strong>${escapeHtml(wordsAmount)}</strong>
     </div>
 
     <!-- 3 SIGNATURES SECTION -->
     <div class="sign-container">
       <div class="sign-col">
         <div class="sign-title">Người mua hàng (Buyer)</div>
-        <div class="sign-desc">(Ký, ghi rõ họ, tên)</div>
+        <div class="sign-desc">(Ký, ghi rõ họ tên)</div>
       </div>
 
       <div class="sign-col">
         <div class="sign-title">Cơ quan thuế (Tax authorities)</div>
-        <div class="sign-desc">(Ký điện tử)</div>
+        <div class="sign-desc">(Ký, ghi rõ họ tên)</div>
         <div class="vnpt-sig-box">
           <div class="sig-valid-tag"><span>✔</span> Signature Valid</div>
-          <div><strong>Ký bởi:</strong> Tổng cục Thuế</div>
-          <div><strong>Ký ngày:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
+          <div><strong>Ký bởi:</strong> ${escapeHtml(cqtSignName)}</div>
+          <div><strong>Ký ngày:</strong> ${escapeHtml(cqtSignDateStr)}</div>
         </div>
       </div>
 
       <div class="sign-col">
         <div class="sign-title">Người bán hàng (Seller)</div>
-        <div class="sign-desc">(Ký điện tử)</div>
+        <div class="sign-desc">(Ký, ghi rõ họ tên)</div>
         <div class="vnpt-sig-box">
           <div class="sig-valid-tag"><span>✔</span> Signature Valid</div>
-          <div><strong>Ký bởi:</strong> ${escapeHtml(invoice.nbten || 'Người bán hàng')}</div>
-          <div><strong>Ký ngày:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
+          <div><strong>Ký bởi:</strong> ${escapeHtml(sellerSignName)}</div>
+          <div><strong>Ký ngày:</strong> ${escapeHtml(sellerSignDateStr)}</div>
         </div>
       </div>
     </div>
 
     <!-- FOOTER -->
     <div class="footer-area">
-      <div style="font-style:italic;color:#64748b;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      <div style="margin-top:2px;">Tra cứu hóa đơn điện tử tại Website: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#0284c7;">${escapeHtml(pUrl)}</a> - Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
+      <div style="margin-top:2px;">Tra cứu hóa đơn tại: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#0284c7;">${escapeHtml(pUrl)}</a> với mã hoá đơn sau: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
     </div>
   </div>
 </body>
