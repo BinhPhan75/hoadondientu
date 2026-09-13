@@ -8,7 +8,6 @@ import {
   ShieldCheck, 
   Copy, 
   Check, 
-  ExternalLink,
   ZoomIn,
   ZoomOut,
   ChevronLeft,
@@ -193,22 +192,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     autoDetectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
     lookupDetails = extractLookupDetails(xmlContent);
 
-    // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
+    // Ưu tiên mã tra cứu và URL có sẵn từ invoice nếu chưa trích xuất được từ XML
+    if (!lookupDetails.lookupCode && effectiveInvoice.lookupCode) {
+      lookupDetails.lookupCode = effectiveInvoice.lookupCode;
+    }
+    if (!lookupDetails.lookupUrl && effectiveInvoice.lookupUrl) {
+      lookupDetails.lookupUrl = effectiveInvoice.lookupUrl;
+    }
+
+    // Đối với hóa đơn VNPT như Nghĩa Sơn: nếu chưa có mã tra cứu thì dùng mã CQT cấp cho từng hóa đơn
     const isVnptInvoice = 
       effectiveInvoice.provider === 'VNPT' ||
       effectiveInvoice.nbmst === '4000344946' ||
       effectiveInvoice.msttcgp === '0100684378' ||
       (effectiveInvoice.nbten && /NGHĨA SƠN|NGHIA SON/i.test(effectiveInvoice.nbten)) ||
-      (effectiveInvoice.caProvider && effectiveInvoice.caProvider.includes('VNPT')) ||
       autoDetectedProvider === 'NGHIA_SON' ||
-      autoDetectedProvider === 'VNPT' ||
-      selectedTemplateId === 'NGHIA_SON' ||
-      selectedTemplateId === 'VNPT';
+      autoDetectedProvider === 'VNPT';
 
     if (isVnptInvoice) {
-      const cqt = effectiveInvoice.mhdon || extractTagValue(xmlContent, 'MCCQT') || extractTagValue(xmlContent, 'mhdon');
-      if (cqt) {
-        lookupDetails.lookupCode = cqt;
+      if (!lookupDetails.lookupCode) {
+        const cqt = effectiveInvoice.mhdon || extractTagValue(xmlContent, 'MCCQT') || extractTagValue(xmlContent, 'mhdon');
+        if (cqt) {
+          lookupDetails.lookupCode = cqt;
+        }
       }
       if (!lookupDetails.lookupUrl) {
         lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${effectiveInvoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
@@ -504,20 +510,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </span>
                 {lookupDetails.lookupCode && (
                   <span className="text-[10px] text-gray-400 border-l border-gray-700 pl-1.5 font-mono">
-                    Mã tra cứu: <strong className="text-emerald-400">{lookupDetails.lookupCode}</strong>
+                    Mã tra cứu: {directLookupUrl ? (
+                      <a 
+                        href={directLookupUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-emerald-400 hover:underline font-bold" 
+                        title={`Mở trang tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
+                      >
+                        {lookupDetails.lookupCode}
+                      </a>
+                    ) : (
+                      <strong className="text-emerald-400">{lookupDetails.lookupCode}</strong>
+                    )}
                   </span>
-                )}
-                {directLookupUrl && (
-                  <a
-                    href={directLookupUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-1.5 px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-bold inline-flex items-center gap-1 transition-all shadow-xs"
-                    title={`Mở trang tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>Tra cứu trực tiếp ↗</span>
-                  </a>
                 )}
               </div>
 
@@ -812,19 +818,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <p>Cổng tra cứu: <a href={directLookupUrl || currentProviderMeta.portalUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{directLookupUrl || currentProviderMeta.portalUrl}</a></p>
                   {lookupDetails.lookupCode && (
                     <p>Mã tra cứu / Fkey: <strong className="text-emerald-400 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700">{lookupDetails.lookupCode}</strong></p>
-                  )}
-                  {directLookupUrl && (
-                    <div className="pt-1.5">
-                      <a
-                        href={directLookupUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-bold transition-all shadow-xs"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Mở trang tra cứu ({currentProviderMeta.shortName}) ↗
-                      </a>
-                    </div>
                   )}
                 </div>
               </div>

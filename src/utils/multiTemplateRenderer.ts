@@ -924,9 +924,7 @@ export function renderMisaTemplate(
 
     <!-- MISA FOOTER -->
     <div class="misa-footer">
-      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b>
-      ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Tra cứu trực tiếp (meInvoice) ↗</a>` : ''}
-      </div>
+      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>
       <div style="margin-top: 2px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
     </div>
   </div>
@@ -1294,9 +1292,7 @@ export function renderEasyInvoiceTemplate(
     <div class="easy-footer">
       <div>Mã của cơ quan thuế (Tax authority code): <b>${escapeHtml(maCqt)}</b></div>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">
-        <div>Trang tra cứu : <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(mUrl)}</a>
-          ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
-        </div>
+        <div>Trang tra cứu : <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(mUrl)}</a></div>
         <div>Mã tra cứu : <b>${escapeHtml(mCode)}</b></div>
       </div>
       <div style="font-style: italic; margin-top: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
@@ -1677,7 +1673,6 @@ export function render4SiTemplate(
     <div class="foursi-footer">
       <div style="font-style: italic; margin-bottom: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
       ${mCode ? `<div>Tra cứu thông tin hóa đơn điện tử tại <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a>. &nbsp;&nbsp;
-        <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#0284c7;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a> &nbsp;&nbsp;
         Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>` : `
       <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho 4SI/L.C.S (không gửi
            kèm mã tra cứu công khai trong API/XML). Ẩn dòng này thay vì hiển thị trống. -->`}
@@ -1860,9 +1855,7 @@ export function renderViettelTemplate(
 
     <!-- VIETTEL LOOKUP BOX -->
     <div class="viettel-lookup-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-      <div>Website tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a>
-        ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#ee0033;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
-      </div>
+      <div>Website tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a></div>
       <div>Mã số bí mật: <b style="color: #ee0033;">${escapeHtml(mCode)}</b></div>
     </div>
 
@@ -2438,9 +2431,7 @@ export function renderVnptTemplate(
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
       <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
-      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b>
-      ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#005baa;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
-      </div>
+      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>
@@ -2527,9 +2518,7 @@ export function renderBkavTemplate(
       Bằng chữ: ${escapeHtml(wordsAmount)}
     </div>
     <div style="border-top: 1px solid #ea580c; margin-top: 14px; padding-top: 6px; font-size: 11px; color: #555; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-      <div>Phát hành bởi hệ thống Bkav eHoadon (www.ehoadon.vn) - Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ea580c; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a>
-        ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#ea580c;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
-      </div>
+      <div>Phát hành bởi hệ thống Bkav eHoadon (www.ehoadon.vn) - Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ea580c; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a></div>
       <div>Mã tra cứu: <b style="font-family: monospace;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
@@ -2833,9 +2822,7 @@ export function renderDefaultTemplate(
     <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 11px; color: #64748b;">
       ${mCode || mUrl ? `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: #334155; flex-wrap: wrap; gap: 4px;">
-        <div>Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: ${primaryColor}; text-decoration: underline; font-weight: 600;">${escapeHtml(mUrl)}</a>
-          ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:${primaryColor};color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở trang tra cứu ↗</a>` : ''}
-        </div>
+        <div>Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: ${primaryColor}; text-decoration: underline; font-weight: 600;">${escapeHtml(mUrl)}</a></div>
         ${mCode ? `<div>Mã tra cứu: <strong style="font-family: monospace;">${escapeHtml(mCode)}</strong></div>` : ''}
       </div>` : ''}
       <div style="text-align: center;">(Hóa đơn điện tử khởi tạo theo Nghị định 123/2020/NĐ-CP và Thông tư 78/2021/TT-BTC)</div>

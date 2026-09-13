@@ -477,9 +477,7 @@ export function renderBaoDuyTemplate(
       <div class="footer-section">
         <div><strong>Mã của cơ quan thuế (Tax authority code):</strong> <span style="font-family:monospace;font-weight:bold;">${escapeHtml(taxAuthorityCode)}</span></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-          <div>Trang tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a>
-          ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
-          </div>
+          <div>Trang tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a></div>
           <div>Mã tra cứu: <strong style="color:#b91c1c;font-family:monospace;">${escapeHtml(mCode)}</strong></div>
         </div>
         <div style="text-align:center;font-style:italic;margin-top:3px;color:#475569;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>

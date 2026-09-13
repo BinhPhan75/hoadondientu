@@ -74,6 +74,7 @@ export function generateGDTInvoiceXml(invoice: GDTInvoice): string {
       <DVTTe>${invoice.dvtte || 'VND'}</DVTTe>
       <TGia>${invoice.tygia || 1}</TGia>
       <HTTToan>${invoice.htttoan || 'TM/CK'}</HTTToan>
+      ${invoice.lookupCode ? `<MTCuu>${escapeXml(invoice.lookupCode)}</MTCuu>` : ''}
       ${(() => {
         let msttcgp = invoice.msttcgp;
         if (!msttcgp) {

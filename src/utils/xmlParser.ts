@@ -408,18 +408,16 @@ export function isVnptSource(source: any): boolean {
   const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
   const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
   const provider = String(getPayloadValue(source, ['provider']) || '').toUpperCase();
-  const caProvider = String(getPayloadValue(source, ['caProvider', 'ca_provider']) || '').toUpperCase();
   const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
 
   return (
     nbmst === '4000344946' || // CÔNG TY TNHH NGHĨA SƠN
     nbten.includes('NGHĨA SƠN') ||
     nbten.includes('NGHIA SON') ||
-    msttcgp === '0100684378' || // MST VNPT
+    msttcgp === '0100684378' || // MST VNPT TCGP
     tentcgp.includes('VNPT') ||
     provider === 'VNPT' ||
     provider === 'NGHIA_SON' ||
-    caProvider.includes('VNPT') ||
     lookupUrl.includes('vnpt-invoice.com.vn')
   );
 }
@@ -427,15 +425,6 @@ export function isVnptSource(source: any): boolean {
 /** Lấy mã tra cứu từ payload JSON của Cổng Thuế/API. */
 export function getLookupCodeFromPayload(source: any): string {
   if (!source) return '';
-
-  // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
-  if (isVnptSource(source)) {
-    const cqtCode = getPayloadValue(source, ['mhdon', 'mccqt', 'MCCQT', 'cqtCode']);
-    if (cqtCode) {
-      const cleanCqt = cleanLookupValue(cqtCode);
-      if (cleanCqt) return cleanCqt;
-    }
-  }
 
   const values = [
     getPayloadValue(source, ['lookupCode', 'LookupCode']),
@@ -453,12 +442,26 @@ export function getLookupCodeFromPayload(source: any): string {
     // ví dụ hóa đơn Tài Trâm Anh C26TTA-273: TransactionID="JXFEULBJM7G7"
     // == "Mã tra cứu hóa đơn" in trên PDF).
     getFromStructuredArrays(source, ['TransactionID']),
+    getPayloadValue(source, ['transactionID', 'TransactionID']),
     // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
     // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
     // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
     getPayloadValue(source, ['mtdtchieu', 'MTDTCChieu', 'maDoiChieu', 'MaDoiChieu'])
   ];
-  return values.map(cleanLookupValue).find(isLookupCodeCandidate) || '';
+
+  const foundCode = values.map(cleanLookupValue).find(isLookupCodeCandidate);
+  if (foundCode) return foundCode;
+
+  // Đối với hóa đơn VNPT như Nghĩa Sơn không có mã tra cứu riêng: dùng mã CQT cấp cho từng hóa đơn (MCCQT / mhdon)
+  if (isVnptSource(source)) {
+    const cqtCode = getPayloadValue(source, ['mhdon', 'mccqt', 'MCCQT', 'cqtCode']);
+    if (cqtCode) {
+      const cleanCqt = cleanLookupValue(cqtCode);
+      if (cleanCqt) return cleanCqt;
+    }
+  }
+
+  return '';
 }
 
 export function getLookupUrlFromPayload(source: any): string {
@@ -547,33 +550,6 @@ export function getSellerFromPayload(source: any): { name: string; taxCode: stri
 export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: string; lookupUrl: string } {
   if (!rawXml) return { lookupCode: '', lookupUrl: '' };
 
-  // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn (MCCQT / mhdon)
-  const isVnpt = /vnpt-invoice|invoice\.vnpt\.vn|tracuu\.vnpt-invoice|0100684378|4000344946/i.test(rawXml) || 
-    /NGHĨA SƠN|NGHIA SON|VNPT-CA/i.test(rawXml);
-
-  if (isVnpt) {
-    const cqtCode = extractTagValue(rawXml, 'MCCQT', '') || 
-      extractTagValue(rawXml, 'mhdon', '') || 
-      extractTagValue(rawXml, 'MaCQT', '') ||
-      extractTagValue(rawXml, 'cqtCode', '');
-    if (cqtCode) {
-      const cleanCqt = cleanLookupValue(cqtCode);
-      if (cleanCqt) {
-        const nbmst = extractTagValue(rawXml, 'MST', '') || extractTagValue(rawXml, 'nbmst', '') || '4000344946';
-        let url = extractTagValue(rawXml, 'LinkTraCuu', '') || 
-          extractTagValue(rawXml, 'WebsiteTraCuu', '') || 
-          extractTagValue(rawXml, 'PortalUrl', '');
-        if (!url || !/^https?:\/\//i.test(url)) {
-          url = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
-        }
-        return {
-          lookupCode: cleanCqt,
-          lookupUrl: url
-        };
-      }
-    }
-  }
-
   const tagValue = (tagNames: string[]): string => {
     for (const tag of tagNames) {
       const value = extractTagValue(rawXml, tag, '');
@@ -582,22 +558,24 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     return '';
   };
 
-  const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode'];
+  // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
+  const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode', 'TransactionID'];
   let lookupCode = tagValue(codeTags);
 
+  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:"
   if (!lookupCode) {
     const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
   }
 
+  // 3. Kiểm tra các khối mở rộng TTin / TTKhac
   const ttinBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
   for (const block of ttinBlocks) {
     const label = normalizeLookupLabel(
       extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name')
     );
     if (!label || label.includes('bi mat') || label.includes('secret')) continue;
-    const isExplicitLookupLabel = /(?:^|\s)(?:ma\s*)?tra\s*cuu(?:\s|$)|^(?:matracuu|fkey|lookupcode)$/i.test(label);
-    // An explicit XML tag has higher authority than an auxiliary field.
+    const isExplicitLookupLabel = /(?:^|\s)(?:ma\s*)?tra\s*cuu(?:\s|$)|^(?:matracuu|fkey|lookupcode|transactionid)$/i.test(label);
     if (!lookupCode && isExplicitLookupLabel) {
       const value = cleanLookupValue(extractTagValue(block, 'DLieu') || extractTagValue(block, 'Data') || extractTagValue(block, 'Value'));
       if (isLookupCodeCandidate(value)) {
@@ -607,6 +585,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     }
   }
 
+  // 4. Nếu mã tra cứu là một đường dẫn URL thì tách tham số code/fkey
   if (lookupCode && /^https?:\/\//i.test(lookupCode)) {
     try {
       const url = new URL(lookupCode);
@@ -616,6 +595,26 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     }
   }
 
+  // 5. Đối với hóa đơn VNPT như Nghĩa Sơn nếu không có mã tra cứu riêng: dùng mã CQT (MCCQT / mhdon)
+  if (!lookupCode) {
+    const isVnpt = /vnpt-invoice|invoice\.vnpt\.vn|tracuu\.vnpt-invoice|4000344946/i.test(rawXml) || 
+      /NGHĨA SƠN|NGHIA SON/i.test(rawXml);
+
+    if (isVnpt) {
+      const cqtCode = extractTagValue(rawXml, 'MCCQT', '') || 
+        extractTagValue(rawXml, 'mhdon', '') || 
+        extractTagValue(rawXml, 'MaCQT', '') ||
+        extractTagValue(rawXml, 'cqtCode', '');
+      if (cqtCode) {
+        const cleanCqt = cleanLookupValue(cqtCode);
+        if (cleanCqt) {
+          lookupCode = cleanCqt;
+        }
+      }
+    }
+  }
+
+  // 6. Tìm URL tra cứu
   const urlTags = ['LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu', 'PortalUrl', 'Website'];
   let lookupUrl = tagValue(urlTags);
   if (!/^https?:\/\//i.test(lookupUrl)) {
@@ -623,8 +622,13 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
   if (!lookupUrl) {
     const urlMatch = rawXml.match(/https?:\/\/[^\s<"']+/gi)?.map(cleanLookupValue)
-      .find(value => !/w3\.org|schema\.org/i.test(value) && /tra[-_]?cuu|invoice|einvoice|sinvoice|easyinvoice|4si/i.test(value));
+      .find(value => !/w3\.org|schema\.org/i.test(value) && /tra[-_]?cuu|invoice|einvoice|sinvoice|easyinvoice|4si|meinvoice|vnpt/i.test(value));
     lookupUrl = urlMatch || '';
+  }
+
+  if (!lookupUrl && (/vnpt-invoice|4000344946/i.test(rawXml) || /NGHĨA SƠN|NGHIA SON/i.test(rawXml))) {
+    const nbmst = extractTagValue(rawXml, 'MST', '') || extractTagValue(rawXml, 'nbmst', '') || '4000344946';
+    lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
 
   return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : '', lookupUrl };
@@ -1449,7 +1453,7 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     /vnpt-invoice|invoice\.vnpt\.vn|tracuu\.vnpt-invoice/i.test(xmlSource);
 
   if (isVnpt) {
-    if (mhdon) {
+    if (!lookupCode && mhdon) {
       lookupCode = mhdon;
     }
     if (!lookupUrl) {
