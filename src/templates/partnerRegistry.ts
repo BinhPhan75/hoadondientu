@@ -138,6 +138,14 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '0318443500') return 'TKJ';
   if (nbmst === '4000344946') return 'NGHIA_SON';
 
+  // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp) - áp dụng mẫu tổng quát cho
+  // BẤT KỲ người bán nào khác dùng cùng phần mềm, không riêng đối tác đã
+  // đặt tên ở trên. Tránh rơi về DEFAULT (mất bố cục đúng) hoặc gán nhầm
+  // vào mẫu của 1 công ty cụ thể khác.
+  const msttcgp = (invoice.msttcgp || '').replace(/[^0-9]/g, '');
+  if (msttcgp === '0302999571') return '4SI'; // Công ty TNHH L.C.S
+  if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT tổng quát)
+
   // 2. Check Seller Names
   if (nbten.includes('baoduy')) return 'BAO_DUY';
   if (nbten.includes('pnj') || (nbten.includes('chetac') && nbten.includes('trangsuc'))) return 'PNJ';
