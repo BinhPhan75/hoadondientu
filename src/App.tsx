@@ -23,6 +23,7 @@ import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
 import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
+import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -329,18 +330,8 @@ export default function App() {
       }));
 
       try {
-        const response = await fetch('/api/gdt/invoice-detail', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': token } : {}),
-            ...(cookie ? { 'x-gdt-cookie': cookie } : {})
-          },
-          body: JSON.stringify({ invoice, token, cookieHeader: cookie })
-        });
-        const data = await response.json();
-        if (data.success && data.invoice) {
-          const enriched = data.invoice as GDTInvoice;
+        const enriched = await executeGdtInvoiceDetail(invoice, token, cookie);
+        if (enriched) {
           setInvoices(prev => {
             const index = prev.findIndex(item => item.id === enriched.id);
             if (index === -1) return prev;
@@ -469,33 +460,17 @@ export default function App() {
       ]);
 
       try {
-        const res = await fetch('/api/gdt/query-invoices', {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': activeToken,
-            'x-gdt-cookie': activeCookie
-          },
-          body: JSON.stringify({
-            fromDate: chunk.fromDate,
-            toDate: chunk.toDate,
-            invoiceType: 'purchase',
-            size: 50,
-            token: activeToken,
-            cookieHeader: activeCookie
-          })
+        const queryRes = await executeGdtInvoiceQuery({
+          fromDate: chunk.fromDate,
+          toDate: chunk.toDate,
+          invoiceType: 'purchase',
+          size: 50,
+          token: activeToken,
+          cookieHeader: activeCookie
         });
 
-        const rawText = await res.text();
-        let data: any = {};
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          data = { success: false, message: `Lỗi phân tích máy chủ HTTP ${res.status}` };
-        }
-
-        if (res.ok && Array.isArray(data.invoices)) {
-          const monthInvoices: GDTInvoice[] = data.invoices;
+        if (queryRes.success && Array.isArray(queryRes.invoices)) {
+          const monthInvoices: GDTInvoice[] = queryRes.invoices;
           const purchases = monthInvoices.filter(inv => inv.loaiHdon === 'purchase');
           const solds = monthInvoices.filter(inv => inv.loaiHdon === 'sold');
           
@@ -562,16 +537,17 @@ export default function App() {
             };
           });
 
+          const sourceTag = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
           setConsoleLogs(prev => [
             ...prev,
             {
               id: Math.random().toString(36).substring(2, 9),
               timestamp: new Date().toLocaleTimeString('vi-VN'),
               level: 'success',
-              message: `✓ [HOÀN TẤT ${chunk.label}] Thu được ${monthInvoices.length} HĐ (${purchases.length} mua vào, ${solds.length} bán ra). Tổng lũy kế: ${runningTotalInvoices} HĐ.`
+              message: `✓ [HOÀN TẤT ${chunk.label}] Thu được ${monthInvoices.length} HĐ (${purchases.length} mua vào, ${solds.length} bán ra)${sourceTag}. Tổng lũy kế: ${runningTotalInvoices} HĐ.`
             }
           ]);
-        } else if (res.status === 401) {
+        } else if (queryRes.status === 401) {
           hasEncounteredError = true;
           setAccount(prev => ({ ...prev, isRealGDT: false }));
           setSyncState(prev => ({
@@ -591,7 +567,7 @@ export default function App() {
           break;
         } else {
           hasEncounteredError = true;
-          const msg = data.message || `Lỗi máy chủ (${res.status})`;
+          const msg = queryRes.message || 'Lỗi tra cứu Cổng Thuế';
           setSyncState(prev => ({
             ...prev,
             hasErrors: true,
@@ -667,27 +643,17 @@ export default function App() {
     ]);
 
     try {
-      const res = await fetch('/api/gdt/query-invoices', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': activeToken,
-          'x-gdt-cookie': activeCookie
-        },
-        body: JSON.stringify({
-          fromDate: chunk.fromDate,
-          toDate: chunk.toDate,
-          invoiceType: 'purchase',
-          size: 50,
-          token: activeToken,
-          cookieHeader: activeCookie
-        })
+      const queryRes = await executeGdtInvoiceQuery({
+        fromDate: chunk.fromDate,
+        toDate: chunk.toDate,
+        invoiceType: 'purchase',
+        size: 50,
+        token: activeToken,
+        cookieHeader: activeCookie
       });
 
-      const data = await res.json().catch(() => ({ success: false }));
-
-      if (res.ok && Array.isArray(data.invoices)) {
-        const monthInvoices: GDTInvoice[] = data.invoices;
+      if (queryRes.success && Array.isArray(queryRes.invoices)) {
+        const monthInvoices: GDTInvoice[] = queryRes.invoices;
         const purchases = monthInvoices.filter(inv => inv.loaiHdon === 'purchase');
         const solds = monthInvoices.filter(inv => inv.loaiHdon === 'sold');
         const pAmount = purchases.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
@@ -734,17 +700,18 @@ export default function App() {
           };
         });
 
+        const sourceTag = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
         setConsoleLogs(prev => [
           ...prev,
           {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'success',
-            message: `✓ [THỬ LẠI THÀNH CÔNG] Đã lấy thành công ${monthInvoices.length} hóa đơn của ${chunk.label}!`
+            message: `✓ [THỬ LẠI THÀNH CÔNG] Đã lấy thành công ${monthInvoices.length} hóa đơn của ${chunk.label}${sourceTag}!`
           }
         ]);
       } else {
-        const errMsg = data.message || `Lỗi HTTP ${res.status}`;
+        const errMsg = queryRes.message || 'Lỗi kết nối Cổng Thuế';
         setSyncState(prev => ({
           ...prev,
           chunks: prev.chunks.map((c, idx) => idx === chunkIndex ? { ...c, status: 'failed' as const, errorMessage: errMsg } : c)
@@ -818,108 +785,55 @@ export default function App() {
       ]);
 
       try {
-        const loginRes = await fetch('/api/gdt/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            taxCode: mst,
-            password: pwd,
-            captchaKey: credentials?.captchaKey,
-            captchaCode: credentials?.captchaCode,
-            captchaCookie: credentials?.captchaCookie
-          })
+        const loginResult = await executeGdtLogin({
+          taxCode: mst,
+          password: pwd,
+          captchaKey: credentials?.captchaKey,
+          captchaCode: credentials?.captchaCode,
+          captchaCookie: credentials?.captchaCookie
         });
 
-        const rawLoginText = await loginRes.text();
-        let loginData: any = {};
-        try {
-          loginData = JSON.parse(rawLoginText);
-        } catch {
-          loginData = {
-            success: false,
-            message: `Máy chủ phản hồi mã ${loginRes.status}. Vui lòng thử lại.`
-          };
-        }
-
-        if (!loginRes.ok || !loginData.success) {
-          // Fallback: If cloud server proxy was blocked by GDT firewall, attempt direct authentication from client browser in Vietnam
-          let directLoginSucceeded = false;
-          try {
-            const directAuthRes = await fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json, text/plain, */*'
-              },
-              body: JSON.stringify({
-                username: mst,
-                password: pwd,
-                ckey: credentials?.captchaKey,
-                cvalue: credentials?.captchaCode
-              })
-            });
-
-            if (directAuthRes.ok) {
-              const directAuthData = await directAuthRes.json();
-              if (directAuthData && directAuthData.token) {
-                loginData = {
-                  success: true,
-                  session: {
-                    token: directAuthData.token,
-                    taxpayerName: directAuthData.name || directAuthData.taxpayerName,
-                    address: directAuthData.address
-                  }
-                };
-                directLoginSucceeded = true;
-              }
+        if (!loginResult.success || !loginResult.token) {
+          const errMsg = loginResult.error || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'error',
+              message: `[KẾT NỐI THẤT BẠI] ${errMsg}`
             }
-          } catch (directAuthErr) {
-            console.warn('[Direct Browser Auth Attempt]:', directAuthErr);
-          }
-
-          if (!directLoginSucceeded && (!loginRes.ok || !loginData.success)) {
-            const errMsg = loginData.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
-            setConsoleLogs(prev => [
-              ...prev,
-              {
-                id: Math.random().toString(36).substring(2, 9),
-                timestamp: new Date().toLocaleTimeString('vi-VN'),
-                level: 'error',
-                message: `[KẾT NỐI THẤT BẠI] ${errMsg}`
-              }
-            ]);
-            setIsRefreshing(false);
-            return { success: false, error: errMsg };
-          }
+          ]);
+          setIsRefreshing(false);
+          return { success: false, error: errMsg };
         }
 
         // Login success!
-        if (loginData.session?.token) {
-          activeToken = loginData.session.token;
-          activeCookie = loginData.session.cookieHeader || '';
-          const newSession = { token: activeToken, cookieHeader: activeCookie };
-          setGdtSession(newSession);
-          try {
-            sessionStorage.setItem('gdt_session_tokens', JSON.stringify(newSession));
-          } catch {}
-        }
+        activeToken = loginResult.token;
+        activeCookie = loginResult.cookieHeader || '';
+        const newSession = { token: activeToken, cookieHeader: activeCookie };
+        setGdtSession(newSession);
+        try {
+          sessionStorage.setItem('gdt_session_tokens', JSON.stringify(newSession));
+        } catch {}
 
         setAccount(prev => ({
           ...prev,
           taxCode: mst,
           password: pwd,
           isRealGDT: true,
-          taxpayerName: loginData.session?.taxpayerName || prev.taxpayerName,
-          address: loginData.session?.address || prev.address
+          taxpayerName: loginResult.taxpayerName || prev.taxpayerName,
+          address: loginResult.address || prev.address
         }));
 
+        const sourceNotice = loginResult.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
         setConsoleLogs(prev => [
           ...prev,
           {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'success',
-            message: `[ĐĂNG NHẬP THÀNH CÔNG] Đã xác thực thành công với Cổng Tổng cục Thuế cho MST ${mst} (${loginData.session?.taxpayerName || mst}).`
+            message: `[ĐĂNG NHẬP THÀNH CÔNG] Đã xác thực thành công với Cổng Tổng cục Thuế cho MST ${mst} (${loginResult.taxpayerName || mst})${sourceNotice}.`
           }
         ]);
       } catch (authErr: any) {
@@ -959,47 +873,32 @@ export default function App() {
     ]);
 
     try {
-      const res = await fetch('/api/gdt/query-invoices', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': activeToken,
-          'x-gdt-cookie': activeCookie
-        },
-        body: JSON.stringify({
-          fromDate: filters.fromDate,
-          toDate: filters.toDate,
-          invoiceType: 'purchase',
-          size: 50,
-          token: activeToken,
-          cookieHeader: activeCookie
-        })
+      const queryRes = await executeGdtInvoiceQuery({
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        invoiceType: 'purchase',
+        size: 50,
+        token: activeToken,
+        cookieHeader: activeCookie
       });
 
-      const rawQueryText = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(rawQueryText);
-      } catch {
-        data = { success: false, message: `Máy chủ phản hồi mã ${res.status}` };
-      }
-
-      if (res.ok && Array.isArray(data.invoices)) {
-        setInvoices(data.invoices);
+      if (queryRes.success && Array.isArray(queryRes.invoices)) {
+        setInvoices(queryRes.invoices);
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
-        enqueueInvoicesForEnrichment(data.invoices, activeToken, activeCookie);
+        enqueueInvoicesForEnrichment(queryRes.invoices, activeToken, activeCookie);
+        const sourceNotice = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
         setConsoleLogs(prev => [
           ...prev,
           {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'success',
-            message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${data.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn!`
+            message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${queryRes.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn${sourceNotice}!`
           }
         ]);
         return { success: true };
-      } else if (res.status === 401) {
+      } else if (queryRes.status === 401) {
         setAccount(prev => ({ ...prev, isRealGDT: false }));
         setConsoleLogs(prev => [
           ...prev,
@@ -1007,10 +906,10 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'warning',
-            message: `[PHIÊN HẾT HẠN / CHƯA ĐĂNG NHẬP] ${data.message || 'Vui lòng nhập mã Captcha ở bảng bên trái để kết nối Tổng cục Thuế.'}`
+            message: `[PHIÊN HẾT HẠN / CHƯA ĐĂNG NHẬP] ${queryRes.message || 'Vui lòng nhập mã Captcha ở bảng bên trái để kết nối Tổng cục Thuế.'}`
           }
         ]);
-        return { success: false, error: data.message };
+        return { success: false, error: queryRes.message };
       } else {
         setConsoleLogs(prev => [
           ...prev,
@@ -1018,10 +917,10 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'error',
-            message: `[TRA CỨU THẤT BẠI] ${data.message || 'Không thể lấy dữ liệu từ Cổng Thuế'}`
+            message: `[TRA CỨU THẤT BẠI] ${queryRes.message || 'Không thể lấy dữ liệu từ Cổng Thuế'}`
           }
         ]);
-        return { success: false, error: data.message };
+        return { success: false, error: queryRes.message };
       }
     } catch (err: any) {
       console.error('Error querying GDT invoices:', err);

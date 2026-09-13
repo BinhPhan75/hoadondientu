@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { GDTAccountConfig, FilterParams } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
+import { executeGdtCaptcha } from '../utils/gdtQueryClient';
 
 export interface CrawlerCredentials {
   taxCode: string;
@@ -130,66 +131,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCaptchaCode('');
     setOcrSuccess(false);
 
-    // Strategy 1: Attempt via Serverless Backend Proxy (/api/gdt/captcha)
-    try {
-      const res = await fetch('/api/gdt/captcha');
-      const rawText = await res.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        console.warn('[Proxy Captcha Non-JSON]:', rawText.slice(0, 100));
-      }
-
-      if (res.ok && data && data.success && data.captchaImage) {
-        setCaptchaImg(data.captchaImage);
-        setCaptchaKey(data.captchaKey || '');
-        setCaptchaCookie(data.captchaCookie || '');
-        setIsRealGdtCaptcha(true);
-        setAuthError(null);
-
-        setIsLoadingCaptcha(false);
-        return;
-      }
-    } catch (proxyErr) {
-      console.warn('[Proxy Captcha Failed, attempting direct fetch]:', proxyErr);
-    }
-
-    // Strategy 2: Direct browser fetch from official GDT Portal
-    // (hoadondientu.gdt.gov.vn supports CORS and works natively when user connects from Vietnam)
-    try {
-      const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
-        method: 'GET',
-        headers: { 'Accept': 'application/json, text/plain, */*' }
-      });
-
-      if (directRes.ok) {
-        const rawDirectText = await directRes.text();
-        let directData: any = null;
-        try {
-          directData = JSON.parse(rawDirectText);
-        } catch {
-          console.warn('[Direct GDT Non-JSON]:', rawDirectText.slice(0, 100));
-        }
-
-        if (directData && directData.key && directData.content) {
-          const imgUrl = directData.content.startsWith('data:')
-            ? directData.content
-            : `data:image/svg+xml;utf8,${encodeURIComponent(directData.content)}`;
-
-          setCaptchaImg(imgUrl);
-          setCaptchaKey(directData.key);
-          setCaptchaCookie('');
-          setIsRealGdtCaptcha(true);
-          setAuthError(null);
-
-          // Manual input is prioritized - do not auto-run OCR to avoid delay/timeouts
-          setIsLoadingCaptcha(false);
-          return;
-        }
-      }
-    } catch (directErr) {
-      console.warn('[Direct GDT Captcha Fetch Failed]:', directErr);
+    const res = await executeGdtCaptcha();
+    if (res.success && res.captchaImage) {
+      setCaptchaImg(res.captchaImage);
+      setCaptchaKey(res.captchaKey || '');
+      setCaptchaCookie(res.captchaCookie || '');
+      setIsRealGdtCaptcha(true);
+      setAuthError(null);
+      setIsLoadingCaptcha(false);
+      return;
     }
 
     // If both failed:
@@ -199,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCaptchaCode('');
     setOcrSuccess(false);
     setIsRealGdtCaptcha(false);
-    setAuthError('Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" hoặc bấm vào ô ảnh để thử lại.');
+    setAuthError(res.error || 'Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" hoặc bấm vào ô ảnh để thử lại.');
     setIsLoadingCaptcha(false);
   };
 

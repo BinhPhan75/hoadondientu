@@ -75,7 +75,12 @@ function findInvoiceDocument(source: any, seen = new Set<any>(), depth = 0): str
     // Some responses carry the XML as base64 in a document/content field.
     if (value.length > 200 && /^[A-Za-z0-9+/=\r\n]+$/.test(value)) {
       try {
-        const decoded = Buffer.from(value, 'base64').toString('utf8').trim();
+        let decoded = '';
+        if (typeof Buffer !== 'undefined') {
+          decoded = Buffer.from(value, 'base64').toString('utf8').trim();
+        } else if (typeof atob !== 'undefined') {
+          decoded = decodeURIComponent(escape(atob(value.replace(/\s+/g, '')))).trim();
+        }
         if (isXml(decoded) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(decoded)) return decoded;
       } catch { /* not a base64 document */ }
     }

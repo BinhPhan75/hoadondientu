@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { GDTAccountConfig } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
+import { executeGdtCaptcha, executeGdtLogin } from '../utils/gdtQueryClient';
 
 interface AccountConfigModalProps {
   isOpen: boolean;
@@ -81,64 +82,16 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     setCaptchaCode('');
     setOcrSuccess(false);
 
-    // Strategy 1: Server proxy (/api/gdt/captcha)
-    try {
-      const res = await fetch('/api/gdt/captcha');
-      const rawText = await res.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        console.warn('[Modal Proxy Captcha Non-JSON]:', rawText.slice(0, 100));
-      }
-      
-      if (res.ok && data && data.success && data.captchaImage) {
-        setCaptchaImg(data.captchaImage);
-        setCaptchaKey(data.captchaKey || '');
-        setIsRealGDT(data.isRealGDT ?? true);
-        if (data.captchaCode) {
-          setCaptchaCode(data.captchaCode);
-          setOcrSuccess(true);
-        }
-        setIsLoadingCaptcha(false);
-        return;
-      }
-    } catch (e) {
-      console.warn('[Modal Proxy Captcha Failed, attempting direct]:', e);
+    const res = await executeGdtCaptcha();
+    if (res.success && res.captchaImage) {
+      setCaptchaImg(res.captchaImage);
+      setCaptchaKey(res.captchaKey || '');
+      setIsRealGDT(true);
+      setIsLoadingCaptcha(false);
+      return;
     }
 
-    // Strategy 2: Direct browser fetch from official GDT Portal
-    try {
-      const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
-        method: 'GET',
-        headers: { 'Accept': 'application/json, text/plain, */*' }
-      });
-
-      if (directRes.ok) {
-        const rawDirectText = await directRes.text();
-        let directData: any = null;
-        try {
-          directData = JSON.parse(rawDirectText);
-        } catch {}
-
-        if (directData && directData.key && directData.content) {
-          const imgUrl = directData.content.startsWith('data:')
-            ? directData.content
-            : `data:image/svg+xml;utf8,${encodeURIComponent(directData.content)}`;
-
-          setCaptchaImg(imgUrl);
-          setCaptchaKey(directData.key);
-          setIsRealGDT(true);
-
-          setIsLoadingCaptcha(false);
-          return;
-        }
-      }
-    } catch (directErr) {
-      console.warn('[Modal Direct GDT Fetch Failed]:', directErr);
-    }
-
-    // Strategy 3: Fallback local SVG captcha with clear high contrast text
+    // Fallback local SVG captcha with clear high contrast text
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let code = '';
     for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -178,32 +131,17 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     }
 
     setIsSubmitting(true);
-    setStatusMessage({ type: 'info', text: 'Đang gửi yêu cầu xác thực trực tiếp đến Cổng Tổng cục Thuế (hoadondientu.gdt.gov.vn)...' });
+    setStatusMessage({ type: 'info', text: 'Đang gửi yêu cầu xác thực đến Cổng Tổng cục Thuế (hoadondientu.gdt.gov.vn)...' });
 
     try {
-      const res = await fetch('/api/gdt/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taxCode: taxCode.trim(),
-          password: password.trim(),
-          captchaKey,
-          captchaCode: activeCode
-        })
+      const loginResult = await executeGdtLogin({
+        taxCode: taxCode.trim(),
+        password: password.trim(),
+        captchaKey,
+        captchaCode: activeCode
       });
 
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = {
-          success: false,
-          message: `Máy chủ trả về phản hồi không đúng định dạng (Mã HTTP: ${res.status}). Vui lòng kiểm tra lại kết nối mạng hoặc thử lại.`
-        };
-      }
-
-      if (res.ok && data.success) {
+      if (loginResult.success && loginResult.token) {
         setStatusMessage({ 
           type: 'success', 
           text: 'Xác thực thành công! Đã kết nối phiên làm việc Cổng Tổng cục Thuế thực tế.' 
@@ -212,8 +150,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         const updatedConfig: GDTAccountConfig = {
           taxCode: taxCode.trim(),
           password: password,
-          taxpayerName: data.session?.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,
-          address: data.session?.address || 'Đăng ký tại Tổng cục Thuế',
+          taxpayerName: loginResult.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,
+          address: loginResult.address || 'Đăng ký tại Tổng cục Thuế',
           rememberMe,
           autoSaveSession: true,
           useHeadlessBrowser: useHeadless,
@@ -227,15 +165,14 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
       } else {
         setStatusMessage({
           type: 'error',
-          text: data.message || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.'
+          text: loginResult.error || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.'
         });
-        // Refresh captcha on failure
         fetchCaptcha();
       }
     } catch (err: any) {
       setStatusMessage({
         type: 'error',
-        text: `Lỗi kết nối máy chủ (${err.message}). Vui lòng thử lại hoặc sử dụng công cụ Python trên máy tính.`
+        text: `Lỗi kết nối máy chủ (${err.message}). Vui lòng thử lại.`
       });
       fetchCaptcha();
     } finally {
