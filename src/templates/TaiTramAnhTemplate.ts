@@ -7,7 +7,8 @@ import {
   extractLookupDetails, 
   generateDefaultQrSvg, 
   getPrintControlsHtml,
-  numberToVietnameseWords
+  numberToVietnameseWords,
+  buildDirectLookupUrl
 } from './templateUtils';
 import { RenderTemplateOptions } from './types';
 
@@ -21,6 +22,7 @@ export function renderTaiTramAnhTemplate(
   
   const mCode = lookupCode || invoice.lookupCode || '';
   const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'MISA', invoice.nbmst);
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0312105174;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
@@ -386,7 +388,9 @@ export function renderTaiTramAnhTemplate(
 
       <!-- FOOTER -->
       <div class="footer-area">
-        <div>Tra cứu tại Website: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#2563eb;text-decoration:none;">${escapeHtml(pUrl)}</a> - Mã tra cứu hóa đơn: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
+        <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:600;">${escapeHtml(pUrl)}</a> - Mã tra cứu hóa đơn: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong>
+        ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;vertical-align:middle;">Tra cứu trực tiếp (meInvoice) ↗</a>` : ''}
+        </div>
         <div style="font-style:italic;color:#64748b;margin-top:2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
         <div style="font-size:10.5px;color:#475569;margin-top:3px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
       </div>

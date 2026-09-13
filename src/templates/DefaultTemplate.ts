@@ -8,7 +8,8 @@ import {
   extractLookupDetails, 
   generateDefaultQrSvg, 
   getPrintControlsHtml,
-  numberToVietnameseWords
+  numberToVietnameseWords,
+  buildDirectLookupUrl
 } from './templateUtils';
 import { RenderTemplateOptions } from './types';
 
@@ -22,6 +23,7 @@ export function renderDefaultTemplate(
   
   const mCode = lookupCode || invoice.lookupCode || '';
   const pUrl = lookupUrl || invoice.lookupUrl || '';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'DEFAULT', invoice.nbmst);
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${invoice.nbmst};KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
@@ -317,8 +319,9 @@ export function renderDefaultTemplate(
     <div class="footer-bar">
       ${mCode || pUrl ? `
         <div>
-          ${pUrl ? `Tra cứu tại: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#2563eb;">${escapeHtml(pUrl)}</a> ` : ''}
+          ${pUrl ? `Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> ` : ''}
           ${mCode ? `- Mã tra cứu: <strong>${escapeHtml(mCode)}</strong>` : ''}
+          ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:600;vertical-align:middle;">Mở trang tra cứu ↗</a>` : ''}
         </div>
       ` : ''}
       <div style="font-style:italic;color:#64748b;margin-top:2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>

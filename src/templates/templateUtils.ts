@@ -59,6 +59,63 @@ export function extractLookupDetails(rawXml?: string): { lookupCode: string; loo
   return extractLookupDetailsFromXml(rawXml);
 }
 
+/**
+ * Tạo URL tra cứu trực tiếp đến hóa đơn dựa trên nhà cung cấp và mã tra cứu.
+ * Đặc biệt đối với MISA (meinvoice.vn):
+ * Cổng tra cứu https://www.meinvoice.vn/tra-cuu không yêu cầu mã captcha khi mở kèm tham số ?code=[MÃ_TRA_CỨU].
+ * Điều này cho phép mở thẳng bản tra cứu hóa đơn một cách tự động khi người dùng nhấp vào link.
+ */
+export function buildDirectLookupUrl(
+  portalUrl?: string,
+  lookupCode?: string,
+  providerOrTemplateId?: string,
+  sellerTaxCode?: string
+): string {
+  let url = (portalUrl || '').trim();
+  const code = (lookupCode || '').trim();
+  const provider = (providerOrTemplateId || '').toUpperCase();
+
+  // Tự động nhận diện URL nếu chưa có
+  if (!url) {
+    if (provider.includes('MISA') || provider.includes('TAI_TRAM_ANH') || provider.includes('XUAN_VINH')) {
+      url = 'https://www.meinvoice.vn/tra-cuu';
+    } else if (provider.includes('VNPT') || provider.includes('NGHIA_SON')) {
+      url = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+    } else if (provider.includes('4SI') || provider.includes('PNJ')) {
+      url = 'https://inv.4si.vn/tra-cuu-hoa-don';
+    } else if (provider.includes('EASY') || provider.includes('SOFTDREAMS') || provider.includes('BAO_DUY') || provider.includes('KIM_LOAN') || provider.includes('TKJ')) {
+      url = sellerTaxCode ? `http://${sellerTaxCode}hd.easyinvoice.com.vn` : 'https://easyinvoice.vn/tra-cuu';
+    } else if (provider.includes('VIETTEL')) {
+      url = 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+    } else if (provider.includes('BKAV')) {
+      url = 'https://ehoadon.bkav.com/tra-cuu';
+    } else {
+      url = 'https://hoadondientu.gdt.gov.vn';
+    }
+  }
+
+  // 1. MISA meInvoice: https://www.meinvoice.vn/tra-cuu
+  // Khi kèm tham số ?code=..., meInvoice sẽ tự động điền mã và hiển thị hóa đơn mà không cần captcha
+  if (url.includes('meinvoice.vn') || provider.includes('MISA') || provider.includes('TAI_TRAM_ANH') || provider.includes('XUAN_VINH')) {
+    if (code) {
+      if (url.includes('?code=') || url.includes('&code=')) {
+        return url;
+      }
+      const baseUrl = url.split('?')[0].replace(/\/+$/, '');
+      return `${baseUrl}?code=${encodeURIComponent(code)}`;
+    }
+    return url;
+  }
+
+  // 2. 4Si / LCS (PNJ):
+  if (url.includes('4si.vn') && code && !url.includes('?code=')) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}code=${encodeURIComponent(code)}`;
+  }
+
+  return url;
+}
+
 export function generateDefaultQrSvg(dataText: string = 'HOADON'): string {
   // Return an inline SVG QR placeholder if no dataUrl is provided
   return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="8" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="16" width="12" height="12" fill="black"/><rect x="64" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="72" y="16" width="12" height="12" fill="black"/><rect x="8" y="64" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="72" width="12" height="12" fill="black"/><rect x="42" y="10" width="14" height="8" fill="black"/><rect x="40" y="24" width="8" height="16" fill="black"/><rect x="10" y="44" width="24" height="8" fill="black"/><rect x="44" y="42" width="16" height="16" fill="black"/><rect x="68" y="44" width="22" height="8" fill="black"/><rect x="42" y="66" width="12" height="24" fill="black"/><rect x="64" y="60" width="14" height="12" fill="black"/><rect x="82" y="66" width="10" height="24" fill="black"/></svg>`;

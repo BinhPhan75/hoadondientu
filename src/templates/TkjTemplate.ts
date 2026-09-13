@@ -9,7 +9,8 @@ import {
   extractLookupDetails, 
   generateDefaultQrSvg, 
   getPrintControlsHtml,
-  numberToVietnameseWords
+  numberToVietnameseWords,
+  buildDirectLookupUrl
 } from './templateUtils';
 import { RenderTemplateOptions } from './types';
 
@@ -23,6 +24,7 @@ export function renderTkjTemplate(
   
   const mCode = lookupCode || invoice.lookupCode || '';
   const pUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'TKJ', invoice.nbmst);
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318443500;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
@@ -455,8 +457,10 @@ export function renderTkjTemplate(
       <!-- FOOTER -->
       <div class="footer-section">
         <div><strong>Mã của cơ quan thuế (Tax authority code):</strong> <span style="font-family:monospace;font-weight:bold;">${escapeHtml(taxAuthorityCode)}</span></div>
-        <div style="display:flex;justify-content:space-between;margin-top:2px;">
-          <div>Trang tra cứu: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#2563eb;text-decoration:none;">${escapeHtml(pUrl)}</a></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
+          <div>Trang tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a>
+          ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
+          </div>
           <div>Mã tra cứu: <strong style="color:#b91c1c;font-family:monospace;">${escapeHtml(mCode)}</strong></div>
         </div>
         <div style="text-align:center;font-style:italic;margin-top:3px;color:#475569;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>

@@ -42,6 +42,7 @@ import {
   InvoiceProviderId, 
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
+import { buildDirectLookupUrl } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 
 interface InvoiceDetailModalProps {
@@ -227,6 +228,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const currentProviderMeta: ProviderMeta = getProviderMeta(effectiveTemplateId);
   const autoDetectedMeta: ProviderMeta = getProviderMeta(autoDetectedProvider);
+
+  const directLookupUrl = effectiveInvoice ? buildDirectLookupUrl(
+    lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+    lookupDetails.lookupCode,
+    effectiveTemplateId,
+    effectiveInvoice.nbmst
+  ) : '';
 
   if (!renderError) {
     try {
@@ -499,6 +507,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     Mã tra cứu: <strong className="text-emerald-400">{lookupDetails.lookupCode}</strong>
                   </span>
                 )}
+                {directLookupUrl && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1.5 px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[11px] font-bold inline-flex items-center gap-1 transition-all shadow-xs"
+                    title={`Mở trang tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Tra cứu trực tiếp ↗</span>
+                  </a>
+                )}
               </div>
 
               {/* Template Switcher Dropdown */}
@@ -628,7 +648,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     srcDoc={standaloneHtml}
                     title="Bản Thể Hiện Hóa Đơn Điện Tử"
                     className="w-full h-[1200px] border-0 bg-white"
-                    sandbox="allow-same-origin allow-scripts allow-modals"
+                    sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                   />
                 </div>
               </div>
@@ -789,9 +809,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="text-gray-300 space-y-1">
                   <p>Nhà cung cấp: <strong className="text-amber-300">{currentProviderMeta.name}</strong></p>
                   <p>Mô tả: <span className="text-gray-400">{currentProviderMeta.description}</span></p>
-                  <p>Cổng tra cứu chính thức: <a href={currentProviderMeta.portalUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{currentProviderMeta.portalUrl}</a></p>
+                  <p>Cổng tra cứu: <a href={directLookupUrl || currentProviderMeta.portalUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{directLookupUrl || currentProviderMeta.portalUrl}</a></p>
                   {lookupDetails.lookupCode && (
                     <p>Mã tra cứu / Fkey: <strong className="text-emerald-400 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700">{lookupDetails.lookupCode}</strong></p>
+                  )}
+                  {directLookupUrl && (
+                    <div className="pt-1.5">
+                      <a
+                        href={directLookupUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md text-xs font-bold transition-all shadow-xs"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Mở trang tra cứu ({currentProviderMeta.shortName}) ↗
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>

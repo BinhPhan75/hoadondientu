@@ -22,7 +22,8 @@ import {
   renderNghiaSonTemplate,
   detectPartnerTemplate,
   PARTNER_METAS,
-  PartnerInvoiceTemplateId
+  PartnerInvoiceTemplateId,
+  buildDirectLookupUrl
 } from '../templates';
 
 export type InvoiceProviderId = 
@@ -207,6 +208,8 @@ export function detectInvoiceProvider(
 export function extractLookupDetails(rawXml?: string): { lookupCode: string; lookupUrl: string } {
   return extractLookupDetailsFromXml(rawXml);
 }
+
+export { buildDirectLookupUrl };
 
 export interface ProviderMeta {
   id: string;
@@ -411,50 +414,90 @@ export function renderInvoiceHtml(
     ? detectInvoiceProvider(rawXml, invoice)
     : providerId;
 
+  let html = '';
   switch (resolvedProvider) {
     case 'BAO_DUY':
-      return renderBaoDuyTemplate(invoice, rawXml, options);
+      html = renderBaoDuyTemplate(invoice, rawXml, options);
+      break;
 
     case 'PNJ':
-      return renderPnjTemplate(invoice, rawXml, options);
+      html = renderPnjTemplate(invoice, rawXml, options);
+      break;
 
     case 'TAI_TRAM_ANH':
-      return renderTaiTramAnhTemplate(invoice, rawXml, options);
+      html = renderTaiTramAnhTemplate(invoice, rawXml, options);
+      break;
 
     case 'XUAN_VINH':
-      return renderXuanVinhTemplate(invoice, rawXml, options);
+      html = renderXuanVinhTemplate(invoice, rawXml, options);
+      break;
 
     case 'KIM_LOAN_TUAN':
-      return renderKimLoanTuanTemplate(invoice, rawXml, options);
+      html = renderKimLoanTuanTemplate(invoice, rawXml, options);
+      break;
 
     case 'TKJ':
-      return renderTkjTemplate(invoice, rawXml, options);
+      html = renderTkjTemplate(invoice, rawXml, options);
+      break;
 
     case 'NGHIA_SON':
-      return renderNghiaSonTemplate(invoice, rawXml, options);
+      html = renderNghiaSonTemplate(invoice, rawXml, options);
+      break;
 
     case 'MISA':
-      return renderMisaTemplate(invoice, rawXml, options);
+      html = renderMisaTemplate(invoice, rawXml, options);
+      break;
 
     case 'VIETTEL':
-      return renderViettelTemplate(invoice, rawXml, options);
+      html = renderViettelTemplate(invoice, rawXml, options);
+      break;
 
     case 'EASYINVOICE':
-      return renderEasyInvoiceTemplate(invoice, rawXml, options);
+      html = renderEasyInvoiceTemplate(invoice, rawXml, options);
+      break;
 
     case '4SI':
-      return render4SiTemplate(invoice, rawXml, options);
+      html = render4SiTemplate(invoice, rawXml, options);
+      break;
 
     case 'VNPT':
-      return renderVnptTemplate(invoice, rawXml, options);
+      html = renderVnptTemplate(invoice, rawXml, options);
+      break;
 
     case 'BKAV':
-      return renderBkavTemplate(invoice, rawXml, options);
+      html = renderBkavTemplate(invoice, rawXml, options);
+      break;
 
     case 'DEFAULT':
     default:
-      return renderDefaultTemplate(invoice, rawXml, options);
+      html = renderDefaultTemplate(invoice, rawXml, options);
+      break;
   }
+
+  // Inject helper script to guarantee links inside iframe open smoothly in new window/tab
+  const scriptTag = `
+<script>
+  (function() {
+    document.addEventListener('click', function(e) {
+      var target = e.target;
+      while (target && target.tagName !== 'A') {
+        target = target.parentElement;
+      }
+      if (target && target.tagName === 'A' && target.href) {
+        var href = target.href;
+        if (href && !href.startsWith('javascript:') && href !== '#') {
+          e.preventDefault();
+          window.open(href, '_blank', 'noopener,noreferrer');
+        }
+      }
+    }, true);
+  })();
+</script>`;
+
+  if (html.includes('</body>')) {
+    return html.replace('</body>', `${scriptTag}\n</body>`);
+  }
+  return html + scriptTag;
 }
 
 /**
@@ -532,8 +575,10 @@ export function renderMisaTemplate(
   options?: RenderTemplateOptions
 ): string {
   const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode } = extractLookupDetails(rawXml);
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
+  const mUrl = lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu';
+  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'MISA', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '006BFBDE319939417F9B4EE5AE3AE75AD7';
   const items = ensureInvoiceItems(invoice);
@@ -879,7 +924,9 @@ export function renderMisaTemplate(
 
     <!-- MISA FOOTER -->
     <div class="misa-footer">
-      <div>Tra cứu tại Website: <a href="https://www.meinvoice.vn/tra-cuu" target="_blank">https://www.meinvoice.vn/tra-cuu</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b>
+      ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Tra cứu trực tiếp (meInvoice) ↗</a>` : ''}
+      </div>
       <div style="margin-top: 2px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
     </div>
   </div>
@@ -912,6 +959,7 @@ export function renderEasyInvoiceTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
   const mUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
+  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'EASYINVOICE', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || 'M2-26-KET3U-65650003078';
   const items = ensureInvoiceItems(invoice);
@@ -1245,7 +1293,12 @@ export function renderEasyInvoiceTemplate(
     <!-- FOOTER EASYINVOICE -->
     <div class="easy-footer">
       <div>Mã của cơ quan thuế (Tax authority code): <b>${escapeHtml(maCqt)}</b></div>
-      <div>Trang tra cứu : <a href="${mUrl}" target="_blank">${mUrl}</a> &nbsp;&nbsp;&nbsp; Mã tra cứu : <b>${escapeHtml(mCode)}</b></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">
+        <div>Trang tra cứu : <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(mUrl)}</a>
+          ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#2563eb;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
+        </div>
+        <div>Mã tra cứu : <b>${escapeHtml(mCode)}</b></div>
+      </div>
       <div style="font-style: italic; margin-top: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
       <div style="border-top: 1px solid #888; margin-top: 6px; padding-top: 4px;">
         Đơn vị cung cấp giải pháp: Công ty cổ phần đầu tư công nghệ và thương mại SOFTDREAMS, MST: 0105987432, Http://easyinvoice.vn/
@@ -1274,8 +1327,10 @@ export function render4SiTemplate(
   options?: RenderTemplateOptions
 ): string {
   const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode } = extractLookupDetails(rawXml);
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://inv.4si.vn/tra-cuu-hoa-don';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, '4SI', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0050A3B99A5BD44558A15F25CFEDC94091';
   const items = ensureInvoiceItems(invoice);
@@ -1621,7 +1676,9 @@ export function render4SiTemplate(
     <!-- FOOTER 4SI -->
     <div class="foursi-footer">
       <div style="font-style: italic; margin-bottom: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      ${mCode ? `<div>Tra cứu thông tin hóa đơn điện tử tại <a href="https://inv.4si.vn/tra-cuu-hoa-don" target="_blank">https://inv.4si.vn/tra-cuu-hoa-don</a>. &nbsp;&nbsp; Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>` : `
+      ${mCode ? `<div>Tra cứu thông tin hóa đơn điện tử tại <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a>. &nbsp;&nbsp;
+        <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#0284c7;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a> &nbsp;&nbsp;
+        Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>` : `
       <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho 4SI/L.C.S (không gửi
            kèm mã tra cứu công khai trong API/XML). Ẩn dòng này thay vì hiển thị trống. -->`}
     </div>
@@ -1645,8 +1702,10 @@ export function renderViettelTemplate(
   options?: RenderTemplateOptions
 ): string {
   const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode } = extractLookupDetails(rawXml);
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://sinvoice.viettel.vn/tracuuhoadon';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'VIETTEL', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
   const items = ensureInvoiceItems(invoice);
@@ -1800,8 +1859,10 @@ export function renderViettelTemplate(
     </div>
 
     <!-- VIETTEL LOOKUP BOX -->
-    <div class="viettel-lookup-box">
-      <div>Website tra cứu: <a href="https://sinvoice.viettel.vn/tracuuhoadon" target="_blank" style="color: #ee0033; font-weight: bold;">https://sinvoice.viettel.vn/tracuuhoadon</a></div>
+    <div class="viettel-lookup-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+      <div>Website tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a>
+        ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#ee0033;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
+      </div>
       <div>Mã số bí mật: <b style="color: #ee0033;">${escapeHtml(mCode)}</b></div>
     </div>
 
@@ -1908,6 +1969,7 @@ export function renderVnptTemplate(
   // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
   const mCode = invoice.mhdon || lookupCode || invoice.lookupCode || maCqt;
   const mUrl = lookupUrl || invoice.lookupUrl || (invoice.nbmst ? `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn` : 'https://vnpt-invoice.com.vn');
+  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'VNPT', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
@@ -2376,7 +2438,9 @@ export function renderVnptTemplate(
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
       <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
-      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(mUrl)}" target="_blank" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b>
+      ${mCode ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#005baa;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
+      </div>
     </div>
   </div>
 </body>
@@ -2394,8 +2458,10 @@ export function renderBkavTemplate(
   options?: RenderTemplateOptions
 ): string {
   const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode } = extractLookupDetails(rawXml);
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://van.ehoadon.vn';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'BKAV', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
@@ -2460,8 +2526,11 @@ export function renderBkavTemplate(
     <div style="font-style: italic; text-align: right; font-size: 11.5px; margin-top: 2px;">
       Bằng chữ: ${escapeHtml(wordsAmount)}
     </div>
-    <div style="border-top: 1px solid #ea580c; margin-top: 14px; padding-top: 6px; text-align: center; font-size: 11px; color: #555;">
-      Phát hành bởi hệ thống Bkav eHoadon (www.ehoadon.vn) - Mã tra cứu: <b>${escapeHtml(mCode)}</b>
+    <div style="border-top: 1px solid #ea580c; margin-top: 14px; padding-top: 6px; font-size: 11px; color: #555; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
+      <div>Phát hành bởi hệ thống Bkav eHoadon (www.ehoadon.vn) - Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ea580c; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a>
+        ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:#ea580c;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>` : ''}
+      </div>
+      <div>Mã tra cứu: <b style="font-family: monospace;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>
@@ -2485,6 +2554,7 @@ export function renderDefaultTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
   const mUrl = lookupUrl || invoice.lookupUrl || 'https://hoadondientu.gdt.gov.vn';
+  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'DEFAULT', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '';
   const items = ensureInvoiceItems(invoice);
@@ -2760,8 +2830,15 @@ export function renderDefaultTemplate(
     </div>
 
     <!-- FOOTER -->
-    <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; text-align: center; font-size: 11px; color: #64748b;">
-      (Hóa đơn điện tử khởi tạo theo Nghị định 123/2020/NĐ-CP và Thông tư 78/2021/TT-BTC)
+    <div style="border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 11px; color: #64748b;">
+      ${mCode || mUrl ? `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: #334155; flex-wrap: wrap; gap: 4px;">
+        <div>Tra cứu tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: ${primaryColor}; text-decoration: underline; font-weight: 600;">${escapeHtml(mUrl)}</a>
+          ${directLookupUrl ? ` &nbsp;<a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:2px 8px;background:${primaryColor};color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở trang tra cứu ↗</a>` : ''}
+        </div>
+        ${mCode ? `<div>Mã tra cứu: <strong style="font-family: monospace;">${escapeHtml(mCode)}</strong></div>` : ''}
+      </div>` : ''}
+      <div style="text-align: center;">(Hóa đơn điện tử khởi tạo theo Nghị định 123/2020/NĐ-CP và Thông tư 78/2021/TT-BTC)</div>
     </div>
   </div>
 </body>

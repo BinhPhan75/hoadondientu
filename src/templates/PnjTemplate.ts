@@ -9,7 +9,8 @@ import {
   extractLookupDetails, 
   generateDefaultQrSvg, 
   getPrintControlsHtml,
-  numberToVietnameseWords
+  numberToVietnameseWords,
+  buildDirectLookupUrl
 } from './templateUtils';
 import { RenderTemplateOptions } from './types';
 
@@ -23,6 +24,7 @@ export function renderPnjTemplate(
   
   const mCode = lookupCode || invoice.lookupCode || '';
   const pUrl = lookupUrl || invoice.lookupUrl || 'https://inv.4si.vn/tra-cuu-hoa-don';
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'PNJ', invoice.nbmst);
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0315018466;KH:${invoice.khhdon};SHD:${invoice.shdon}${mCode ? `;MTC:${mCode}` : ''}`);
 
   const items = ensureInvoiceItems(invoice);
@@ -467,7 +469,9 @@ export function renderPnjTemplate(
       <div style="font-style:italic;color:#475569;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
       ${mCode ? `
       <div class="footer-lookup-flex">
-        <div>Tra cứu thông tin hóa đơn điện tử tại: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#0284c7;">${escapeHtml(pUrl)}</a></div>
+        <div>Tra cứu thông tin hóa đơn điện tử tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a>
+          <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-left:8px;padding:2px 8px;background:#0284c7;color:#fff;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;vertical-align:middle;">Mở tra cứu ↗</a>
+        </div>
         <div>Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
       </div>` : `
       <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho nhà cung cấp này (4SI/L.C.S
