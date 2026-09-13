@@ -9,6 +9,7 @@ import { renderKimLoanTuanTemplate } from './KimLoanTuanTemplate';
 import { renderTkjTemplate } from './TkjTemplate';
 import { renderNghiaSonTemplate } from './NghiaSonTemplate';
 import { renderFourSiTemplate } from './FourSiTemplate';
+import { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
 import { renderDefaultTemplate } from './DefaultTemplate';
 
 export * from './types';
@@ -22,6 +23,7 @@ export { renderKimLoanTuanTemplate } from './KimLoanTuanTemplate';
 export { renderTkjTemplate } from './TkjTemplate';
 export { renderNghiaSonTemplate } from './NghiaSonTemplate';
 export { renderFourSiTemplate } from './FourSiTemplate';
+export { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
 export { renderDefaultTemplate } from './DefaultTemplate';
 
 /**
@@ -58,6 +60,9 @@ export function renderPartnerInvoiceHtml(
 
     case 'NGHIA_SON':
       return renderNghiaSonTemplate(invoice, rawXml, options);
+
+    case 'TAN_THANH_DANH':
+      return renderTanThanhDanhTemplate(invoice, rawXml, options);
 
     case '4SI':
       return renderFourSiTemplate(invoice, rawXml, options);

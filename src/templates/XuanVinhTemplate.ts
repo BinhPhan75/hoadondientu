@@ -21,7 +21,7 @@ export function renderXuanVinhTemplate(
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu';
+  const pUrl = 'https://www.meinvoice.vn/tra-cuu';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'MISA', invoice.nbmst);
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0400557356;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
 

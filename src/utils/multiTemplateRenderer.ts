@@ -20,6 +20,7 @@ import {
   renderKimLoanTuanTemplate,
   renderTkjTemplate,
   renderNghiaSonTemplate,
+  renderTanThanhDanhTemplate,
   detectPartnerTemplate,
   PARTNER_METAS,
   PartnerInvoiceTemplateId,
@@ -34,6 +35,7 @@ export type InvoiceProviderId =
   | 'KIM_LOAN_TUAN'
   | 'TKJ'
   | 'NGHIA_SON'
+  | 'TAN_THANH_DANH'
   | 'MISA' 
   | 'VIETTEL' 
   | 'VNPT' 
@@ -302,6 +304,17 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         portalUrl: 'https://4000344946-tt78.vnpt-invoice.com.vn',
         description: 'Mẫu hóa đơn GTGT VNPT Invoice 3 ô chữ ký - CÔNG TY TNHH NGHĨA SƠN'
       };
+    case 'TAN_THANH_DANH':
+      return {
+        id: 'TAN_THANH_DANH',
+        name: 'Vàng Bạc Tân Thanh Danh (MISA)',
+        shortName: 'Tân Thanh Danh',
+        domain: 'meinvoice.vn',
+        badge: '👑 Tân Thanh Danh',
+        color: '#059669',
+        portalUrl: 'https://www.meinvoice.vn/tra-cuu',
+        description: 'Mẫu hóa đơn bán hàng 2C26MTD MISA meInvoice - CÔNG TY TNHH KINH DOANH VÀNG BẠC TÂN THANH DANH'
+      };
     case 'MISA':
       return {
         id: 'MISA',
@@ -444,6 +457,10 @@ export function renderInvoiceHtml(
       html = renderNghiaSonTemplate(invoice, rawXml, options);
       break;
 
+    case 'TAN_THANH_DANH':
+      html = renderTanThanhDanhTemplate(invoice, rawXml, options);
+      break;
+
     case 'MISA':
       html = renderMisaTemplate(invoice, rawXml, options);
       break;
@@ -577,7 +594,7 @@ export function renderMisaTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const mUrl = lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu';
+  const mUrl = 'https://www.meinvoice.vn/tra-cuu';
   const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'MISA', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '006BFBDE319939417F9B4EE5AE3AE75AD7';
@@ -1672,10 +1689,8 @@ export function render4SiTemplate(
     <!-- FOOTER 4SI -->
     <div class="foursi-footer">
       <div style="font-style: italic; margin-bottom: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      ${mCode ? `<div>Tra cứu thông tin hóa đơn điện tử tại <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a>. &nbsp;&nbsp;
-        Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>` : `
-      <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho 4SI/L.C.S (không gửi
-           kèm mã tra cứu công khai trong API/XML). Ẩn dòng này thay vì hiển thị trống. -->`}
+      <div>Tra cứu thông tin hóa đơn điện tử tại <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a>. &nbsp;&nbsp;
+        Mã tra cứu: <b>${escapeHtml(mCode || '')}</b></div>
     </div>
   </div>
 </body>

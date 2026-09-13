@@ -467,14 +467,10 @@ export function renderPnjTemplate(
     <!-- FOOTER -->
     <div class="footer-lookup">
       <div style="font-style:italic;color:#475569;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      ${mCode ? `
       <div class="footer-lookup-flex">
         <div>Tra cứu thông tin hóa đơn điện tử tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;">${escapeHtml(pUrl)}</a></div>
-        <div>Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
-      </div>` : `
-      <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho nhà cung cấp này (4SI/L.C.S
-           không gửi kèm mã tra cứu công khai trong API/XML của GDT). Ẩn dòng này thay vì
-           hiển thị trống/sai, giống cách bản thể hiện chính thức của GDT không có mục này. -->`}
+        <div>Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode || '')}</strong></div>
+      </div>
     </div>
   </div>
 </body>

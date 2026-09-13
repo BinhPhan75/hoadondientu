@@ -8,6 +8,7 @@ export type PartnerInvoiceTemplateId =
   | 'KIM_LOAN_TUAN'
   | 'TKJ'
   | 'NGHIA_SON'
+  | 'TAN_THANH_DANH'
   | 'DEFAULT'
   // Backward-compatibility aliases for existing provider IDs
   | 'MISA'

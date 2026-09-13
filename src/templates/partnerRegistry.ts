@@ -94,6 +94,19 @@ export const PARTNER_METAS: PartnerMeta[] = [
     isCustomPartner: true
   },
   {
+    id: 'TAN_THANH_DANH',
+    name: 'CÔNG TY TNHH KINH DOANH VÀNG BẠC TÂN THANH DANH',
+    shortName: 'Vàng Bạc Tân Thanh Danh',
+    taxCode: '0317978711',
+    defaultAddress: '25-27 An Dương Vương, Phường An Đông, Thành phố Hồ Chí Minh, Việt Nam',
+    portalUrl: 'https://www.meinvoice.vn/tra-cuu',
+    providerBrand: 'MISA meInvoice',
+    badge: 'Tân Thanh Danh',
+    color: '#059669',
+    description: 'Mẫu hóa đơn bán hàng 2C26MTD MISA meInvoice - Vàng Bạc Tân Thanh Danh',
+    isCustomPartner: true
+  },
+  {
     id: 'DEFAULT',
     name: 'Mẫu Hóa Đơn Chuẩn Nghị Định 123 (Mặc Định)',
     shortName: 'Mặc định hệ thống',
@@ -137,6 +150,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '0318391940') return 'KIM_LOAN_TUAN';
   if (nbmst === '0318443500') return 'TKJ';
   if (nbmst === '4000344946') return 'NGHIA_SON';
+  if (nbmst === '0317978711') return 'TAN_THANH_DANH';
 
   // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp) - áp dụng mẫu tổng quát cho
   // BẤT KỲ người bán nào khác dùng cùng phần mềm, không riêng đối tác đã
@@ -154,6 +168,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbten.includes('kimloantuan')) return 'KIM_LOAN_TUAN';
   if (nbten.includes('tkj')) return 'TKJ';
   if (nbten.includes('nghiason')) return 'NGHIA_SON';
+  if (nbten.includes('tanthanhdanh') || nbten.includes('thanhdanh')) return 'TAN_THANH_DANH';
 
   // 3. Check raw XML content if available
   if (xml) {
@@ -164,6 +179,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
     if (xml.includes('0318391940') || xml.includes('kim loan tuấn') || xml.includes('kim loan tuan')) return 'KIM_LOAN_TUAN';
     if (xml.includes('0318443500') || xml.includes('tkj')) return 'TKJ';
     if (xml.includes('4000344946') || xml.includes('nghĩa sơn') || xml.includes('nghia son')) return 'NGHIA_SON';
+    if (xml.includes('0317978711') || xml.includes('tân thanh danh') || xml.includes('tan thanh danh')) return 'TAN_THANH_DANH';
   }
 
   // 4. Default for all entities outside the list

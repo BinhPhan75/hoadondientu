@@ -61,9 +61,27 @@ export function extractLookupDetails(rawXml?: string): { lookupCode: string; loo
 
 /**
  * Tạo URL tra cứu trực tiếp đến hóa đơn dựa trên nhà cung cấp và mã tra cứu.
- * Đặc biệt đối với MISA (meinvoice.vn):
- * Cổng tra cứu https://www.meinvoice.vn/tra-cuu không yêu cầu mã captcha khi mở kèm tham số ?code=[MÃ_TRA_CỨU].
- * Điều này cho phép mở thẳng bản tra cứu hóa đơn một cách tự động khi người dùng nhấp vào link.
+ *
+ * Quy tắc tự động điền theo từng nhà cung cấp:
+ * 1. MISA meInvoice (không cần captcha):
+ *    - Cổng: https://www.meinvoice.vn/tra-cuu
+ *    - Tham số: ?code=[MÃ_TRA_CỨU]
+ *    - Tự động điền mã và mở trực tiếp chi tiết hóa đơn (không cần captcha).
+ *    - Luôn chuẩn hóa về domain https://www.meinvoice.vn/tra-cuu, tuyệt đối không lấy website người bán (như daidoanket.vn).
+ *
+ * 2. VNPT Invoice (yêu cầu captcha):
+ *    - Cổng: https://[MST]-tt78.vnpt-invoice.com.vn
+ *    - Tham số: ?strFkey=[MÃ_TRA_CỨU]
+ *    - Tự động điền mã tra cứu vào ô "Mã tra cứu HĐ" (name="strFkey"), người dùng chỉ cần gõ captcha.
+ *
+ * 3. Softdreams EasyInvoice (yêu cầu captcha):
+ *    - Cổng: http://[MST]hd.easyinvoice.com.vn/Search/Index hoặc https://tracuu.easyinvoice.vn/Search/Index
+ *    - Tham số: ?fkey=[MÃ_TRA_CỨU]
+ *    - Tự động điền mã tra cứu vào ô "Mã tra cứu" (id="iFkey" name="FKey"), người dùng chỉ cần gõ captcha.
+ *
+ * 4. 4Si / LCS (PNJ):
+ *    - Cổng: https://inv.4si.vn/tra-cuu-hoa-don
+ *    - Chưa lấy được mã tra cứu từ Cổng Thuế -> để trống mã tra cứu.
  */
 export function buildDirectLookupUrl(
   portalUrl?: string,
@@ -75,44 +93,88 @@ export function buildDirectLookupUrl(
   const code = (lookupCode || '').trim();
   const provider = (providerOrTemplateId || '').toUpperCase();
 
-  // Tự động nhận diện URL nếu chưa có
-  if (!url) {
-    if (provider.includes('MISA') || provider.includes('TAI_TRAM_ANH') || provider.includes('XUAN_VINH')) {
-      url = 'https://www.meinvoice.vn/tra-cuu';
-    } else if (provider.includes('VNPT') || provider.includes('NGHIA_SON')) {
-      url = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
-    } else if (provider.includes('4SI') || provider.includes('PNJ')) {
-      url = 'https://inv.4si.vn/tra-cuu-hoa-don';
-    } else if (provider.includes('EASY') || provider.includes('SOFTDREAMS') || provider.includes('BAO_DUY') || provider.includes('KIM_LOAN') || provider.includes('TKJ')) {
-      url = sellerTaxCode ? `http://${sellerTaxCode}hd.easyinvoice.com.vn` : 'https://easyinvoice.vn/tra-cuu';
-    } else if (provider.includes('VIETTEL')) {
-      url = 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
-    } else if (provider.includes('BKAV')) {
-      url = 'https://ehoadon.bkav.com/tra-cuu';
-    } else {
-      url = 'https://hoadondientu.gdt.gov.vn';
-    }
-  }
+  // 1. MISA meInvoice
+  // Nếu thuộc MISA (hoặc các mẫu đối tác dùng MISA: Tài Trâm Anh, Xuân Vinh, Tân Thanh Danh),
+  // hoặc URL chứa meinvoice.vn, hoặc URL bị gán nhầm domain người bán (như daidoanket.vn)
+  const isMisa = provider.includes('MISA') ||
+    provider.includes('TAI_TRAM_ANH') ||
+    provider.includes('XUAN_VINH') ||
+    provider.includes('TAN_THANH_DANH') ||
+    /meinvoice\.vn/i.test(url);
 
-  // 1. MISA meInvoice: https://www.meinvoice.vn/tra-cuu
-  // Khi kèm tham số ?code=..., meInvoice sẽ tự động điền mã và hiển thị hóa đơn mà không cần captcha
-  if (url.includes('meinvoice.vn') || provider.includes('MISA') || provider.includes('TAI_TRAM_ANH') || provider.includes('XUAN_VINH')) {
+  if (isMisa) {
+    const baseMisaUrl = 'https://www.meinvoice.vn/tra-cuu';
     if (code) {
-      if (url.includes('?code=') || url.includes('&code=')) {
-        return url;
-      }
-      const baseUrl = url.split('?')[0].replace(/\/+$/, '');
-      return `${baseUrl}?code=${encodeURIComponent(code)}`;
+      return `${baseMisaUrl}/?code=${encodeURIComponent(code)}`;
     }
-    return url;
+    return baseMisaUrl;
   }
 
-  // 2. 4Si / LCS (PNJ):
-  if (url.includes('4si.vn') && code && !url.includes('?code=')) {
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}code=${encodeURIComponent(code)}`;
+  // 2. VNPT Invoice
+  // Điền mã nhận hóa đơn vào ô name="strFkey"
+  const isVnpt = provider.includes('VNPT') ||
+    provider.includes('NGHIA_SON') ||
+    /vnpt-invoice\.com\.vn/i.test(url);
+
+  if (isVnpt) {
+    let vnptUrl = url;
+    if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
+      vnptUrl = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+    }
+    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
+    if (code) {
+      return `${cleanUrl}/?strFkey=${encodeURIComponent(code)}`;
+    }
+    return cleanUrl;
   }
 
+  // 3. Softdreams EasyInvoice
+  // Điền mã tra cứu vào ô id="iFkey" name="FKey" qua endpoint /Search/Index?fkey=...
+  const isEasyInvoice = provider.includes('EASY') ||
+    provider.includes('SOFTDREAMS') ||
+    provider.includes('BAO_DUY') ||
+    provider.includes('KIM_LOAN') ||
+    provider.includes('TKJ') ||
+    /easyinvoice/i.test(url);
+
+  if (isEasyInvoice) {
+    let easyUrl = url;
+    if (!easyUrl || !/easyinvoice/i.test(easyUrl)) {
+      easyUrl = sellerTaxCode
+        ? `http://${sellerTaxCode}hd.easyinvoice.com.vn`
+        : 'https://tracuu.easyinvoice.vn';
+    }
+    let cleanUrl = easyUrl.split('?')[0].replace(/\/+$/, '');
+    if (!/\/Search\/Index$/i.test(cleanUrl)) {
+      cleanUrl = `${cleanUrl}/Search/Index`;
+    }
+    if (code) {
+      return `${cleanUrl}?fkey=${encodeURIComponent(code)}`;
+    }
+    return cleanUrl;
+  }
+
+  // 4. 4Si / LCS (PNJ)
+  // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
+  const is4Si = provider.includes('4SI') || provider.includes('PNJ') || /4si\.vn/i.test(url);
+  if (is4Si) {
+    return 'https://inv.4si.vn/tra-cuu-hoa-don';
+  }
+
+  // 5. Viettel S-Invoice
+  if (provider.includes('VIETTEL') || /sinvoice\.viettel/i.test(url)) {
+    return 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+  }
+
+  // 6. Bkav eHoadon
+  if (provider.includes('BKAV') || /bkav|ehoadon/i.test(url)) {
+    return 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  // Mặc định: Nếu có URL thì giữ nguyên, nếu chưa có thì trỏ về Cổng HĐĐT của Tổng cục Thuế
+  if (!url) {
+    url = 'https://hoadondientu.gdt.gov.vn';
+  }
   return url;
 }
 

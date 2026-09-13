@@ -221,6 +221,38 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
     }
 
+    // Đối với hóa đơn MISA meInvoice (Xuân Vinh, Tài Trâm Anh, Tân Thanh Danh, Báo Đại Đoàn Kết...):
+    // Cổng tra cứu chuẩn luôn là https://www.meinvoice.vn/tra-cuu (không lấy website người bán như daidoanket.vn)
+    const isMisaInvoice =
+      effectiveInvoice.provider === 'MISA' ||
+      effectiveInvoice.msttcgp === '0101243150' ||
+      effectiveInvoice.nbmst === '0317978711' || // Tân Thanh Danh
+      effectiveInvoice.nbmst === '0312105174' || // Tài Trâm Anh
+      effectiveInvoice.nbmst === '0400557356' || // Xuân Vinh
+      autoDetectedProvider === 'MISA' ||
+      autoDetectedProvider === 'TAN_THANH_DANH' ||
+      autoDetectedProvider === 'TAI_TRAM_ANH' ||
+      autoDetectedProvider === 'XUAN_VINH' ||
+      (effectiveInvoice.nbten && /TÂN THANH DANH|XUÂN VINH|TÀI TRÂM ANH|ĐẠI ĐOÀN KẾT/i.test(effectiveInvoice.nbten));
+
+    if (isMisaInvoice) {
+      lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
+    }
+
+    // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
+    const is4SiInvoice =
+      effectiveInvoice.provider === '4SI' ||
+      effectiveInvoice.msttcgp === '0302999571' ||
+      effectiveInvoice.msttcgp === '0315744883' ||
+      effectiveInvoice.nbmst === '0315018466' || // PNJ
+      autoDetectedProvider === 'PNJ' ||
+      autoDetectedProvider === '4SI';
+
+    if (is4SiInvoice) {
+      lookupDetails.lookupUrl = 'https://inv.4si.vn/tra-cuu-hoa-don';
+      // Không gán mã CQT làm mã tra cứu cho 4SI, để trống nếu chưa có
+    }
+
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
     console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);
@@ -539,7 +571,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <option value="AUTO" className="bg-gray-900 text-emerald-300 font-bold">
                     ✨ Tự động nhận diện ({autoDetectedMeta.shortName})
                   </option>
-                  <optgroup label="── 7 ĐỐI TÁC CHÍNH ──" className="bg-gray-900 text-amber-300 font-bold">
+                  <optgroup label="── CÁC ĐỐI TÁC CHÍNH ──" className="bg-gray-900 text-amber-300 font-bold">
                     <option value="BAO_DUY" className="bg-gray-900 text-white">💎 Bảo Duy (Trang Sức Bảo Duy)</option>
                     <option value="PNJ" className="bg-gray-900 text-white">👑 PNJ (Chế Tác & KD Trang Sức PNJ)</option>
                     <option value="TAI_TRAM_ANH" className="bg-gray-900 text-white">💍 Tài Trâm Anh (Gia Công Trang Sức)</option>
@@ -547,6 +579,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     <option value="KIM_LOAN_TUAN" className="bg-gray-900 text-white">✨ Kim Loan Tuấn (KD Vàng Bạc)</option>
                     <option value="TKJ" className="bg-gray-900 text-white">⚜️ TKJ (TM DV Vàng Bạc TKJ)</option>
                     <option value="NGHIA_SON" className="bg-gray-900 text-white">🌐 Nghĩa Sơn (Cty TNHH Nghĩa Sơn)</option>
+                    <option value="TAN_THANH_DANH" className="bg-gray-900 text-white">🏆 Tân Thanh Danh (MISA meInvoice)</option>
                   </optgroup>
                   <optgroup label="── MẪU MẶC ĐỊNH & KHÁC ──" className="bg-gray-900 text-gray-400 font-normal">
                     <option value="DEFAULT" className="bg-gray-900 text-white font-semibold">📋 Mẫu Mặc Định (Chuẩn NĐ 123/TT 78)</option>

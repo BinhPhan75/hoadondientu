@@ -469,11 +469,36 @@ export function getLookupUrlFromPayload(source: any): string {
     const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '4000344946');
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
+
+  // Kiểm tra nếu là nguồn MISA (meInvoice)
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'TenTCGP', 'tentcgpLabel']) || '');
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '');
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'sellerName']) || '');
+
+  const isMisa = msttcgp === '0101243150' ||
+    /MISA/i.test(tentcgp) ||
+    /MISA/i.test(provider) ||
+    nbmst === '0317978711' || // Tân Thanh Danh
+    /TÂN THANH DANH|TAN THANH DANH/i.test(nbten) ||
+    /ĐẠI ĐOÀN KẾT|DAI DOAN KET/i.test(nbten);
+
+  if (isMisa) {
+    return 'https://www.meinvoice.vn/tra-cuu';
+  }
+
   const structured = getFromStructuredArrays(source, ['PortalLink', 'LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu']);
   const value = cleanLookupValue(structured || String(getPayloadValue(source, [
     'lookupUrl', 'LookupUrl', 'lookup_url', 'linkTraCuu', 'LinkTraCuu',
     'websiteTraCuu', 'WebsiteTraCuu', 'webTraCuu', 'WebTraCuu'
   ]) ?? ''));
+
+  // Nếu là domain người bán chung không phải cổng tra cứu thì bỏ qua
+  if (/daidoanket\.vn/i.test(value)) {
+    return 'https://www.meinvoice.vn/tra-cuu';
+  }
+
   return /^https?:\/\//i.test(value) ? value : '';
 }
 
@@ -615,8 +640,19 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   // 6. Tìm URL tra cứu
-  const urlTags = ['LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu', 'PortalUrl', 'Website'];
+  // Chỉ lấy thẻ chuyên dụng cho link tra cứu, không lấy thẻ <Website> chung của người bán
+  // trừ khi URL đó thực sự chứa đường dẫn tra cứu hóa đơn điện tử
+  const urlTags = ['LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu', 'PortalUrl', 'PortalLink'];
   let lookupUrl = tagValue(urlTags);
+
+  // Nếu thẻ <Website> chứa từ khóa tra cứu HĐĐT mới được chấp nhận
+  if (!lookupUrl) {
+    const rawWebsite = tagValue(['Website']);
+    if (rawWebsite && /tra[-_]?cuu|invoice|einvoice|portal|meinvoice|easyinvoice|sinvoice|vnpt/i.test(rawWebsite)) {
+      lookupUrl = rawWebsite;
+    }
+  }
+
   if (!/^https?:\/\//i.test(lookupUrl)) {
     lookupUrl = '';
   }
@@ -626,9 +662,33 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     lookupUrl = urlMatch || '';
   }
 
-  if (!lookupUrl && (/vnpt-invoice|4000344946/i.test(rawXml) || /NGHĨA SƠN|NGHIA SON/i.test(rawXml))) {
+  // Chuẩn hóa đường dẫn tra cứu cho từng nhà cung cấp:
+  // 6a. MISA meInvoice: Cổng tra cứu luôn là https://www.meinvoice.vn/tra-cuu
+  const isMisa = /meinvoice\.vn|misa\.vn/i.test(rawXml) || 
+    /0101243150/i.test(rawXml) || 
+    /MISA meInvoice/i.test(rawXml) ||
+    /0317978711/i.test(rawXml) || // Tân Thanh Danh
+    /TÂN THANH DANH|TAN THANH DANH/i.test(rawXml) ||
+    /BÁO ĐẠI ĐOÀN KẾT|BAO DAI DOAN KET|daidoanket\.vn/i.test(rawXml);
+
+  if (isMisa) {
+    lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
+  }
+
+  // 6b. VNPT Invoice
+  if (!lookupUrl && (/vnpt-invoice|4000344946/i.test(rawXml) || /NGHĨA SƠN|NGHIA SON/i.test(rawXml) || /0100684378/i.test(rawXml))) {
     const nbmst = extractTagValue(rawXml, 'MST', '') || extractTagValue(rawXml, 'nbmst', '') || '4000344946';
     lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
+  }
+
+  // 6c. 4SI / LCS (PNJ):
+  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883|0302999571|0315018466/i.test(rawXml);
+  if (is4Si) {
+    if (!lookupUrl) lookupUrl = 'https://inv.4si.vn/tra-cuu-hoa-don';
+    // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
+    if (!extractTagValue(rawXml, 'MTCuu') && !extractTagValue(rawXml, 'MaTraCuu') && !extractTagValue(rawXml, 'FKey')) {
+      lookupCode = '';
+    }
   }
 
   return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : '', lookupUrl };
