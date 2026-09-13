@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -281,6 +281,9 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
   const detailLookup = getLookupCodeFromPayload(detailSource);
   const detailUrl = getLookupUrlFromPayload(detailSource);
 
+  const resolvedMhdon = value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon;
+  const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
+
   return {
     ...invoice,
     nbmst: seller.taxCode || value(detailSource, ['nbmst']) || invoice.nbmst,
@@ -289,10 +292,12 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     nmmst: value(detailSource, ['nmmst', 'nmtnnt']) || invoice.nmmst,
     nmten: value(detailSource, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
     nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
-    mhdon: value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
+    mhdon: resolvedMhdon,
     msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || invoice.msttcgp,
-    lookupCode: detailLookup || invoice.lookupCode || undefined,
-    lookupUrl: detailUrl || invoice.lookupUrl || undefined,
+    lookupCode: (isVnpt && resolvedMhdon) ? resolvedMhdon : (detailLookup || invoice.lookupCode || undefined),
+    lookupUrl: (isVnpt && !detailUrl && !invoice.lookupUrl) 
+      ? `https://${seller.taxCode || invoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn` 
+      : (detailUrl || invoice.lookupUrl || undefined),
     items: authoritativeItems,
     ...(detailXml ? { rawXml: detailXml } : {}),
     // A downloaded XML alone is not evidence that line descriptions were

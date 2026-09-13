@@ -20,8 +20,10 @@ export function renderNghiaSonTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || invoice.mhdon || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn`;
+  const maCqt = invoice.mhdon || '00BB3C25BCB8C74D908D5962B75A9ED39B';
+  // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
+  const mCode = invoice.mhdon || lookupCode || invoice.lookupCode || maCqt;
+  const pUrl = lookupUrl || invoice.lookupUrl || `https://${invoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${invoice.nbmst || ''};KH:${invoice.khhdon};SHD:${invoice.shdon}${mCode ? `;MTC:${mCode}` : ''}`);
 
   const items = ensureInvoiceItems(invoice);
@@ -29,7 +31,6 @@ export function renderNghiaSonTemplate(
   const subTotal = invoice.tgtcthue || Math.round(totalAmount / 1.1);
   const vatAmount = invoice.tgtthue || (totalAmount - subTotal > 0 ? totalAmount - subTotal : Math.round(subTotal * 0.1));
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const maCqt = invoice.mhdon || '00BB3C25BCB8C74D908D5962B75A9ED39B';
   const showControls = options?.showPrintControls !== false;
 
   const buyerName = invoice.nmten || 'CÔNG TY TNHH MỘT THÀNH VIÊN VÀNG BẠC NGHĨA TÍN';
@@ -419,10 +420,7 @@ export function renderNghiaSonTemplate(
     <!-- FOOTER -->
     <div class="footer-area">
       <div style="font-style:italic;color:#64748b;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      ${mCode ? `<div style="margin-top:2px;">Tra cứu hóa đơn điện tử tại Website: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#0284c7;">${escapeHtml(pUrl)}</a> - Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>` : `
-      <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho VNPT Invoice
-           (JSON không gửi kèm mã tra cứu công khai). Ẩn dòng này thay vì
-           hiển thị trống/sai. -->`}
+      <div style="margin-top:2px;">Tra cứu hóa đơn điện tử tại Website: <a href="${escapeHtml(pUrl)}" target="_blank" style="color:#0284c7;">${escapeHtml(pUrl)}</a> - Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
     </div>
   </div>
 </body>

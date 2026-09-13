@@ -40,8 +40,8 @@ export class VnptDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    // Trích xuất Fkey hoặc Mã tra cứu của VNPT
-    let lookupCode = this.extractCustomField(xmlData, ['Fkey', 'Mã Fkey', 'Mã tra cứu', 'MaTraCuu']);
+    // Trích xuất mã tra cứu của VNPT (Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu chính là mã CQT)
+    let lookupCode = cqtCode || this.extractCustomField(xmlData, ['Fkey', 'Mã Fkey', 'Mã tra cứu', 'MaTraCuu']);
     if (!lookupCode) {
       lookupCode = this.extractXmlTag(xmlData, 'Fkey') || this.extractXmlTag(xmlData, 'MTCuu');
     }

@@ -407,7 +407,7 @@ export const SAMPLE_PARTNER_INVOICES: GDTInvoice[] = [
     signerName: 'CÔNG TY TNHH NGHĨA SƠN',
     signedDate: '2026-07-16T16:01:45',
     caProvider: 'VNPT-CA',
-    lookupCode: '20260716-160100-249591',
+    lookupCode: '00BB3C25BCB8C74D908D5962B75A9ED39B',
     lookupUrl: 'https://4000344946-tt78.vnpt-invoice.com.vn',
     items: [
       {

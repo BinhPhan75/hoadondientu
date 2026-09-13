@@ -42,7 +42,7 @@ import {
   InvoiceProviderId, 
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
-import { ensureInvoiceItems, hasGenuineItems } from '../utils/xmlParser';
+import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -191,6 +191,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
     autoDetectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
     lookupDetails = extractLookupDetails(xmlContent);
+
+    // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
+    const isVnptInvoice = 
+      effectiveInvoice.provider === 'VNPT' ||
+      effectiveInvoice.nbmst === '4000344946' ||
+      effectiveInvoice.msttcgp === '0100684378' ||
+      (effectiveInvoice.nbten && /NGHĨA SƠN|NGHIA SON/i.test(effectiveInvoice.nbten)) ||
+      (effectiveInvoice.caProvider && effectiveInvoice.caProvider.includes('VNPT')) ||
+      autoDetectedProvider === 'NGHIA_SON' ||
+      autoDetectedProvider === 'VNPT' ||
+      selectedTemplateId === 'NGHIA_SON' ||
+      selectedTemplateId === 'VNPT';
+
+    if (isVnptInvoice) {
+      const cqt = effectiveInvoice.mhdon || extractTagValue(xmlContent, 'MCCQT') || extractTagValue(xmlContent, 'mhdon');
+      if (cqt) {
+        lookupDetails.lookupCode = cqt;
+      }
+      if (!lookupDetails.lookupUrl) {
+        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${effectiveInvoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+      }
+    }
+
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
     console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);

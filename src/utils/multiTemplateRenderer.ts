@@ -1904,10 +1904,11 @@ export function renderVnptTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || invoice.mhdon || '';
-  const mUrl = lookupUrl || invoice.lookupUrl || 'https://vnpt-invoice.com.vn';
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0011B88299A1209384B2C89';
+  // Đối với hóa đơn VNPT như Nghĩa Sơn: mã tra cứu hóa đơn chính là mã CQT cấp cho từng hóa đơn
+  const mCode = invoice.mhdon || lookupCode || invoice.lookupCode || maCqt;
+  const mUrl = lookupUrl || invoice.lookupUrl || (invoice.nbmst ? `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn` : 'https://vnpt-invoice.com.vn');
+  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
@@ -2375,7 +2376,7 @@ export function renderVnptTemplate(
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
       <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
-      <div>Tra cứu trực tuyến tại: <a href="https://vnpt-invoice.com.vn" target="_blank" style="color: #005baa; font-weight: bold;">https://vnpt-invoice.com.vn</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(mUrl)}" target="_blank" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>
