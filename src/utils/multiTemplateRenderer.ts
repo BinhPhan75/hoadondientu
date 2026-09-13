@@ -1281,8 +1281,8 @@ export function render4SiTemplate(
   const items = ensureInvoiceItems(invoice);
   const showControls = options?.showPrintControls !== false;
 
-  const qrSrc = options?.qrCodeDataUrl || 
-    `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`https://inv.4si.vn/tra-cuu-hoa-don?code=${mCode}`)}`;
+  const qrSrc = options?.qrCodeDataUrl ||
+    `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`https://inv.4si.vn/tra-cuu-hoa-don${mCode ? `?code=${mCode}` : ''}`)}`;
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -1493,7 +1493,7 @@ export function render4SiTemplate(
   <div class="print-actions">
     <div>
       <span style="font-weight: bold; color: #38bdf8;">[Giao diện 4Si E-Invoice / LCS]</span>
-      <span style="font-size: 12px; color: #94a3b8; margin-left: 8px;">Mã tra cứu: ${escapeHtml(mCode)}</span>
+      ${mCode ? `<span style="font-size: 12px; color: #94a3b8; margin-left: 8px;">Mã tra cứu: ${escapeHtml(mCode)}</span>` : ''}
     </div>
     <button class="print-btn" onclick="window.print()">In Hóa Đơn (A4)</button>
   </div>
@@ -1513,7 +1513,7 @@ export function render4SiTemplate(
       </div>
       <div class="foursi-qr-box">
         <img src="${qrSrc}" alt="QR Code" />
-        <div class="qr-subtext">${escapeHtml(mCode.substring(0, 12))}</div>
+        ${mCode ? `<div class="qr-subtext">${escapeHtml(mCode.substring(0, 12))}</div>` : ''}
       </div>
     </div>
 
@@ -1621,7 +1621,9 @@ export function render4SiTemplate(
     <!-- FOOTER 4SI -->
     <div class="foursi-footer">
       <div style="font-style: italic; margin-bottom: 2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      <div>Tra cứu thông tin hóa đơn điện tử tại <a href="https://inv.4si.vn/tra-cuu-hoa-don" target="_blank">https://inv.4si.vn/tra-cuu-hoa-don</a>. &nbsp;&nbsp; Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>
+      ${mCode ? `<div>Tra cứu thông tin hóa đơn điện tử tại <a href="https://inv.4si.vn/tra-cuu-hoa-don" target="_blank">https://inv.4si.vn/tra-cuu-hoa-don</a>. &nbsp;&nbsp; Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>` : `
+      <!-- Không có mã tra cứu thật từ dữ liệu Cổng Thuế cho 4SI/L.C.S (không gửi
+           kèm mã tra cứu công khai trong API/XML). Ẩn dòng này thay vì hiển thị trống. -->`}
     </div>
   </div>
 </body>
@@ -1902,7 +1904,7 @@ export function renderVnptTemplate(
 ): string {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || '';
+  const mCode = lookupCode || invoice.lookupCode || invoice.mhdon || '';
   const mUrl = lookupUrl || invoice.lookupUrl || 'https://vnpt-invoice.com.vn';
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0011B88299A1209384B2C89';

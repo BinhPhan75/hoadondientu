@@ -285,6 +285,7 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     nmten: value(detailSource, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
     nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
     mhdon: value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon,
+    msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || invoice.msttcgp,
     lookupCode: detailLookup || invoice.lookupCode || undefined,
     lookupUrl: detailUrl || invoice.lookupUrl || undefined,
     items: authoritativeItems,
