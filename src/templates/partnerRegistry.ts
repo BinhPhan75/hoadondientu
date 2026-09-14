@@ -17,15 +17,15 @@ export const PARTNER_METAS: PartnerMeta[] = [
   },
   {
     id: 'PNJ',
-    name: 'Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ',
-    shortName: 'Trang Sức PNJ',
+    name: 'Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ (4Si / LCS)',
+    shortName: 'Trang Sức PNJ (Mẫu GDT)',
     taxCode: '0315018466',
     defaultAddress: 'Số 23 Đường số 14, Phường An Nhơn, Thành Phố Hồ Chí Minh, Việt Nam',
     portalUrl: 'https://inv.4si.vn/tra-cuu-hoa-don',
-    providerBrand: '4Si / LCS',
-    badge: 'PNJ',
-    color: '#d97706',
-    description: 'Mẫu hóa đơn bán hàng 7 cột (kèm trọng lượng chi tiết), Logo kim cương PNJ, Cung cấp bởi L.C.S',
+    providerBrand: 'Tổng cục Thuế (GDT)',
+    badge: 'PNJ (GDT)',
+    color: '#915715',
+    description: 'Áp dụng mẫu chuẩn Tổng cục Thuế (GDT) theo quy định đối với hóa đơn 4SI',
     isCustomPartner: true
   },
   {
@@ -108,14 +108,14 @@ export const PARTNER_METAS: PartnerMeta[] = [
   },
   {
     id: 'DEFAULT',
-    name: 'Mẫu Hóa Đơn Chuẩn Nghị Định 123 (Mặc Định)',
-    shortName: 'Mặc định hệ thống',
+    name: 'Mẫu Hóa Đơn Điện Tử Chuẩn Tổng Cục Thuế (GDT)',
+    shortName: 'Mẫu Tổng cục Thuế',
     taxCode: '',
-    portalUrl: '',
-    providerBrand: 'Hóa Đơn Điện Tử Chuẩn',
-    badge: 'Mặc định',
-    color: '#334155',
-    description: 'Mẫu hóa đơn tiêu chuẩn áp dụng cho tất cả các đối tác và đơn vị ngoài danh sách đối tác chính',
+    portalUrl: 'https://hoadondientu.gdt.gov.vn',
+    providerBrand: 'Tổng cục Thuế (GDT)',
+    badge: '🏛️ Tổng cục Thuế',
+    color: '#915715',
+    description: 'Mẫu thể hiện hóa đơn điện tử chính thức từ Cổng Thông tin HĐĐT Tổng cục Thuế (áp dụng cho hóa đơn chưa nhận diện, 4SI của PNJ, viễn thông, điện lực, thu phí ngân hàng...)',
     isCustomPartner: false
   }
 ];
@@ -134,8 +134,9 @@ function normalizeStr(str: string): string {
 }
 
 /**
- * Automatically detects whether an invoice belongs to one of the 7 main partners.
- * Falls back to 'DEFAULT' for all other entities.
+ * Automatically detects whether an invoice belongs to one of the main partners.
+ * Falls back to 'DEFAULT' (Mẫu chuẩn Tổng cục Thuế) for all un-recognized entities,
+ * 4SI / PNJ, telecom, electricity, bank fees...
  */
 export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): PartnerInvoiceTemplateId {
   const nbmst = (invoice.nbmst || '').replace(/[^0-9]/g, '');
@@ -144,7 +145,8 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 1. Check Tax Codes (Highest Accuracy)
   if (nbmst === '0318657735') return 'BAO_DUY';
-  if (nbmst === '0315018466') return 'PNJ';
+  // PNJ và 4SI: Theo chỉ đạo của người dùng, sử dụng theo mẫu của GDT cung cấp (DEFAULT)
+  if (nbmst === '0315018466') return 'DEFAULT';
   if (nbmst === '0312105174') return 'TAI_TRAM_ANH';
   if (nbmst === '0400557356') return 'XUAN_VINH';
   if (nbmst === '0318391940') return 'KIM_LOAN_TUAN';
@@ -152,17 +154,14 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '4000344946') return 'NGHIA_SON';
   if (nbmst === '0317978711') return 'TAN_THANH_DANH';
 
-  // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp) - áp dụng mẫu tổng quát cho
-  // BẤT KỲ người bán nào khác dùng cùng phần mềm, không riêng đối tác đã
-  // đặt tên ở trên. Tránh rơi về DEFAULT (mất bố cục đúng) hoặc gán nhầm
-  // vào mẫu của 1 công ty cụ thể khác.
+  // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp)
   const msttcgp = (invoice.msttcgp || '').replace(/[^0-9]/g, '');
-  if (msttcgp === '0302999571') return '4SI'; // Công ty TNHH L.C.S
-  if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT tổng quát)
+  if (msttcgp === '0302999571' || msttcgp === '0315744883') return 'DEFAULT'; // 4SI / LCS -> Dùng mẫu GDT
+  if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT Nghĩa Sơn)
 
   // 2. Check Seller Names
   if (nbten.includes('baoduy')) return 'BAO_DUY';
-  if (nbten.includes('pnj') || (nbten.includes('chetac') && nbten.includes('trangsuc'))) return 'PNJ';
+  if (nbten.includes('pnj') || (nbten.includes('chetac') && nbten.includes('trangsuc'))) return 'DEFAULT'; // PNJ -> Dùng mẫu GDT
   if (nbten.includes('taitramanh') || nbten.includes('tramanh')) return 'TAI_TRAM_ANH';
   if (nbten.includes('xuanvinh')) return 'XUAN_VINH';
   if (nbten.includes('kimloantuan')) return 'KIM_LOAN_TUAN';
@@ -173,7 +172,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   // 3. Check raw XML content if available
   if (xml) {
     if (xml.includes('0318657735') || xml.includes('bảo duy') || xml.includes('bao duy')) return 'BAO_DUY';
-    if (xml.includes('0315018466') || xml.includes('4si.vn') || xml.includes('l.c.s') || xml.includes('pnj')) return 'PNJ';
+    if (xml.includes('0315018466') || xml.includes('4si.vn') || xml.includes('l.c.s') || xml.includes('pnj')) return 'DEFAULT'; // 4SI / PNJ -> Dùng mẫu GDT
     if (xml.includes('0312105174') || xml.includes('tài trâm anh') || xml.includes('tai tram anh')) return 'TAI_TRAM_ANH';
     if (xml.includes('0400557356') || xml.includes('xuân vinh') || xml.includes('xuan vinh')) return 'XUAN_VINH';
     if (xml.includes('0318391940') || xml.includes('kim loan tuấn') || xml.includes('kim loan tuan')) return 'KIM_LOAN_TUAN';
@@ -182,7 +181,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
     if (xml.includes('0317978711') || xml.includes('tân thanh danh') || xml.includes('tan thanh danh')) return 'TAN_THANH_DANH';
   }
 
-  // 4. Default for all entities outside the list
+  // 4. Mặc định: Tất cả các hóa đơn chưa nhận diện, viễn thông, điện lực, phí ngân hàng... đều dùng mẫu Tổng cục Thuế (DEFAULT)
   return 'DEFAULT';
 }
 

@@ -21,6 +21,7 @@ import {
   renderTkjTemplate,
   renderNghiaSonTemplate,
   renderTanThanhDanhTemplate,
+  renderDefaultTemplate as renderGDTDefaultTemplate,
   detectPartnerTemplate,
   PARTNER_METAS,
   PartnerInvoiceTemplateId,
@@ -117,7 +118,7 @@ export function detectInvoiceProvider(
       return 'VNPT';
     }
     if (/inv\.4si\.vn|4si\.vn|4si/i.test(raw)) {
-      return '4SI';
+      return 'DEFAULT';
     }
     if (/easyinvoice|softdreams/i.test(raw)) {
       return 'EASYINVOICE';
@@ -134,7 +135,7 @@ export function detectInvoiceProvider(
       if (msttcgp === '0101243150') return 'MISA';
       if (msttcgp === '0100109106') return 'VIETTEL';
       if (msttcgp === '0105987432') return 'EASYINVOICE';
-      if (msttcgp === '0315744883') return '4SI';
+      if (msttcgp === '0315744883' || msttcgp === '0302999571') return 'DEFAULT';
       if (msttcgp === '0101360697') return 'BKAV';
     }
 
@@ -147,7 +148,7 @@ export function detectInvoiceProvider(
       if (sigText.includes('VIETTEL')) return 'VIETTEL';
       if (sigText.includes('BKAV')) return 'BKAV';
       if (sigText.includes('EASYCA') || sigText.includes('SOFTDREAMS')) return 'EASYINVOICE';
-      if (sigText.includes('4SI') || sigText.includes('LCS')) return '4SI';
+      if (sigText.includes('4SI') || sigText.includes('LCS')) return 'DEFAULT';
     }
   }
 
@@ -161,7 +162,7 @@ export function detectInvoiceProvider(
       if (p.includes('MISA')) return 'MISA';
       if (p.includes('VIETTEL')) return 'VIETTEL';
       if (p.includes('EASY') || p.includes('SOFTDREAMS')) return 'EASYINVOICE';
-      if (p.includes('4SI') || p.includes('LCS')) return '4SI';
+      if (p.includes('4SI') || p.includes('LCS')) return 'DEFAULT';
       if (p.includes('BKAV')) return 'BKAV';
     }
 
@@ -169,7 +170,7 @@ export function detectInvoiceProvider(
     if (msttcgp === '0100684378') return 'VNPT';
     if (msttcgp === '0101243150') return 'MISA';
     if (msttcgp === '0105987432') return 'EASYINVOICE';
-    if (msttcgp === '0315744883') return '4SI';
+    if (msttcgp === '0315744883' || msttcgp === '0302999571') return 'DEFAULT';
     if (msttcgp === '0100109106') return 'VIETTEL';
     if (msttcgp === '0101360697') return 'BKAV';
 
@@ -177,7 +178,7 @@ export function detectInvoiceProvider(
     if (tentcgp.includes('VNPT')) return 'VNPT';
     if (tentcgp.includes('MISA')) return 'MISA';
     if (tentcgp.includes('EASY') || tentcgp.includes('SOFTDREAMS')) return 'EASYINVOICE';
-    if (tentcgp.includes('4SI') || tentcgp.includes('LCS')) return '4SI';
+    if (tentcgp.includes('4SI') || tentcgp.includes('LCS')) return 'DEFAULT';
     if (tentcgp.includes('VIETTEL')) return 'VIETTEL';
     if (tentcgp.includes('BKAV')) return 'BKAV';
 
@@ -362,13 +363,13 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
     case '4SI':
       return {
         id: '4SI',
-        name: '4Si E-Invoice / LCS',
-        shortName: '4Si (PNJ)',
-        domain: 'inv.4si.vn',
-        badge: '💎 4Si E-Invoice (PNJ)',
-        color: '#0891b2',
-        portalUrl: 'https://inv.4si.vn',
-        description: 'Giải pháp HĐĐT 4Si / LCS (Công ty TNHH 4Si - MST 0315744883, chuẩn hệ thống PNJ Jewelry)'
+        name: 'Mẫu Chuẩn Tổng cục Thuế (4Si / LCS / PNJ)',
+        shortName: '4Si / GDT',
+        domain: 'hoadondientu.gdt.gov.vn',
+        badge: '🏛️ Mẫu Tổng cục Thuế',
+        color: '#915715',
+        portalUrl: 'https://hoadondientu.gdt.gov.vn',
+        description: 'Sử dụng mẫu chuẩn Tổng cục Thuế (GDT) áp dụng cho hóa đơn 4Si / PNJ'
       };
     case 'BKAV':
       return {
@@ -385,13 +386,13 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
     default:
       return {
         id: 'DEFAULT',
-        name: 'Chuẩn Nghị định 123 / Thông tư 78',
-        shortName: 'Mẫu Chuẩn NĐ 123',
+        name: 'Mẫu Hóa Đơn Điện Tử Chuẩn Tổng Cục Thuế (GDT)',
+        shortName: 'Mẫu Tổng cục Thuế',
         domain: 'hoadondientu.gdt.gov.vn',
-        badge: '📋 Mẫu Chuẩn NĐ 123',
-        color: '#dc2626',
+        badge: '🏛️ Tổng cục Thuế',
+        color: '#915715',
         portalUrl: 'https://hoadondientu.gdt.gov.vn',
-        description: 'Mẫu chuẩn hóa theo Nghị định 123/2020/NĐ-CP & Thông tư 78/2021/TT-BTC của Tổng cục Thuế'
+        description: 'Mẫu thể hiện hóa đơn điện tử chính thức từ Cổng Thông tin HĐĐT Tổng cục Thuế (áp dụng cho hóa đơn chưa nhận diện, 4SI của PNJ, viễn thông, điện lực, thu phí ngân hàng...)'
       };
   }
 }
@@ -474,7 +475,7 @@ export function renderInvoiceHtml(
       break;
 
     case '4SI':
-      html = render4SiTemplate(invoice, rawXml, options);
+      html = renderGDTDefaultTemplate(invoice, rawXml, options);
       break;
 
     case 'VNPT':
@@ -487,7 +488,7 @@ export function renderInvoiceHtml(
 
     case 'DEFAULT':
     default:
-      html = renderDefaultTemplate(invoice, rawXml, options);
+      html = renderGDTDefaultTemplate(invoice, rawXml, options);
       break;
   }
 
@@ -1339,6 +1340,14 @@ export function render4SiTemplate(
   rawXml?: string,
   options?: RenderTemplateOptions
 ): string {
+  return renderGDTDefaultTemplate(invoice, rawXml, options);
+}
+
+function _internalOld4SiTemplate(
+  invoice: GDTInvoice,
+  rawXml?: string,
+  options?: RenderTemplateOptions
+) {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
@@ -2554,6 +2563,14 @@ export function renderDefaultTemplate(
   rawXml?: string,
   options?: RenderTemplateOptions
 ): string {
+  return renderGDTDefaultTemplate(invoice, rawXml, options);
+}
+
+function _internalOldDefaultTemplate(
+  invoice: GDTInvoice,
+  rawXml?: string,
+  options?: RenderTemplateOptions
+) {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
