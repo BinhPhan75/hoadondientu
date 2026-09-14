@@ -177,14 +177,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             <Database className="w-3.5 h-3.5 text-cyan-400" />
             <span>Database:</span>
             {dbStatus?.connected ? (
-              <span className="text-emerald-400 font-medium inline-flex items-center gap-1">
+              <span className="text-emerald-400 font-medium inline-flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 Neon PostgreSQL ({dbStatus.totalUsers} tài khoản)
               </span>
             ) : (
-              <span className="text-cyan-300 font-medium inline-flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                Local Store ({dbStatus?.totalUsers || 1} tài khoản)
+              <span className="text-amber-400/90 font-medium inline-flex items-center gap-1.5" title="Cấu hình biến môi trường DATABASE_URL để kết nối Neon PostgreSQL">
+                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                Chưa kết nối Neon DB ({dbStatus?.totalUsers ?? 0} tài khoản)
               </span>
             )}
           </div>

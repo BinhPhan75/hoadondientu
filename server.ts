@@ -1388,26 +1388,28 @@ app.get('/api/admin/db-status', async (req, res) => {
   }
 });
 
+// Global process safety handlers
+process.on('uncaughtException', (err) => {
+  console.error('[Process uncaughtException]:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process unhandledRejection]:', reason);
+});
+
 // Start Express Server with Vite integration
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        allowedHosts: true,
-      },
-      appType: 'spa',
+  // 1. Mở cổng lắng nghe 3000 NGAY LẬP TỨC để Nginx/Cloud Run không bao giờ trả về 502/Warmup
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    // Khởi tạo Database Neon bất đồng bộ trong nền
+    initDatabase().then(dbInitResult => {
+      console.log(`[Database Init] ${dbInitResult.message}`);
+    }).catch(dbErr => {
+      console.warn('[Database Init] Warning:', dbErr.message);
     });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+  });
 
-  // Global JSON error handler for all /api endpoints
+  // 2. Global JSON error handler cho các API endpoints
   app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     console.error('[API Error Handler]:', err);
     if (res.headersSent) {
@@ -1419,15 +1421,28 @@ async function startServer() {
     });
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    // Khởi tạo Database Neon bất đồng bộ trong nền, không làm chặn port 3000
-    initDatabase().then(dbInitResult => {
-      console.log(`[Database Init] ${dbInitResult.message}`);
-    }).catch(dbErr => {
-      console.warn('[Database Init] Warning:', dbErr.message);
+  // 3. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const vite = await createViteServer({
+        server: {
+          middlewareMode: true,
+          allowedHosts: true,
+        },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+      console.log('[Vite] Vite middleware attached.');
+    } catch (viteErr: any) {
+      console.error('[Vite Init Error]:', viteErr.message);
+    }
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
-  });
+  }
 }
 
 startServer();

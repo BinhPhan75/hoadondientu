@@ -113,15 +113,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string): Promise<{ success: boolean; message?: string; expired?: boolean }> => {
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ username, password })
-      });
+      const doRequest = async () => {
+        return await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ username, password })
+        });
+      };
 
-      const parsed = await parseResponseSafe(res);
+      let res = await doRequest();
+      let parsed = await parseResponseSafe(res);
+
+      // Nếu gặp lỗi server đang khởi động (502, 503, 504 hoặc warmup HTML), tự động thử lại sau 1.2s
+      if (!parsed.data && (res.status === 502 || res.status === 503 || res.status === 504 || res.status === 500 || parsed.errorText?.includes('khởi động'))) {
+        console.log('[Auth] Máy chủ đang warmup, tự động thử lại sau 1.2 giây...');
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        res = await doRequest();
+        parsed = await parseResponseSafe(res);
+      }
 
       if (!parsed.success || !parsed.data) {
         const errorMsg = parsed.data?.message || parsed.errorText || 'Đăng nhập không thành công.';
@@ -147,7 +159,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err: any) {
       return {
         success: false,
-        message: err.message || 'Lỗi kết nối máy chủ'
+        message: err.message || 'Lỗi kết nối máy chủ. Vui lòng kiểm tra lại đường truyền mạng.'
       };
     }
   };
