@@ -17,8 +17,7 @@ import {
   ShieldCheck,
   Eye,
   Layers,
-  Sparkles,
-  Info
+  Sparkles
 } from 'lucide-react';
 import { MonthSyncChunk, MultiMonthSyncState, GDTInvoice, GDTAccountConfig } from '../types';
 import { exportSingleMonthToExcel, exportComprehensiveMultiMonthReport } from '../utils/excelExporter';
@@ -131,16 +130,6 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
             >
               <X className="w-5 h-5" />
             </button>
-          </div>
-        </div>
-
-        {/* Info Banner: Rule of GDT 1-month limit */}
-        <div className="px-5 py-2.5 bg-blue-950/40 border-b border-blue-900/50 flex items-center justify-between text-xs text-blue-200">
-          <div className="flex items-center gap-2">
-            <Info className="w-4 h-4 text-blue-400 shrink-0" />
-            <span>
-              Quy định Tổng cục Thuế: Chỉ cho phép tra cứu tối đa <strong>1 tháng/lần</strong>. Phần mềm tự động chia thành {syncState.totalMonths} tháng, lấy lần lượt có giãn cách nhịp để tránh bị nghẽn (429) và tổng hợp kết quả toàn kỳ.
-            </span>
           </div>
         </div>
 

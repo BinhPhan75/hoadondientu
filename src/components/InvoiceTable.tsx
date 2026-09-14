@@ -388,7 +388,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
-                                ? `Tra cứu MISA meInvoice (Tự động gán mã ${inv.lookupCode || ''} & mở hóa đơn không cần captcha)` 
+                                ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${inv.lookupCode || ''})` 
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

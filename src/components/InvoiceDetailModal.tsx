@@ -450,11 +450,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
                 }`}
                 title={isMisaInvoice 
-                  ? `Mở trực tiếp Cổng MISA meInvoice: Tự động gán mã ${lookupDetails.lookupCode || ''} vào ô tra cứu và mở hóa đơn (không cần captcha)` 
+                  ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
                   : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
               >
                 <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{isMisaInvoice ? 'Tra cứu meInvoice (Tự mở)' : 'Tra cứu Cổng NCC'}</span>
+                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : 'Tra cứu Cổng NCC'}</span>
               </a>
             )}
 
