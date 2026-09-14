@@ -941,7 +941,7 @@ export function renderMisaTemplate(
 
     <!-- MISA FOOTER -->
     <div class="misa-footer">
-      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <b>${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;font-weight:bold;" title="Mở trang tra cứu meInvoice (Tự động gán mã & mở hóa đơn)">${escapeHtml(mCode)}</a></div>
       <div style="margin-top: 2px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
     </div>
   </div>

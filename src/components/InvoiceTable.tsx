@@ -9,10 +9,12 @@ import {
   Square,
   AlertCircle,
   FileSpreadsheet,
-  FolderArchive
+  FolderArchive,
+  ExternalLink
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
+import { buildDirectLookupUrl } from '../templates/templateUtils';
 
 interface InvoiceTableProps {
   invoices: GDTInvoice[];
@@ -279,6 +281,26 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                         </button>
                       </div>
 
+                      {/* Mã tra cứu trực tiếp */}
+                      {inv.lookupCode && (
+                        <div className="flex items-center gap-1 text-[10.5px] text-gray-500 font-mono mt-0.5">
+                          <span className="text-gray-400">Mã TC:</span>
+                          <a
+                            href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
+                            title={/meinvoice/i.test(inv.lookupUrl || '') || inv.provider === 'MISA' || inv.nbmst === '0101243150'
+                              ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
+                              : `Mã tra cứu: ${inv.lookupCode}`}
+                          >
+                            <span>{inv.lookupCode}</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                          </a>
+                        </div>
+                      )}
+
                       {/* Hàng hóa / Dịch vụ tóm tắt */}
                       {inv.items && inv.items.length > 0 ? (
                         <div 
@@ -345,6 +367,34 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           <FileText className="w-3 h-3" />
                           <span>Xem PDF</span>
                         </button>
+
+                        {/* Tra cứu trực tiếp trên Cổng NCC */}
+                        {(() => {
+                          const directUrl = buildDirectLookupUrl(
+                            inv.lookupUrl,
+                            inv.lookupCode,
+                            inv.provider,
+                            inv.nbmst
+                          );
+                          const isMisa = /meinvoice/i.test(directUrl) || inv.provider === 'MISA' || inv.nbmst === '0101243150';
+                          return (
+                            <a
+                              href={directUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`p-1 rounded transition-colors cursor-pointer ${
+                                isMisa 
+                                  ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50' 
+                                  : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
+                              }`}
+                              title={isMisa 
+                                ? `Tra cứu MISA meInvoice (Tự động gán mã ${inv.lookupCode || ''} & mở hóa đơn không cần captcha)` 
+                                : 'Mở cổng tra cứu hóa đơn'}
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          );
+                        })()}
 
                         <button
                           onClick={() => onDownloadXml(inv)}

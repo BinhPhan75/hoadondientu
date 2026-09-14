@@ -610,11 +610,11 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     }
   }
 
-  // 4. Nếu mã tra cứu là một đường dẫn URL thì tách tham số code/fkey
+  // 4. Nếu mã tra cứu là một đường dẫn URL thì tách tham số sc/code/fkey
   if (lookupCode && /^https?:\/\//i.test(lookupCode)) {
     try {
       const url = new URL(lookupCode);
-      lookupCode = cleanLookupValue(url.searchParams.get('code') || url.searchParams.get('c') || url.searchParams.get('fkey') || '');
+      lookupCode = cleanLookupValue(url.searchParams.get('sc') || url.searchParams.get('code') || url.searchParams.get('c') || url.searchParams.get('fkey') || '');
     } catch {
       lookupCode = '';
     }

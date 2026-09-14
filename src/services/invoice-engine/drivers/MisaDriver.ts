@@ -49,13 +49,13 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
       lookupCode = this.extractXmlTag(xmlData, 'MTCuu') || this.extractXmlTag(xmlData, 'MaTraCuu');
     }
 
-    // Nếu mã tra cứu là một đường dẫn URL (ví dụ: https://www.meinvoice.vn/tra-cuu/?code=ABCXYZ)
+    // Nếu mã tra cứu là một đường dẫn URL (ví dụ: https://www.meinvoice.vn/tra-cuu/?sc=ABCXYZ hoặc ?code=ABCXYZ)
     let lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
     if (lookupCode && lookupCode.includes('http')) {
       try {
         const urlObj = new URL(lookupCode);
         lookupUrl = `${urlObj.origin}${urlObj.pathname}`;
-        const codeParam = urlObj.searchParams.get('code') || urlObj.searchParams.get('c');
+        const codeParam = urlObj.searchParams.get('sc') || urlObj.searchParams.get('code') || urlObj.searchParams.get('c');
         if (codeParam) {
           lookupCode = codeParam;
         }

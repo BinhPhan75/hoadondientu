@@ -94,6 +94,10 @@ export const SAMPLE_GDT_INVOICES: GDTInvoice[] = [
     signerName: 'CÔNG TY CỔ PHẦN MISA',
     signedDate: '2025-02-18T14:23:05',
     caProvider: 'MISA-CA',
+    provider: 'MISA',
+    msttcgp: '0101243150',
+    lookupCode: 'BDFJCJ4385ME',
+    lookupUrl: 'https://www.meinvoice.vn/tra-cuu',
     items: [
       {
         lineNo: 1,

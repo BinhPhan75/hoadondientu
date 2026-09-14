@@ -65,8 +65,12 @@ export function extractLookupDetails(rawXml?: string): { lookupCode: string; loo
  * Quy tắc tự động điền theo từng nhà cung cấp:
  * 1. MISA meInvoice (không cần captcha):
  *    - Cổng: https://www.meinvoice.vn/tra-cuu
- *    - Tham số: ?code=[MÃ_TRA_CỨU]
- *    - Tự động điền mã và mở trực tiếp chi tiết hóa đơn (không cần captcha).
+ *    - Tham số: ?sc=[MÃ_TRA_CỨU]&code=[MÃ_TRA_CỨU]
+ *    - Cơ chế hoạt động của MISA meInvoice:
+ *      Khi nhận được query string có tham số ?sc=..., frontend của meinvoice.vn (hàm CheckParamQuery) sẽ:
+ *      1. Tự động gán mã tra cứu vào khung nhập liệu (#txtCode): $("#txtCode").val(n.sc)
+ *      2. Tự động gọi API ValidateTransactionID và kích hoạt tính năng tự mở hóa đơn (DoSearch() -> ShowSearchResultPopup)
+ *      3. MISA hoàn toàn không yêu cầu nhập captcha khi tra cứu qua link trực tiếp có mã hợp lệ.
  *    - Luôn chuẩn hóa về domain https://www.meinvoice.vn/tra-cuu, tuyệt đối không lấy website người bán (như daidoanket.vn).
  *
  * 2. VNPT Invoice (yêu cầu captcha):
@@ -90,8 +94,24 @@ export function buildDirectLookupUrl(
   sellerTaxCode?: string
 ): string {
   let url = (portalUrl || '').trim();
-  const code = (lookupCode || '').trim();
+  const rawCode = (lookupCode || '').trim();
   const provider = (providerOrTemplateId || '').toUpperCase();
+
+  // Làm sạch mã tra cứu: loại bỏ tiền tố như "Mã tra cứu:", "MTC:", "Fkey:" nếu có
+  let code = rawCode.replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
+
+  // Nếu mã truyền vào dạng URL thì trích xuất giá trị tham số mã tra cứu
+  if (/^https?:\/\//i.test(code)) {
+    try {
+      const u = new URL(code);
+      const extracted = u.searchParams.get('sc') || u.searchParams.get('code') || u.searchParams.get('c') || u.searchParams.get('fkey');
+      if (extracted) {
+        code = extracted.trim();
+      }
+    } catch {
+      // Giữ nguyên mã
+    }
+  }
 
   // 1. MISA meInvoice
   // Nếu thuộc MISA (hoặc các mẫu đối tác dùng MISA: Tài Trâm Anh, Xuân Vinh, Tân Thanh Danh),
@@ -105,7 +125,12 @@ export function buildDirectLookupUrl(
   if (isMisa) {
     const baseMisaUrl = 'https://www.meinvoice.vn/tra-cuu';
     if (code) {
-      return `${baseMisaUrl}/?code=${encodeURIComponent(code)}`;
+      // Cổng MISA meInvoice đọc tham số `sc` (Search Code / Transaction ID) trong URL.
+      // Khi có `sc=...`, script của meinvoice.vn sẽ:
+      // - Gán mã vào khung input #txtCode: $("#txtCode").val(n.sc)
+      // - Tự động kích hoạt tìm kiếm và mở cửa sổ popup xem hóa đơn (không cần gõ captcha).
+      // Bổ sung đồng thời &code= để đảm bảo khả năng tương thích toàn diện.
+      return `${baseMisaUrl}?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
     }
     return baseMisaUrl;
   }

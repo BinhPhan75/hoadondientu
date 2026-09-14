@@ -22,7 +22,8 @@ import {
   Building2,
   Search,
   RotateCcw,
-  RefreshCw
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
@@ -273,6 +274,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId,
     effectiveInvoice.nbmst
   ) : '';
+
+  const isMisaInvoice = /meinvoice\.vn/i.test(directLookupUrl) || 
+    effectiveTemplateId === 'MISA' || 
+    effectiveTemplateId === 'TAI_TRAM_ANH' || 
+    effectiveTemplateId === 'XUAN_VINH' || 
+    effectiveTemplateId === 'TAN_THANH_DANH' ||
+    effectiveInvoice?.nbmst === '0101243150';
 
   if (!renderError) {
     try {
@@ -547,10 +555,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         href={directLookupUrl} 
                         target="_blank" 
                         rel="noopener noreferrer" 
-                        className="text-emerald-400 hover:underline font-bold" 
-                        title={`Mở trang tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
+                        className="text-emerald-400 hover:underline font-bold inline-flex items-center gap-1" 
+                        title={isMisaInvoice 
+                          ? `Tự động gán mã ${lookupDetails.lookupCode} vào ô tra cứu MISA meInvoice và mở hóa đơn (không cần captcha)` 
+                          : `Mở trang tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
                       >
-                        {lookupDetails.lookupCode}
+                        <span>{lookupDetails.lookupCode}</span>
+                        <ExternalLink className="w-2.5 h-2.5 opacity-80" />
                       </a>
                     ) : (
                       <strong className="text-emerald-400">{lookupDetails.lookupCode}</strong>
@@ -848,9 +859,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="text-gray-300 space-y-1">
                   <p>Nhà cung cấp: <strong className="text-amber-300">{currentProviderMeta.name}</strong></p>
                   <p>Mô tả: <span className="text-gray-400">{currentProviderMeta.description}</span></p>
-                  <p>Cổng tra cứu: <a href={directLookupUrl || currentProviderMeta.portalUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">{directLookupUrl || currentProviderMeta.portalUrl}</a></p>
+                  <p>Cổng tra cứu: <a href={directLookupUrl || currentProviderMeta.portalUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline font-mono text-[11px] inline-flex items-center gap-1">
+                    <span>{directLookupUrl || currentProviderMeta.portalUrl}</span>
+                    <ExternalLink className="w-3 h-3 inline" />
+                  </a></p>
                   {lookupDetails.lookupCode && (
-                    <p>Mã tra cứu / Fkey: <strong className="text-emerald-400 font-mono bg-gray-900 px-1.5 py-0.5 rounded border border-gray-700">{lookupDetails.lookupCode}</strong></p>
+                    <div className="flex items-center gap-2 pt-1 flex-wrap">
+                      <span>Mã tra cứu / Fkey:</span>
+                      <strong className="text-emerald-400 font-mono bg-gray-900 px-2 py-0.5 rounded border border-gray-700">{lookupDetails.lookupCode}</strong>
+                      {isMisaInvoice && (
+                        <span className="text-[10.5px] text-emerald-300 bg-emerald-950/80 border border-emerald-700 px-2 py-0.5 rounded font-medium">
+                          ✓ Tự động gán mã & mở hóa đơn trực tiếp (Không cần captcha)
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -878,6 +900,25 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {directLookupUrl && (
+              <a
+                href={directLookupUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
+                  isMisaInvoice
+                    ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
+                    : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
+                }`}
+                title={isMisaInvoice 
+                  ? `Mở trực tiếp Cổng MISA meInvoice: Tự động gán mã ${lookupDetails.lookupCode || ''} vào ô tra cứu và mở hóa đơn (không cần captcha)` 
+                  : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{isMisaInvoice ? 'Tra cứu meInvoice (Tự mở)' : 'Tra cứu Cổng NCC'}</span>
+              </a>
+            )}
+
             <button
               onClick={handlePrint}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors cursor-pointer"
