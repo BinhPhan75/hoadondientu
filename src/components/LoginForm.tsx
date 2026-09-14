@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Database, Clock, Sparkles } from 'lucide-react';
+import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Database, Clock } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess?: () => void;
@@ -46,12 +46,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleFillAdmin = () => {
-    setUsername('admin');
-    setPassword('admin@2026');
-    setErrorMessage(null);
   };
 
   return (
@@ -174,20 +168,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             <div>
               <span className="font-semibold text-slate-300">Bảo mật đa tầng:</span> Thông tin đăng nhập Cổng Tổng cục Thuế (Mật khẩu Thuế) được lưu trữ riêng tại trình duyệt máy tính cá nhân của Quý khách.
             </div>
-          </div>
-
-          {/* Admin shortcut for first setup */}
-          <div className="mt-4 pt-3 border-t border-slate-700/30 flex items-center justify-between text-xs text-slate-500">
-            <span>Tài khoản Quản trị mặc định:</span>
-            <button
-              type="button"
-              onClick={handleFillAdmin}
-              className="text-cyan-400 hover:text-cyan-300 font-mono hover:underline flex items-center gap-1 cursor-pointer"
-              title="Điền nhanh thông tin tài khoản Quản trị viên Master"
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>admin / admin@2026</span>
-            </button>
           </div>
         </div>
 

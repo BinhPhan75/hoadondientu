@@ -1,14 +1,1 @@
-[
-  {
-    "id": 1,
-    "username": "admin",
-    "password": "admin@2026",
-    "full_name": "Quản trị hệ thống Master",
-    "role": "admin",
-    "duration_months": 1200,
-    "created_at": "2026-09-14T10:11:54.227Z",
-    "expires_at": "2126-01-01T23:59:59.999Z",
-    "is_active": true,
-    "notes": "Tài khoản Quản trị mặc định"
-  }
-]
+[]

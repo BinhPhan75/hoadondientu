@@ -17,6 +17,33 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const TOKEN_STORAGE_KEY = 'gdt_web_auth_token';
 const USER_STORAGE_KEY = 'gdt_web_auth_user';
 
+/**
+ * Phân tích phản hồi an toàn từ server, tránh lỗi JSON.parse khi server trả về plain text / 500 HTML
+ */
+async function parseResponseSafe(res: Response): Promise<{ success: boolean; data?: any; errorText?: string }> {
+  try {
+    const rawText = await res.text();
+    if (!rawText) {
+      return { success: res.ok, data: {} };
+    }
+    try {
+      const json = JSON.parse(rawText);
+      return { success: res.ok && json.success !== false, data: json };
+    } catch {
+      // Server trả về plain text hoặc trang lỗi HTML (VD: 502/503/500 proxy)
+      let message = 'Máy chủ đang phản hồi không đúng định dạng JSON.';
+      if (res.status === 500 || res.status === 502 || res.status === 503 || rawText.includes('A server error')) {
+        message = 'Máy chủ đang khởi động hoặc kết nối Database bị gián đoạn. Vui lòng bấm đăng nhập lại sau vài giây.';
+      } else if (rawText.length > 0 && rawText.length < 120) {
+        message = rawText;
+      }
+      return { success: false, errorText: message };
+    }
+  } catch (readErr: any) {
+    return { success: false, errorText: readErr.message || 'Lỗi đọc phản hồi mạng.' };
+  }
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<WebUser | null>(() => {
     try {
@@ -35,11 +62,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const refreshDbStatus = async () => {
     try {
       const res = await fetch('/api/admin/db-status');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setDbStatus(data);
-        }
+      const parsed = await parseResponseSafe(res);
+      if (parsed.data?.success) {
+        setDbStatus(parsed.data);
       }
     } catch (err) {
       console.warn('[AuthContext] Lỗi kiểm tra trạng thái DB:', err);
@@ -62,20 +87,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.user) {
-          setCurrentUser(data.user);
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
-          setToken(savedToken);
-        } else {
-          // Phiên không hợp lệ
-          localStorage.removeItem(TOKEN_STORAGE_KEY);
-          localStorage.removeItem(USER_STORAGE_KEY);
-          setCurrentUser(null);
-          setToken(null);
-        }
+      const parsed = await parseResponseSafe(res);
+      if (parsed.success && parsed.data?.user) {
+        setCurrentUser(parsed.data.user);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(parsed.data.user));
+        setToken(savedToken);
       } else {
+        // Phiên không hợp lệ
         localStorage.removeItem(TOKEN_STORAGE_KEY);
         localStorage.removeItem(USER_STORAGE_KEY);
         setCurrentUser(null);
@@ -103,17 +121,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({ username, password })
       });
 
-      const data = await res.json();
+      const parsed = await parseResponseSafe(res);
 
-      if (!res.ok || !data.success) {
+      if (!parsed.success || !parsed.data) {
+        const errorMsg = parsed.data?.message || parsed.errorText || 'Đăng nhập không thành công.';
         return {
           success: false,
-          message: data.message || 'Đăng nhập không thành công',
-          expired: data.expired || false
+          message: errorMsg,
+          expired: parsed.data?.expired || false
         };
       }
 
-      // Lưu phiên
+      const data = parsed.data;
+
+      // Lưu phiên đăng nhập
       localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
       setToken(data.token);

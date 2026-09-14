@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
@@ -1389,13 +1390,6 @@ app.get('/api/admin/db-status', async (req, res) => {
 
 // Start Express Server with Vite integration
 async function startServer() {
-  try {
-    const dbInitResult = await initDatabase();
-    console.log(`[Database Init] ${dbInitResult.message}`);
-  } catch (dbErr: any) {
-    console.warn('[Database Init] Warning:', dbErr.message);
-  }
-
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: {
@@ -1413,8 +1407,26 @@ async function startServer() {
     });
   }
 
+  // Global JSON error handler for all /api endpoints
+  app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('[API Error Handler]:', err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Lỗi máy chủ nội bộ. Vui lòng thử lại.'
+    });
+  });
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    // Khởi tạo Database Neon bất đồng bộ trong nền, không làm chặn port 3000
+    initDatabase().then(dbInitResult => {
+      console.log(`[Database Init] ${dbInitResult.message}`);
+    }).catch(dbErr => {
+      console.warn('[Database Init] Warning:', dbErr.message);
+    });
   });
 }
 

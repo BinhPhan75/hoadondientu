@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { Pool, QueryResult } from 'pg';
 import fs from 'fs';
 import path from 'path';
@@ -32,7 +33,10 @@ let isPostgresConnected = false;
  * Lấy hoặc khởi tạo kết nối PostgreSQL (Neon Serverless hoặc tiêu chuẩn)
  */
 export function getPostgresPool(): Pool | null {
-  const databaseUrl = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
+  let databaseUrl = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+  // Loại bỏ dấu nháy kép hoặc đơn nếu người dùng copy-paste thừa
+  databaseUrl = databaseUrl.replace(/^["']|["']$/g, '').trim();
+
   if (!databaseUrl) {
     return null;
   }
@@ -44,12 +48,12 @@ export function getPostgresPool(): Pool | null {
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
         max: 10,
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
         idleTimeoutMillis: 30000
       });
 
       pool.on('error', (err) => {
-        console.error('[Neon PostgreSQL] Pool error:', err.message);
+        console.warn('[Neon PostgreSQL] Pool background error:', err.message);
         isPostgresConnected = false;
       });
     } catch (err: any) {
@@ -120,30 +124,10 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
           is_active BOOLEAN DEFAULT TRUE,
           notes TEXT
         );
+        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
       `);
 
-      // 2. Kiểm tra xem đã có tài khoản admin chưa
-      const adminCheck = await p.query(`SELECT id FROM web_users WHERE role = 'admin' LIMIT 1;`);
-      if (adminCheck.rows.length === 0) {
-        const adminExpiry = new Date('2126-01-01T23:59:59.999Z');
-        await p.query(`
-          INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT (username) DO NOTHING;
-        `, [
-          'admin',
-          'admin@2026',
-          'Quản trị hệ thống Master',
-          'admin',
-          1200,
-          adminExpiry.toISOString(),
-          true,
-          'Tài khoản Quản trị khởi tạo mặc định để tạo và cấp phát tài khoản MST'
-        ]);
-        console.log('[Neon PostgreSQL] ✓ Đã khởi tạo bảng web_users và tạo tài khoản admin: admin / admin@2026');
-      } else {
-        console.log('[Neon PostgreSQL] ✓ Kết nối Neon thành công, bảng web_users đã sẵn sàng');
-      }
+      console.log('[Neon PostgreSQL] ✓ Kết nối Neon thành công, bảng web_users đã sẵn sàng.');
 
       isPostgresConnected = true;
       return {
@@ -167,7 +151,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
 }
 
 /**
- * Đảm bảo file JSON cục bộ có tài khoản admin mặc định
+ * Đảm bảo file JSON cục bộ tồn tại
  */
 function ensureLocalUsersFile(): WebUserRecord[] {
   if (!fs.existsSync(DATA_DIR)) {
@@ -175,48 +159,20 @@ function ensureLocalUsersFile(): WebUserRecord[] {
   }
 
   if (!fs.existsSync(LOCAL_USERS_FILE)) {
-    const defaultUsers: WebUserRecord[] = [
-      {
-        id: 1,
-        username: 'admin',
-        password: 'admin@2026',
-        full_name: 'Quản trị hệ thống Master',
-        role: 'admin',
-        duration_months: 1200,
-        created_at: new Date().toISOString(),
-        expires_at: '2126-01-01T23:59:59.999Z',
-        is_active: true,
-        notes: 'Tài khoản Quản trị mặc định'
-      }
-    ];
-    fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(defaultUsers, null, 2), 'utf-8');
-    return defaultUsers;
+    const initialUsers: WebUserRecord[] = [];
+    fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(initialUsers, null, 2), 'utf-8');
+    return initialUsers;
   }
 
   try {
     const raw = fs.readFileSync(LOCAL_USERS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
+    if (Array.isArray(parsed)) {
       return parsed;
     }
   } catch {}
 
-  const fallback: WebUserRecord[] = [
-    {
-      id: 1,
-      username: 'admin',
-      password: 'admin@2026',
-      full_name: 'Quản trị hệ thống Master',
-      role: 'admin',
-      duration_months: 1200,
-      created_at: new Date().toISOString(),
-      expires_at: '2126-01-01T23:59:59.999Z',
-      is_active: true,
-      notes: 'Tài khoản Quản trị mặc định'
-    }
-  ];
-  fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(fallback, null, 2), 'utf-8');
-  return fallback;
+  return [];
 }
 
 function saveLocalUsers(users: WebUserRecord[]) {
