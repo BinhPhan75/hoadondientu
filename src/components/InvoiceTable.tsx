@@ -10,7 +10,8 @@ import {
   AlertCircle,
   FileSpreadsheet,
   FolderArchive,
-  ExternalLink
+  ExternalLink,
+  Search
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
@@ -30,6 +31,7 @@ interface InvoiceTableProps {
   onQuickResetPeriod?: () => void;
   currentDateRange?: { from: string; to: string };
   currentMst?: string;
+  hasSearched?: boolean;
 }
 
 export const InvoiceTable: React.FC<InvoiceTableProps> = ({
@@ -45,7 +47,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
   onQuickSyncPeriod,
   onQuickResetPeriod,
   currentDateRange,
-  currentMst
+  currentMst,
+  hasSearched = false
 }) => {
   const [copiedMst, setCopiedMst] = useState<string | null>(null);
 
@@ -115,46 +118,76 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <tbody>
             {invoices.length === 0 ? (
               <tr>
-                <td colSpan={12} className="p-10 text-center text-gray-600 bg-gray-50/40">
-                  <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-3">
-                    <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
-                      <AlertCircle className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-gray-900">
-                        Không tìm thấy hóa đơn mua vào nào trong khoảng thời gian đã lọc
-                      </p>
-                      <p className="text-xs text-gray-500 font-mono mt-1">
-                        Kỳ tra cứu:{' '}
-                        <strong className="text-gray-800">
-                          {currentDateRange ? `${currentDateRange.from} → ${currentDateRange.to}` : 'Tất cả'}
-                        </strong>{' '}
-                        | MST:{' '}
-                        <strong className="text-gray-800 font-mono">
-                          {currentMst || '(Chưa nhập)'}
-                        </strong>
-                      </p>
-                    </div>
+                <td colSpan={12} className="p-12 text-center text-gray-600 bg-gray-50/40">
+                  <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-3.5">
+                    {!hasSearched ? (
+                      <>
+                        <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shadow-2xs">
+                          <FileText className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <p className="text-base font-bold text-gray-900">
+                            Danh sách hóa đơn đang trống
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto leading-relaxed">
+                            Khi tải lại web, dữ liệu kết quả cũ đã được xóa sạch. Vui lòng nhập Mã số thuế, Mật khẩu, Captcha và nhấn nút <strong>"Tra cứu HĐ"</strong> ở menu bên trái để tải dữ liệu hóa đơn mua vào mới nhất từ Cổng Tổng cục Thuế.
+                          </p>
+                        </div>
 
-                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                      {onQuickSyncPeriod && (
-                        <button
-                          onClick={onQuickSyncPeriod}
-                          className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <span>Tra cứu kỳ này</span>
-                        </button>
-                      )}
+                        {onQuickSyncPeriod && (
+                          <div className="pt-2">
+                            <button
+                              onClick={onQuickSyncPeriod}
+                              className="px-4 py-2 bg-[#ef4444] hover:bg-red-600 text-white rounded-md text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                            >
+                              <Search className="w-3.5 h-3.5" />
+                              <span>Tra cứu hóa đơn mua vào</span>
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                          <AlertCircle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">
+                            Không tìm thấy hóa đơn mua vào nào trong khoảng thời gian đã lọc
+                          </p>
+                          <p className="text-xs text-gray-500 font-mono mt-1">
+                            Kỳ tra cứu:{' '}
+                            <strong className="text-gray-800">
+                              {currentDateRange ? `${currentDateRange.from} → ${currentDateRange.to}` : 'Tất cả'}
+                            </strong>{' '}
+                            | MST:{' '}
+                            <strong className="text-gray-800 font-mono">
+                              {currentMst || '(Chưa nhập)'}
+                            </strong>
+                          </p>
+                        </div>
 
-                      {onQuickResetPeriod && (
-                        <button
-                          onClick={onQuickResetPeriod}
-                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors cursor-pointer"
-                        >
-                          <span>Đặt lại bộ lọc</span>
-                        </button>
-                      )}
-                    </div>
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                          {onQuickSyncPeriod && (
+                            <button
+                              onClick={onQuickSyncPeriod}
+                              className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>Tra cứu kỳ này</span>
+                            </button>
+                          )}
+
+                          {onQuickResetPeriod && (
+                            <button
+                              onClick={onQuickResetPeriod}
+                              className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              <span>Đặt lại bộ lọc</span>
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -284,7 +317,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {/* Mã tra cứu trực tiếp */}
                       {inv.lookupCode && (
                         <div className="flex items-center gap-1 text-[10.5px] text-gray-500 font-mono mt-0.5">
-                          <span className="text-gray-400">Mã TC:</span>
+                          <span className="text-gray-400">
+                            {/viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) ? 'Mã bí mật:' : 'Mã TC:'}
+                          </span>
                           <a
                             href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
                             target="_blank"
@@ -293,6 +328,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
                             title={/meinvoice/i.test(inv.lookupUrl || '') || inv.provider === 'MISA' || inv.nbmst === '0101243150'
                               ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
+                              : /viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) || /sinvoice\.viettel/i.test(inv.lookupUrl || '')
+                              ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
                               : `Mã tra cứu: ${inv.lookupCode}`}
                           >
                             <span>{inv.lookupCode}</span>
@@ -382,6 +419,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             inv.provider === 'TAI_TRAM_ANH' || 
                             inv.provider === 'XUAN_VINH' || 
                             inv.nbmst === '0101243150';
+                          const isViettel = /sinvoice\.viettel/i.test(directUrl) ||
+                            inv.provider === 'VIETTEL' ||
+                            Boolean(inv.caProvider?.includes('VIETTEL'));
                           return (
                             <a
                               href={directUrl}
@@ -390,10 +430,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                               className={`p-1 rounded transition-colors cursor-pointer ${
                                 isMisa 
                                   ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50' 
+                                  : isViettel
+                                  ? 'text-red-600 hover:text-red-800 hover:bg-red-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
                                 ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${inv.lookupCode || ''})` 
+                                : isViettel
+                                ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${inv.lookupCode || ''})`
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

@@ -1728,7 +1728,7 @@ export function renderViettelTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://sinvoice.viettel.vn/tracuuhoadon';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'VIETTEL', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
@@ -1883,9 +1883,9 @@ export function renderViettelTemplate(
     </div>
 
     <!-- VIETTEL LOOKUP BOX -->
-    <div class="viettel-lookup-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-      <div>Website tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;">${escapeHtml(pUrl)}</a></div>
-      <div>Mã số bí mật: <b style="color: #ee0033;">${escapeHtml(mCode)}</b></div>
+    <div class="viettel-lookup-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+      <div>MST Bên bán: <b style="color: #111;">${escapeHtml(invoice.nbmst)}</b> &nbsp;|&nbsp; Tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;" title="Tự động điền MST người bán và Mã số bí mật vào cổng Viettel S-Invoice">${escapeHtml(pUrl)}</a></div>
+      <div>Mã số bí mật: <b style="color: #ee0033; font-size: 13px; font-family: monospace;">${escapeHtml(mCode)}</b></div>
     </div>
 
     <!-- BUYER -->

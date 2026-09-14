@@ -50,26 +50,16 @@ export default function App() {
   });
 
   // Master Invoices State (Real Data from Live GDT or Imported XML)
+  // Xóa dữ liệu kết quả cũ khi mở lại app/reload web, hiển thị trang trống, chỉ xuất hiện khi tra cứu
   const [invoices, setInvoices] = useState<GDTInvoice[]>(() => {
-    const saved = localStorage.getItem('gdt_saved_invoices');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((inv: GDTInvoice) => {
-            ensureInvoiceItems(inv);
-            return inv;
-          });
-        }
-      } catch (e) {}
-    }
-    return SAMPLE_PARTNER_INVOICES.map((inv: GDTInvoice) => {
-      ensureInvoiceItems(inv);
-      return inv;
-    });
+    try {
+      localStorage.removeItem('gdt_saved_invoices');
+    } catch {}
+    return [];
   });
+  const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
-  const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('imported_xml');
+  const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('live_gdt');
 
   // Filter Parameters State
   const [filters, setFilters] = useState<FilterParams>({
@@ -948,6 +938,7 @@ export default function App() {
         // Tự động ẩn menu bên trái để gọn màn hình
         collapseLeftMenu();
         setInvoices(queryRes.invoices);
+        setHasSearched(true);
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
         enqueueInvoicesForEnrichment(queryRes.invoices, activeToken, activeCookie);
@@ -966,6 +957,7 @@ export default function App() {
         return { success: true };
       } else if (queryRes.status === 401) {
         setAccount(prev => ({ ...prev, isRealGDT: false }));
+        setHasSearched(true);
         setConsoleLogs(prev => [
           ...prev,
           {
@@ -977,6 +969,7 @@ export default function App() {
         ]);
         return { success: false, error: queryRes.message };
       } else {
+        setHasSearched(true);
         setConsoleLogs(prev => [
           ...prev,
           {
@@ -990,6 +983,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Error querying GDT invoices:', err);
+      setHasSearched(true);
       setConsoleLogs(prev => [
         ...prev,
         {
@@ -1026,6 +1020,7 @@ export default function App() {
     }
 
     setDataSourceType('imported_xml');
+    setHasSearched(true);
     autoCollapseConsole(1200);
     setInvoices(prev => {
       const existingIds = new Set(prev.map(i => i.id));
@@ -1076,6 +1071,7 @@ export default function App() {
       return inv;
     });
     setInvoices(refreshed);
+    setHasSearched(true);
     setSelectedInvoices([]);
     setDataSourceType('imported_xml');
     setFilters({
@@ -1089,14 +1085,13 @@ export default function App() {
       searchKeyword: '',
       taxRateFilter: 'all'
     });
-    localStorage.setItem('gdt_saved_invoices', JSON.stringify(refreshed));
     setConsoleLogs(prev => [
       ...prev,
       {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'success',
-        message: '✓ Đã khôi phục 7 hóa đơn mẫu gốc chính xác của các đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn) với danh sách hàng hóa chi tiết thực tế.'
+        message: '✓ Đã tải 7 hóa đơn mẫu gốc của các đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn) với danh sách hàng hóa chi tiết thực tế.'
       }
     ]);
   };
@@ -1128,6 +1123,10 @@ export default function App() {
       });
       setInvoices([]);
       setSelectedInvoices([]);
+      setHasSearched(false);
+      try {
+        localStorage.removeItem('gdt_saved_invoices');
+      } catch {}
       setIsConfigModalOpen(true);
     }
   };
@@ -1252,6 +1251,7 @@ export default function App() {
             onQuickResetPeriod={handleResetFilters}
             currentDateRange={{ from: filters.fromDate, to: filters.toDate }}
             currentMst={account.taxCode}
+            hasSearched={hasSearched}
           />
         </div>
 

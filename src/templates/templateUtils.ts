@@ -192,8 +192,23 @@ export function buildDirectLookupUrl(
   }
 
   // 5. Viettel S-Invoice
+  // Tự động điền MST người bán và Mã số bí mật vào cổng tra cứu Viettel
   if (provider.includes('VIETTEL') || /sinvoice\.viettel/i.test(url)) {
-    return 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+    const baseUrl = 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+    const params = new URLSearchParams();
+    const cleanSellerMst = (sellerTaxCode || '').trim();
+    if (cleanSellerMst) {
+      params.append('supplierTaxCode', cleanSellerMst);
+      params.append('taxCode', cleanSellerMst);
+      params.append('mst', cleanSellerMst);
+    }
+    if (code) {
+      params.append('reservationCode', code);
+      params.append('secretCode', code);
+      params.append('code', code);
+    }
+    const q = params.toString();
+    return q ? `${baseUrl}?${q}` : baseUrl;
   }
 
   // 6. Bkav eHoadon

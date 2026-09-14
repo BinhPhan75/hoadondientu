@@ -68,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold uppercase tracking-wider text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                Hóa đơn mua vào
+                Tool tra cứu hóa đơn mua vào
               </span>
               <span className="text-xs font-mono font-bold text-gray-900">
                 MST: {account.taxCode || '(Chưa nhập)'}

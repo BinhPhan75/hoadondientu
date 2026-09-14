@@ -263,6 +263,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId === 'TAN_THANH_DANH' ||
     effectiveInvoice?.nbmst === '0101243150';
 
+  const isViettelInvoice = /sinvoice\.viettel/i.test(directLookupUrl) || 
+    effectiveTemplateId === 'VIETTEL' || 
+    Boolean(effectiveInvoice?.caProvider?.includes('VIETTEL'));
+
   if (!renderError) {
     try {
       // Tạo HTML chuẩn theo template của nhà cung cấp
@@ -447,14 +451,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
                   isMisaInvoice
                     ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
+                    : isViettelInvoice
+                    ? 'text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600 hover:border-red-500 ring-1 ring-red-500/30'
                     : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
                 }`}
                 title={isMisaInvoice 
                   ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
+                  : isViettelInvoice
+                  ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${effectiveInvoice?.nbmst || ''} & Mã bí mật ${lookupDetails.lookupCode || ''})`
                   : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
               >
-                <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : 'Tra cứu Cổng NCC'}</span>
+                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isViettelInvoice ? 'text-red-400' : 'text-cyan-400'}`} />
+                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isViettelInvoice ? 'Tra cứu Viettel S-Invoice' : 'Tra cứu Cổng NCC'}</span>
               </a>
             )}
 
