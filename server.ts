@@ -106,12 +106,13 @@ function extractCookies(res: any): string {
 }
 
 // Resilient GDT Fetch with Retry & Timeout Protection
-async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 5000): Promise<Response> {
+async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 7000): Promise<Response> {
   let lastError: any = null;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    let timer: NodeJS.Timeout | null = null;
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      timer = setTimeout(() => controller.abort(), timeoutMs);
 
       const mergedHeaders = {
         ...GDT_HEADERS,
@@ -124,7 +125,7 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
         signal: controller.signal
       });
 
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
 
       if (resp.ok || resp.status === 400 || resp.status === 401 || resp.status === 403) {
         return resp;
@@ -132,6 +133,7 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
 
       lastError = new Error(`Cổng Thuế phản hồi mã HTTP ${resp.status}`);
     } catch (err: any) {
+      if (timer) clearTimeout(timer);
       lastError = err;
     }
 
@@ -352,7 +354,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/gdt/captcha', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 1, 4000);
+    const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 1, 6500);
 
     if (gdtRes.ok) {
       const cookieStr = extractCookies(gdtRes);
@@ -378,9 +380,13 @@ app.get('/api/gdt/captcha', async (req, res) => {
     }
 
     const errText = await gdtRes.text();
-    console.warn('[GDT Captcha Fetch Non-OK]:', gdtRes.status, errText.substring(0, 200));
+    console.info('[GDT Captcha Fetch Notice]: HTTP', gdtRes.status, errText.substring(0, 100));
   } catch (error: any) {
-    console.warn('[GDT Proxy] Live GDT captcha fetch error:', error.message);
+    if (error?.name === 'AbortError' || error?.message?.includes('aborted')) {
+      console.info('[GDT Proxy] Live GDT captcha connection timed out from server; switching seamlessly to client fallback.');
+    } else {
+      console.info('[GDT Proxy] Live GDT captcha notice:', error?.message);
+    }
   }
 
   // Return clean JSON (status 200) so client can seamlessly switch to direct Vietnam browser fetch
@@ -392,7 +398,7 @@ app.get('/api/gdt/captcha', async (req, res) => {
     captchaCode: '',
     captchaImage: '',
     source: 'gdt_unreachable',
-    message: 'Máy chủ Vercel (nước ngoài) không thể kết nối trực tiếp đến Cổng Thuế. Ứng dụng sẽ tự động tải Captcha trực tiếp từ trình duyệt của bạn tại Việt Nam.',
+    message: 'Máy chủ Cloud (ngoài nước) không thể kết nối trực tiếp đến Cổng Thuế. Ứng dụng sẽ tự động tải Captcha trực tiếp từ trình duyệt của bạn tại Việt Nam.',
     directFallbackUrl: 'https://hoadondientu.gdt.gov.vn/api/captcha'
   });
 });

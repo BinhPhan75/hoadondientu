@@ -598,8 +598,12 @@ export function renderMisaTemplate(
   const mUrl = 'https://www.meinvoice.vn/tra-cuu';
   const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, 'MISA', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || '006BFBDE319939417F9B4EE5AE3AE75AD7';
+  const maCqt = invoice.mhdon || '';
   const items = ensureInvoiceItems(invoice);
+  const itemsTotal = items.reduce((acc, it) => acc + (Number(it.amount ?? (it as any).thtien) || 0), 0);
+  const totalBeforeTax = invoice.tgtcthue !== undefined && invoice.tgtcthue !== null ? invoice.tgtcthue : itemsTotal;
+  const totalTax = invoice.tgtthue !== undefined && invoice.tgtthue !== null ? invoice.tgtthue : 0;
+  const grandTotal = invoice.tgtttbso !== undefined && invoice.tgtttbso !== null ? invoice.tgtttbso : (totalBeforeTax + totalTax);
   const sellerName = invoice.nbten || 'Đơn vị bán hàng';
   const watermark = options?.watermarkText || sellerName.split(' ').slice(-2).join(' ') || 'meInvoice';
 
@@ -839,7 +843,7 @@ export function renderMisaTemplate(
       <div class="invoice-title-col">
         <div class="inv-title">${escapeHtml(invoice.thdon || 'HÓA ĐƠN GIÁ TRỊ GIA TĂNG')}</div>
         <div class="inv-date">Ngày ${day} tháng ${month} năm ${year}</div>
-        <div class="inv-meta-line">Mã CQT: <b>${escapeHtml(maCqt)}</b></div>
+        ${maCqt ? `<div class="inv-meta-line">Mã CQT: <b>${escapeHtml(maCqt)}</b></div>` : ''}
         <div class="inv-meta-line" style="margin-top: 4px;">
           Ký hiệu: <b>${escapeHtml(invoice.khhdon)}</b> &nbsp;&nbsp; 
           Số: <b style="color: #c5221f; font-size: 15px;">${escapeHtml(invoice.shdon)}</b>
@@ -908,15 +912,16 @@ export function renderMisaTemplate(
     <div class="total-section">
       <div class="total-row">
         <span>Cộng tiền hàng:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum(invoice.tgtcthue)} đ</span>
+        <span style="font-family: monospace; font-weight: bold;">${formatNum(totalBeforeTax)} đ</span>
       </div>
+      ${totalTax > 0 ? `
       <div class="total-row">
-        <span>Thuế suất GTGT: <b>${items[0]?.taxRate || '8%'}</b> &nbsp;&nbsp;&nbsp;&nbsp; Tiền thuế GTGT:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum(invoice.tgtthue)} đ</span>
-      </div>
+        <span>Thuế suất GTGT: <b>${items[0]?.taxRate || ''}</b> &nbsp;&nbsp;&nbsp;&nbsp; Tiền thuế GTGT:</span>
+        <span style="font-family: monospace; font-weight: bold;">${formatNum(totalTax)} đ</span>
+      </div>` : ''}
       <div class="total-row" style="font-size: 13.5px; border-top: 1px dashed #777; padding-top: 4px; margin-top: 4px;">
         <span style="font-weight: bold;">Tổng tiền thanh toán:</span>
-        <span style="font-family: monospace; font-weight: bold; color: #c5221f; font-size: 14.5px;">${formatNum(invoice.tgtttbso)} đ</span>
+        <span style="font-family: monospace; font-weight: bold; color: #c5221f; font-size: 14.5px;">${formatNum(grandTotal)} đ</span>
       </div>
       <div style="margin-top: 4px;">
         Số tiền viết bằng chữ: <i>${escapeHtml(wordsAmount)}</i>
@@ -942,7 +947,7 @@ export function renderMisaTemplate(
 
     <!-- MISA FOOTER -->
     <div class="misa-footer">
-      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a> - Mã tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;font-weight:bold;" title="Mở trang tra cứu meInvoice (Tự động gán mã & mở hóa đơn)">${escapeHtml(mCode)}</a></div>
+      <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl || mUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml(mUrl)}</a>${mCode ? ` - Mã tra cứu: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;font-weight:bold;" title="Mở trang tra cứu meInvoice (Tự động gán mã & mở hóa đơn)">${escapeHtml(mCode)}</a>` : ''}</div>
       <div style="margin-top: 2px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
     </div>
   </div>

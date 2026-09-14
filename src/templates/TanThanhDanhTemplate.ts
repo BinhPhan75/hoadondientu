@@ -26,22 +26,23 @@ export function renderTanThanhDanhTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   
-  const mCode = lookupCode || invoice.lookupCode || (invoice.shdon === '00001667' || invoice.shdon === '1667' || !invoice.shdon ? 'Q_FRCXKNQDQE' : '');
+  const mCode = lookupCode || invoice.lookupCode || '';
   const pUrl = 'https://www.meinvoice.vn/tra-cuu';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'MISA', invoice.nbmst || '0317978711');
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0317978711;KH:${invoice.khhdon || '2C26MTD'};SHD:${invoice.shdon || '00001667'};MTC:${mCode}`);
+  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${invoice.nbmst || '0317978711'};KH:${invoice.khhdon || '2C26MTD'};SHD:${invoice.shdon || ''};MTC:${mCode}`);
 
   const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 964178200);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const maCqt = invoice.mhdon || 'M2-26-YESOO-00000001832';
+  const calculatedTotal = items.reduce((sum, item) => sum + (Number(item.amount || item.thtien || 0)), 0);
+  const totalAmount = typeof invoice.tgtttbso === 'number' && invoice.tgtttbso > 0 ? invoice.tgtttbso : calculatedTotal;
+  const wordsAmount = invoice.tgtttbchu || (totalAmount > 0 ? numberToVietnameseWords(totalAmount) : '');
+  const maCqt = invoice.mhdon || '';
   const showControls = options?.showPrintControls !== false;
 
   const sellerName = invoice.nbten || 'CÔNG TY TNHH KINH DOANH VÀNG BẠC TÂN THANH DANH';
   const sellerTaxCode = invoice.nbmst || '0317978711';
   const sellerAddress = invoice.nbdchi || (invoice as any).nmdchi_seller || '25-27 An Dương Vương, Phường 08, Quận 5, Thành phố Hồ Chí Minh, Việt Nam';
   const sellerPhone = (invoice as any).sdt_seller || (invoice as any).nbsdt || '028 3835 1868';
-  const sellerBank = '114002948828 - Ngân hàng TMCP Công Thương Việt Nam (VietinBank) - Chi nhánh 5 - TP HCM';
+  const sellerBank = invoice.nbstk ? `${invoice.nbstk}${invoice.nbnhang ? ` - ${invoice.nbnhang}` : ''}` : '';
 
   const buyerName = invoice.nmten || 'CÔNG TY TNHH MỘT THÀNH VIÊN VÀNG BẠC NGHĨA TÍN';
   const buyerTaxCode = invoice.nmmst || '4000926165';
@@ -52,7 +53,7 @@ export function renderTanThanhDanhTemplate(
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
-  <title>HÓA ĐƠN BÁN HÀNG - ${escapeHtml(sellerName)} - Số: ${escapeHtml(invoice.shdon || '00001667')}</title>
+  <title>HÓA ĐƠN BÁN HÀNG - ${escapeHtml(sellerName)} - Số: ${escapeHtml(invoice.shdon || '')}</title>
   <style>
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -416,7 +417,7 @@ export function renderTanThanhDanhTemplate(
 
       <!-- FOOTER -->
       <div class="footer-area">
-        <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#059669;text-decoration:underline;font-weight:bold;">${escapeHtml(pUrl)}</a> - Mã tra cứu hóa đơn: <strong style="font-family:monospace;font-size:12.5px;color:#065f46;">${escapeHtml(mCode)}</strong></div>
+        <div>Tra cứu tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#059669;text-decoration:underline;font-weight:bold;">${escapeHtml(pUrl)}</a>${mCode ? ` - Mã tra cứu hóa đơn: <strong style="font-family:monospace;font-size:12.5px;color:#065f46;">${escapeHtml(mCode)}</strong>` : ''}</div>
         <div style="font-style:italic;color:#64748b;margin-top:2px;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
         <div style="font-size:10.5px;color:#475569;margin-top:3px;">Phát hành bởi phần mềm MISA meInvoice - Công ty Cổ phần MISA (www.misa.vn) - MST 0101243150</div>
       </div>

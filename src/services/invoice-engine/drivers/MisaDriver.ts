@@ -7,6 +7,7 @@ import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
+import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
 
 export class MisaDriver extends BaseInvoiceProviderDriver {
   readonly name = 'MISA meInvoice Driver';
@@ -43,14 +44,15 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    // Tìm Mã tra cứu (MISA thường lưu trong <TTin><TTruong>Mã tra cứu</TTruong><DLieu>...</DLieu></TTin> hoặc <MTCuu>)
-    let lookupCode = this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'LookupCode', 'MTC']);
+    // Tìm Mã tra cứu và URL tra cứu MISA từ XML bằng bộ trích xuất chuẩn hóa
+    const { lookupCode: extractedCode, lookupUrl: extractedUrl } = extractLookupDetailsFromXml(xmlData);
+    let lookupCode = extractedCode || this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'LookupCode', 'MTC', 'TransactionID']);
     if (!lookupCode) {
-      lookupCode = this.extractXmlTag(xmlData, 'MTCuu') || this.extractXmlTag(xmlData, 'MaTraCuu');
+      lookupCode = this.extractXmlTag(xmlData, 'TransactionID') || this.extractXmlTag(xmlData, 'MTCuu') || this.extractXmlTag(xmlData, 'MaTraCuu');
     }
 
     // Nếu mã tra cứu là một đường dẫn URL (ví dụ: https://www.meinvoice.vn/tra-cuu/?sc=ABCXYZ hoặc ?code=ABCXYZ)
-    let lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
+    let lookupUrl = extractedUrl || 'https://www.meinvoice.vn/tra-cuu';
     if (lookupCode && lookupCode.includes('http')) {
       try {
         const urlObj = new URL(lookupCode);
@@ -77,7 +79,7 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
       templateCode,
       invoiceDate,
       lookupCode: lookupCode || undefined,
-      lookupUrl,
+      lookupUrl: lookupUrl || 'https://www.meinvoice.vn/tra-cuu',
       cqtCode: cqtCode || undefined,
       totalAmount,
       totalTaxAmount,
@@ -107,16 +109,34 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
     const cleanMst = (info.sellerTaxCode || '').trim();
 
     // Danh sách các endpoints API chính thức & viewer của MISA
-    const candidateEndpoints = [
+    const candidateEndpoints: Array<{ url: string; method: string; data?: any }> = [
       {
         url: 'https://www.meinvoice.vn/api/viewer/download-pdf',
         method: 'POST',
         data: {
           code: cleanLookupCode,
+          transactionID: cleanLookupCode,
           taxCode: cleanMst,
           invoiceNo: info.invoiceNo,
           series: info.invoiceSeries
         }
+      },
+      {
+        url: 'https://www.meinvoice.vn/api/viewer/get-invoice-pdf-file',
+        method: 'POST',
+        data: {
+          transactionID: cleanLookupCode,
+          code: cleanLookupCode,
+          taxCode: cleanMst
+        }
+      },
+      {
+        url: `https://www.meinvoice.vn/api/viewer/get-invoice-pdf-file?transactionId=${encodeURIComponent(cleanLookupCode)}&taxCode=${encodeURIComponent(cleanMst)}`,
+        method: 'GET'
+      },
+      {
+        url: `https://www.meinvoice.vn/api/viewer/download-pdf?sc=${encodeURIComponent(cleanLookupCode)}&taxCode=${encodeURIComponent(cleanMst)}`,
+        method: 'GET'
       },
       {
         url: `https://www.meinvoice.vn/api/v1/invoices/download-pdf?code=${encodeURIComponent(cleanLookupCode)}&taxCode=${encodeURIComponent(cleanMst)}`,

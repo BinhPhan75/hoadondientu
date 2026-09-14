@@ -139,7 +139,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCaptchaImg(res.captchaImage);
       setCaptchaKey(res.captchaKey || '');
       setCaptchaCookie(res.captchaCookie || '');
-      setIsRealGdtCaptcha(true);
+      setIsRealGdtCaptcha(res.source === 'proxy' || res.source === 'direct_browser');
       setAuthError(null);
       setIsLoadingCaptcha(false);
       return;
@@ -152,7 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setCaptchaCode('');
     setOcrSuccess(false);
     setIsRealGdtCaptcha(false);
-    setAuthError(res.error || 'Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" hoặc bấm vào ô ảnh để thử lại.');
+    setAuthError('Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" để thử lại.');
     setIsLoadingCaptcha(false);
   };
 

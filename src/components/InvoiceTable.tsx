@@ -376,7 +376,12 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             inv.provider,
                             inv.nbmst
                           );
-                          const isMisa = /meinvoice/i.test(directUrl) || inv.provider === 'MISA' || inv.nbmst === '0101243150';
+                          const isMisa = /meinvoice/i.test(directUrl) || 
+                            inv.provider === 'MISA' || 
+                            inv.provider === 'TAN_THANH_DANH' || 
+                            inv.provider === 'TAI_TRAM_ANH' || 
+                            inv.provider === 'XUAN_VINH' || 
+                            inv.nbmst === '0101243150';
                           return (
                             <a
                               href={directUrl}

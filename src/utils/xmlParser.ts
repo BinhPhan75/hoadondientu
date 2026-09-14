@@ -360,21 +360,39 @@ function cleanLookupValue(value: any): string {
  */
 function getFromStructuredArrays(source: any, fieldNames: string[]): string {
   if (!source || typeof source !== 'object') return '';
-  const arrayKeys = ['ttkhac', 'TTKhac', 'nbttkhac', 'NBTTKhac', 'nmttkhac', 'NMTTKhac', 'cttkhac', 'CTTKhac'];
+  const arrayKeys = [
+    'ttkhac', 'TTKhac', 'nbttkhac', 'NBTTKhac', 'nmttkhac', 'NMTTKhac', 'cttkhac', 'CTTKhac',
+    'ttin', 'TTin', 'dltkhac', 'DLTKhac', 'thongTinKhac', 'ThongTinKhac', 'customFields'
+  ];
   const normalized = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
   const wanted = fieldNames.map(normalized);
+
+  const checkItem = (entry: any): string => {
+    if (!entry || typeof entry !== 'object') return '';
+    const label = getPayloadValue(entry, ['ttruong', 'TTruong', 'Ttruong', 'key', 'name', 'field', 'ten']);
+    if (!label) return '';
+    if (wanted.includes(normalized(String(label)))) {
+      const value = getPayloadValue(entry, ['dlieu', 'DLieu', 'Dlieu', 'value', 'val', 'duLieu']);
+      if (value !== undefined && value !== null && String(value).trim()) {
+        return String(value).trim();
+      }
+    }
+    return '';
+  };
+
   for (const arrKey of arrayKeys) {
     const arr = getPayloadValue(source, [arrKey]);
-    if (!Array.isArray(arr)) continue;
-    for (const entry of arr) {
-      if (!entry || typeof entry !== 'object') continue;
-      const label = getPayloadValue(entry, ['ttruong', 'TTruong', 'Ttruong']);
-      if (!label) continue;
-      if (wanted.includes(normalized(String(label)))) {
-        const value = getPayloadValue(entry, ['dlieu', 'DLieu', 'Dlieu']);
-        if (value !== undefined && value !== null && String(value).trim()) {
-          return String(value).trim();
-        }
+    if (Array.isArray(arr)) {
+      for (const entry of arr) {
+        const val = checkItem(entry);
+        if (val) return val;
+      }
+    } else if (arr && typeof arr === 'object') {
+      const subItems = arr.ttin || arr.TTin || arr.item || arr.Item;
+      const list = Array.isArray(subItems) ? subItems : [subItems || arr];
+      for (const entry of list) {
+        const val = checkItem(entry);
+        if (val) return val;
       }
     }
   }
@@ -422,11 +440,53 @@ export function isVnptSource(source: any): boolean {
   );
 }
 
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp MISA meInvoice (Tân Thanh Danh, Tài Trâm Anh, Xuân Vinh...) hay không.
+ */
+export function isMisaSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0101243150' || // MISA
+    tentcgp.includes('MISA') ||
+    provider.includes('MISA') ||
+    nbmst === '0317978711' || // TÂN THANH DANH
+    nbmst === '0312105174' || // TÀI TRÂM ANH
+    nbmst === '0400557356' || // XUÂN VINH
+    nbmst === '0101243150' ||
+    nbten.includes('TÂN THANH DANH') ||
+    nbten.includes('TAN THANH DANH') ||
+    nbten.includes('TÀI TRÂM ANH') ||
+    nbten.includes('TAI TRAM ANH') ||
+    nbten.includes('XUÂN VINH') ||
+    nbten.includes('XUAN VINH') ||
+    nbten.includes('ĐẠI ĐOÀN KẾT') ||
+    nbten.includes('DAI DOAN KET') ||
+    lookupUrl.includes('meinvoice.vn')
+  );
+}
+
 /** Lấy mã tra cứu từ payload JSON của Cổng Thuế/API. */
 export function getLookupCodeFromPayload(source: any): string {
   if (!source) return '';
 
+  const isMisa = isMisaSource(source);
+  const misaTransactionId = getFromStructuredArrays(source, ['TransactionID', 'TransactionId', 'transactionID']) ||
+    getPayloadValue(source, ['transactionID', 'TransactionID']);
+
+  // Đối với hóa đơn MISA: TransactionID là mã tra cứu chính thức in trên hóa đơn
+  if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
+    return cleanLookupValue(misaTransactionId);
+  }
+
   const values = [
+    misaTransactionId,
     getPayloadValue(source, ['lookupCode', 'LookupCode']),
     getPayloadValue(source, ['lookup_code']),
     getPayloadValue(source, ['mtcuu', 'MTCuu']),
@@ -434,14 +494,12 @@ export function getLookupCodeFromPayload(source: any): string {
     // Cấu trúc mảng { ttruong: "Fkey", dlieu: "..." } - đã xác nhận đây là
     // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
     // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
-    getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode']),
+    getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC']),
     getPayloadValue(source, ['fkey', 'FKey']),
     getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
     // MISA meInvoice: mã tra cứu THẬT in trên hóa đơn nằm trong mảng cttkhac
-    // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc,
-    // ví dụ hóa đơn Tài Trâm Anh C26TTA-273: TransactionID="JXFEULBJM7G7"
-    // == "Mã tra cứu hóa đơn" in trên PDF).
-    getFromStructuredArrays(source, ['TransactionID']),
+    // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc).
+    getFromStructuredArrays(source, ['TransactionID', 'TransactionId']),
     getPayloadValue(source, ['transactionID', 'TransactionID']),
     // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
     // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
@@ -470,21 +528,7 @@ export function getLookupUrlFromPayload(source: any): string {
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
 
-  // Kiểm tra nếu là nguồn MISA (meInvoice)
-  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'MSTTCGP']) || '');
-  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'TenTCGP', 'tentcgpLabel']) || '');
-  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '');
-  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '');
-  const nbten = String(getPayloadValue(source, ['nbten', 'sellerName']) || '');
-
-  const isMisa = msttcgp === '0101243150' ||
-    /MISA/i.test(tentcgp) ||
-    /MISA/i.test(provider) ||
-    nbmst === '0317978711' || // Tân Thanh Danh
-    /TÂN THANH DANH|TAN THANH DANH/i.test(nbten) ||
-    /ĐẠI ĐOÀN KẾT|DAI DOAN KET/i.test(nbten);
-
-  if (isMisa) {
+  if (isMisaSource(source)) {
     return 'https://www.meinvoice.vn/tra-cuu';
   }
 
@@ -600,7 +644,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
       extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name')
     );
     if (!label || label.includes('bi mat') || label.includes('secret')) continue;
-    const isExplicitLookupLabel = /(?:^|\s)(?:ma\s*)?tra\s*cuu(?:\s|$)|^(?:matracuu|fkey|lookupcode|transactionid)$/i.test(label);
+    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc/i.test(label);
     if (!lookupCode && isExplicitLookupLabel) {
       const value = cleanLookupValue(extractTagValue(block, 'DLieu') || extractTagValue(block, 'Data') || extractTagValue(block, 'Value'));
       if (isLookupCodeCandidate(value)) {
@@ -617,6 +661,14 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
       lookupCode = cleanLookupValue(url.searchParams.get('sc') || url.searchParams.get('code') || url.searchParams.get('c') || url.searchParams.get('fkey') || '');
     } catch {
       lookupCode = '';
+    }
+  }
+
+  // 4.1 Bổ sung quét tham số sc= hoặc TransactionID trong toàn bộ nội dung XML nếu chưa tìm thấy
+  if (!lookupCode) {
+    const scMatch = rawXml.match(/[?&]sc=([A-Za-z0-9_-]+)/i);
+    if (scMatch?.[1] && isLookupCodeCandidate(scMatch[1])) {
+      lookupCode = cleanLookupValue(scMatch[1]);
     }
   }
 
@@ -668,7 +720,11 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     /0101243150/i.test(rawXml) || 
     /MISA meInvoice/i.test(rawXml) ||
     /0317978711/i.test(rawXml) || // Tân Thanh Danh
+    /0312105174/i.test(rawXml) || // Tài Trâm Anh
+    /0400557356/i.test(rawXml) || // Xuân Vinh
     /TÂN THANH DANH|TAN THANH DANH/i.test(rawXml) ||
+    /TÀI TRÂM ANH|TAI TRAM ANH/i.test(rawXml) ||
+    /XUÂN VINH|XUAN VINH/i.test(rawXml) ||
     /BÁO ĐẠI ĐOÀN KẾT|BAO DAI DOAN KET|daidoanket\.vn/i.test(rawXml);
 
   if (isMisa) {

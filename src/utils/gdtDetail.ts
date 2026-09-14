@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isPlaceholderItemName, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
+import { extractLookupDetailsFromXml, getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isPlaceholderItemName, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -280,9 +280,21 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
   const authoritativeItems = xmlItems.length ? xmlItems : detailItems;
   const detailLookup = getLookupCodeFromPayload(detailSource);
   const detailUrl = getLookupUrlFromPayload(detailSource);
+  const xmlLookup = detailXml ? extractLookupDetailsFromXml(detailXml) : null;
 
   const resolvedMhdon = value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon;
   const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
+  const isMisa = isMisaSource(detailSource) || isMisaSource(invoice);
+
+  const finalLookupCode = (isVnpt && resolvedMhdon) 
+    ? resolvedMhdon 
+    : (detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || undefined);
+
+  const finalLookupUrl = isVnpt 
+    ? (detailUrl || invoice.lookupUrl || `https://${seller.taxCode || invoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`)
+    : isMisa 
+      ? (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu')
+      : (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || undefined);
 
   return {
     ...invoice,
@@ -293,11 +305,10 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     nmten: value(detailSource, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
     nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
     mhdon: resolvedMhdon,
-    msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || invoice.msttcgp,
-    lookupCode: (isVnpt && resolvedMhdon) ? resolvedMhdon : (detailLookup || invoice.lookupCode || undefined),
-    lookupUrl: (isVnpt && !detailUrl && !invoice.lookupUrl) 
-      ? `https://${seller.taxCode || invoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn` 
-      : (detailUrl || invoice.lookupUrl || undefined),
+    msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || (isMisa ? '0101243150' : invoice.msttcgp),
+    provider: isMisa ? 'MISA' : (isVnpt ? 'VNPT' : (invoice.provider || undefined)),
+    lookupCode: finalLookupCode,
+    lookupUrl: finalLookupUrl,
     items: authoritativeItems,
     ...(detailXml ? { rawXml: detailXml } : {}),
     // A downloaded XML alone is not evidence that line descriptions were

@@ -120,7 +120,12 @@ export function buildDirectLookupUrl(
     provider.includes('TAI_TRAM_ANH') ||
     provider.includes('XUAN_VINH') ||
     provider.includes('TAN_THANH_DANH') ||
-    /meinvoice\.vn/i.test(url);
+    sellerTaxCode === '0317978711' || // Tân Thanh Danh
+    sellerTaxCode === '0312105174' || // Tài Trâm Anh
+    sellerTaxCode === '0400557356' || // Xuân Vinh
+    sellerTaxCode === '0101243150' || // MISA
+    /meinvoice\.vn/i.test(url) ||
+    /daidoanket\.vn/i.test(url);
 
   if (isMisa) {
     const baseMisaUrl = 'https://www.meinvoice.vn/tra-cuu';

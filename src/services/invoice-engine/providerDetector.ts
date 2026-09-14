@@ -32,7 +32,7 @@ export type DetectedInvoiceProvider =
 
 export interface DetectionResultDetails {
   provider: DetectedInvoiceProvider;
-  priority: 1 | 1.5 | 2 | 0; // 1: Domain URL, 1.5: Solution Provider MSTTCGP, 2: Digital Signature CA, 0: Unknown Fallback
+  priority: 1 | 1.5 | 1.8 | 2 | 0; // 1: Domain URL, 1.5: Solution Provider MSTTCGP, 1.8: Partner MISA, 2: Digital Signature CA, 0: Unknown Fallback
   matchedPattern: string;
   sourceDescription: string;
 }
@@ -244,6 +244,22 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     if (tentcgp.includes('CYBERLOTUS') || tentcgp.includes('CYBERBILL')) {
       return { provider: 'CYBERBILL', priority: 1.5, matchedPattern: 'TenTCGP: CYBERBILL', sourceDescription: 'Tổ chức giải pháp: CyberBill' };
     }
+  }
+
+  // =========================================================================
+  // ƯU TIÊN 1.8: Quét Mã số thuế hoặc Tên người bán thuộc đối tác MISA
+  // (Tân Thanh Danh: 0317978711, Tài Trâm Anh: 0312105174, Xuân Vinh: 0400557356)
+  // =========================================================================
+  if (
+    /0317978711|0312105174|0400557356/i.test(xmlString) ||
+    /TÂN THANH DANH|TAN THANH DANH|TÀI TRÂM ANH|TAI TRAM ANH|XUÂN VINH|XUAN VINH|meInvoice/i.test(xmlString)
+  ) {
+    return {
+      provider: 'MISA',
+      priority: 1.8,
+      matchedPattern: 'MISA Partner (Tân Thanh Danh / Tài Trâm Anh / Xuân Vinh)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống MISA meInvoice'
+    };
   }
 
   // =========================================================================
