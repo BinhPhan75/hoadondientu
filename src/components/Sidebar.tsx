@@ -219,7 +219,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       captchaCookie
     });
 
-    if (result && !result.success && result.error) {
+    if (result && result.success) {
+      // Khi nhấn vào bắt đầu truy xuất, nếu kết nối thành công với cổng tổng cục thuế, menu trên trái sẽ tự động ẩn để gọn màn hình
+      if (onCollapseSidebar) onCollapseSidebar();
+      if (onCloseMobileSidebar) onCloseMobileSidebar();
+    } else if (result && !result.success && result.error) {
       setAuthError(result.error);
       // Auto refresh captcha on failure so user can retry immediately
       fetchCaptcha();
