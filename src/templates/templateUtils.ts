@@ -192,9 +192,10 @@ export function buildDirectLookupUrl(
   }
 
   // 5. Viettel S-Invoice
+  // Link chuẩn: https://www.sinvoice.vn/p/tra-cuu-hoa-don.html
   // Tự động điền MST người bán và Mã số bí mật vào cổng tra cứu Viettel
-  if (provider.includes('VIETTEL') || /sinvoice\.viettel/i.test(url)) {
-    const baseUrl = 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+  if (provider.includes('VIETTEL') || /sinvoice/i.test(url) || /viettel/i.test(url)) {
+    const baseUrl = 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html';
     const params = new URLSearchParams();
     const cleanSellerMst = (sellerTaxCode || '').trim();
     if (cleanSellerMst) {

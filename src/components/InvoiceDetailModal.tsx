@@ -263,7 +263,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId === 'TAN_THANH_DANH' ||
     effectiveInvoice?.nbmst === '0101243150';
 
-  const isViettelInvoice = /sinvoice\.viettel/i.test(directLookupUrl) || 
+  const isViettelInvoice = /sinvoice/i.test(directLookupUrl) || 
     effectiveTemplateId === 'VIETTEL' || 
     Boolean(effectiveInvoice?.caProvider?.includes('VIETTEL'));
 

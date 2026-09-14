@@ -332,10 +332,10 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         id: 'VIETTEL',
         name: 'Viettel S-Invoice',
         shortName: 'Viettel',
-        domain: 'sinvoice.viettel.vn',
+        domain: 'sinvoice.vn',
         badge: '🔴 Viettel S-Invoice',
         color: '#dc2626',
-        portalUrl: 'https://sinvoice.viettel.vn/tracuuhoadon',
+        portalUrl: 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html',
         description: 'Giải pháp HĐĐT S-Invoice Tập đoàn Công nghiệp - Viễn thông Quân đội (MST 0100109106)'
       };
     case 'VNPT':
@@ -1728,7 +1728,7 @@ export function renderViettelTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://sinvoice.viettel.vn/tra-cuu-hoa-don';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'VIETTEL', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
@@ -1961,7 +1961,7 @@ export function renderViettelTemplate(
     <!-- FOOTER -->
     <div class="viettel-footer">
       <div>Hóa đơn điện tử khởi tạo từ hệ thống Viettel S-Invoice - Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)</div>
-      <div>Tra cứu trực tuyến: <a href="https://sinvoice.viettel.vn" target="_blank" style="color: #ee0033;">https://sinvoice.viettel.vn</a></div>
+      <div>Tra cứu trực tuyến: <a href="https://www.sinvoice.vn/p/tra-cuu-hoa-don.html" target="_blank" style="color: #ee0033;">https://www.sinvoice.vn/p/tra-cuu-hoa-don.html</a></div>
     </div>
   </div>
 </body>

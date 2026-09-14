@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { createServer as createViteServer } from 'vite';
@@ -8,6 +9,16 @@ import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
+import {
+  initDatabase,
+  getDatabaseStatus,
+  findUserByUsername,
+  getAllUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  WebUserView
+} from './src/db/neonDb';
 
 const app = express();
 const PORT = 3000;
@@ -1146,8 +1157,245 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   }
 });
 
+// ============================================================================
+// WEB AUTHENTICATION & NEON DATABASE MANAGEMENT ROUTES
+// ============================================================================
+
+interface WebSessionInfo {
+  token: string;
+  username: string;
+  role: 'admin' | 'user';
+  createdAt: number;
+}
+const webSessions = new Map<string, WebSessionInfo>();
+
+function formatUserForClient(user: WebUserView) {
+  return {
+    id: user.id,
+    username: user.username,
+    fullName: user.full_name || '',
+    role: user.role,
+    durationMonths: user.duration_months,
+    createdAt: user.created_at,
+    expiresAt: user.expires_at,
+    isActive: user.is_active,
+    notes: user.notes || '',
+    daysRemaining: user.days_remaining,
+    isExpired: user.is_expired,
+    status: user.status
+  };
+}
+
+function formatUserForAdmin(user: WebUserView) {
+  return {
+    ...formatUserForClient(user),
+    password: user.password // Cung cấp để Admin có thể xem/copy gửi cho khách hàng
+  };
+}
+
+async function authenticateWebUser(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập hệ thống.' });
+  }
+
+  const token = authHeader.substring(7).trim();
+  const session = webSessions.get(token);
+  if (!session) {
+    return res.status(401).json({ success: false, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
+  }
+
+  const user = await findUserByUsername(session.username);
+  if (!user || !user.is_active) {
+    webSessions.delete(token);
+    return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại hoặc đã bị khóa.' });
+  }
+
+  if (user.is_expired && user.role !== 'admin') {
+    webSessions.delete(token);
+    return res.status(403).json({
+      success: false,
+      expired: true,
+      message: `Tài khoản của bạn đã hết hạn sử dụng (${new Date(user.expires_at).toLocaleDateString('vi-VN')}). Vui lòng liên hệ quản trị viên để gia hạn.`
+    });
+  }
+
+  (req as any).webUser = user;
+  next();
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const user = (req as any).webUser;
+  if (!user || user.role !== 'admin') {
+    return res.status(403).json({ success: false, message: 'Bạn không có quyền quản trị viên.' });
+  }
+  next();
+}
+
+// 1. Đăng nhập hệ thống Web
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế và mật khẩu.' });
+    }
+
+    const user = await findUserByUsername(username);
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Tên đăng nhập (Mã số thuế) hoặc mật khẩu không đúng.' });
+    }
+
+    if (user.password !== password.trim()) {
+      return res.status(401).json({ success: false, message: 'Mật khẩu không chính xác.' });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ success: false, message: 'Tài khoản này đang bị tạm khóa. Vui lòng liên hệ quản trị viên.' });
+    }
+
+    if (user.is_expired && user.role !== 'admin') {
+      const expiryFormatted = new Date(user.expires_at).toLocaleDateString('vi-VN');
+      return res.status(403).json({
+        success: false,
+        expired: true,
+        message: `Tài khoản của bạn đã hết hạn sử dụng vào ngày ${expiryFormatted}. Vui lòng liên hệ quản trị viên để gia hạn gói cước.`
+      });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    webSessions.set(token, {
+      token,
+      username: user.username,
+      role: user.role,
+      createdAt: Date.now()
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: formatUserForClient(user)
+    });
+  } catch (err: any) {
+    console.error('[Auth Login Error]:', err);
+    res.status(500).json({ success: false, message: err.message || 'Lỗi xử lý đăng nhập' });
+  }
+});
+
+// 2. Lấy thông tin phiên làm việc hiện tại
+app.get('/api/auth/me', authenticateWebUser, async (req, res) => {
+  res.json({
+    success: true,
+    user: formatUserForClient((req as any).webUser)
+  });
+});
+
+// 3. Đăng xuất
+app.post('/api/auth/logout', (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    webSessions.delete(token);
+  }
+  res.json({ success: true });
+});
+
+// 4. Quản trị: Lấy danh sách tất cả tài khoản người dùng
+app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
+  try {
+    const users = await getAllUsers();
+    res.json({
+      success: true,
+      users: users.map(formatUserForAdmin)
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 5. Quản trị: Tạo tài khoản người dùng mới
+app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
+  try {
+    const { username, password, fullName, durationMonths, notes, role } = req.body;
+    const result = await createUser({
+      username,
+      password,
+      fullName,
+      durationMonths: Number(durationMonths) || 1,
+      notes,
+      role: role === 'admin' ? 'admin' : 'user'
+    });
+
+    if (!result.success || !result.user) {
+      return res.status(400).json({ success: false, message: result.error || 'Không thể tạo người dùng' });
+    }
+
+    res.json({
+      success: true,
+      user: formatUserForAdmin(result.user)
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 6. Quản trị: Cập nhật thông tin / gia hạn / đổi mật khẩu
+app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
+  try {
+    const { password, fullName, extendMonths, newExpiresAt, isActive, notes } = req.body;
+    const result = await updateUser(req.params.id, {
+      password,
+      fullName,
+      extendMonths: extendMonths ? Number(extendMonths) : undefined,
+      newExpiresAt,
+      isActive,
+      notes
+    });
+
+    if (!result.success || !result.user) {
+      return res.status(400).json({ success: false, message: result.error || 'Cập nhật thất bại' });
+    }
+
+    res.json({
+      success: true,
+      user: formatUserForAdmin(result.user)
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 7. Quản trị: Xóa người dùng
+app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await deleteUser(req.params.id);
+    if (!result.success) {
+      return res.status(400).json({ success: false, message: result.error });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 8. Trạng thái kết nối Neon Database
+app.get('/api/admin/db-status', async (req, res) => {
+  try {
+    const status = await getDatabaseStatus();
+    res.json({ success: true, ...status });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Start Express Server with Vite integration
 async function startServer() {
+  try {
+    const dbInitResult = await initDatabase();
+    console.log(`[Database Init] ${dbInitResult.message}`);
+  } catch (dbErr: any) {
+    console.warn('[Database Init] Warning:', dbErr.message);
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: {

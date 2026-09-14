@@ -328,7 +328,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
                             title={/meinvoice/i.test(inv.lookupUrl || '') || inv.provider === 'MISA' || inv.nbmst === '0101243150'
                               ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
-                              : /viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) || /sinvoice\.viettel/i.test(inv.lookupUrl || '')
+                              : /viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) || /sinvoice/i.test(inv.lookupUrl || '')
                               ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
                               : `Mã tra cứu: ${inv.lookupCode}`}
                           >
@@ -419,7 +419,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             inv.provider === 'TAI_TRAM_ANH' || 
                             inv.provider === 'XUAN_VINH' || 
                             inv.nbmst === '0101243150';
-                          const isViettel = /sinvoice\.viettel/i.test(directUrl) ||
+                          const isViettel = /sinvoice/i.test(directUrl) ||
                             inv.provider === 'VIETTEL' ||
                             Boolean(inv.caProvider?.includes('VIETTEL'));
                           return (

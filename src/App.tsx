@@ -24,9 +24,16 @@ import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
 import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, AlertTriangle, X } from 'lucide-react';
+import { useAuth } from './context/AuthContext';
+import { LoginForm } from './components/LoginForm';
+import { AdminUserModal } from './components/AdminUserModal';
 
 export default function App() {
+  const { currentUser, isLoading: isAuthLoading, logout: logoutWeb } = useAuth();
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [dismissExpiryWarning, setDismissExpiryWarning] = useState(false);
+
   // Account Configuration State (from localStorage or default)
   const [account, setAccount] = useState<GDTAccountConfig>(() => {
     const saved = localStorage.getItem('gdt_account_config');
@@ -1131,6 +1138,33 @@ export default function App() {
     }
   };
 
+  // Đồng bộ nhanh MST đăng nhập với form tài khoản Thuế (nếu tài khoản thuế ở máy chưa nhập)
+  useEffect(() => {
+    if (currentUser?.username && currentUser.username !== 'admin' && /^[0-9\-]+$/.test(currentUser.username)) {
+      if (!account.taxCode) {
+        setAccount(prev => ({
+          ...prev,
+          taxCode: currentUser.username,
+          taxpayerName: currentUser.fullName || prev.taxpayerName
+        }));
+      }
+    }
+  }, [currentUser?.username]);
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-4">
+        <div className="w-10 h-10 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin mb-4" />
+        <div className="text-base font-semibold text-white">Tool Tra Cứu Hóa Đơn Mua Vào</div>
+        <div className="text-xs text-slate-400 mt-1">Đang kiểm tra thông tin phiên đăng nhập...</div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginForm />;
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937]">
       {/* 1. Left Sidebar (High Density Dark Theme) */}
@@ -1188,15 +1222,37 @@ export default function App() {
           selectedInvoices={selectedInvoices}
           totalInvoicesCount={filteredInvoices.length}
           dataSourceType={dataSourceType}
+          currentUser={currentUser}
           onOpenConfig={() => setIsConfigModalOpen(true)}
           onOpenBatchDownload={() => setIsBatchDownloadModalOpen(true)}
           onExportExcel={() => handleExportExcel(selectedInvoices.length > 0 ? selectedInvoices : filteredInvoices)}
           onRefreshData={handleRunCrawler}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
+          onOpenAdminUsers={() => setIsAdminModalOpen(true)}
+          onLogoutWeb={logoutWeb}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={handleToggleSidebar}
         />
+
+        {/* Subscription Expiry Warning Banner (For users with <= 7 days remaining) */}
+        {currentUser && currentUser.role !== 'admin' && currentUser.daysRemaining <= 7 && !dismissExpiryWarning && (
+          <div className="bg-amber-400 text-slate-950 px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-2xs z-20 shrink-0">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0" />
+              <span>
+                Thông báo thời hạn: Tài khoản của bạn còn <strong>{currentUser.daysRemaining} ngày</strong> sử dụng (hết hạn ngày {new Date(currentUser.expiresAt).toLocaleDateString('vi-VN')}). Vui lòng liên hệ Quản trị viên để gia hạn gói cước.
+              </span>
+            </div>
+            <button
+              onClick={() => setDismissExpiryWarning(true)}
+              className="p-1 hover:bg-amber-500/40 rounded text-slate-950 cursor-pointer"
+              title="Đóng thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Stats Bar */}
         <TaxSummaryDashboard invoices={filteredInvoices} />
@@ -1332,6 +1388,12 @@ export default function App() {
         onResumeSync={handleResumeSync}
         onRetryChunk={handleRetryChunk}
         onStartSync={() => handleRunCrawler()}
+      />
+
+      {/* Admin User Management & Plan Subscription Modal */}
+      <AdminUserModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
       />
 
       {/* Persistent Floating Progress Badge */}

@@ -17,7 +17,7 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
     name: 'Viettel S-Invoice Driver',
     providerCode: 'VIETTEL',
     description: 'Tra cứu và tải PDF HĐĐT gốc từ cổng Viettel S-Invoice qua Số hóa đơn, Mã số bí mật và OCR Captcha',
-    sampleUrl: 'https://sinvoice.viettel.vn/tra-cuu-hoa-don',
+    sampleUrl: 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html',
     supportsCaptcha: true,
     requiredFields: ['sellerTaxCode', 'invoiceNo', 'secretCode']
   };
