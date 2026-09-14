@@ -102,6 +102,14 @@ export default function App() {
     }
   });
 
+  const collapseLeftMenu = () => {
+    setIsSidebarCollapsed(true);
+    try {
+      localStorage.setItem('gdt_sidebar_collapsed', 'true');
+    } catch {}
+    setIsMobileSidebarOpen(false);
+  };
+
   const handleToggleSidebar = () => {
     if (window.innerWidth < 1024) {
       setIsMobileSidebarOpen(prev => !prev);
@@ -114,6 +122,26 @@ export default function App() {
         return next;
       });
     }
+  };
+
+  // Live Console Collapse State
+  const [isConsoleCollapsed, setIsConsoleCollapsed] = useState(false);
+  const consoleCollapseTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  const autoCollapseConsole = (delay = 1200) => {
+    if (consoleCollapseTimeoutRef.current) {
+      clearTimeout(consoleCollapseTimeoutRef.current);
+    }
+    consoleCollapseTimeoutRef.current = setTimeout(() => {
+      setIsConsoleCollapsed(true);
+    }, delay);
+  };
+
+  const handleToggleConsole = () => {
+    if (consoleCollapseTimeoutRef.current) {
+      clearTimeout(consoleCollapseTimeoutRef.current);
+    }
+    setIsConsoleCollapsed(prev => !prev);
   };
 
   // Multi-Month Orchestration State
@@ -283,6 +311,7 @@ export default function App() {
       return;
     }
     exportInvoicesToExcel(listToExport, `Bang_Ke_Hoa_Don_GDT_${account.taxCode}`);
+    autoCollapseConsole(1200);
     setConsoleLogs(prev => [
       ...prev,
       {
@@ -420,6 +449,8 @@ export default function App() {
 
     setIsMultiMonthModalOpen(true);
     setShowFloatingBadge(true);
+    // Tự động ẩn menu bên trái để mở rộng không gian nhìn gọn màn hình
+    collapseLeftMenu();
 
     setConsoleLogs(prev => [
       ...prev,
@@ -637,6 +668,8 @@ export default function App() {
     ]);
 
     setIsRefreshing(false);
+    // Tự động thu gọn thanh LIVE SELENIUM CONSOLE xuống dưới sau khi chạy kết xuất thành công dữ liệu
+    autoCollapseConsole(1200);
     return { success: true };
   };
 
@@ -759,6 +792,11 @@ export default function App() {
   // Run Crawler / Query real invoices from GDT
   const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
     setIsRefreshing(true);
+    if (consoleCollapseTimeoutRef.current) {
+      clearTimeout(consoleCollapseTimeoutRef.current);
+    }
+    // Mở rộng console để người dùng theo dõi nhật ký thời gian thực
+    setIsConsoleCollapsed(false);
     // A refresh starts a new result set immediately, including when login fails.
     setInvoices([]);
     setSelectedInvoices([]);
@@ -847,6 +885,9 @@ export default function App() {
           address: loginResult.address || prev.address
         }));
 
+        // Đã kết nối thành công với Cổng Tổng cục Thuế: tự động ẩn menu bên trái để mở rộng không gian nhìn gọn màn hình
+        collapseLeftMenu();
+
         const sourceNotice = loginResult.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
         setConsoleLogs(prev => [
           ...prev,
@@ -904,6 +945,8 @@ export default function App() {
       });
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
+        // Tự động ẩn menu bên trái để gọn màn hình
+        collapseLeftMenu();
         setInvoices(queryRes.invoices);
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
@@ -918,6 +961,8 @@ export default function App() {
             message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${queryRes.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn${sourceNotice}!`
           }
         ]);
+        // Tự động thu gọn thanh LIVE SELENIUM CONSOLE xuống dưới sau khi chạy kết xuất thành công dữ liệu
+        autoCollapseConsole(1200);
         return { success: true };
       } else if (queryRes.status === 401) {
         setAccount(prev => ({ ...prev, isRealGDT: false }));
@@ -981,6 +1026,7 @@ export default function App() {
     }
 
     setDataSourceType('imported_xml');
+    autoCollapseConsole(1200);
     setInvoices(prev => {
       const existingIds = new Set(prev.map(i => i.id));
       const filteredNew = imported.filter(i => !existingIds.has(i.id));
@@ -1099,12 +1145,7 @@ export default function App() {
             onRunCrawler={handleRunCrawler}
             isLoading={isRefreshing}
             onOpenConfigModal={() => setIsConfigModalOpen(true)}
-            onCollapseSidebar={() => {
-              setIsSidebarCollapsed(true);
-              try {
-                localStorage.setItem('gdt_sidebar_collapsed', 'true');
-              } catch {}
-            }}
+            onCollapseSidebar={collapseLeftMenu}
           />
         </div>
       )}
@@ -1221,6 +1262,8 @@ export default function App() {
           onClearLogs={() => setConsoleLogs([])}
           onRunCrawler={handleRunCrawler}
           taxCode={account.taxCode}
+          isCollapsed={isConsoleCollapsed}
+          onToggleCollapse={handleToggleConsole}
         />
       </div>
 
