@@ -41,13 +41,17 @@ export const ConsoleDock: React.FC<ConsoleDockProps> = ({
     <div className="shrink-0 bg-black text-[#10b981] font-mono border-t-4 border-gray-700 z-20">
       {/* Console Title Bar */}
       <div className="bg-[#111827] px-4 py-1.5 flex items-center justify-between border-b border-gray-800 text-[11px]">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Terminal className="w-3.5 h-3.5 text-[#ef4444]" />
           <span className="text-white font-bold tracking-wide">
             LIVE SELENIUM CONSOLE
           </span>
           <span className="text-gray-500">|</span>
-          <span className="text-gray-400 font-mono text-[10px]">
+          <span className="text-amber-300 font-semibold text-[11px] tracking-wide">
+            Bản quyền thuộc về BinhPhan@2026
+          </span>
+          <span className="text-gray-500 hidden sm:inline">|</span>
+          <span className="text-gray-400 font-mono text-[10px] hidden md:inline">
             python3 gdt_selenium_crawler.py --mst {taxCode || '0316892345'}
           </span>
           {isRunning && (
