@@ -6,7 +6,9 @@ import {
   Settings, 
   RefreshCw,
   FolderArchive,
-  Menu
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen
 } from 'lucide-react';
 import { GDTAccountConfig, GDTInvoice } from '../types';
 
@@ -21,6 +23,7 @@ interface HeaderProps {
   onRefreshData: () => void;
   isRefreshing: boolean;
   onLogout: () => void;
+  isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 }
 
@@ -33,21 +36,32 @@ export const Header: React.FC<HeaderProps> = ({
   onExportExcel,
   onRefreshData,
   isRefreshing,
+  isSidebarCollapsed,
   onToggleSidebar
 }) => {
   return (
     <header className="bg-white border-b border-[#d1d5db] sticky top-0 z-30 shrink-0">
       {/* Main Header */}
       <div className="px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
-        {/* Left Side: Company & MST Info */}
-        <div className="flex items-center gap-3">
+        {/* Left Side: Company & MST Info + Sidebar Toggle */}
+        <div className="flex items-center gap-2.5">
           {onToggleSidebar && (
             <button
               onClick={onToggleSidebar}
-              className="lg:hidden p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md border border-gray-300 transition-colors"
-              title="Mở menu tác vụ"
+              className="p-1.5 text-gray-700 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title={isSidebarCollapsed ? "Hiện menu bên trái" : "Ẩn menu bên trái để mở rộng bảng dữ liệu"}
             >
-              <Menu className="w-4 h-4" />
+              {isSidebarCollapsed ? (
+                <>
+                  <PanelLeftOpen className="w-4 h-4 text-blue-600" />
+                  <span className="text-xs font-bold text-blue-700 hidden sm:inline">Hiện menu</span>
+                </>
+              ) : (
+                <>
+                  <PanelLeftClose className="w-4 h-4 text-gray-600" />
+                  <span className="text-xs font-semibold text-gray-700 hidden sm:inline">Ẩn menu</span>
+                </>
+              )}
             </button>
           )}
 

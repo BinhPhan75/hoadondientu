@@ -15,7 +15,8 @@ import {
   AlertTriangle,
   X,
   Globe2,
-  Database
+  Database,
+  PanelLeftClose
 } from 'lucide-react';
 import { GDTAccountConfig, FilterParams } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
@@ -38,6 +39,7 @@ interface SidebarProps {
   isLoading: boolean;
   onOpenConfigModal: () => void;
   onCloseMobileSidebar?: () => void;
+  onCollapseSidebar?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -48,7 +50,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRunCrawler,
   isLoading,
   onOpenConfigModal,
-  onCloseMobileSidebar
+  onCloseMobileSidebar,
+  onCollapseSidebar
 }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [localMst, setLocalMst] = useState(account.taxCode || '');
@@ -241,14 +244,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
           </div>
 
-          {onCloseMobileSidebar && (
-            <button
-              onClick={onCloseMobileSidebar}
-              className="lg:hidden p-1 text-gray-400 hover:text-white rounded hover:bg-gray-800"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {onCollapseSidebar && (
+              <button
+                type="button"
+                onClick={onCollapseSidebar}
+                className="hidden lg:flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
+                title="Ẩn menu bên trái để mở rộng không gian nhìn"
+              >
+                <PanelLeftClose className="w-4 h-4 text-gray-400" />
+                <span className="text-[11px] font-medium">Ẩn menu</span>
+              </button>
+            )}
+
+            {onCloseMobileSidebar && (
+              <button
+                type="button"
+                onClick={onCloseMobileSidebar}
+                className="lg:hidden p-1 text-gray-400 hover:text-white rounded hover:bg-gray-800 cursor-pointer"
+                title="Đóng menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Connection Status Badge */}

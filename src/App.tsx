@@ -94,6 +94,27 @@ export default function App() {
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('gdt_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebar = () => {
+    if (window.innerWidth < 1024) {
+      setIsMobileSidebarOpen(prev => !prev);
+    } else {
+      setIsSidebarCollapsed(prev => {
+        const next = !prev;
+        try {
+          localStorage.setItem('gdt_sidebar_collapsed', String(next));
+        } catch {}
+        return next;
+      });
+    }
+  };
 
   // Multi-Month Orchestration State
   const [syncState, setSyncState] = useState<MultiMonthSyncState>({
@@ -1068,17 +1089,25 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937]">
       {/* 1. Left Sidebar (High Density Dark Theme) */}
-      <div className="hidden lg:block h-full">
-        <Sidebar
-          account={account}
-          filters={filters}
-          onFilterChange={setFilters}
-          onUpdateAccount={setAccount}
-          onRunCrawler={handleRunCrawler}
-          isLoading={isRefreshing}
-          onOpenConfigModal={() => setIsConfigModalOpen(true)}
-        />
-      </div>
+      {!isSidebarCollapsed && (
+        <div className="hidden lg:block h-full shrink-0">
+          <Sidebar
+            account={account}
+            filters={filters}
+            onFilterChange={setFilters}
+            onUpdateAccount={setAccount}
+            onRunCrawler={handleRunCrawler}
+            isLoading={isRefreshing}
+            onOpenConfigModal={() => setIsConfigModalOpen(true)}
+            onCollapseSidebar={() => {
+              setIsSidebarCollapsed(true);
+              try {
+                localStorage.setItem('gdt_sidebar_collapsed', 'true');
+              } catch {}
+            }}
+          />
+        </div>
+      )}
 
       {/* Mobile Drawer Sidebar */}
       {isMobileSidebarOpen && (
@@ -1125,7 +1154,8 @@ export default function App() {
           onRefreshData={handleRunCrawler}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
-          onToggleSidebar={() => setIsMobileSidebarOpen(true)}
+          isSidebarCollapsed={isSidebarCollapsed}
+          onToggleSidebar={handleToggleSidebar}
         />
 
         {/* Stats Bar */}
