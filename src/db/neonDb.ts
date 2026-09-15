@@ -29,16 +29,31 @@ const LOCAL_USERS_FILE = path.join(DATA_DIR, 'web_users.json');
 let pool: Pool | null = null;
 let isPostgresConnected = false;
 
+function getDatabaseConfig(): { url: string; source: string } {
+  const candidates: Array<[string, string | undefined]> = [
+    ['POSTGRES_URL', process.env.POSTGRES_URL],
+    ['POSTGRES_PRISMA_URL', process.env.POSTGRES_PRISMA_URL],
+    ['DATABASE_URL', process.env.DATABASE_URL],
+    ['NEON_DATABASE_URL', process.env.NEON_DATABASE_URL],
+    ['POSTGRES_URL_NON_POOLING', process.env.POSTGRES_URL_NON_POOLING],
+    ['DATABASE_URL_UNPOOLED', process.env.DATABASE_URL_UNPOOLED]
+  ];
+  const selected = candidates.find(([, value]) => value && value.trim());
+  return {
+    source: selected?.[0] || '',
+    url: (selected?.[1] || '').trim().replace(/^["']|["']$/g, '').trim()
+  };
+}
+
 function getDatabaseUrl(): string {
-  return (
-    process.env.DATABASE_URL ||
-    process.env.NEON_DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.DATABASE_URL_UNPOOLED ||
-    ''
-  ).trim().replace(/^["']|["']$/g, '').trim();
+  return getDatabaseConfig().url;
+}
+
+function safeDatabaseError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/postgres(?:ql)?:\/\/[^\\s]+/gi, 'postgresql://[redacted]')
+    .replace(/password=[^&\\s]+/gi, 'password=[redacted]');
 }
 
 /**
@@ -58,7 +73,7 @@ export function getPostgresPool(): Pool | null {
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
         max: 10,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 10000,
         idleTimeoutMillis: 30000
       });
 
@@ -116,7 +131,8 @@ export function enrichUserWithStatus(user: WebUserRecord): WebUserView {
  * Khởi tạo bảng dữ liệu và tài khoản Admin mặc định
  */
 export async function initDatabase(): Promise<{ success: boolean; type: 'neon_postgres' | 'local_file'; message: string }> {
-  const databaseUrl = getDatabaseUrl();
+  const databaseConfig = getDatabaseConfig();
+  const databaseUrl = databaseConfig.url;
   if (!databaseUrl) {
     isPostgresConnected = false;
     return {
@@ -155,12 +171,12 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
         message: 'Đã kết nối thành công tới Database Neon PostgreSQL.'
       };
     } catch (err: any) {
-      console.warn('[Neon PostgreSQL] Không thể kết nối hoặc khởi tạo bảng trên Neon:', err.message);
+      console.warn('[Neon PostgreSQL] Không thể kết nối hoặc khởi tạo bảng trên Neon:', safeDatabaseError(err));
       isPostgresConnected = false;
       return {
         success: false,
         type: 'local_file',
-        message: 'Không thể kết nối tới Neon PostgreSQL. Vui lòng kiểm tra connection string và quyền truy cập.'
+        message: `Không thể kết nối tới Neon PostgreSQL (${databaseConfig.source}). Vui lòng kiểm tra connection string và quyền truy cập.`
       };
     }
   }
@@ -168,7 +184,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
   return {
     success: false,
     type: 'local_file',
-    message: 'Không thể khởi tạo pool PostgreSQL. Vui lòng kiểm tra connection string và cấu hình Neon.'
+    message: `Không thể khởi tạo pool PostgreSQL (${databaseConfig.source}). Vui lòng kiểm tra connection string và cấu hình Neon.`
   };
 }
 
@@ -213,12 +229,15 @@ export async function getDatabaseStatus(): Promise<{
   message: string;
   totalUsers: number;
   databaseUrlConfigured: boolean;
+  connectionSource?: string;
 }> {
   const p = getPostgresPool();
-  const dbConfigured = Boolean(getDatabaseUrl());
+  const databaseConfig = getDatabaseConfig();
+  const dbConfigured = Boolean(databaseConfig.url);
 
   if (p) {
     try {
+      await p.query('SELECT 1;');
       const res = await p.query('SELECT COUNT(*) as count FROM web_users;');
       const totalUsers = parseInt(res.rows[0]?.count || '0', 10);
       return {
@@ -226,10 +245,20 @@ export async function getDatabaseStatus(): Promise<{
         type: 'neon_postgres',
         message: 'Neon PostgreSQL đang hoạt động ổn định',
         totalUsers,
-        databaseUrlConfigured: true
+        databaseUrlConfigured: true,
+        connectionSource: databaseConfig.source
       };
     } catch (err: any) {
-      console.warn('[DB Status] Error checking Postgres:', err.message);
+      const message = safeDatabaseError(err);
+      console.warn('[DB Status] Error checking Postgres:', message);
+      return {
+        connected: false,
+        type: 'neon_postgres',
+        message: `Neon PostgreSQL lỗi (${message})`,
+        totalUsers: 0,
+        databaseUrlConfigured: true,
+        connectionSource: databaseConfig.source
+      };
     }
   }
 
@@ -240,7 +269,8 @@ export async function getDatabaseStatus(): Promise<{
       ? 'Không thể truy vấn Neon PostgreSQL. Không sử dụng dữ liệu local.'
       : 'Chưa cấu hình connection string cho Neon',
     totalUsers: 0,
-    databaseUrlConfigured: dbConfigured
+    databaseUrlConfigured: dbConfigured,
+    connectionSource: databaseConfig.source
   };
 }
 
