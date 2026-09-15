@@ -1,6 +1,8 @@
 {
   "version": 2,
   "regions": ["sin1"],
+  "installCommand": "npm install --include=optional",
+  "buildCommand": "npm run build",
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
