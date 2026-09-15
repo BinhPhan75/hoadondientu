@@ -127,6 +127,8 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
         CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
       `);
 
+      await ensureDefaultAdminUser();
+
       console.log('[Neon PostgreSQL] ✓ Kết nối Neon thành công, bảng web_users đã sẵn sàng.');
 
       isPostgresConnected = true;
@@ -142,7 +144,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
   }
 
   // Fallback: Local JSON Storage
-  ensureLocalUsersFile();
+  await ensureDefaultAdminUser();
   return {
     success: true,
     type: 'local_file',
@@ -180,6 +182,57 @@ function saveLocalUsers(users: WebUserRecord[]) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+}
+
+function createDefaultAdminRecord(): WebUserRecord {
+  const now = new Date();
+  const expiresAt = calculateExpiryDate(now, 12);
+  return {
+    id: 'admin',
+    username: 'admin',
+    password: 'admin',
+    full_name: 'Quản trị viên hệ thống',
+    role: 'admin',
+    duration_months: 12,
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    is_active: true,
+    notes: 'Tài khoản mặc định do hệ thống tạo cho lần đăng nhập đầu tiên.'
+  };
+}
+
+async function ensureDefaultAdminUser(): Promise<void> {
+  const p = getPostgresPool();
+  if (p) {
+    try {
+      const countRes = await p.query('SELECT COUNT(*)::int AS count FROM web_users;');
+      const count = Number(countRes.rows[0]?.count || 0);
+      if (count === 0) {
+        const admin = createDefaultAdminRecord();
+        await p.query(`
+          INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+        `, [
+          admin.username,
+          admin.password,
+          admin.full_name,
+          admin.role,
+          admin.duration_months,
+          admin.expires_at,
+          admin.is_active,
+          admin.notes
+        ]);
+      }
+      return;
+    } catch (err: any) {
+      console.warn('[ensureDefaultAdminUser] PostgreSQL seed failed, falling back to local default user:', err.message);
+    }
+  }
+
+  const localUsers = ensureLocalUsersFile();
+  if (localUsers.length === 0) {
+    saveLocalUsers([createDefaultAdminRecord()]);
+  }
 }
 
 /**
@@ -227,6 +280,8 @@ export async function getDatabaseStatus(): Promise<{
  * Tìm người dùng theo tên đăng nhập (Mã số thuế hoặc admin)
  */
 export async function findUserByUsername(username: string): Promise<WebUserView | null> {
+  await ensureDefaultAdminUser();
+
   const cleanUsername = (username || '').trim().toLowerCase();
   if (!cleanUsername) return null;
 
@@ -254,6 +309,8 @@ export async function findUserByUsername(username: string): Promise<WebUserView 
  * Lấy danh sách tất cả người dùng (Dành cho Quản trị viên)
  */
 export async function getAllUsers(): Promise<WebUserView[]> {
+  await ensureDefaultAdminUser();
+
   const p = getPostgresPool();
   if (p) {
     try {
