@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Database, Clock } from 'lucide-react';
+import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess?: () => void;
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
-  const { login, dbStatus } = useAuth();
+  const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -168,25 +168,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             <div>
               <span className="font-semibold text-slate-300">Bảo mật đa tầng:</span> Thông tin đăng nhập Cổng Tổng cục Thuế (Mật khẩu Thuế) được lưu trữ riêng tại trình duyệt máy tính cá nhân của Quý khách.
             </div>
-          </div>
-        </div>
-
-        {/* Database Status Indicator */}
-        <div className="mt-4 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-xs text-slate-400 shadow-sm">
-            <Database className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Database:</span>
-            {dbStatus?.connected ? (
-              <span className="text-emerald-400 font-medium inline-flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                Neon PostgreSQL ({dbStatus.totalUsers} tài khoản)
-              </span>
-            ) : (
-              <span className="text-amber-400/90 font-medium inline-flex items-center gap-1.5" title="Cấu hình biến môi trường DATABASE_URL để kết nối Neon PostgreSQL">
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                Chưa kết nối Neon DB ({dbStatus?.totalUsers ?? 0} tài khoản)
-              </span>
-            )}
           </div>
         </div>
 
