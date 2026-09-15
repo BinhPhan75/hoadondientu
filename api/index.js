@@ -5,7 +5,6 @@ import path2 from "path";
 import crypto from "crypto";
 import { spawn } from "child_process";
 import JSZip3 from "jszip";
-import { createServer as createViteServer } from "vite";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -10879,6 +10878,7 @@ async function startServer() {
   });
   if (process.env.NODE_ENV !== "production") {
     try {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: {
           middlewareMode: true,

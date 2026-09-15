@@ -4,7 +4,6 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
-import { createServer as createViteServer } from 'vite';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
@@ -1458,6 +1457,7 @@ async function startServer() {
   // 3. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
   if (process.env.NODE_ENV !== 'production') {
     try {
+      const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
         server: {
           middlewareMode: true,
