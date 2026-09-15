@@ -1168,7 +1168,38 @@ interface WebSessionInfo {
   role: 'admin' | 'user';
   createdAt: number;
 }
-const webSessions = new Map<string, WebSessionInfo>();
+function getAuthTokenSecret(): string {
+  const secret = process.env.AUTH_TOKEN_SECRET || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
+  if (!secret) {
+    throw new Error('Chưa cấu hình AUTH_TOKEN_SECRET hoặc kết nối Neon.');
+  }
+  return secret;
+}
+
+function createWebToken(username: string): string {
+  const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString('base64url');
+  const signature = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function getUsernameFromToken(token: string): string | null {
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) return null;
+
+  const expected = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return typeof parsed.username === 'string' ? parsed.username : null;
+  } catch {
+    return null;
+  }
+}
 
 function formatUserForClient(user: WebUserView) {
   return {
@@ -1201,19 +1232,17 @@ async function authenticateWebUser(req: express.Request, res: express.Response, 
   }
 
   const token = authHeader.substring(7).trim();
-  const session = webSessions.get(token);
-  if (!session) {
+  const username = getUsernameFromToken(token);
+  if (!username) {
     return res.status(401).json({ success: false, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
   }
 
-  const user = await findUserByUsername(session.username);
+  const user = await findUserByUsername(username);
   if (!user || !user.is_active) {
-    webSessions.delete(token);
     return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại hoặc đã bị khóa.' });
   }
 
   if (user.is_expired && user.role !== 'admin') {
-    webSessions.delete(token);
     return res.status(403).json({
       success: false,
       expired: true,
@@ -1271,13 +1300,7 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    webSessions.set(token, {
-      token,
-      username: user.username,
-      role: user.role,
-      createdAt: Date.now()
-    });
+    const token = createWebToken(user.username);
 
     res.json({
       success: true,
@@ -1303,7 +1326,6 @@ app.post('/api/auth/logout', (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7).trim();
-    webSessions.delete(token);
   }
   res.json({ success: true });
 });
@@ -1311,6 +1333,10 @@ app.post('/api/auth/logout', (req, res) => {
 // 4. Quản trị: Lấy danh sách tất cả tài khoản người dùng
 app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    const dbInit = await initDatabase();
+    if (!dbInit.success) {
+      return res.status(503).json({ success: false, message: dbInit.message });
+    }
     const users = await getAllUsers();
     res.json({
       success: true,

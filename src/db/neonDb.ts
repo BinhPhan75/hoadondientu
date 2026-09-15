@@ -223,14 +223,13 @@ export async function getDatabaseStatus(): Promise<{
     }
   }
 
-  const localUsers = ensureLocalUsersFile();
   return {
     connected: false,
-    type: 'local_file',
+    type: 'neon_postgres',
     message: dbConfigured 
-      ? 'Đang thử kết nối lại Neon PostgreSQL, tạm thời sử dụng Local Store'
-      : 'Chưa cấu hình biến môi trường DATABASE_URL cho Neon, đang sử dụng Local Store',
-    totalUsers: localUsers.length,
+      ? 'Không thể truy vấn Neon PostgreSQL. Không sử dụng dữ liệu local.'
+      : 'Chưa cấu hình biến môi trường DATABASE_URL cho Neon',
+    totalUsers: 0,
     databaseUrlConfigured: dbConfigured
   };
 }
