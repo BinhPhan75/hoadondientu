@@ -29,13 +29,23 @@ const LOCAL_USERS_FILE = path.join(DATA_DIR, 'web_users.json');
 let pool: Pool | null = null;
 let isPostgresConnected = false;
 
+function getDatabaseUrl(): string {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    ''
+  ).trim().replace(/^["']|["']$/g, '').trim();
+}
+
 /**
  * Lấy hoặc khởi tạo kết nối PostgreSQL (Neon Serverless hoặc tiêu chuẩn)
  */
 export function getPostgresPool(): Pool | null {
-  let databaseUrl = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
-  // Loại bỏ dấu nháy kép hoặc đơn nếu người dùng copy-paste thừa
-  databaseUrl = databaseUrl.replace(/^["']|["']$/g, '').trim();
+  const databaseUrl = getDatabaseUrl();
 
   if (!databaseUrl) {
     return null;
@@ -106,13 +116,13 @@ export function enrichUserWithStatus(user: WebUserRecord): WebUserView {
  * Khởi tạo bảng dữ liệu và tài khoản Admin mặc định
  */
 export async function initDatabase(): Promise<{ success: boolean; type: 'neon_postgres' | 'local_file'; message: string }> {
-  const databaseUrl = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+  const databaseUrl = getDatabaseUrl();
   if (!databaseUrl) {
     isPostgresConnected = false;
     return {
       success: false,
       type: 'local_file',
-      message: 'Chưa cấu hình DATABASE_URL/NEON_DATABASE_URL. Ứng dụng bắt buộc phải kết nối tới Neon để xác thực người dùng.'
+      message: 'Chưa cấu hình connection string Neon (DATABASE_URL, NEON_DATABASE_URL hoặc POSTGRES_URL).'
     };
   }
 
@@ -150,7 +160,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
       return {
         success: false,
         type: 'local_file',
-        message: 'Không thể kết nối tới Neon PostgreSQL. Vui lòng kiểm tra DATABASE_URL và quyền truy cập.'
+        message: 'Không thể kết nối tới Neon PostgreSQL. Vui lòng kiểm tra connection string và quyền truy cập.'
       };
     }
   }
@@ -158,7 +168,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
   return {
     success: false,
     type: 'local_file',
-    message: 'Không thể khởi tạo pool PostgreSQL. Vui lòng kiểm tra DATABASE_URL và cấu hình Neon.'
+    message: 'Không thể khởi tạo pool PostgreSQL. Vui lòng kiểm tra connection string và cấu hình Neon.'
   };
 }
 
@@ -205,7 +215,7 @@ export async function getDatabaseStatus(): Promise<{
   databaseUrlConfigured: boolean;
 }> {
   const p = getPostgresPool();
-  const dbConfigured = Boolean(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  const dbConfigured = Boolean(getDatabaseUrl());
 
   if (p) {
     try {
@@ -228,7 +238,7 @@ export async function getDatabaseStatus(): Promise<{
     type: 'neon_postgres',
     message: dbConfigured 
       ? 'Không thể truy vấn Neon PostgreSQL. Không sử dụng dữ liệu local.'
-      : 'Chưa cấu hình biến môi trường DATABASE_URL cho Neon',
+      : 'Chưa cấu hình connection string cho Neon',
     totalUsers: 0,
     databaseUrlConfigured: dbConfigured
   };
@@ -241,7 +251,7 @@ export async function findUserByUsername(username: string): Promise<WebUserView 
   const cleanUsername = (username || '').trim().toLowerCase();
   if (!cleanUsername) return null;
 
-  const dbConfigured = Boolean(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  const dbConfigured = Boolean(getDatabaseUrl());
   if (!dbConfigured) {
     return null;
   }
@@ -268,7 +278,7 @@ export async function findUserByUsername(username: string): Promise<WebUserView 
  * Lấy danh sách tất cả người dùng (Dành cho Quản trị viên)
  */
 export async function getAllUsers(): Promise<WebUserView[]> {
-  const dbConfigured = Boolean(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  const dbConfigured = Boolean(getDatabaseUrl());
   if (!dbConfigured) {
     return [];
   }
@@ -344,29 +354,7 @@ export async function createUser(params: {
     }
   }
 
-  // Fallback Local Store
-  const localUsers = ensureLocalUsersFile();
-  if (localUsers.some(u => u.username.toLowerCase() === cleanUsername.toLowerCase())) {
-    return { success: false, error: `Mã số thuế "${cleanUsername}" đã tồn tại trên hệ thống.` };
-  }
-
-  const newUserRecord: WebUserRecord = {
-    id: Date.now(),
-    username: cleanUsername,
-    password: cleanPassword,
-    full_name: params.fullName || '',
-    role,
-    duration_months: durationMonths,
-    created_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    is_active: true,
-    notes: params.notes || ''
-  };
-
-  localUsers.push(newUserRecord);
-  saveLocalUsers(localUsers);
-
-  return { success: true, user: enrichUserWithStatus(newUserRecord) };
+  return { success: false, error: 'Không thể kết nối Neon PostgreSQL để tạo người dùng.' };
 }
 
 /**
@@ -424,35 +412,7 @@ export async function updateUser(
     }
   }
 
-  // Local fallback
-  const localUsers = ensureLocalUsersFile();
-  const index = localUsers.findIndex(u => String(u.id) === String(id));
-  if (index === -1) {
-    return { success: false, error: 'Không tìm thấy người dùng cần cập nhật.' };
-  }
-
-  const current = localUsers[index];
-  let expiresAt = new Date(current.expires_at);
-
-  if (params.extendMonths) {
-    const baseDate = expiresAt.getTime() < Date.now() ? new Date() : expiresAt;
-    expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
-  } else if (params.newExpiresAt) {
-    expiresAt = new Date(params.newExpiresAt);
-  }
-
-  if (params.password !== undefined && params.password.trim() !== '') {
-    current.password = params.password.trim();
-  }
-  if (params.fullName !== undefined) current.full_name = params.fullName;
-  if (params.isActive !== undefined) current.is_active = params.isActive;
-  if (params.notes !== undefined) current.notes = params.notes;
-  current.expires_at = expiresAt.toISOString();
-
-  localUsers[index] = current;
-  saveLocalUsers(localUsers);
-
-  return { success: true, user: enrichUserWithStatus(current) };
+  return { success: false, error: 'Không thể kết nối Neon PostgreSQL để cập nhật người dùng.' };
 }
 
 /**
@@ -478,16 +438,5 @@ export async function deleteUser(id: number | string): Promise<{ success: boolea
     }
   }
 
-  const localUsers = ensureLocalUsersFile();
-  const index = localUsers.findIndex(u => String(u.id) === String(id));
-  if (index === -1) {
-    return { success: false, error: 'Không tìm thấy người dùng' };
-  }
-  if (localUsers[index].role === 'admin' || localUsers[index].username === 'admin') {
-    return { success: false, error: 'Không thể xóa tài khoản Quản trị viên Master.' };
-  }
-
-  localUsers.splice(index, 1);
-  saveLocalUsers(localUsers);
-  return { success: true };
+  return { success: false, error: 'Không thể kết nối Neon PostgreSQL để xóa người dùng.' };
 }
