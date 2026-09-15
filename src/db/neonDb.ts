@@ -106,11 +106,20 @@ export function enrichUserWithStatus(user: WebUserRecord): WebUserView {
  * Khởi tạo bảng dữ liệu và tài khoản Admin mặc định
  */
 export async function initDatabase(): Promise<{ success: boolean; type: 'neon_postgres' | 'local_file'; message: string }> {
+  const databaseUrl = (process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '').trim();
+  if (!databaseUrl) {
+    isPostgresConnected = false;
+    return {
+      success: false,
+      type: 'local_file',
+      message: 'Chưa cấu hình DATABASE_URL/NEON_DATABASE_URL. Ứng dụng bắt buộc phải kết nối tới Neon để xác thực người dùng.'
+    };
+  }
+
   const p = getPostgresPool();
 
   if (p) {
     try {
-      // 1. Tạo bảng web_users nếu chưa có
       await p.query(`
         CREATE TABLE IF NOT EXISTS web_users (
           id SERIAL PRIMARY KEY,
@@ -127,8 +136,6 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
         CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
       `);
 
-      await ensureDefaultAdminUser();
-
       console.log('[Neon PostgreSQL] ✓ Kết nối Neon thành công, bảng web_users đã sẵn sàng.');
 
       isPostgresConnected = true;
@@ -138,17 +145,20 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
         message: 'Đã kết nối thành công tới Database Neon PostgreSQL.'
       };
     } catch (err: any) {
-      console.warn('[Neon PostgreSQL] Không thể kết nối hoặc khởi tạo bảng trên Neon, chuyển sang Local Store dự phòng:', err.message);
+      console.warn('[Neon PostgreSQL] Không thể kết nối hoặc khởi tạo bảng trên Neon:', err.message);
       isPostgresConnected = false;
+      return {
+        success: false,
+        type: 'local_file',
+        message: 'Không thể kết nối tới Neon PostgreSQL. Vui lòng kiểm tra DATABASE_URL và quyền truy cập.'
+      };
     }
   }
 
-  // Fallback: Local JSON Storage
-  await ensureDefaultAdminUser();
   return {
-    success: true,
+    success: false,
     type: 'local_file',
-    message: 'Đang lưu trữ dữ liệu người dùng tại tệp tin nội bộ (Local Store). Hãy cấu hình DATABASE_URL để kết nối trực tiếp vào Neon.'
+    message: 'Không thể khởi tạo pool PostgreSQL. Vui lòng kiểm tra DATABASE_URL và cấu hình Neon.'
   };
 }
 
@@ -182,57 +192,6 @@ function saveLocalUsers(users: WebUserRecord[]) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   fs.writeFileSync(LOCAL_USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
-}
-
-function createDefaultAdminRecord(): WebUserRecord {
-  const now = new Date();
-  const expiresAt = calculateExpiryDate(now, 12);
-  return {
-    id: 'admin',
-    username: 'admin',
-    password: 'admin',
-    full_name: 'Quản trị viên hệ thống',
-    role: 'admin',
-    duration_months: 12,
-    created_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    is_active: true,
-    notes: 'Tài khoản mặc định do hệ thống tạo cho lần đăng nhập đầu tiên.'
-  };
-}
-
-async function ensureDefaultAdminUser(): Promise<void> {
-  const p = getPostgresPool();
-  if (p) {
-    try {
-      const countRes = await p.query('SELECT COUNT(*)::int AS count FROM web_users;');
-      const count = Number(countRes.rows[0]?.count || 0);
-      if (count === 0) {
-        const admin = createDefaultAdminRecord();
-        await p.query(`
-          INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
-        `, [
-          admin.username,
-          admin.password,
-          admin.full_name,
-          admin.role,
-          admin.duration_months,
-          admin.expires_at,
-          admin.is_active,
-          admin.notes
-        ]);
-      }
-      return;
-    } catch (err: any) {
-      console.warn('[ensureDefaultAdminUser] PostgreSQL seed failed, falling back to local default user:', err.message);
-    }
-  }
-
-  const localUsers = ensureLocalUsersFile();
-  if (localUsers.length === 0) {
-    saveLocalUsers([createDefaultAdminRecord()]);
-  }
 }
 
 /**
@@ -280,10 +239,13 @@ export async function getDatabaseStatus(): Promise<{
  * Tìm người dùng theo tên đăng nhập (Mã số thuế hoặc admin)
  */
 export async function findUserByUsername(username: string): Promise<WebUserView | null> {
-  await ensureDefaultAdminUser();
-
   const cleanUsername = (username || '').trim().toLowerCase();
   if (!cleanUsername) return null;
+
+  const dbConfigured = Boolean(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  if (!dbConfigured) {
+    return null;
+  }
 
   const p = getPostgresPool();
   if (p) {
@@ -296,20 +258,21 @@ export async function findUserByUsername(username: string): Promise<WebUserView 
         return enrichUserWithStatus(res.rows[0]);
       }
     } catch (err: any) {
-      console.warn('[findUserByUsername] PostgreSQL error, checking local fallback:', err.message);
+      console.warn('[findUserByUsername] PostgreSQL error:', err.message);
     }
   }
 
-  const localUsers = ensureLocalUsersFile();
-  const found = localUsers.find(u => u.username.toLowerCase() === cleanUsername);
-  return found ? enrichUserWithStatus(found) : null;
+  return null;
 }
 
 /**
  * Lấy danh sách tất cả người dùng (Dành cho Quản trị viên)
  */
 export async function getAllUsers(): Promise<WebUserView[]> {
-  await ensureDefaultAdminUser();
+  const dbConfigured = Boolean(process.env.DATABASE_URL || process.env.NEON_DATABASE_URL);
+  if (!dbConfigured) {
+    return [];
+  }
 
   const p = getPostgresPool();
   if (p) {
@@ -317,12 +280,11 @@ export async function getAllUsers(): Promise<WebUserView[]> {
       const res = await p.query('SELECT * FROM web_users ORDER BY id DESC;');
       return res.rows.map(enrichUserWithStatus);
     } catch (err: any) {
-      console.warn('[getAllUsers] PostgreSQL error, checking local fallback:', err.message);
+      console.warn('[getAllUsers] PostgreSQL error:', err.message);
     }
   }
 
-  const localUsers = ensureLocalUsersFile();
-  return localUsers.map(enrichUserWithStatus).reverse();
+  return [];
 }
 
 /**

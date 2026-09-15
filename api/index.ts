@@ -196,11 +196,18 @@ apiRouter.get('/gdt/status', (req: Request, res: Response) => {
 
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    await initDatabase();
+    const dbInit = await initDatabase();
     const { username, password } = req.body || {};
 
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế và mật khẩu.' });
+    }
+
+    if (!dbInit.success) {
+      return res.status(503).json({
+        success: false,
+        message: dbInit.message || 'Hệ thống chưa kết nối tới Neon Database. Vui lòng cấu hình DATABASE_URL/NEON_DATABASE_URL trước khi đăng nhập.'
+      });
     }
 
     const user = await findUserByUsername(username);
