@@ -19,7 +19,7 @@ import {
   updateUser,
   deleteUser,
   WebUserView
-} from './src/db/neonDb';
+} from './src/db/neonDb.ts';
 
 const app = express();
 const PORT = 3000;

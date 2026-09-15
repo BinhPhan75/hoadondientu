@@ -10,7 +10,7 @@ import {
   updateUser,
   deleteUser,
   WebUserView
-} from '../src/db/neonDb';
+} from '../src/db/neonDb.ts';
 
 const app = express();
 const apiRouter = Router();
