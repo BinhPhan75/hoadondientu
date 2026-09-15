@@ -1,47 +1,14 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
 // server.ts
-var server_exports = {};
-__export(server_exports, {
-  default: () => server_default
-});
-module.exports = __toCommonJS(server_exports);
-var import_config2 = require("dotenv/config");
-var import_express = __toESM(require("express"), 1);
-var import_path2 = __toESM(require("path"), 1);
-var import_crypto = __toESM(require("crypto"), 1);
-var import_child_process = require("child_process");
-var import_jszip3 = __toESM(require("jszip"), 1);
-var import_vite = require("vite");
+import "dotenv/config";
+import express from "express";
+import path2 from "path";
+import crypto from "crypto";
+import { spawn } from "child_process";
+import JSZip3 from "jszip";
+import { createServer as createViteServer } from "vite";
 
 // src/utils/xmlParser.ts
-var import_jszip = __toESM(require("jszip"), 1);
+import JSZip from "jszip";
 
 // src/services/invoice-engine/providerDetector.ts
 function detectProvider(xmlString) {
@@ -7490,7 +7457,7 @@ var OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 </xsl:stylesheet>`;
 
 // src/services/invoice-engine/captcha/CaptchaSolver.ts
-var import_tesseract = require("tesseract.js");
+import { createWorker } from "tesseract.js";
 var CaptchaSolver = class {
   static {
     this.workerInstance = null;
@@ -7515,7 +7482,7 @@ var CaptchaSolver = class {
     this.initPromise = (async () => {
       try {
         console.log("[CaptchaSolver] \u0110ang kh\u1EDFi t\u1EA1o Tesseract.js OCR Worker...");
-        const worker = await (0, import_tesseract.createWorker)(lang, 1, {
+        const worker = await createWorker(lang, 1, {
           errorHandler: (err) => {
             if (process.env.DEBUG_OCR) {
               console.warn("[CaptchaSolver] Worker error handled safely:", err);
@@ -7775,7 +7742,7 @@ var BaseInvoiceProviderDriver = class {
 };
 
 // src/services/invoice-engine/drivers/MisaDriver.ts
-var import_axios = __toESM(require("axios"), 1);
+import axios from "axios";
 var MisaDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -7906,7 +7873,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
     for (const endpoint of candidateEndpoints) {
       try {
         this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn MISA: ${endpoint.url.substring(0, 70)}...`, logs);
-        const response = await (0, import_axios.default)({
+        const response = await axios({
           url: endpoint.url,
           method: endpoint.method,
           data: endpoint.data,
@@ -7974,7 +7941,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/ViettelDriver.ts
-var import_axios2 = __toESM(require("axios"), 1);
+import axios2 from "axios";
 var ViettelDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8057,7 +8024,7 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 15e3;
     let solvedCaptchaCode = "";
     let cookieHeader = "";
-    const client = import_axios2.default.create({
+    const client = axios2.create({
       baseURL: "https://sinvoice.viettel.vn",
       timeout: timeoutMs,
       headers: {
@@ -8167,8 +8134,8 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/FourSiDriver.ts
-var import_axios3 = __toESM(require("axios"), 1);
-var cheerio = __toESM(require("cheerio"), 1);
+import axios3 from "axios";
+import * as cheerio from "cheerio";
 var FourSiDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8253,7 +8220,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 15e3;
     const baseUrl = "https://inv.4si.vn";
     let cookieHeader = "";
-    const client = import_axios3.default.create({
+    const client = axios3.create({
       baseURL: baseUrl,
       timeout: timeoutMs,
       headers: {
@@ -8371,7 +8338,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/VnptDriver.ts
-var import_axios4 = __toESM(require("axios"), 1);
+import axios4 from "axios";
 var VnptDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8444,7 +8411,7 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
     for (const url of endpoints) {
       try {
         this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn VNPT: ${url.substring(0, 60)}...`, logs);
-        const resp = await import_axios4.default.get(url, {
+        const resp = await axios4.get(url, {
           timeout: timeoutMs,
           responseType: "arraybuffer",
           headers: {
@@ -8481,7 +8448,7 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/GenericFallbackDriver.ts
-var import_jspdf = require("jspdf");
+import { jsPDF } from "jspdf";
 var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8563,7 +8530,7 @@ var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
       this.createLog(`\u0110\xE3 bi\xEAn so\u1EA1n b\u1EA3n th\u1EC3 hi\u1EC7n HTML/CSS chu\u1EA9n h\xF3a (${(officialHtml.length / 1024).toFixed(1)} KB)`, logs);
     }
     this.createLog("\u0110ang d\u1EF1ng c\u1EA5u tr\xFAc t\xE0i li\u1EC7u PDF vector \u0111\u1ED9 ph\xE2n gi\u1EA3i cao...", logs);
-    const pdfDoc = new import_jspdf.jsPDF({
+    const pdfDoc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
       format: "a4"
@@ -9175,7 +9142,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
 // src/utils/gdtDetail.ts
-var import_jszip2 = __toESM(require("jszip"), 1);
+import JSZip2 from "jszip";
 var value = (source, keys) => {
   if (!source || typeof source !== "object") return "";
   for (const key of keys) {
@@ -9215,7 +9182,7 @@ async function readXmlFromExport(bytes, contentType) {
   const text = new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "").trim();
   if (isXml(text) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(text)) return text;
   if (!contentType.toLowerCase().includes("zip") && !(bytes[0] === 80 && bytes[1] === 75)) return "";
-  const zip = await import_jszip2.default.loadAsync(bytes);
+  const zip = await JSZip2.loadAsync(bytes);
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
     const entryText = (await entry.async("text")).replace(/^\uFEFF/, "").trim();
@@ -9419,11 +9386,11 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
 }
 
 // src/db/neonDb.ts
-var import_config = require("dotenv/config");
-var import_pg = require("pg");
-var import_path = __toESM(require("path"), 1);
-var DATA_DIR = import_path.default.join(process.cwd(), "data");
-var LOCAL_USERS_FILE = import_path.default.join(DATA_DIR, "web_users.json");
+import "dotenv/config";
+import { Pool } from "pg";
+import path from "path";
+var DATA_DIR = path.join(process.cwd(), "data");
+var LOCAL_USERS_FILE = path.join(DATA_DIR, "web_users.json");
 var pool = null;
 var isPostgresConnected = false;
 function getDatabaseConfig() {
@@ -9456,7 +9423,7 @@ function getPostgresPool() {
   if (!pool) {
     try {
       const isLocalhost = databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
-      pool = new import_pg.Pool({
+      pool = new Pool({
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
         max: 10,
@@ -9729,11 +9696,11 @@ async function deleteUser(id) {
 }
 
 // server.ts
-var import_genai = require("@google/genai");
-var app = (0, import_express.default)();
+import { GoogleGenAI } from "@google/genai";
+var app = express();
 var PORT = 3e3;
-app.use(import_express.default.json({ limit: "50mb" }));
-app.use(import_express.default.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -9838,7 +9805,7 @@ var geminiSpendingCapBlockedUntil = 0;
 var geminiRateLimitBlockedUntil = 0;
 function getGeminiClient() {
   if (!geminiAiClient && process.env.GEMINI_API_KEY) {
-    geminiAiClient = new import_genai.GoogleGenAI({
+    geminiAiClient = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
@@ -10461,7 +10428,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
     return entry;
   };
   addLog("step", `[1/6] B\u1EAFt \u0111\u1EA7u kh\u1EDFi t\u1EA1o quy tr\xECnh t\u1EF1 \u0111\u1ED9ng h\xF3a Python Selenium cho MST: ${mst}`, "INIT", 10);
-  const pythonScriptPath = import_path2.default.join(process.cwd(), "python", "gdt_selenium_crawler.py");
+  const pythonScriptPath = path2.join(process.cwd(), "python", "gdt_selenium_crawler.py");
   const args = [
     pythonScriptPath,
     "--mst",
@@ -10478,7 +10445,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
   if (headless !== false) {
     args.push("--headless");
   }
-  const pyProcess = (0, import_child_process.spawn)("python3", args, {
+  const pyProcess = spawn("python3", args, {
     cwd: process.cwd(),
     env: { ...process.env, PYTHONUNBUFFERED: "1" }
   });
@@ -10518,12 +10485,12 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 });
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
-    const zip = new import_jszip3.default();
+    const zip = new JSZip3();
     const fs = await import("fs");
-    const pythonDir = import_path2.default.join(process.cwd(), "python");
+    const pythonDir = path2.join(process.cwd(), "python");
     const files = ["gdt_selenium_crawler.py", "requirements.txt", "README_GDT.md"];
     for (const file of files) {
-      const fullPath = import_path2.default.join(pythonDir, file);
+      const fullPath = path2.join(pythonDir, file);
       if (fs.existsSync(fullPath)) {
         const content = fs.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
@@ -10679,16 +10646,16 @@ function getAuthTokenSecret() {
 }
 function createWebToken(username) {
   const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString("base64url");
-  const signature = import_crypto.default.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
+  const signature = crypto.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 function getUsernameFromToken(token) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
-  const expected = import_crypto.default.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
+  const expected = crypto.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
   const actualBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !import_crypto.default.timingSafeEqual(actualBuffer, expectedBuffer)) {
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
     return null;
   }
   try {
@@ -10912,7 +10879,7 @@ async function startServer() {
   });
   if (process.env.NODE_ENV !== "production") {
     try {
-      const vite = await (0, import_vite.createServer)({
+      const vite = await createViteServer({
         server: {
           middlewareMode: true,
           allowedHosts: true
@@ -10925,10 +10892,10 @@ async function startServer() {
       console.error("[Vite Init Error]:", viteErr.message);
     }
   } else {
-    const distPath = import_path2.default.join(process.cwd(), "dist");
-    app.use(import_express.default.static(distPath));
+    const distPath = path2.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(import_path2.default.join(distPath, "index.html"));
+      res.sendFile(path2.join(distPath, "index.html"));
     });
   }
 }
@@ -10936,3 +10903,6 @@ var server_default = app;
 if (!process.env.VERCEL) {
   startServer();
 }
+export {
+  server_default as default
+};
