@@ -109,7 +109,7 @@ export const PythonSeleniumModal: React.FC<PythonSeleniumModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-gray-400">
-                Tự động hóa đăng nhập, giải Captcha và tải hàng loạt từ Cổng Tổng cục Thuế
+                Tự động tải hàng loạt từ Cổng Tổng cục Thuế
               </p>
             </div>
           </div>
