@@ -66,7 +66,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             Tool Tra Cứu Hóa Đơn Mua Vào
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Đăng nhập hệ thống bằng Mã Số Thuế doanh nghiệp
+            Đăng nhập hệ thống bằng tài khoản được cấp
           </p>
         </div>
 

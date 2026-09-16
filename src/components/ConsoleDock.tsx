@@ -84,7 +84,7 @@ export const ConsoleDock: React.FC<ConsoleDockProps> = ({
           </span>
           <span className="text-gray-500 hidden sm:inline shrink-0">|</span>
           <span className="text-gray-400 font-mono text-[10px] hidden md:inline truncate max-w-[200px]">
-            python3 gdt_selenium_crawler.py --mst {taxCode || '0316892345'}
+            Zalo: 0949 539 969
           </span>
           {isRunning && (
             <span className="flex items-center gap-1 text-purple-400 text-[10px] ml-2 shrink-0">

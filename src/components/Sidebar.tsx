@@ -283,7 +283,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {account.isRealGDT ? (
             <>
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">ĐÃ KẾT NỐI CỔNG THUẾ THẬT</span>
+              <span className="truncate">ĐÃ KẾT NỐI CỔNG TỔNG CỤC THUẾ</span>
             </>
           ) : (
             <>
@@ -355,14 +355,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                 <span>Mã Captcha</span>
-                <span className="text-[9px] bg-blue-950 text-blue-300 px-1 py-0.2 rounded border border-blue-800 font-mono">
-                  Nhập tay
-                </span>
-                {isRealGdtCaptcha && (
-                  <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-800 font-mono">
-                    Cổng Thuế
-                  </span>
-                )}
               </label>
 
               <div className="flex items-center gap-2">
@@ -431,23 +423,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Manual Entry Status Line */}
-            <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
-              {captchaCode ? (
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                  Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
-                </span>
-              ) : isScanningOcr ? (
-                <span className="text-amber-400 flex items-center gap-1 animate-pulse">
-                  <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
-                  Đang nhận diện...
-                </span>
-              ) : (
-                <span className="text-gray-400 text-[9.5px]">
-                  Nhìn ảnh và nhập 4-6 ký tự vào ô (nhấn ảnh để đổi)
-                </span>
-              )}
-            </div>
+            {(captchaCode || isScanningOcr) && (
+              <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
+                {captchaCode ? (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
+                  </span>
+                ) : (
+                  <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+                    <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
+                    Đang nhận diện...
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Error Message if Authentication Failed */}
