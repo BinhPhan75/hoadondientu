@@ -1541,7 +1541,11 @@ async function startServer() {
       console.error('[Vite Init Error]:', viteErr.message);
     }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    // In the packaged Electron app, server.cjs and the frontend assets are
+    // both inside the app archive, so process.cwd() points to the wrong folder.
+    const distPath = process.env.VERCEL
+      ? path.join(process.cwd(), 'dist')
+      : path.dirname(__filename);
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
