@@ -8,17 +8,25 @@ process.env.PORT = process.env.PORT || '3000';
 let serverStarted = false;
 
 function loadDesktopEnvironment() {
-  const envPath = path.join(path.dirname(process.execPath), '.env');
-  const result = dotenv.config({ path: envPath, override: false });
+  const candidates = [
+    path.join(path.dirname(process.execPath), '.env'),
+    path.join(process.cwd(), '.env')
+  ];
+  const envPath = candidates.find((candidate) => require('fs').existsSync(candidate));
 
-  if (result.error && result.error.code !== 'ENOENT') {
-    dialog.showErrorBox(
-      'Không thể đọc cấu hình ứng dụng',
-      `Không đọc được file cấu hình ${envPath}.\n\n${result.error.message}`
-    );
+  if (envPath) {
+    const result = dotenv.config({ path: envPath, override: false });
+    if (result.error) {
+      dialog.showErrorBox(
+        'Không thể đọc cấu hình ứng dụng',
+        `Không đọc được file cấu hình ${envPath}.\n\n${result.error.message}`
+      );
+    }
+  } else {
+    console.warn(`[Desktop] Không tìm thấy file .env. Đã kiểm tra: ${candidates.join(', ')}`);
   }
 
-  return envPath;
+  return envPath || candidates[0];
 }
 
 function startLocalApi() {
