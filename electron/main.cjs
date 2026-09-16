@@ -3,7 +3,8 @@ const dotenv = require('dotenv');
 const path = require('path');
 
 process.env.NODE_ENV = 'production';
-process.env.PORT = process.env.PORT || '3000';
+// Use a desktop-only port so an older app instance cannot serve this UI.
+process.env.PORT = process.env.PORT || '3217';
 process.env.AUTH_WEBAPP_URL = process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app';
 
 let serverStarted = false;
@@ -68,7 +69,7 @@ async function createWindow() {
   });
 
   try {
-    await window.loadURL('http://127.0.0.1:3000');
+    await window.loadURL(`http://127.0.0.1:${process.env.PORT}`);
   } catch (error) {
     dialog.showErrorBox('Không thể mở giao diện ứng dụng', error.message);
   }
