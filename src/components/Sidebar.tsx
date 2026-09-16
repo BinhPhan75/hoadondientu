@@ -283,7 +283,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {account.isRealGDT ? (
             <>
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">ĐÃ KẾT NỐI CỔNG THUẾ THẬT</span>
+              <span className="truncate">ĐÃ KẾT NỐI CỔNG TỔNG CỤC THUẾ</span>
             </>
           ) : (
             <>
