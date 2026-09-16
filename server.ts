@@ -1176,7 +1176,9 @@ function getAuthTokenSecret(): string {
 }
 
 function getWebAppAuthUrl(): string {
-  return (process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app').trim().replace(/\/+$/, '');
+  const configuredUrl = (process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app').trim();
+  const normalizedUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`;
+  return normalizedUrl.replace(/\/+$/, '');
 }
 
 function mapRemoteUser(user: any): WebUserView | null {
