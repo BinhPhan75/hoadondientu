@@ -1211,6 +1211,28 @@ async function getRemoteAuthUser(token: string): Promise<WebUserView | null> {
   return mapRemoteUser(payload.user);
 }
 
+async function proxyWebAppRequest(
+  req: express.Request,
+  route: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
+): Promise<{ status: number; payload: any }> {
+  const authUrl = getWebAppAuthUrl();
+  const headers: Record<string, string> = {
+    Authorization: req.headers.authorization || ''
+  };
+  const options: RequestInit = { method, headers };
+  if (method !== 'GET' && method !== 'DELETE') {
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(req.body || {});
+  }
+  const response = await fetch(`${authUrl}${route}`, options);
+  const payload = await response.json().catch(() => ({
+    success: false,
+    message: `Webapp trả về HTTP ${response.status}.`
+  }));
+  return { status: response.status, payload };
+}
+
 function createWebToken(username: string): string {
   const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString('base64url');
   const signature = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
@@ -1402,6 +1424,10 @@ app.post('/api/auth/logout', (req, res) => {
 // 4. Quản trị: Lấy danh sách tất cả tài khoản người dùng
 app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl()) {
+      const result = await proxyWebAppRequest(req, '/api/admin/users', 'GET');
+      return res.status(result.status).json(result.payload);
+    }
     const dbInit = await initDatabase();
     if (!dbInit.success) {
       return res.status(503).json({ success: false, message: dbInit.message });
@@ -1419,6 +1445,10 @@ app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) 
 // 5. Quản trị: Tạo tài khoản người dùng mới
 app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl()) {
+      const result = await proxyWebAppRequest(req, '/api/admin/users', 'POST');
+      return res.status(result.status).json(result.payload);
+    }
     const { username, password, fullName, durationMonths, notes, role } = req.body;
     const result = await createUser({
       username,
@@ -1445,6 +1475,10 @@ app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res)
 // 6. Quản trị: Cập nhật thông tin / gia hạn / đổi mật khẩu
 app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl()) {
+      const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'PUT');
+      return res.status(result.status).json(result.payload);
+    }
     const { password, fullName, extendMonths, newExpiresAt, isActive, notes } = req.body;
     const result = await updateUser(req.params.id, {
       password,
@@ -1471,6 +1505,10 @@ app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, r
 // 7. Quản trị: Xóa người dùng
 app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl()) {
+      const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'DELETE');
+      return res.status(result.status).json(result.payload);
+    }
     const result = await deleteUser(req.params.id);
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.error });
@@ -1484,6 +1522,14 @@ app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req
 // 8. Trạng thái kết nối Neon Database
 app.get('/api/admin/db-status', async (req, res) => {
   try {
+    if (getWebAppAuthUrl()) {
+      return res.json({
+        success: true,
+        connected: true,
+        type: 'remote_webapp',
+        message: 'Xác thực Neon được thực hiện bởi webapp.'
+      });
+    }
     const status = await getDatabaseStatus();
     res.json({ success: true, ...status });
   } catch (err: any) {
