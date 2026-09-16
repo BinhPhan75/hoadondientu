@@ -355,13 +355,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-center justify-between">
               <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                 <span>Mã Captcha</span>
-                <span className="text-[9px] bg-blue-950 text-blue-300 px-1 py-0.2 rounded border border-blue-800 font-mono">
-                  Nhập tay
-                </span>
                 {isRealGdtCaptcha && (
-                  <span className="text-[9px] bg-emerald-950 text-emerald-400 px-1 py-0.2 rounded border border-emerald-800 font-mono">
-                    Cổng Thuế
-                  </span>
                 )}
               </label>
 
