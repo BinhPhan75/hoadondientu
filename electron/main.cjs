@@ -27,13 +27,14 @@ function startLocalApi() {
     require(path.join(__dirname, '..', 'dist', 'server.cjs'));
     serverStarted = true;
 
-    if (!process.env.POSTGRES_URL &&
+    if (!process.env.AUTH_WEBAPP_URL &&
+        !process.env.POSTGRES_URL &&
         !process.env.POSTGRES_PRISMA_URL &&
         !process.env.DATABASE_URL &&
         !process.env.NEON_DATABASE_URL &&
         !process.env.POSTGRES_URL_NON_POOLING &&
         !process.env.DATABASE_URL_UNPOOLED) {
-      console.warn(`[Desktop] Chưa cấu hình Neon. Đặt DATABASE_URL trong ${envPath}`);
+      console.warn(`[Desktop] Chưa cấu hình xác thực. Đặt AUTH_WEBAPP_URL hoặc DATABASE_URL trong ${envPath}`);
     }
   } catch (error) {
     dialog.showErrorBox('Không thể khởi động máy chủ cục bộ', error.message);

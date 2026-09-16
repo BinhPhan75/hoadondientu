@@ -1175,6 +1175,40 @@ function getAuthTokenSecret(): string {
   return secret;
 }
 
+function getWebAppAuthUrl(): string {
+  return (process.env.AUTH_WEBAPP_URL || '').trim().replace(/\/+$/, '');
+}
+
+function mapRemoteUser(user: any): WebUserView | null {
+  if (!user || typeof user.username !== 'string') return null;
+  return {
+    id: user.id ?? user.username,
+    username: user.username,
+    password: '',
+    full_name: user.fullName || user.full_name || '',
+    role: user.role === 'admin' ? 'admin' : 'user',
+    duration_months: Number(user.durationMonths ?? user.duration_months) || 1,
+    created_at: user.createdAt || user.created_at || new Date().toISOString(),
+    expires_at: user.expiresAt || user.expires_at || new Date(8640000000000000).toISOString(),
+    is_active: user.isActive !== false && user.is_active !== false,
+    notes: user.notes || '',
+    days_remaining: Math.max(0, Number(user.daysRemaining ?? user.days_remaining) || 0),
+    is_expired: user.isExpired === true || user.is_expired === true,
+    status: user.status || 'active'
+  };
+}
+
+async function getRemoteAuthUser(token: string): Promise<WebUserView | null> {
+  const authUrl = getWebAppAuthUrl();
+  if (!authUrl) return null;
+  const response = await fetch(`${authUrl}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as { user?: any };
+  return mapRemoteUser(payload.user);
+}
+
 function createWebToken(username: string): string {
   const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString('base64url');
   const signature = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
@@ -1231,6 +1265,23 @@ async function authenticateWebUser(req: express.Request, res: express.Response, 
   }
 
   const token = authHeader.substring(7).trim();
+  if (getWebAppAuthUrl()) {
+    try {
+      const remoteUser = await getRemoteAuthUser(token);
+      if (!remoteUser || !remoteUser.is_active) {
+        return res.status(401).json({ success: false, message: 'Phiên đăng nhập webapp đã hết hạn. Vui lòng đăng nhập lại.' });
+      }
+      if (remoteUser.is_expired && remoteUser.role !== 'admin') {
+        return res.status(403).json({ success: false, expired: true, message: 'Tài khoản đã hết hạn sử dụng.' });
+      }
+      (req as any).webUser = remoteUser;
+      return next();
+    } catch (error: any) {
+      console.error('[Desktop Remote Auth Error]:', error.message);
+      return res.status(502).json({ success: false, message: 'Không kết nối được máy chủ xác thực webapp.' });
+    }
+  }
+
   const username = getUsernameFromToken(token);
   if (!username) {
     return res.status(401).json({ success: false, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
@@ -1264,12 +1315,29 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
 // 1. Đăng nhập hệ thống Web
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const dbInit = await initDatabase();
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế và mật khẩu.' });
     }
 
+    const authUrl = getWebAppAuthUrl();
+    if (authUrl) {
+      const remoteResponse = await fetch(`${authUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const remotePayload = await remoteResponse.json().catch(() => ({}));
+      if (!remoteResponse.ok || remotePayload.success === false) {
+        return res.status(remoteResponse.status || 502).json(remotePayload);
+      }
+      if (!remotePayload.token || !remotePayload.user) {
+        return res.status(502).json({ success: false, message: 'Webapp trả về dữ liệu đăng nhập không hợp lệ.' });
+      }
+      return res.json(remotePayload);
+    }
+
+    const dbInit = await initDatabase();
     if (!dbInit.success) {
       return res.status(503).json({
         success: false,
