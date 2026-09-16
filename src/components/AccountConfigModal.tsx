@@ -16,6 +16,14 @@ import { GDTAccountConfig } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
 import { executeGdtCaptcha, executeGdtLogin } from '../utils/gdtQueryClient';
 
+declare global {
+  interface Window {
+    desktopBridge?: {
+      openGdtBrowser: () => Promise<{ success: boolean }>;
+    };
+  }
+}
+
 interface AccountConfigModalProps {
   isOpen: boolean;
   currentConfig: GDTAccountConfig;
@@ -180,6 +188,14 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     }
   };
 
+  const openOfficialGdt = async () => {
+    if (window.desktopBridge) {
+      await window.desktopBridge.openGdtBrowser();
+      return;
+    }
+    window.open('https://hoadondientu.gdt.gov.vn/', '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-2xs flex items-center justify-center p-4">
       <div className="bg-white rounded max-w-lg w-full shadow-2xl border border-[#d1d5db] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -214,6 +230,21 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
               <p className="text-amber-800">
                 Sử dụng tài khoản và mật khẩu được Tổng cục Thuế cấp khi đăng ký sử dụng HĐĐT theo Nghị định 123/2020/NĐ-CP.
               </p>
+            </div>
+
+            <div className="p-3 bg-sky-50 border border-sky-200 rounded text-[11px] text-sky-900 space-y-2">
+              <p className="font-bold">Đăng nhập trực tiếp trên Cổng Thuế</p>
+              <p>
+                Nếu Cổng Thuế chặn yêu cầu tự động, hãy mở trang chính thức và tự nhập MST,
+                mật khẩu cùng Captcha. Ứng dụng không thu thập mật khẩu hoặc Captcha từ trang này.
+              </p>
+              <button
+                type="button"
+                onClick={openOfficialGdt}
+                className="px-3 py-1.5 rounded bg-sky-700 text-white font-semibold hover:bg-sky-800"
+              >
+                Mở Cổng Thuế chính thức
+              </button>
             </div>
           </div>
 

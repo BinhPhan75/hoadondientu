@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const dotenv = require('dotenv');
 const path = require('path');
 
@@ -8,6 +8,11 @@ process.env.PORT = process.env.PORT || '3217';
 process.env.AUTH_WEBAPP_URL = process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app';
 
 let serverStarted = false;
+
+ipcMain.handle('open-gdt-browser', async () => {
+  await shell.openExternal('https://hoadondientu.gdt.gov.vn/');
+  return { success: true };
+});
 
 function loadDesktopEnvironment() {
   const candidates = [
@@ -64,7 +69,8 @@ async function createWindow() {
     backgroundColor: '#0f172a',
     webPreferences: {
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs')
     }
   });
 

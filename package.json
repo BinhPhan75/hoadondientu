@@ -64,6 +64,7 @@
     "files": [
       "dist/**/*",
       "electron/main.cjs",
+      "electron/preload.cjs",
       "package.json"
     ],
     "win": {
