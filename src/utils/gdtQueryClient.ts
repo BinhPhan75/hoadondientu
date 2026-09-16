@@ -185,8 +185,20 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
       // Captcha or password error specifically reported by GDT via proxy
       // Let's attempt direct fallback anyway just in case the proxy had an issue
     }
+
+    if (data?.message || data?.details) {
+      return {
+        success: false,
+        error: data.message || data.details
+      };
+    }
+
+    return {
+      success: false,
+      error: `Cổng Thuế từ chối đăng nhập (HTTP ${res.status}). Vui lòng kiểm tra Captcha, MST và mật khẩu.`
+    };
   } catch (proxyErr) {
-    console.warn('[Proxy Login Failed, attempting direct browser auth]:', proxyErr);
+    console.warn('[Proxy Login Failed]:', proxyErr);
   }
 
   return {
