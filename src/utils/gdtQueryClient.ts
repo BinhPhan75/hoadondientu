@@ -106,7 +106,7 @@ export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', is
 }
 
 /**
- * Fetch Captcha with Dual-Strategy (Server Proxy + Direct GDT Portal Fallback)
+ * Fetch Captcha with Backend proxy only
  */
 export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   // Strategy 1: Serverless Backend Proxy (/api/gdt/captcha)
@@ -133,54 +133,17 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   } catch (proxyErr) {
     console.info('[Proxy Captcha switched to direct fetch]:', proxyErr);
   }
-
-  // Strategy 2: Direct browser fetch from official GDT Portal
-  try {
-    const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/captcha', {
-      method: 'GET',
-      headers: { 'Accept': 'application/json, text/plain, */*' },
-      credentials: 'include'
-    });
-
-    if (directRes.ok) {
-      const rawDirect = await directRes.text();
-      let directData: any = null;
-      try { directData = JSON.parse(rawDirect); } catch {}
-      if (directData && directData.key && directData.content) {
-        const imgUrl = directData.content.startsWith('data:')
-          ? directData.content
-          : `data:image/svg+xml;utf8,${encodeURIComponent(directData.content)}`;
-
-        return {
-          success: true,
-          captchaImage: imgUrl,
-          captchaKey: directData.key,
-          source: 'direct_browser'
-        };
-      }
-    }
-  } catch (directErr) {
-    console.info('[Direct GDT Captcha Notice]:', directErr);
-  }
-
-  // Strategy 3: Local clear high-contrast SVG Captcha fallback (ensures the UI is always functional)
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  let fallbackCode = '';
-  for (let i = 0; i < 4; i++) fallbackCode += chars.charAt(Math.floor(Math.random() * chars.length));
-  const fallbackKey = 'ckey_offline_' + Math.random().toString(36).substring(2, 9);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="38" viewBox="0 0 120 38"><rect width="100%" height="100%" fill="#f1f5f9" rx="4"/><line x1="8" y1="14" x2="112" y2="24" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,2"/><text x="16" y="27" font-family="monospace, sans-serif" font-size="20" font-weight="bold" fill="#0f172a" letter-spacing="6">${fallbackCode}</text></svg>`;
-  const imgUrl = `data:image/svg+xml;base64,${btoa(svg)}`;
-
+
   return {
-    success: true,
-    captchaImage: imgUrl,
-    captchaKey: fallbackKey,
-    source: 'fallback'
+    success: false,
+    captchaImage: '',
+    captchaKey: '',
+    source: 'proxy'
   };
 }
 
 /**
- * Resilient GDT Login with Dual-Strategy (Server Proxy + Direct GDT Portal Fallback)
+ * Resilient GDT Login with Backend proxy only
  */
 export async function executeGdtLogin(options: LoginOptions): Promise<LoginResult> {
   const { taxCode, password, captchaKey, captchaCode, captchaCookie } = options;
@@ -225,143 +188,18 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
   } catch (proxyErr) {
     console.warn('[Proxy Login Failed, attempting direct browser auth]:', proxyErr);
   }
-
-  // Strategy 2: Direct browser authentication from Vietnam client
-  try {
-    const directRes = await fetch('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/plain, */*'
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        username: taxCode.trim(),
-        password: password.trim(),
-        ckey: captchaKey || '',
-        cvalue: (captchaCode || '').trim()
-      })
-    });
-
-    if (directRes.ok) {
-      const data = await directRes.json();
-      if (data && data.token) {
-        const cleanToken = data.token.startsWith('Bearer ') ? data.token : `Bearer ${data.token}`;
-        return {
-          success: true,
-          token: cleanToken,
-          taxpayerName: data.user?.fullName || data.user?.name || data.name || data.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (${taxCode.trim()})`,
-          address: data.user?.address || data.address || 'Đăng ký tại Tổng cục Thuế',
-          source: 'direct_browser'
-        };
-      }
-    } else {
-      let errText = '';
-      try {
-        const errJson = await directRes.json();
-        errText = errJson.message || errJson.error || '';
-      } catch {}
-      return {
-        success: false,
-        error: errText || `Xác thực thất bại từ Cổng Tổng cục Thuế (HTTP ${directRes.status}). Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.`
-      };
-    }
-  } catch (directErr: any) {
-    console.warn('[Direct GDT Login Failed]:', directErr);
-    return {
-      success: false,
-      error: directErr?.message || 'Không thể kết nối đến máy chủ Tổng cục Thuế.'
-    };
-  }
-
+
   return {
     success: false,
-    error: 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.'
+    error: 'Máy chủ chưa kết nối được Cổng Tổng cục Thuế. Vui lòng thử lại sau.'
   };
-}
-
-/**
- * Direct browser query to official GDT endpoints from the client in Vietnam
- */
-async function queryDirectFromBrowser(
-  type: 'purchase' | 'sold',
-  source: 'query' | 'sco-query',
-  fromDate: string,
-  toDate: string,
-  token: string,
-  size = 50
-): Promise<{ list: GDTInvoice[]; isExpired?: boolean }> {
-  const gdtFrom = formatDateForGdt(fromDate, false);
-  const gdtTo = formatDateForGdt(toDate, true);
-  const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
-  const apiBase = source === 'sco-query' ? 'sco-query' : 'query';
-  const tokenHeader = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-
-  let allInvoices: GDTInvoice[] = [];
-  let page = 0;
-  const maxPages = 20; // Support up to 1000 invoices per month chunk
-
-  while (page < maxPages) {
-    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
-
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json, text/plain, */*',
-          'Authorization': tokenHeader
-        },
-        credentials: 'include'
-      });
-
-      if (res.status === 401 || res.status === 403) {
-        return { list: allInvoices, isExpired: true };
-      }
-
-      if (!res.ok) {
-        break;
-      }
-
-      const raw = await res.text();
-      let data: any = {};
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        break;
-      }
-
-      const rawList = extractGdtInvoiceList(data);
-      if (!Array.isArray(rawList) || rawList.length === 0) {
-        break;
-      }
-
-      const normalized = rawList.map((item: any) => normalizeGdtInvoiceItem(item, type, source === 'sco-query'));
-      allInvoices = allInvoices.concat(normalized);
-
-      const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
-      if (total > 0 && allInvoices.length >= total) {
-        break;
-      }
-
-      if (rawList.length < size) {
-        break;
-      }
-
-      page++;
-      await new Promise(r => setTimeout(r, 200));
-    } catch {
-      break;
-    }
-  }
-
-  return { list: allInvoices };
 }
 
 /**
  * Unified resilient invoice query:
  * 1. Tries the Serverless Backend Proxy (/api/gdt/query-invoices)
  * 2. If proxy fails, times out, returns 502/504 (e.g. Vercel IP blocked by GDT firewall),
- *    automatically falls back to direct browser fetch to hoadondientu.gdt.gov.vn
+ *    uses the backend proxy only
  */
 export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
   const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '' } = options;
@@ -422,50 +260,13 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
   } catch (err: any) {
     proxyError = err?.message || 'Proxy connection error';
   }
-
-  // Step 2: Fallback to Direct Browser Query (Runs directly from the user's browser in Vietnam)
-  try {
-    const typesToFetch: ('purchase' | 'sold')[] = invoiceType === 'both' ? ['purchase', 'sold'] : [invoiceType as 'purchase' | 'sold'];
-    let directInvoices: GDTInvoice[] = [];
-
-    for (const t of typesToFetch) {
-      // Regular invoices
-      const regRes = await queryDirectFromBrowser(t, 'query', fromDate, toDate, token, size);
-      if (regRes.isExpired) {
-        return {
-          success: false,
-          status: 401,
-          invoices: [],
-          message: 'Phiên Cổng Thuế đã hết hạn. Vui lòng nhập Captcha để đăng nhập lại.'
-        };
-      }
-      directInvoices = directInvoices.concat(regRes.list);
-
-      // POS / Computer Invoices (Máy tính tiền)
-      const posRes = await queryDirectFromBrowser(t, 'sco-query', fromDate, toDate, token, size);
-      if (posRes.list.length > 0) {
-        directInvoices = directInvoices.concat(posRes.list);
-      }
-    }
-
-    // Deduplicate by ID
-    const uniqueMap = new Map<string, GDTInvoice>();
-    directInvoices.forEach(inv => uniqueMap.set(inv.id, inv));
-    const finalInvoices = Array.from(uniqueMap.values());
-
-    return {
-      success: true,
-      invoices: finalInvoices,
-      source: 'direct_browser'
-    };
-  } catch (directErr: any) {
-    return {
-      success: false,
-      status: proxyStatus || 500,
-      invoices: [],
-      message: proxyError || directErr?.message || 'Không thể lấy hóa đơn từ Cổng Thuế.'
-    };
-  }
+
+  return {
+    success: false,
+    status: proxyStatus || 502,
+    invoices: [],
+    message: proxyError || 'Máy chủ chưa lấy được dữ liệu từ Cổng Tổng cục Thuế. Không thể gọi trực tiếp từ trình duyệt do chính sách CORS.'
+  };
 }
 
 /**
@@ -503,22 +304,5 @@ export async function executeGdtInvoiceDetail(
     // Proxy failed or timed out on Vercel
   }
 
-  // Strategy 2: Direct browser fetch from Vietnam client
-  try {
-    const tokenHeader = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
-    const gdtHeaders: Record<string, string> = {
-      Authorization: tokenHeader
-    };
-    const detail = await fetchGdtInvoiceDetail(invoice, gdtHeaders);
-    let xmlExport = { xml: '', status: 0, contentType: '', bytes: 0, url: '' };
-    try {
-      xmlExport = await fetchGdtInvoiceXml(invoice, gdtHeaders);
-    } catch {}
-
-    const merged = mergeGdtInvoiceDetail(invoice, detail, xmlExport.xml);
-    return merged;
-  } catch (err) {
-    console.warn('[Direct Invoice Detail Enrichment Error]:', err);
-    return null;
-  }
+  return null;
 }
