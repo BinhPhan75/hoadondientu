@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog } = require('electron');
+const dotenv = require('dotenv');
 const path = require('path');
 
 process.env.NODE_ENV = 'production';
@@ -6,10 +7,34 @@ process.env.PORT = process.env.PORT || '3000';
 
 let serverStarted = false;
 
+function loadDesktopEnvironment() {
+  const envPath = path.join(path.dirname(process.execPath), '.env');
+  const result = dotenv.config({ path: envPath, override: false });
+
+  if (result.error && result.error.code !== 'ENOENT') {
+    dialog.showErrorBox(
+      'Không thể đọc cấu hình ứng dụng',
+      `Không đọc được file cấu hình ${envPath}.\n\n${result.error.message}`
+    );
+  }
+
+  return envPath;
+}
+
 function startLocalApi() {
   try {
+    const envPath = loadDesktopEnvironment();
     require(path.join(__dirname, '..', 'dist', 'server.cjs'));
     serverStarted = true;
+
+    if (!process.env.POSTGRES_URL &&
+        !process.env.POSTGRES_PRISMA_URL &&
+        !process.env.DATABASE_URL &&
+        !process.env.NEON_DATABASE_URL &&
+        !process.env.POSTGRES_URL_NON_POOLING &&
+        !process.env.DATABASE_URL_UNPOOLED) {
+      console.warn(`[Desktop] Chưa cấu hình Neon. Đặt DATABASE_URL trong ${envPath}`);
+    }
   } catch (error) {
     dialog.showErrorBox('Không thể khởi động máy chủ cục bộ', error.message);
     app.quit();
