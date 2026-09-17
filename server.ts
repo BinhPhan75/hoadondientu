@@ -41,6 +41,14 @@ app.use((req, res, next) => {
 
 // Chuẩn hóa path cho môi trường Vercel Serverless Functions
 app.use((req, res, next) => {
+  // Nếu req.url bị Vercel rewrite thành /api/index.js hoặc /api, phục hồi lại từ originalUrl hoặc x-matched-path
+  if (req.url === '/api/index.js' || req.url === '/api' || req.url === '/api/') {
+    const matched = (req.headers['x-matched-path'] as string) || req.originalUrl;
+    if (matched && matched !== '/api/index.js' && matched !== '/api') {
+      req.url = matched;
+    }
+  }
+
   if (!req.url.startsWith('/api')) {
     if (
       req.url.startsWith('/auth') ||
@@ -1527,17 +1535,39 @@ interface WebSessionInfo {
   createdAt: number;
 }
 function getAuthTokenSecret(): string {
-  const secret = process.env.AUTH_TOKEN_SECRET || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
-  if (!secret) {
-    throw new Error('Chưa cấu hình AUTH_TOKEN_SECRET hoặc kết nối Neon.');
-  }
+  const secret = process.env.AUTH_TOKEN_SECRET ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL ||
+    process.env.NEON_DATABASE_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    'gdt_web_auth_token_default_secret_key_2026';
   return secret;
 }
 
-function getWebAppAuthUrl(): string {
-  const configuredUrl = (process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app').trim();
+function getWebAppAuthUrl(req?: express.Request): string {
+  // Khi chạy trên Vercel hoặc môi trường Web Server, không proxy sang webapp khác
+  if (process.env.VERCEL) {
+    return '';
+  }
+  // Chỉ kích hoạt proxy nếu có biến môi trường AUTH_WEBAPP_URL được cấu hình rõ ràng (dành cho app Desktop)
+  const configuredUrl = (process.env.AUTH_WEBAPP_URL || '').trim();
+  if (!configuredUrl) {
+    return '';
+  }
   const normalizedUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`;
-  return normalizedUrl.replace(/\/+$/, '');
+  const trimmed = normalizedUrl.replace(/\/+$/, '');
+
+  // Tránh tự proxy vào chính mình nếu domain trùng với host hiện tại
+  if (req) {
+    const host = req.get('host');
+    if (host && (trimmed.includes(host) || host.includes('vercel.app'))) {
+      return '';
+    }
+  }
+
+  return trimmed;
 }
 
 function mapRemoteUser(user: any): WebUserView | null {
@@ -1648,7 +1678,7 @@ async function authenticateWebUser(req: express.Request, res: express.Response, 
   }
 
   const token = authHeader.substring(7).trim();
-  if (getWebAppAuthUrl()) {
+  if (getWebAppAuthUrl(req)) {
     try {
       const remoteUser = await getRemoteAuthUser(token);
       if (!remoteUser || !remoteUser.is_active) {
@@ -1703,7 +1733,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế và mật khẩu.' });
     }
 
-    const authUrl = getWebAppAuthUrl();
+    const authUrl = getWebAppAuthUrl(req);
     if (authUrl) {
       const remoteResponse = await fetch(`${authUrl}/api/auth/login`, {
         method: 'POST',
@@ -1722,9 +1752,9 @@ app.post('/api/auth/login', async (req, res) => {
 
     const dbInit = await initDatabase();
     if (!dbInit.success) {
-      return res.status(503).json({
+      return res.status(200).json({
         success: false,
-        message: dbInit.message || 'Hệ thống chưa kết nối tới Neon Database. Vui lòng cấu hình DATABASE_URL/NEON_DATABASE_URL trước khi đăng nhập.'
+        message: dbInit.message || 'Hệ thống chưa kết nối tới Neon Database. Vui lòng cấu hình DATABASE_URL hoặc POSTGRES_URL trên Vercel.'
       });
     }
 
@@ -1783,13 +1813,13 @@ app.post('/api/auth/logout', (req, res) => {
 // 4. Quản trị: Lấy danh sách tất cả tài khoản người dùng
 app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
-    if (getWebAppAuthUrl()) {
+    if (getWebAppAuthUrl(req)) {
       const result = await proxyWebAppRequest(req, '/api/admin/users', 'GET');
       return res.status(result.status).json(result.payload);
     }
     const dbInit = await initDatabase();
     if (!dbInit.success) {
-      return res.status(503).json({ success: false, message: dbInit.message });
+      return res.status(200).json({ success: false, message: dbInit.message });
     }
     const users = await getAllUsers();
     res.json({
@@ -1804,7 +1834,7 @@ app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) 
 // 5. Quản trị: Tạo tài khoản người dùng mới
 app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
-    if (getWebAppAuthUrl()) {
+    if (getWebAppAuthUrl(req)) {
       const result = await proxyWebAppRequest(req, '/api/admin/users', 'POST');
       return res.status(result.status).json(result.payload);
     }
@@ -1834,7 +1864,7 @@ app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res)
 // 6. Quản trị: Cập nhật thông tin / gia hạn / đổi mật khẩu
 app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
-    if (getWebAppAuthUrl()) {
+    if (getWebAppAuthUrl(req)) {
       const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'PUT');
       return res.status(result.status).json(result.payload);
     }
@@ -1864,7 +1894,7 @@ app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, r
 // 7. Quản trị: Xóa người dùng
 app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
   try {
-    if (getWebAppAuthUrl()) {
+    if (getWebAppAuthUrl(req)) {
       const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'DELETE');
       return res.status(result.status).json(result.payload);
     }
@@ -1881,7 +1911,7 @@ app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req
 // 8. Trạng thái kết nối Neon Database
 app.get('/api/admin/db-status', async (req, res) => {
   try {
-    if (getWebAppAuthUrl()) {
+    if (getWebAppAuthUrl(req)) {
       return res.json({
         success: true,
         connected: true,
@@ -1904,6 +1934,18 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Process unhandledRejection]:', reason);
 });
 
+// Global JSON error handler cho các API endpoints (Áp dụng cho cả Vercel Serverless và Local Server)
+app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[API Error Handler]:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Lỗi máy chủ nội bộ. Vui lòng thử lại.'
+  });
+});
+
 // Start Express Server with Vite integration
 async function startServer() {
   // 1. Mở cổng lắng nghe 3000 NGAY LẬP TỨC để Nginx/Cloud Run không bao giờ trả về 502/Warmup
@@ -1917,19 +1959,7 @@ async function startServer() {
     });
   });
 
-  // 2. Global JSON error handler cho các API endpoints
-  app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('[API Error Handler]:', err);
-    if (res.headersSent) {
-      return next(err);
-    }
-    res.status(err.status || 500).json({
-      success: false,
-      message: err.message || 'Lỗi máy chủ nội bộ. Vui lòng thử lại.'
-    });
-  });
-
-  // 3. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
+  // 2. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
   if (process.env.NODE_ENV !== 'production') {
     try {
       const { createServer: createViteServer } = await import('vite');
@@ -1950,7 +1980,7 @@ async function startServer() {
     // both inside the app archive, so process.cwd() points to the wrong folder.
     const distPath = process.env.VERCEL
       ? path.join(process.cwd(), 'dist')
-      : path.dirname(__filename);
+      : (typeof __filename !== 'undefined' ? path.dirname(__filename) : process.cwd());
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

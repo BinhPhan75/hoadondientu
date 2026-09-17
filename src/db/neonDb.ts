@@ -96,6 +96,7 @@ export function getPostgresPool(): Pool | null {
       pool.on('error', (err) => {
         console.warn('[Neon PostgreSQL] Pool background error:', err.message);
         isPostgresConnected = false;
+        pool = null;
       });
     } catch (err: any) {
       console.error('[Neon PostgreSQL] Khởi tạo pool thất bại:', err.message);

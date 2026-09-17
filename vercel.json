@@ -1,6 +1,7 @@
 {
   "version": 2,
   "regions": ["sin1"],
+  "outputDirectory": "dist",
   "installCommand": "npm install --include=optional",
   "buildCommand": "npm run build",
   "functions": {

@@ -1,46 +1,15 @@
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
 // server.ts
-var server_exports = {};
-__export(server_exports, {
-  default: () => server_default
-});
-module.exports = __toCommonJS(server_exports);
-var import_config2 = require("dotenv/config");
-var import_express = __toESM(require("express"), 1);
-var import_path2 = __toESM(require("path"), 1);
-var import_crypto = __toESM(require("crypto"), 1);
-var import_child_process = require("child_process");
-var import_jszip3 = __toESM(require("jszip"), 1);
+import "dotenv/config";
+import express from "express";
+import path2 from "path";
+import crypto2 from "crypto";
+import { spawn } from "child_process";
+import JSZip3 from "jszip";
+import { ProxyAgent } from "undici";
+import Tesseract from "tesseract.js";
 
 // src/utils/xmlParser.ts
-var import_jszip = __toESM(require("jszip"), 1);
+import JSZip from "jszip";
 
 // src/services/invoice-engine/providerDetector.ts
 function detectProvider(xmlString) {
@@ -7489,7 +7458,17 @@ var OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 </xsl:stylesheet>`;
 
 // src/services/invoice-engine/captcha/CaptchaSolver.ts
-var import_tesseract = require("tesseract.js");
+import { createWorker } from "tesseract.js";
+import { GoogleGenAI } from "@google/genai";
+var aiClient = null;
+function getGenAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 var CaptchaSolver = class {
   static {
     this.workerInstance = null;
@@ -7499,6 +7478,87 @@ var CaptchaSolver = class {
   }
   static {
     this.initPromise = null;
+  }
+  /**
+   * Giải Captcha bằng AI (Gemini Vision) theo chỉ thị trích xuất ký tự chuyên sâu
+   */
+  static async solveWithAI(imageInput, options) {
+    const ai = getGenAI();
+    if (!ai) return null;
+    const startTime = Date.now();
+    try {
+      let buf;
+      let mimeType = "image/png";
+      if (Buffer.isBuffer(imageInput)) {
+        buf = imageInput;
+      } else if (imageInput instanceof Uint8Array) {
+        buf = Buffer.from(imageInput);
+      } else if (typeof imageInput === "string") {
+        const trimmed = imageInput.trim();
+        if (trimmed.startsWith("data:image/")) {
+          const match = trimmed.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+          if (match) {
+            mimeType = match[1];
+            buf = Buffer.from(trimmed.substring(match[0].length), "base64");
+          } else {
+            buf = Buffer.from(trimmed, "base64");
+          }
+        } else {
+          buf = Buffer.from(trimmed, "base64");
+        }
+      } else {
+        return null;
+      }
+      if (buf[0] === 255 && buf[1] === 216) {
+        mimeType = "image/jpeg";
+      } else if (buf[0] === 137 && buf[1] === 80) {
+        mimeType = "image/png";
+      } else if (buf[0] === 71 && buf[1] === 73) {
+        mimeType = "image/gif";
+      }
+      const base64Data = buf.toString("base64");
+      const prompt = `Nhi\u1EC7m v\u1EE5:
+1. Nh\xECn v\xE0o h\xECnh \u1EA3nh captcha \u0111\u01B0\u1EE3c cung c\u1EA5p.
+2. Tr\xEDch xu\u1EA5t ch\xEDnh x\xE1c c\xE1c k\xFD t\u1EF1/ch\u1EEF s\u1ED1 xu\u1EA5t hi\u1EC7n trong captcha.
+3. B\u1ECF qua t\u1EA5t c\u1EA3 nhi\u1EC5u, \u0111\u01B0\u1EDDng g\u1EA1ch ngang, n\u1EC1n m\u1EDD ho\u1EB7c m\xE0u s\u1EAFc xung quanh.
+
+Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
+- CH\u1EC8 tr\u1EA3 v\u1EC1 \u0111\xFAng chu\u1ED7i k\xFD t\u1EF1/ch\u1EEF s\u1ED1 \u0111\xE3 \u0111\u1ECDc \u0111\u01B0\u1EE3c.
+- KH\xD4NG gi\u1EA3i th\xEDch, KH\xD4NG ch\xE0o h\u1ECFi, KH\xD4NG \u0111\xEDnh k\xE8m d\u1EA5u c\xE2u ho\u1EB7c kho\u1EA3ng tr\u1EAFng d\u01B0 th\u1EEBa.`;
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ]
+      });
+      const responseText = response.text ? response.text.trim() : "";
+      const cleanCode = responseText.replace(/[^a-zA-Z0-9]/g, "").trim();
+      if (cleanCode.length >= 2 && cleanCode.length <= 10) {
+        console.log(`[CaptchaSolver:AI] \u0110\xE3 tr\xEDch xu\u1EA5t Captcha b\u1EB1ng AI: "${cleanCode}" (${Date.now() - startTime}ms)`);
+        return {
+          code: cleanCode,
+          confidence: 99,
+          engine: "gemini",
+          processingTimeMs: Date.now() - startTime
+        };
+      }
+    } catch (aiErr) {
+      console.warn("[CaptchaSolver:AI] AI gi\u1EA3i Captcha l\u1ED7i ho\u1EB7c timeout, chuy\u1EC3n sang Tesseract/Fallback:", aiErr.message);
+    }
+    return null;
   }
   /**
    * Khởi tạo hoặc lấy worker Tesseract.js dạng Singleton để tối ưu hiệu năng
@@ -7514,7 +7574,7 @@ var CaptchaSolver = class {
     this.initPromise = (async () => {
       try {
         console.log("[CaptchaSolver] \u0110ang kh\u1EDFi t\u1EA1o Tesseract.js OCR Worker...");
-        const worker = await (0, import_tesseract.createWorker)(lang, 1, {
+        const worker = await createWorker(lang, 1, {
           errorHandler: (err) => {
             if (process.env.DEBUG_OCR) {
               console.warn("[CaptchaSolver] Worker error handled safely:", err);
@@ -7588,6 +7648,10 @@ var CaptchaSolver = class {
           processingTimeMs: Date.now() - startTime
         };
       }
+    }
+    const aiResult = await this.solveWithAI(imageInput, options);
+    if (aiResult && aiResult.code) {
+      return aiResult;
     }
     const imagePayload = this.normalizeImagePayload(imageInput);
     if (Buffer.isBuffer(imagePayload)) {
@@ -7774,7 +7838,7 @@ var BaseInvoiceProviderDriver = class {
 };
 
 // src/services/invoice-engine/drivers/MisaDriver.ts
-var import_axios = __toESM(require("axios"), 1);
+import axios from "axios";
 var MisaDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -7785,7 +7849,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
       providerCode: "MISA",
       description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng MISA meInvoice (meinvoice.vn) qua M\xE3 tra c\u1EE9u v\xE0 MST b\xEAn b\xE1n",
       sampleUrl: "https://www.meinvoice.vn/tra-cuu",
-      supportsCaptcha: false,
+      supportsCaptcha: true,
       requiredFields: ["sellerTaxCode", "lookupCode"]
     };
   }
@@ -7905,7 +7969,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
     for (const endpoint of candidateEndpoints) {
       try {
         this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn MISA: ${endpoint.url.substring(0, 70)}...`, logs);
-        const response = await (0, import_axios.default)({
+        const response = await axios({
           url: endpoint.url,
           method: endpoint.method,
           data: endpoint.data,
@@ -7973,7 +8037,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/ViettelDriver.ts
-var import_axios2 = __toESM(require("axios"), 1);
+import axios2 from "axios";
 var ViettelDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8056,7 +8120,7 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 15e3;
     let solvedCaptchaCode = "";
     let cookieHeader = "";
-    const client = import_axios2.default.create({
+    const client = axios2.create({
       baseURL: "https://sinvoice.viettel.vn",
       timeout: timeoutMs,
       headers: {
@@ -8166,8 +8230,8 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/FourSiDriver.ts
-var import_axios3 = __toESM(require("axios"), 1);
-var cheerio = __toESM(require("cheerio"), 1);
+import axios3 from "axios";
+import * as cheerio from "cheerio";
 var FourSiDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8252,7 +8316,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 15e3;
     const baseUrl = "https://inv.4si.vn";
     let cookieHeader = "";
-    const client = import_axios3.default.create({
+    const client = axios3.create({
       baseURL: baseUrl,
       timeout: timeoutMs,
       headers: {
@@ -8370,117 +8434,10 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/invoice-engine/drivers/VnptDriver.ts
-var import_axios4 = __toESM(require("axios"), 1);
-var VnptDriver = class extends BaseInvoiceProviderDriver {
-  constructor() {
-    super(...arguments);
-    this.name = "VNPT Invoice Driver";
-    this.providerCode = "VNPT";
-    this.metadata = {
-      name: "VNPT Invoice Driver",
-      providerCode: "VNPT",
-      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng VNPT Invoice qua Fkey / M\xE3 tra c\u1EE9u v\xE0 MST b\xEAn b\xE1n",
-      sampleUrl: "https://tracuu.vnpt-invoice.com.vn",
-      supportsCaptcha: false,
-      requiredFields: ["sellerTaxCode", "lookupCode"]
-    };
-  }
-  /**
-   * Nhận diện hóa đơn VNPT theo đúng thứ tự ưu tiên nghiêm ngặt
-   */
-  canHandle(xmlData) {
-    if (typeof xmlData !== "string") {
-      return xmlData.provider === "VNPT";
-    }
-    return detectProvider(xmlData) === "VNPT";
-  }
-  extractInfo(xmlData) {
-    const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst");
-    const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten");
-    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
-    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
-    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
-    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
-    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
-    let lookupCode = cqtCode || this.extractCustomField(xmlData, ["Fkey", "M\xE3 Fkey", "M\xE3 tra c\u1EE9u", "MaTraCuu"]);
-    if (!lookupCode) {
-      lookupCode = this.extractXmlTag(xmlData, "Fkey") || this.extractXmlTag(xmlData, "MTCuu");
-    }
-    const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
-    const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
-    return {
-      provider: this.providerCode,
-      providerName: "VNPT Invoice",
-      sellerTaxCode,
-      sellerName,
-      invoiceNo,
-      invoiceSeries,
-      templateCode,
-      invoiceDate,
-      lookupCode: lookupCode || void 0,
-      lookupUrl: "https://tracuu.vnpt-invoice.com.vn",
-      cqtCode: cqtCode || void 0,
-      totalAmount,
-      totalTaxAmount,
-      currency: this.extractXmlTag(xmlData, "DVTTe") || "VND",
-      rawXml: xmlData,
-      additionalData: {
-        msttcgp: "0100686209"
-      }
-    };
-  }
-  async fetchPdf(info, options) {
-    const logs = [];
-    this.createLog(`Kh\u1EDFi ch\u1EA1y VNPT Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
-    const fkey = (info.lookupCode || "").trim();
-    const cleanMst = (info.sellerTaxCode || "").trim();
-    this.createLog(`Fkey VNPT: "${fkey}", MST: "${cleanMst}"`, logs);
-    const timeoutMs = options?.timeoutMs || 12e3;
-    const endpoints = [
-      `https://tracuu.vnpt-invoice.com.vn/api/invoices/download-pdf?fkey=${encodeURIComponent(fkey)}&taxCode=${encodeURIComponent(cleanMst)}`,
-      `https://portal.vnpt-invoice.com.vn/api/download-pdf?fkey=${encodeURIComponent(fkey)}`
-    ];
-    for (const url of endpoints) {
-      try {
-        this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn VNPT: ${url.substring(0, 60)}...`, logs);
-        const resp = await import_axios4.default.get(url, {
-          timeout: timeoutMs,
-          responseType: "arraybuffer",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Accept": "application/pdf, application/json, */*",
-            ...options?.customHeaders || {}
-          },
-          validateStatus: (s) => s === 200
-        });
-        if (resp.data && resp.data.byteLength > 50) {
-          const buf = Buffer.from(resp.data);
-          if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-            this.createLog(`T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-            return {
-              success: true,
-              provider: this.providerCode,
-              driverName: this.name,
-              pdfBuffer: buf,
-              pdfBase64: buf.toString("base64"),
-              contentType: "application/pdf",
-              filename: this.buildPdfFilename(info),
-              isFallback: false,
-              sourceUrl: url,
-              executionLogs: logs
-            };
-          }
-        }
-      } catch (err) {
-        this.createLog(`C\u1ED5ng VNPT ph\u1EA3n h\u1ED3i c\u1EA3nh b\xE1o: ${err.message}`, logs);
-      }
-    }
-    throw new Error(`[VnptDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB VNPT Invoice. S\u1EBD k\xEDch ho\u1EA1t Fallback.`);
-  }
-};
+import axios4 from "axios";
 
 // src/services/invoice-engine/drivers/GenericFallbackDriver.ts
-var import_jspdf = require("jspdf");
+import { jsPDF } from "jspdf";
 var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8562,7 +8519,7 @@ var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
       this.createLog(`\u0110\xE3 bi\xEAn so\u1EA1n b\u1EA3n th\u1EC3 hi\u1EC7n HTML/CSS chu\u1EA9n h\xF3a (${(officialHtml.length / 1024).toFixed(1)} KB)`, logs);
     }
     this.createLog("\u0110ang d\u1EF1ng c\u1EA5u tr\xFAc t\xE0i li\u1EC7u PDF vector \u0111\u1ED9 ph\xE2n gi\u1EA3i cao...", logs);
-    const pdfDoc = new import_jspdf.jsPDF({
+    const pdfDoc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
       format: "a4"
@@ -8726,7 +8683,193 @@ var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
+// src/services/invoice-engine/drivers/VnptDriver.ts
+var VnptDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "VNPT Invoice Driver";
+    this.providerCode = "VNPT";
+    this.metadata = {
+      name: "VNPT Invoice Driver",
+      providerCode: "VNPT",
+      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng VNPT Invoice qua Fkey / M\xE3 tra c\u1EE9u, MST b\xEAn b\xE1n v\xE0 v\u01B0\u1EE3t Captcha t\u1EF1 \u0111\u1ED9ng",
+      sampleUrl: "https://tracuu.vnpt-invoice.com.vn",
+      supportsCaptcha: true,
+      requiredFields: ["sellerTaxCode", "lookupCode"]
+    };
+    this.fallback = new GenericFallbackDriver();
+  }
+  /**
+   * Nhận diện hóa đơn VNPT theo đúng thứ tự ưu tiên nghiêm ngặt
+   */
+  canHandle(xmlData) {
+    if (typeof xmlData !== "string") {
+      return xmlData.provider === "VNPT";
+    }
+    return detectProvider(xmlData) === "VNPT";
+  }
+  extractInfo(xmlData) {
+    const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst");
+    const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten");
+    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
+    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
+    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
+    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
+    let lookupCode = cqtCode || this.extractCustomField(xmlData, ["Fkey", "M\xE3 Fkey", "M\xE3 tra c\u1EE9u", "MaTraCuu"]);
+    if (!lookupCode) {
+      lookupCode = this.extractXmlTag(xmlData, "Fkey") || this.extractXmlTag(xmlData, "MTCuu");
+    }
+    const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
+    const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    return {
+      provider: this.providerCode,
+      providerName: "VNPT Invoice",
+      sellerTaxCode,
+      sellerName,
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+      invoiceDate,
+      lookupCode: lookupCode || void 0,
+      lookupUrl: "https://tracuu.vnpt-invoice.com.vn",
+      cqtCode: cqtCode || void 0,
+      totalAmount,
+      totalTaxAmount,
+      currency: this.extractXmlTag(xmlData, "DVTTe") || "VND",
+      rawXml: xmlData,
+      additionalData: {
+        msttcgp: "0100686209"
+      }
+    };
+  }
+  async fetchPdf(info, options) {
+    const logs = [];
+    this.createLog(`Kh\u1EDFi ch\u1EA1y VNPT Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
+    const fkey = (info.lookupCode || "").trim();
+    const cleanMst = (info.sellerTaxCode || "").trim();
+    this.createLog(`Fkey VNPT: "${fkey}", MST: "${cleanMst}"`, logs);
+    const timeoutMs = options?.timeoutMs || 15e3;
+    let lastError = "";
+    const directEndpoints = [
+      `https://tracuu.vnpt-invoice.com.vn/api/invoices/download-pdf?fkey=${encodeURIComponent(fkey)}&taxCode=${encodeURIComponent(cleanMst)}`,
+      `https://portal.vnpt-invoice.com.vn/api/download-pdf?fkey=${encodeURIComponent(fkey)}`
+    ];
+    for (const url of directEndpoints) {
+      try {
+        this.createLog(`\u0110ang th\u1EED t\u1EA3i tr\u1EF1c ti\u1EBFp t\u1EEB VNPT: ${url.substring(0, 65)}...`, logs);
+        const resp = await axios4.get(url, {
+          timeout: timeoutMs,
+          responseType: "arraybuffer",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept": "application/pdf, application/json, */*",
+            ...options?.customHeaders || {}
+          },
+          validateStatus: (s) => s === 200
+        });
+        if (resp.data && resp.data.byteLength > 50) {
+          const buf = Buffer.from(resp.data);
+          if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+            this.createLog(`T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
+            return {
+              success: true,
+              provider: this.providerCode,
+              driverName: this.name,
+              pdfBuffer: buf,
+              pdfBase64: buf.toString("base64"),
+              contentType: "application/pdf",
+              filename: this.buildPdfFilename(info),
+              isFallback: false,
+              sourceUrl: url,
+              executionLogs: logs
+            };
+          }
+        }
+      } catch (err) {
+        lastError = err.message || String(err);
+      }
+    }
+    const portalCandidates = [
+      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, "") : null,
+      cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : null,
+      "https://tracuu.vnpt-invoice.com.vn",
+      "https://portal.vnpt-invoice.com.vn"
+    ].filter(Boolean);
+    for (const portal of portalCandidates) {
+      try {
+        const captchaUrl = `${portal}/Captcha.ashx`;
+        this.createLog(`Y\xEAu c\u1EA7u \u1EA3nh Captcha t\u1EEB c\u1ED5ng VNPT: ${captchaUrl}`, logs);
+        const captchaResp = await axios4.get(captchaUrl, {
+          timeout: 8e3,
+          responseType: "arraybuffer",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Referer": portal
+          },
+          validateStatus: (s) => s === 200
+        });
+        const cookieHeader = captchaResp.headers["set-cookie"] ? Array.isArray(captchaResp.headers["set-cookie"]) ? captchaResp.headers["set-cookie"].join("; ") : captchaResp.headers["set-cookie"] : "";
+        if (captchaResp.data && captchaResp.data.byteLength > 20) {
+          this.createLog("\u0110\xE3 nh\u1EADn \u1EA3nh Captcha t\u1EEB VNPT. \u0110ang tr\xEDch xu\u1EA5t m\xE3 Captcha...", logs);
+          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
+          const captchaCode = captchaResult.code;
+          this.createLog(`\u0110\xE3 gi\u1EA3i Captcha VNPT th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
+          const queryUrl = `${portal}/TraCuu/TraCuuHoaDon`;
+          const queryResp = await axios4.post(queryUrl, {
+            fkey,
+            mst: cleanMst,
+            captcha: captchaCode,
+            sohd: info.invoiceNo,
+            khhdon: info.invoiceSeries
+          }, {
+            timeout: timeoutMs,
+            responseType: "arraybuffer",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+              "Referer": portal,
+              "Cookie": cookieHeader,
+              ...options?.customHeaders || {}
+            },
+            validateStatus: (s) => s < 500
+          });
+          if (queryResp.data && queryResp.data.byteLength > 50) {
+            const buf = Buffer.from(queryResp.data);
+            if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+              this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
+              return {
+                success: true,
+                provider: this.providerCode,
+                driverName: this.name,
+                pdfBuffer: buf,
+                pdfBase64: buf.toString("base64"),
+                contentType: "application/pdf",
+                filename: this.buildPdfFilename(info),
+                isFallback: false,
+                sourceUrl: queryUrl,
+                captchaSolved: captchaCode,
+                executionLogs: logs
+              };
+            }
+          }
+        }
+      } catch (portalErr) {
+        this.createLog(`C\u1ED5ng VNPT ${portal} ch\u01B0a ho\xE0n t\u1EA5t: ${portalErr.message}`, logs);
+      }
+    }
+    this.createLog(`K\xEDch ho\u1EA1t Fallback chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78 cho H\u0110 VNPT`, logs);
+    const fallbackRes = await this.fallback.fetchPdf(info, options);
+    return {
+      ...fallbackRes,
+      provider: this.providerCode,
+      driverName: this.name,
+      executionLogs: [...logs, ...fallbackRes.executionLogs]
+    };
+  }
+};
+
 // src/services/invoice-engine/drivers/EasyInvoiceDriver.ts
+import axios5 from "axios";
 var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8735,9 +8878,9 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
     this.metadata = {
       name: "Softdreams EasyInvoice Driver",
       providerCode: "EASYINVOICE",
-      description: "Tra c\u1EE9u & x\u1EED l\xFD h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED EasyInvoice (Softdreams) qua M\xE3 tra c\u1EE9u / Ch\u1EEF k\xFD s\u1ED1 EasyCA",
+      description: "Tra c\u1EE9u & x\u1EED l\xFD h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED EasyInvoice (Softdreams) qua M\xE3 tra c\u1EE9u / Ch\u1EEF k\xFD s\u1ED1 EasyCA v\xE0 v\u01B0\u1EE3t Captcha t\u1EF1 \u0111\u1ED9ng",
       sampleUrl: "https://easyinvoice.vn/tra-cuu",
-      supportsCaptcha: false,
+      supportsCaptcha: true,
       requiredFields: ["lookupCode", "sellerTaxCode"]
     };
     this.fallback = new GenericFallbackDriver();
@@ -8756,7 +8899,7 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
     const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
     const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
     const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
-    const lookupCode = this.extractCustomField(xmlData, ["M\xE3 tra c\u1EE9u", "MaTraCuu", "MTCuu", "Fkey", "EasyInvoice"]) || this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "MaTraCuu");
+    const lookupCode = this.extractCustomField(xmlData, ["M\xE3 tra c\u1EE9u", "MaTraCuu", "MTCuu", "Fkey", "Ikey", "EasyInvoice"]) || this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "MaTraCuu");
     return {
       provider: this.providerCode,
       providerName: "Softdreams EasyInvoice",
@@ -8775,7 +8918,78 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi \u0111\u1ED9ng x\u1EED l\xFD H\u0110\u0110T EasyInvoice: S\u1ED1 ${info.invoiceNo}, M\u1EABu ${info.templateCode}/${info.invoiceSeries}`, logs);
-    this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF & HTML/CSS chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78`, logs);
+    const lookupCode = (info.lookupCode || "").trim();
+    const cleanMst = (info.sellerTaxCode || "").trim();
+    this.createLog(`M\xE3 tra c\u1EE9u EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
+    const timeoutMs = options?.timeoutMs || 15e3;
+    const portalCandidates = [
+      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, "") : null,
+      "https://easyinvoice.vn",
+      "https://tracuu.easyinvoice.vn",
+      cleanMst ? `https://${cleanMst}.easyinvoice.com.vn` : null
+    ].filter(Boolean);
+    for (const portal of portalCandidates) {
+      try {
+        const captchaUrl = `${portal}/Home/GetCaptcha`;
+        this.createLog(`\u0110ang l\u1EA5y \u1EA3nh Captcha t\u1EEB c\u1ED5ng EasyInvoice: ${captchaUrl}`, logs);
+        const captchaResp = await axios5.get(captchaUrl, {
+          timeout: 8e3,
+          responseType: "arraybuffer",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Referer": portal
+          },
+          validateStatus: (s) => s === 200
+        });
+        const cookieHeader = captchaResp.headers["set-cookie"] ? Array.isArray(captchaResp.headers["set-cookie"]) ? captchaResp.headers["set-cookie"].join("; ") : captchaResp.headers["set-cookie"] : "";
+        if (captchaResp.data && captchaResp.data.byteLength > 20) {
+          this.createLog("\u0110\xE3 nh\u1EADn \u1EA3nh Captcha EasyInvoice. \u0110ang tr\xEDch xu\u1EA5t m\xE3 Captcha...", logs);
+          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
+          const captchaCode = captchaResult.code;
+          this.createLog(`\u0110\xE3 gi\u1EA3i Captcha EasyInvoice th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
+          const queryUrl = `${portal}/Home/TraCuuHoaDon`;
+          const queryResp = await axios5.post(queryUrl, {
+            Ikey: lookupCode,
+            Mst: cleanMst,
+            Captcha: captchaCode,
+            Pattern: info.templateCode,
+            Serial: info.invoiceSeries
+          }, {
+            timeout: timeoutMs,
+            responseType: "arraybuffer",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+              "Referer": portal,
+              "Cookie": cookieHeader,
+              ...options?.customHeaders || {}
+            },
+            validateStatus: (s) => s < 500
+          });
+          if (queryResp.data && queryResp.data.byteLength > 50) {
+            const buf = Buffer.from(queryResp.data);
+            if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+              this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB EasyInvoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
+              return {
+                success: true,
+                provider: this.providerCode,
+                driverName: this.name,
+                pdfBuffer: buf,
+                pdfBase64: buf.toString("base64"),
+                contentType: "application/pdf",
+                filename: this.buildPdfFilename(info),
+                isFallback: false,
+                sourceUrl: queryUrl,
+                captchaSolved: captchaCode,
+                executionLogs: logs
+              };
+            }
+          }
+        }
+      } catch (portalErr) {
+        this.createLog(`C\u1ED5ng EasyInvoice ${portal} ch\u01B0a ho\xE0n t\u1EA5t: ${portalErr.message}`, logs);
+      }
+    }
+    this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,
@@ -9174,7 +9388,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
 // src/utils/gdtDetail.ts
-var import_jszip2 = __toESM(require("jszip"), 1);
+import JSZip2 from "jszip";
 var value = (source, keys) => {
   if (!source || typeof source !== "object") return "";
   for (const key of keys) {
@@ -9185,6 +9399,12 @@ var value = (source, keys) => {
   return "";
 };
 var isXml = (source) => /^\s*(?:<\?xml|<[^>]+>)/i.test(source);
+var getRequestId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "req-" + Math.random().toString(36).substring(2, 11) + "-" + Date.now();
+};
 var GDT_REQUEST_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
   "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -9214,7 +9434,7 @@ async function readXmlFromExport(bytes, contentType) {
   const text = new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "").trim();
   if (isXml(text) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(text)) return text;
   if (!contentType.toLowerCase().includes("zip") && !(bytes[0] === 80 && bytes[1] === 75)) return "";
-  const zip = await import_jszip2.default.loadAsync(bytes);
+  const zip = await JSZip2.loadAsync(bytes);
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
     const entryText = (await entry.async("text")).replace(/^\uFEFF/, "").trim();
@@ -9271,6 +9491,7 @@ async function fetchGdtInvoiceXml(invoice, headers, signal) {
       const response = await fetch(url, {
         headers: {
           ...GDT_REQUEST_HEADERS,
+          "request-id": getRequestId(),
           Accept: "application/zip, application/xml, text/xml, application/octet-stream, */*",
           "End-Point": "/tra-cuu/tra-cuu-hoa-don",
           Action: getInvoiceAction(invoice, true),
@@ -9327,6 +9548,7 @@ async function fetchGdtInvoiceDetail(invoice, headers, signal) {
       const response = await fetch(`https://hoadondientu.gdt.gov.vn${path3}?${params.toString()}`, {
         headers: {
           ...GDT_REQUEST_HEADERS,
+          "request-id": getRequestId(),
           Accept: "application/json, text/plain, */*",
           "End-Point": "/tra-cuu/tra-cuu-hoa-don",
           Action: getInvoiceAction(invoice),
@@ -9418,26 +9640,39 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
 }
 
 // src/db/neonDb.ts
-var import_config = require("dotenv/config");
-var import_pg = require("pg");
-var import_path = __toESM(require("path"), 1);
-var DATA_DIR = import_path.default.join(process.cwd(), "data");
-var LOCAL_USERS_FILE = import_path.default.join(DATA_DIR, "web_users.json");
+import "dotenv/config";
+import { Pool } from "pg";
+import path from "path";
+var DATA_DIR = path.join(process.cwd(), "data");
+var LOCAL_USERS_FILE = path.join(DATA_DIR, "web_users.json");
 var pool = null;
 var isPostgresConnected = false;
+var isTableInitialized = false;
 function getDatabaseConfig() {
   const candidates = [
     ["POSTGRES_URL", process.env.POSTGRES_URL],
-    ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
     ["DATABASE_URL", process.env.DATABASE_URL],
     ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL],
+    ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
     ["POSTGRES_URL_NON_POOLING", process.env.POSTGRES_URL_NON_POOLING],
     ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED]
   ];
   const selected = candidates.find(([, value2]) => value2 && value2.trim());
+  let url = (selected?.[1] || "").trim().replace(/^["']|["']$/g, "").trim();
+  if (!url && process.env.POSTGRES_HOST && process.env.POSTGRES_USER) {
+    const user = encodeURIComponent(process.env.POSTGRES_USER || "");
+    const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || "");
+    const host = process.env.POSTGRES_HOST;
+    const db = process.env.POSTGRES_DATABASE || "neondb";
+    url = `postgresql://${user}:${pass}@${host}/${db}?sslmode=require`;
+    return {
+      source: "POSTGRES_HOST_CONFIG",
+      url
+    };
+  }
   return {
     source: selected?.[0] || "",
-    url: (selected?.[1] || "").trim().replace(/^["']|["']$/g, "").trim()
+    url
   };
 }
 function getDatabaseUrl() {
@@ -9445,7 +9680,7 @@ function getDatabaseUrl() {
 }
 function safeDatabaseError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/postgres(?:ql)?:\/\/[^\\s]+/gi, "postgresql://[redacted]").replace(/password=[^&\\s]+/gi, "password=[redacted]");
+  return message.replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "postgresql://[redacted]").replace(/password=[^&\s]+/gi, "password=[redacted]");
 }
 function getPostgresPool() {
   const databaseUrl = getDatabaseUrl();
@@ -9455,16 +9690,17 @@ function getPostgresPool() {
   if (!pool) {
     try {
       const isLocalhost = databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
-      pool = new import_pg.Pool({
+      pool = new Pool({
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
-        max: 10,
-        connectionTimeoutMillis: 1e4,
-        idleTimeoutMillis: 3e4
+        max: process.env.VERCEL ? 3 : 10,
+        connectionTimeoutMillis: 15e3,
+        idleTimeoutMillis: 2e4
       });
       pool.on("error", (err) => {
         console.warn("[Neon PostgreSQL] Pool background error:", err.message);
         isPostgresConnected = false;
+        pool = null;
       });
     } catch (err) {
       console.error("[Neon PostgreSQL] Kh\u1EDFi t\u1EA1o pool th\u1EA5t b\u1EA1i:", err.message);
@@ -9508,48 +9744,86 @@ async function initDatabase() {
     return {
       success: false,
       type: "local_file",
-      message: "Ch\u01B0a c\u1EA5u h\xECnh connection string Neon (DATABASE_URL, NEON_DATABASE_URL ho\u1EB7c POSTGRES_URL)."
+      message: "Ch\u01B0a c\u1EA5u h\xECnh connection string Neon tr\xEAn Vercel (POSTGRES_URL, DATABASE_URL ho\u1EB7c NEON_DATABASE_URL)."
     };
   }
   const p = getPostgresPool();
   if (p) {
     try {
-      await p.query(`
-        CREATE TABLE IF NOT EXISTS web_users (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(50) UNIQUE NOT NULL,
-          password VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255),
-          role VARCHAR(20) DEFAULT 'user',
-          duration_months INTEGER DEFAULT 1,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-          is_active BOOLEAN DEFAULT TRUE,
-          notes TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-      `);
-      console.log("[Neon PostgreSQL] \u2713 K\u1EBFt n\u1ED1i Neon th\xE0nh c\xF4ng, b\u1EA3ng web_users \u0111\xE3 s\u1EB5n s\xE0ng.");
+      if (!isTableInitialized) {
+        let tableExists = false;
+        try {
+          await p.query("SELECT 1 FROM web_users LIMIT 1;");
+          tableExists = true;
+        } catch {
+          tableExists = false;
+        }
+        if (!tableExists) {
+          await p.query(`
+            CREATE TABLE IF NOT EXISTS web_users (
+              id SERIAL PRIMARY KEY,
+              username VARCHAR(50) UNIQUE NOT NULL,
+              password VARCHAR(255) NOT NULL,
+              full_name VARCHAR(255),
+              role VARCHAR(20) DEFAULT 'user',
+              duration_months INTEGER DEFAULT 1,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+              is_active BOOLEAN DEFAULT TRUE,
+              notes TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+          `);
+          console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 kh\u1EDFi t\u1EA1o b\u1EA3ng web_users tr\xEAn Neon.");
+        }
+        try {
+          const countRes = await p.query("SELECT COUNT(*) as count FROM web_users;");
+          const count = parseInt(countRes.rows[0]?.count || "0", 10);
+          if (count === 0) {
+            const defaultAdminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
+            await p.query(`
+              INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              ON CONFLICT (username) DO NOTHING;
+            `, [
+              "admin",
+              process.env.ADMIN_DEFAULT_PASSWORD || "Admin@123",
+              "Qu\u1EA3n tr\u1ECB vi\xEAn h\u1EC7 th\u1ED1ng",
+              "admin",
+              120,
+              (/* @__PURE__ */ new Date()).toISOString(),
+              defaultAdminExpiry.toISOString(),
+              true,
+              "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn kh\u1EDFi t\u1EA1o t\u1EF1 \u0111\u1ED9ng t\u1EEB Neon DB"
+            ]);
+            console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 t\u1EA1o t\xE0i kho\u1EA3n Admin m\u1EB7c \u0111\u1ECBnh (admin / Admin@123)");
+          }
+        } catch (seedErr) {
+          console.warn("[Neon PostgreSQL] Ki\u1EC3m tra admin seed:", seedErr);
+        }
+        isTableInitialized = true;
+      }
       isPostgresConnected = true;
       return {
         success: true,
         type: "neon_postgres",
-        message: "\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi Database Neon PostgreSQL."
+        message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi Neon PostgreSQL (${databaseConfig.source}).`
       };
     } catch (err) {
-      console.warn("[Neon PostgreSQL] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i ho\u1EB7c kh\u1EDFi t\u1EA1o b\u1EA3ng tr\xEAn Neon:", safeDatabaseError(err));
+      const safeErr = safeDatabaseError(err);
+      console.warn("[Neon PostgreSQL] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i t\u1EDBi Neon:", safeErr);
       isPostgresConnected = false;
       return {
         success: false,
         type: "local_file",
-        message: `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i t\u1EDBi Neon PostgreSQL (${databaseConfig.source}). Vui l\xF2ng ki\u1EC3m tra connection string v\xE0 quy\u1EC1n truy c\u1EADp.`
+        message: `L\u1ED7i k\u1EBFt n\u1ED1i Neon PostgreSQL (${databaseConfig.source}): ${safeErr}`
       };
     }
   }
   return {
     success: false,
     type: "local_file",
-    message: `Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o pool PostgreSQL (${databaseConfig.source}). Vui l\xF2ng ki\u1EC3m tra connection string v\xE0 c\u1EA5u h\xECnh Neon.`
+    message: `Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o pool PostgreSQL (${databaseConfig.source}). Vui l\xF2ng ki\u1EC3m tra connection string.`
   };
 }
 async function getDatabaseStatus() {
@@ -9728,11 +10002,11 @@ async function deleteUser(id) {
 }
 
 // server.ts
-var import_genai = require("@google/genai");
-var app = (0, import_express.default)();
-var PORT = 3e3;
-app.use(import_express.default.json({ limit: "50mb" }));
-app.use(import_express.default.urlencoded({ extended: true, limit: "50mb" }));
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+var app = express();
+var PORT = Number(process.env.PORT) || 3e3;
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
@@ -9742,25 +10016,48 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use((req, res, next) => {
+  if (req.url === "/api/index.js" || req.url === "/api" || req.url === "/api/") {
+    const matched = req.headers["x-matched-path"] || req.originalUrl;
+    if (matched && matched !== "/api/index.js" && matched !== "/api") {
+      req.url = matched;
+    }
+  }
+  if (!req.url.startsWith("/api")) {
+    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
+      req.url = "/api" + req.url;
+    }
+  }
+  next();
+});
 var currentSession = null;
 var captchaCookieJar = /* @__PURE__ */ new Map();
 var captchaContentMap = /* @__PURE__ */ new Map();
 var seleniumLogs = [];
 var GDT_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
   "Accept": "application/json, text/plain, */*",
   "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
-  "Referer": "https://hoadondientu.gdt.gov.vn/",
   "Origin": "https://hoadondientu.gdt.gov.vn",
-  "Cache-Control": "no-cache",
-  "Pragma": "no-cache",
-  "Sec-Ch-Ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
-  "Sec-Ch-Ua-Mobile": "?0",
-  "Sec-Ch-Ua-Platform": '"Windows"',
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "same-origin"
+  "Referer": "https://hoadondientu.gdt.gov.vn/",
+  "sec-ch-ua": '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "empty",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-site": "same-origin"
 };
+function getGdtDispatcher(customProxy) {
+  const proxyUrl = (customProxy || process.env.VIETNAM_PROXY_URL || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || "").trim();
+  if (proxyUrl) {
+    try {
+      return new ProxyAgent(proxyUrl);
+    } catch (e) {
+      console.warn("[Proxy Initialization Warning]:", e);
+    }
+  }
+  return void 0;
+}
 function extractGdtInvoiceList(data) {
   if (Array.isArray(data)) return data;
   const candidates = [
@@ -9801,23 +10098,82 @@ function extractCookies(res) {
   }
   return (cookieList || []).filter(Boolean).map((c) => c.trim().split(";")[0]).filter((c) => c && c.includes("=")).join("; ");
 }
-async function fetchGDT(url, options = {}, maxRetries = 1, timeoutMs = 7e3) {
+var globalF5Cookie = "";
+var lastF5CookieTime = 0;
+async function ensureF5Session(customProxy) {
+  const now = Date.now();
+  if (globalF5Cookie && now - lastF5CookieTime < 10 * 60 * 1e3) {
+    return globalF5Cookie;
+  }
+  try {
+    const dispatcher = getGdtDispatcher(customProxy);
+    const fetchOpt = {
+      headers: {
+        ...GDT_HEADERS,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none"
+      },
+      signal: AbortSignal.timeout(6e3)
+    };
+    if (dispatcher) fetchOpt.dispatcher = dispatcher;
+    const homeRes = await fetch("https://hoadondientu.gdt.gov.vn/", fetchOpt);
+    const cookie = extractCookies(homeRes);
+    if (cookie) {
+      globalF5Cookie = cookie;
+      lastF5CookieTime = now;
+    }
+  } catch (e) {
+  }
+  return globalF5Cookie;
+}
+async function fetchGDT(url, options = {}, maxRetries = 1, timeoutMs = 12e3, customProxy) {
   let lastError = null;
+  const dispatcher = getGdtDispatcher(customProxy);
+  const f5Cookie = await ensureF5Session(customProxy);
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let timer = null;
     try {
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
+      const callerHeaders = options.headers || {};
+      const existingCookie = callerHeaders["Cookie"] || callerHeaders["cookie"] || "";
+      const mergedCookie = [f5Cookie, existingCookie].filter(Boolean).join("; ");
       const mergedHeaders = {
         ...GDT_HEADERS,
-        ...options.headers || {}
+        "request-id": crypto2.randomUUID ? crypto2.randomUUID() : `req_${Date.now()}`,
+        "End-Point": "/",
+        "Action": "",
+        ...callerHeaders
       };
-      const resp = await fetch(url, {
+      if (mergedCookie) {
+        mergedHeaders["Cookie"] = mergedCookie;
+      }
+      const fetchOptions = {
         ...options,
         headers: mergedHeaders,
         signal: controller.signal
-      });
+      };
+      if (dispatcher) {
+        fetchOptions.dispatcher = dispatcher;
+      }
+      const resp = await fetch(url, fetchOptions);
       if (timer) clearTimeout(timer);
+      const newCookies = extractCookies(resp);
+      if (newCookies) {
+        const set1 = new Set((globalF5Cookie || "").split("; ").filter(Boolean));
+        for (const c of newCookies.split("; ").filter(Boolean)) {
+          const key = c.split("=")[0];
+          for (const item of Array.from(set1)) {
+            if (item.startsWith(`${key}=`)) set1.delete(item);
+          }
+          set1.add(c);
+        }
+        globalF5Cookie = Array.from(set1).join("; ");
+        lastF5CookieTime = Date.now();
+      }
       if (resp.ok || resp.status === 400 || resp.status === 401 || resp.status === 403) {
         return resp;
       }
@@ -9832,19 +10188,27 @@ async function fetchGDT(url, options = {}, maxRetries = 1, timeoutMs = 7e3) {
   }
   throw lastError || new Error("Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF.");
 }
+function cleanGdtSvgNoise(svg) {
+  if (!svg || typeof svg !== "string") return svg;
+  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, "");
+}
 var geminiAiClient = null;
 var geminiSpendingCapBlockedUntil = 0;
 var geminiRateLimitBlockedUntil = 0;
-function getGeminiClient() {
-  if (!geminiAiClient && process.env.GEMINI_API_KEY) {
-    geminiAiClient = new import_genai.GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+function getGeminiClient(customKey) {
+  const apiKey = customKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!geminiAiClient || customKey) {
+    const client = new GoogleGenAI2({
+      apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
+    if (!customKey) geminiAiClient = client;
+    return client;
   }
   return geminiAiClient;
 }
-async function solveCaptchaOCR(svgOrDataUri) {
+async function solveCaptchaOCR(svgOrDataUri, customApiKey) {
   if (!svgOrDataUri) return { code: "", error: "D\u1EEF li\u1EC7u \u1EA3nh Captcha r\u1ED7ng" };
   let rawSvg = svgOrDataUri;
   let isBitmap = false;
@@ -9862,8 +10226,8 @@ async function solveCaptchaOCR(svgOrDataUri) {
       bitmapBase64 = match[2];
     }
   }
-  if (!isBitmap && !rawSvg.includes("<svg") && !rawSvg.includes("xmlns")) {
-    return { code: "", error: "\u0110\u1ECBnh d\u1EA1ng SVG kh\xF4ng h\u1EE3p l\u1EC7" };
+  if (!isBitmap && (rawSvg.includes("<svg") || rawSvg.includes("xmlns"))) {
+    rawSvg = cleanGdtSvgNoise(rawSvg);
   }
   if (!isBitmap) {
     const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
@@ -9876,112 +10240,84 @@ async function solveCaptchaOCR(svgOrDataUri) {
       }
     }
   }
-  if (Date.now() < geminiSpendingCapBlockedUntil) {
-    return {
-      code: "",
-      isSpendingCap: true,
-      error: "D\u1EF1 \xE1n \u0111\xE3 ch\u1EA1m h\u1EA1n m\u1EE9c chi ti\xEAu h\xE0ng th\xE1ng c\u1EE7a API Gemini (Spending cap). B\u1EA1n c\xF3 th\u1EC3 nh\xECn \u1EA3nh v\xE0 nh\u1EADp m\xE3 Captcha 4-6 k\xFD t\u1EF1."
-    };
-  }
-  if (Date.now() < geminiRateLimitBlockedUntil) {
-    return {
-      code: "",
-      error: "H\u1EA1n m\u1EE9c API t\u1EA1m th\u1EDDi b\u1EADn (Rate limit). Vui l\xF2ng nh\u1EADp m\xE3 Captcha 4-6 k\xFD t\u1EF1."
-    };
-  }
-  if (!process.env.GEMINI_API_KEY) {
-    return {
-      code: "",
-      isMissingApiKey: true,
-      error: "Ch\u01B0a c\u1EA5u h\xECnh bi\u1EBFn m\xF4i tr\u01B0\u1EDDng GEMINI_API_KEY. B\u1EA1n c\xF3 th\u1EC3 nh\u1EADp Captcha th\u1EE7 c\xF4ng."
-    };
-  }
-  const ai = getGeminiClient();
-  if (!ai) {
-    return {
-      code: "",
-      isMissingApiKey: true,
-      error: "Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o Gemini AI Client."
-    };
-  }
-  const candidateModels = [
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest",
-    "gemini-3.8-flash"
-  ];
-  let lastErrorMsg = "";
-  const svgSnippet = rawSvg.substring(0, 4e3);
-  for (const modelName of candidateModels) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const contentsPayload = isBitmap && bitmapBase64 ? [
-          {
-            inlineData: {
-              mimeType: bitmapMime,
-              data: bitmapBase64
-            }
-          },
-          {
-            text: "This is a captcha image. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation."
-          }
-        ] : [
-          {
-            text: `This is a Vietnamese GDT tax portal captcha SVG image.
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without any spaces, markdown, or punctuation.
+  const activeAi = getGeminiClient(customApiKey);
+  if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
+    const candidateModels = [
+      "gemini-2.5-flash",
+      "gemini-3.6-flash",
+      "gemini-flash-latest"
+    ];
+    const svgSnippet = rawSvg.substring(0, 4e3);
+    const contentsPayload = isBitmap && bitmapBase64 ? [
+      {
+        inlineData: {
+          mimeType: bitmapMime,
+          data: bitmapBase64
+        }
+      },
+      {
+        text: "This is a captcha image from Vietnamese tax portal. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation."
+      }
+    ] : [
+      {
+        text: `This is a Vietnamese GDT tax portal captcha SVG image (noise lines removed).
+Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without spaces, markdown, or punctuation.
 SVG Source:
 \`\`\`xml
 ${svgSnippet}
 \`\`\``
-          }
-        ];
-        const ocrPromise = ai.models.generateContent({
+      }
+    ];
+    for (const modelName of candidateModels) {
+      try {
+        const ocrPromise = activeAi.models.generateContent({
           model: modelName,
           contents: contentsPayload
         });
         const timeoutPromise = new Promise(
-          (resolve) => setTimeout(() => resolve(null), 8e3)
+          (resolve) => setTimeout(() => resolve(null), 7e3)
         );
         const aiResp = await Promise.race([ocrPromise, timeoutPromise]);
         if (aiResp && aiResp.text) {
           const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-          if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
+          if (extracted && extracted.length >= 4 && extracted.length <= 6) {
+            console.log(`[Gemini OCR (${modelName})] Successfully recognized Captcha: "${extracted}"`);
             return { code: extracted, modelUsed: modelName };
           }
         }
         break;
       } catch (err) {
-        lastErrorMsg = err?.message || String(err);
-        const isSpendingCap = lastErrorMsg.includes("spending cap") || lastErrorMsg.includes("monthly spending cap");
-        const isRateLimit = lastErrorMsg.includes("429") || lastErrorMsg.includes("RESOURCE_EXHAUSTED") || lastErrorMsg.includes("quota");
-        const isUnavailable = lastErrorMsg.includes("503") || lastErrorMsg.includes("high demand") || lastErrorMsg.includes("UNAVAILABLE");
-        if (isSpendingCap) {
-          geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1e3;
-          console.log("[Gemini OCR] Monthly spending cap reached. OCR paused for 15 minutes.");
+        const msg = err?.message || String(err);
+        if (msg.includes("spending cap")) {
+          if (!customApiKey) geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1e3;
           break;
         }
-        if (isRateLimit) {
-          geminiRateLimitBlockedUntil = Date.now() + 60 * 1e3;
-          console.log("[Gemini OCR] Rate limit (429) reached. OCR paused for 60 seconds.");
+        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+          if (!customApiKey) geminiRateLimitBlockedUntil = Date.now() + 60 * 1e3;
           break;
         }
-        if (isUnavailable && attempt === 0) {
-          await new Promise((r) => setTimeout(r, 600));
-          continue;
-        }
-        break;
       }
     }
-    if (Date.now() < geminiSpendingCapBlockedUntil || Date.now() < geminiRateLimitBlockedUntil) {
-      break;
+  }
+  if (isBitmap && bitmapBase64) {
+    try {
+      console.log("[Tesseract OCR] Running local fallback OCR on bitmap...");
+      const imageBuffer = Buffer.from(bitmapBase64, "base64");
+      const { data } = await Tesseract.recognize(imageBuffer, "eng");
+      if (data && data.text) {
+        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+        if (cleaned.length >= 4 && cleaned.length <= 6) {
+          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
+          return { code: cleaned, modelUsed: "tesseract-local" };
+        }
+      }
+    } catch (tessErr) {
+      console.warn("[Tesseract OCR] Recognition error:", tessErr?.message);
     }
   }
-  const isSpendingCapFinal = Date.now() < geminiSpendingCapBlockedUntil || lastErrorMsg.includes("spending cap") || lastErrorMsg.includes("monthly spending cap");
-  const isRateLimitFinal = Date.now() < geminiRateLimitBlockedUntil || lastErrorMsg.includes("429") || lastErrorMsg.includes("quota") || lastErrorMsg.includes("RESOURCE_EXHAUSTED");
   return {
     code: "",
-    isSpendingCap: isSpendingCapFinal,
-    error: isSpendingCapFinal ? "D\u1EF1 \xE1n \u0111\xE3 ch\u1EA1m h\u1EA1n m\u1EE9c chi ti\xEAu h\xE0ng th\xE1ng c\u1EE7a API Gemini (Spending cap). B\u1EA1n c\xF3 th\u1EC3 nh\xECn h\xECnh v\xE0 nh\u1EADp m\xE3 Captcha th\u1EE7 c\xF4ng." : isRateLimitFinal ? "H\u1EA1n m\u1EE9c API Gemini t\u1EA1m th\u1EDDi b\u1ECB gi\u1EDBi h\u1EA1n (429 Rate Limit). Vui l\xF2ng nh\u1EADp Captcha th\u1EE7 c\xF4ng ho\u1EB7c th\u1EED l\u1EA1i sau 1 ph\xFAt." : lastErrorMsg ? `L\u1ED7i Gemini API: ${lastErrorMsg.substring(0, 120)}` : "Kh\xF4ng nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c m\xE3 Captcha."
+    error: "Kh\xF4ng t\u1EF1 \u0111\u1ED9ng nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c m\xE3 Captcha. Vui l\xF2ng nh\xECn h\xECnh v\xE0 nh\u1EADp m\xE3 th\u1EE7 c\xF4ng."
   };
 }
 app.get("/api/health", (req, res) => {
@@ -10073,8 +10409,118 @@ app.post("/api/gdt/ocr-captcha", async (req, res) => {
     });
   }
 });
+app.post("/api/gdt/auto-login", async (req, res) => {
+  const { taxCode, password, vietnamProxy, customApiKey } = req.body;
+  if (!taxCode || !taxCode.trim()) {
+    return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\u1EADp M\xE3 s\u1ED1 thu\u1EBF (MST)." });
+  }
+  if (!password || !password.trim()) {
+    return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\u1EADp M\u1EADt kh\u1EA9u do CQT c\u1EA5p." });
+  }
+  const maxAttempts = 3;
+  let lastGdtError = "";
+  let isWafBlocked = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[Auto-Login] L\u1EA7n th\u1EED ${attempt}/${maxAttempts} cho MST ${taxCode.trim()}...`);
+      const gdtRes = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {}, 1, 8e3, vietnamProxy);
+      if (!gdtRes.ok) {
+        if (gdtRes.status === 403) {
+          isWafBlocked = true;
+          lastGdtError = "H\u1EC7 th\u1ED1ng ph\xE1t hi\u1EC7n h\xE0nh vi kh\xF4ng h\u1EE3p l\u1EC7. Y\xEAu c\u1EA7u \u0111\xE3 b\u1ECB ch\u1EB7n.";
+          break;
+        }
+        continue;
+      }
+      const cookieStr = extractCookies(gdtRes);
+      const capData = await gdtRes.json();
+      if (!capData?.key || !capData?.content) continue;
+      captchaCookieJar.set(capData.key, cookieStr);
+      captchaContentMap.set(capData.key, capData.content);
+      const cleanedSvg = cleanGdtSvgNoise(capData.content);
+      const ocrResult = await solveCaptchaOCR(cleanedSvg, customApiKey);
+      const solvedCode = (ocrResult.code || "").trim().toUpperCase();
+      if (!solvedCode || solvedCode.length < 4) {
+        console.log(`[Auto-Login] L\u1EA7n ${attempt}: OCR ch\u01B0a ra m\xE3 k\xFD t\u1EF1, \u0111\u1ED5i Captcha m\u1EDBi...`);
+        continue;
+      }
+      console.log(`[Auto-Login] L\u1EA7n ${attempt}: M\xE3 Captcha "${solvedCode}" (Model: ${ocrResult.modelUsed || "default"}). \u0110ang g\u1EEDi x\xE1c th\u1EF1c...`);
+      const authRes = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...cookieStr ? { "Cookie": cookieStr } : {}
+        },
+        body: JSON.stringify({
+          username: taxCode.trim(),
+          password: password.trim(),
+          ckey: capData.key,
+          cvalue: solvedCode
+        })
+      }, 1, 15e3, vietnamProxy);
+      const newCookieStr = extractCookies(authRes);
+      const combinedCookies = [cookieStr, newCookieStr].filter(Boolean).join("; ");
+      const rawAuthText = await authRes.text();
+      let authData = {};
+      try {
+        authData = JSON.parse(rawAuthText);
+      } catch {
+      }
+      if (authRes.status === 403 || authData?.message?.includes("b\u1ECB ch\u1EB7n") || authData?.message?.includes("kh\xF4ng h\u1EE3p l\u1EC7")) {
+        isWafBlocked = true;
+        lastGdtError = authData?.message || "C\u1ED5ng Thu\u1EBF ch\u1EB7n k\u1EBFt n\u1ED1i t\u1EEB m\xE1y ch\u1EE7 (HTTP 403)";
+        break;
+      }
+      if (authRes.ok && (authData.token || authData.jwt || authData.access_token)) {
+        const realToken = authData.token || authData.jwt || authData.access_token;
+        const cleanToken = realToken.startsWith("Bearer ") ? realToken : `Bearer ${realToken}`;
+        currentSession = {
+          taxCode: taxCode.trim(),
+          taxpayerName: authData.user?.fullName || authData.user?.tenNnt || authData.user?.name || `DOANH NGHI\u1EC6P N\u1ED8P THU\u1EBE (MST: ${taxCode.trim()})`,
+          address: authData.user?.address || authData.user?.dchi || "\u0110\u0103ng k\xFD t\u1EA1i T\u1ED5ng c\u1EE5c Thu\u1EBF Vi\u1EC7t Nam",
+          token: cleanToken,
+          cookieHeader: combinedCookies,
+          isRealGDT: true,
+          createdAt: Date.now()
+        };
+        console.log(`[Auto-Login] \u0110\u0102NG NH\u1EACP TH\xC0NH C\xD4NG cho MST ${taxCode.trim()} \u1EDF l\u1EA7n th\u1EED ${attempt}!`);
+        return res.json({
+          success: true,
+          isRealGDT: true,
+          message: `\u0110\xE3 t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha th\xE0nh c\xF4ng (l\u1EA7n th\u1EED ${attempt}) v\xE0 \u0111\u0103ng nh\u1EADp C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF!`,
+          session: currentSession,
+          attemptsUsed: attempt
+        });
+      }
+      if (authData?.message?.toLowerCase().includes("m\u1EADt kh\u1EA9u") || authData?.message?.toLowerCase().includes("t\xEAn \u0111\u0103ng nh\u1EADp")) {
+        return res.status(400).json({
+          success: false,
+          message: authData.message || "M\xE3 s\u1ED1 thu\u1EBF ho\u1EB7c M\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c."
+        });
+      }
+      lastGdtError = authData?.message || "M\xE3 x\xE1c th\u1EF1c kh\xF4ng ch\xEDnh x\xE1c";
+      console.log(`[Auto-Login] L\u1EA7n ${attempt} ch\u01B0a \u0111\xFAng m\xE3 (${lastGdtError}). T\u1EF1 \u0111\u1ED9ng th\u1EED l\u1EA1i...`);
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (e) {
+      console.warn(`[Auto-Login] L\u1ED7i l\u1EA7n th\u1EED ${attempt}:`, e.message);
+      lastGdtError = e.message;
+    }
+  }
+  if (isWafBlocked) {
+    return res.status(403).json({
+      success: false,
+      isWafBlocked: true,
+      message: "C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF \u0111\xE3 ch\u1EB7n IP c\u1EE7a m\xE1y ch\u1EE7 Cloud n\u01B0\u1EDBc ngo\xE0i (HTTP 403: Y\xEAu c\u1EA7u \u0111\xE3 b\u1ECB ch\u1EB7n). Vui l\xF2ng s\u1EED d\u1EE5ng b\u1EA3n Desktop (.exe) ch\u1EA1y tr\u1EF1c ti\u1EBFp t\u1EA1i Vi\u1EC7t Nam ho\u1EB7c c\u1EA5u h\xECnh Proxy IP Vi\u1EC7t Nam \u0111\u1EC3 truy c\u1EADp \u1ED5n \u0111\u1ECBnh."
+    });
+  }
+  return res.status(400).json({
+    success: false,
+    needManualCaptcha: true,
+    message: `T\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha ch\u01B0a th\xE0nh c\xF4ng sau ${maxAttempts} l\u1EA7n th\u1EED (${lastGdtError}). B\u1EA1n c\xF3 th\u1EC3 chuy\u1EC3n sang nh\u1EADp Captcha th\u1EE7 c\xF4ng \u0111\u1EC3 ti\u1EBFp t\u1EE5c.`
+  });
+});
 app.post("/api/gdt/login", async (req, res) => {
-  let { taxCode, password, captchaKey, captchaCode, captchaCookie } = req.body;
+  let { taxCode, password, captchaKey, captchaCode, captchaCookie, vietnamProxy } = req.body;
   if (!taxCode) {
     return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\u1EADp M\xE3 s\u1ED1 thu\u1EBF (MST)." });
   }
@@ -10098,7 +10544,7 @@ app.post("/api/gdt/login", async (req, res) => {
         ckey: captchaKey || "",
         cvalue: captchaCode.trim()
       })
-    }, 2, 2e4);
+    }, 1, 2e4, vietnamProxy);
     const newCookieStr = extractCookies(authRes);
     const combinedCookies = [cookieHeader, newCookieStr].filter(Boolean).join("; ");
     const rawText = await authRes.text();
@@ -10131,10 +10577,12 @@ app.post("/api/gdt/login", async (req, res) => {
         session: currentSession
       });
     } else {
-      const errorMsg = authData.message || authData.details || "X\xE1c th\u1EF1c th\u1EA5t b\u1EA1i t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF. Vui l\xF2ng ki\u1EC3m tra l\u1EA1i MST, M\u1EADt kh\u1EA9u ho\u1EB7c m\xE3 Captcha.";
+      const isWafBlocked = authRes.status === 403 || authData.message && authData.message.includes("b\u1ECB ch\u1EB7n") || authData.message && authData.message.includes("kh\xF4ng h\u1EE3p l\u1EC7");
+      const errorMsg = isWafBlocked ? "C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF ch\u1EB7n k\u1EBFt n\u1ED1i t\u1EEB m\xE1y ch\u1EE7 \u0111\xE1m m\xE2y n\u01B0\u1EDBc ngo\xE0i (HTTP 403: Y\xEAu c\u1EA7u \u0111\xE3 b\u1ECB ch\u1EB7n). Vui l\xF2ng s\u1EED d\u1EE5ng b\u1EA3n Desktop (.exe) ch\u1EA1y tr\u1EF1c ti\u1EBFp t\u1EA1i Vi\u1EC7t Nam ho\u1EB7c c\u1EA5u h\xECnh Proxy IP Vi\u1EC7t Nam \u0111\u1EC3 kh\xF4ng b\u1ECB ch\u1EB7n." : authData.message || authData.details || "X\xE1c th\u1EF1c th\u1EA5t b\u1EA1i t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF. Vui l\xF2ng ki\u1EC3m tra l\u1EA1i MST, M\u1EADt kh\u1EA9u ho\u1EB7c m\xE3 Captcha.";
       return res.status(authRes.status || 400).json({
         success: false,
         isRealGDT: true,
+        isWafBlocked,
         message: errorMsg,
         rawGdtResponse: authData
       });
@@ -10145,7 +10593,7 @@ app.post("/api/gdt/login", async (req, res) => {
       success: false,
       isRealGDT: true,
       isNetworkBlocked: true,
-      message: `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn m\xE1y ch\u1EE7 C\u1ED5ng Thu\u1EBF (${err.message}). Vui l\xF2ng th\u1EED l\u1EA1i ho\u1EB7c s\u1EED d\u1EE5ng c\xF4ng c\u1EE5 Python tr\xEAn m\xE1y t\xEDnh \u0111\u1EC3 k\u1EBFt n\u1ED1i tr\u1EF1c ti\u1EBFp.`
+      message: `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn m\xE1y ch\u1EE7 C\u1ED5ng Thu\u1EBF (${err.message}). Vui l\xF2ng th\u1EED l\u1EA1i ho\u1EB7c s\u1EED d\u1EE5ng b\u1EA3n Desktop t\u1EA1i Vi\u1EC7t Nam \u0111\u1EC3 k\u1EBFt n\u1ED1i tr\u1EF1c ti\u1EBFp.`
     });
   }
 });
@@ -10209,7 +10657,7 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie } = req.body;
+  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
   const authHeader = req.headers.authorization || bodyToken || currentSession?.token || "";
   const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
@@ -10230,7 +10678,16 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   const rawFrom = fromDate || "2025-01-01";
   const rawTo = toDate || "2025-12-31";
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
-  const tokenHeader = authHeader.startsWith("Bearer ") ? authHeader : `Bearer ${authHeader}`;
+  const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+  const tokenHeader = rawToken ? `Bearer ${rawToken}` : "";
+  const cleanCookies = (cookieHeader || "").split(";").map((c) => c.trim()).filter((c) => {
+    const parts = c.split("=");
+    return parts.length >= 2 && parts[1].trim().length > 0 && parts[0].trim() !== "jwt";
+  });
+  if (rawToken) {
+    cleanCookies.push(`jwt=${rawToken}`);
+  }
+  const sanitizedCookie = cleanCookies.join("; ");
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 1, page = 0, accumulated = []) => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
@@ -10240,17 +10697,29 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const resp = await fetch(url, {
+        const resp = await fetchGDT(url, {
+          method: "GET",
           headers: {
-            ...GDT_HEADERS,
             "Authorization": tokenHeader,
-            ...cookieHeader ? { "Cookie": cookieHeader } : {}
-          },
-          signal: AbortSignal.timeout(15e3)
-        });
-        if (resp.status === 401 || resp.status === 403) {
-          console.warn(`[GDT Query ${source}/${type} Unauthorized]: Session token expired.`);
+            "Accept": "application/json, text/plain, */*",
+            "End-Point": "/tra-cuu/tra-cuu-hoa-don",
+            "Action": "",
+            ...sanitizedCookie ? { "Cookie": sanitizedCookie } : {}
+          }
+        }, 1, 15e3, vietnamProxy);
+        if (resp.status === 401) {
+          console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
+          if (source === "sco-query") {
+            return [];
+          }
           return { error: "AUTH_EXPIRED" };
+        }
+        if (resp.status === 403) {
+          console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
+          if (source === "sco-query") {
+            return [];
+          }
+          return { error: "WAF_BLOCKED" };
         }
         if (resp.status === 429) {
           console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
@@ -10348,6 +10817,9 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       if (chunkResult?.error === "AUTH_EXPIRED") {
         return { error: "AUTH_EXPIRED" };
       }
+      if (chunkResult?.error === "WAF_BLOCKED") {
+        return { error: "WAF_BLOCKED" };
+      }
       if (Array.isArray(chunkResult)) {
         allInvoices = allInvoices.concat(chunkResult);
       }
@@ -10358,28 +10830,37 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     let results = [];
     const purchaseList = await fetchAllChunksForType("purchase", "query");
     if (purchaseList?.error === "AUTH_EXPIRED") {
-      currentSession = null;
+      const isFresh = currentSession?.createdAt && Date.now() - currentSession.createdAt < 10 * 60 * 1e3;
+      if (!isFresh) {
+        currentSession = null;
+      }
       return res.status(401).json({
         success: false,
         isExpired: true,
-        message: "Phi\xEAn l\xE0m vi\u1EC7c C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF \u0111\xE3 h\u1EBFt h\u1EA1n (Token Expired). Vui l\xF2ng nh\u1EADp m\xE3 Captcha \u0111\u1EC3 k\u1EBFt n\u1ED1i l\u1EA1i."
+        sessionValid: Boolean(isFresh),
+        message: "Phi\xEAn l\xE0m vi\u1EC7c C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF c\u1EA7n x\xE1c th\u1EF1c l\u1EA1i. Vui l\xF2ng nh\u1EADp m\xE3 Captcha \u0111\u1EC3 ti\u1EBFp t\u1EE5c."
+      });
+    }
+    if (purchaseList?.error === "WAF_BLOCKED") {
+      return res.status(403).json({
+        success: false,
+        isWafBlocked: true,
+        sessionValid: true,
+        invoices: [],
+        message: "C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF t\u1EA1m th\u1EDDi t\u1EEB ch\u1ED1i truy v\u1EA5n (HTTP 403: Y\xEAu c\u1EA7u b\u1ECB h\u1EA1n ch\u1EBF). Phi\xEAn \u0111\u0103ng nh\u1EADp c\u1EE7a b\u1EA1n v\u1EABn c\xF2n hi\u1EC7u l\u1EF1c. Vui l\xF2ng th\u1EED l\u1EA1i sau gi\xE2y l\xE1t."
       });
     }
     if (Array.isArray(purchaseList)) {
       results = results.concat(purchaseList);
     }
-    await sleep(250);
-    const posPurchaseList = await fetchAllChunksForType("purchase", "sco-query");
-    if (posPurchaseList?.error === "AUTH_EXPIRED") {
-      currentSession = null;
-      return res.status(401).json({
-        success: false,
-        isExpired: true,
-        message: "Phi\xEAn l\xE0m vi\u1EC7c C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF \u0111\xE3 h\u1EBFt h\u1EA1n (Token Expired). Vui l\xF2ng nh\u1EADp m\xE3 Captcha \u0111\u1EC3 k\u1EBFt n\u1ED1i l\u1EA1i."
-      });
-    }
-    if (Array.isArray(posPurchaseList)) {
-      results = results.concat(posPurchaseList);
+    try {
+      await sleep(250);
+      const posPurchaseList = await fetchAllChunksForType("purchase", "sco-query");
+      if (Array.isArray(posPurchaseList)) {
+        results = results.concat(posPurchaseList);
+      }
+    } catch (posErr) {
+      console.info("[GDT sco-query POS notice]:", posErr?.message || posErr);
     }
     const seenMap = /* @__PURE__ */ new Map();
     for (const inv of results) {
@@ -10394,7 +10875,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       try {
         const detailHeaders = {
           Authorization: tokenHeader,
-          ...cookieHeader ? { Cookie: cookieHeader } : {}
+          ...sanitizedCookie ? { Cookie: sanitizedCookie } : cookieHeader ? { Cookie: cookieHeader } : {}
         };
         let detail = null;
         try {
@@ -10460,7 +10941,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
     return entry;
   };
   addLog("step", `[1/6] B\u1EAFt \u0111\u1EA7u kh\u1EDFi t\u1EA1o quy tr\xECnh t\u1EF1 \u0111\u1ED9ng h\xF3a Python Selenium cho MST: ${mst}`, "INIT", 10);
-  const pythonScriptPath = import_path2.default.join(process.cwd(), "python", "gdt_selenium_crawler.py");
+  const pythonScriptPath = path2.join(process.cwd(), "python", "gdt_selenium_crawler.py");
   const args = [
     pythonScriptPath,
     "--mst",
@@ -10477,7 +10958,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
   if (headless !== false) {
     args.push("--headless");
   }
-  const pyProcess = (0, import_child_process.spawn)("python3", args, {
+  const pyProcess = spawn("python3", args, {
     cwd: process.cwd(),
     env: { ...process.env, PYTHONUNBUFFERED: "1" }
   });
@@ -10517,35 +10998,142 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 });
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
-    const zip = new import_jszip3.default();
+    const zip = new JSZip3();
     const fs = await import("fs");
-    const pythonDir = import_path2.default.join(process.cwd(), "python");
-    const files = ["gdt_selenium_crawler.py", "requirements.txt", "README_GDT.md"];
+    const pythonDir = path2.join(process.cwd(), "python");
+    const files = [
+      "gdt_selenium_crawler.py",
+      "requirements.txt",
+      "README_GDT.md",
+      "gdt_crawler.ps1",
+      "run_powershell.bat",
+      "run_windows.bat",
+      "HUONG_DAN_SUA_LOI_PYTHON.txt"
+    ];
     for (const file of files) {
-      const fullPath = import_path2.default.join(pythonDir, file);
+      const fullPath = path2.join(pythonDir, file);
       if (fs.existsSync(fullPath)) {
         const content = fs.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
     const runBat = `@echo off
-echo ========================================================
+chcp 65001 >nul
+title TOOL T\u1EF0 \u0110\u1ED8NG H\xD3A T\u1EA2I H\xD3A \u0110\u01A0N \u0110I\u1EC6N T\u1EEC T\u1ED4NG C\u1EE4C THU\u1EBE (GDT)
+echo ==============================================================================
 echo  KHOI DONG TOOL TAI HOA DON DIEN TU TONG CUC THUE GDT
-echo ========================================================
-python -m pip install -r requirements.txt
-python gdt_selenium_crawler.py --mst 0316892345 --type purchase
+echo ==============================================================================
+echo.
+
+:: 1. Kiem tra lenh python trong PATH
+set PYTHON_CMD=
+where python >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set PYTHON_CMD=python
+    goto :FOUND_PYTHON
+)
+
+:: 2. Kiem tra py launcher tren Windows
+where py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set PYTHON_CMD=py
+    goto :FOUND_PYTHON
+)
+
+:: 3. Tim trong thu muc cai dat mac dinh cua Windows
+for /d %%D in ("%LOCALAPPDATA%\\Programs\\Python\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+for /d %%D in ("C:\\Program Files\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+for /d %%D in ("C:\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+
+:: 4. Neu khong tim thay Python: Hien thi menu lua chon thong minh
+cls
+echo ==============================================================================
+echo  THONG BAO: MAY TINH CHUA CAI PYTHON HOAC CHUA TICK 'ADD PYTHON TO PATH'
+echo ==============================================================================
+echo.
+echo He thong khong tim thay trinh thuc thi Python tren may tinh cua ban.
+echo Ban co the chon 1 trong cac phuong an sau:
+echo.
+echo   [1] Chay ngay bang Windows PowerShell (KHONG CAN CAI PYTHON - KHUYEN DUNG)
+echo   [2] Tu dong cai dat Python 3 qua Windows winget (Tu dong 100%%)
+echo   [3] Mo trang chu python.org de tai bo cai thu cong
+echo   [4] Xem huong dan chi tiet khac phuc loi
+echo   [5] Thoat
+echo.
+set /p USER_CHOICE="Nhap lua chon cua ban (1/2/3/4/5) [Mac dinh: 1]: "
+if "%USER_CHOICE%"=="" set USER_CHOICE=1
+
+if "%USER_CHOICE%"=="1" (
+    echo.
+    echo Dang khoi dong tool truc tiep qua Windows PowerShell...
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0gdt_crawler.ps1"
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="2" (
+    echo.
+    echo Dang tu dong cai dat Python qua winget...
+    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+    echo.
+    echo Cai dat hoan tat! Vui long dong cua so nay va khoi dong lai run_windows.bat.
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="3" (
+    start https://www.python.org/downloads/
+    echo.
+    echo Luu y quan trong: Khi cai dat, nho TICK CHON vao o "Add python.exe to PATH" o man hinh dau tien!
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="4" (
+    notepad "%~dp0HUONG_DAN_SUA_LOI_PYTHON.txt"
+    exit /b
+)
+
+pause
+exit /b
+
+:FOUND_PYTHON
+echo [OK] Da tim thay trinh thuc thi Python: %PYTHON_CMD%
+echo.
+echo Khoi dong Tool tai hoa don...
+%PYTHON_CMD% "%~dp0gdt_selenium_crawler.py"
+echo.
 pause
 `;
     const runSh = `#!/bin/bash
 echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
-python3 gdt_selenium_crawler.py --mst 0316892345 --type purchase
+python3 gdt_selenium_crawler.py --type purchase
 `;
-    zip.file("run_windows.bat", runBat);
+    if (fs.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
+    } else {
+      zip.file("run_windows.bat", runBat);
+    }
     zip.file("run_mac_linux.sh", runSh);
     const buffer = await zip.generateAsync({ type: "nodebuffer" });
     res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", 'attachment; filename="GDT_Selenium_Crawler_Python.zip"');
+    res.setHeader("Content-Disposition", 'attachment; filename="GDT_Invoice_Crawler_Desktop.zip"');
     res.send(buffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -10670,24 +11258,84 @@ app.post("/api/invoice-downloader/solve-captcha", async (req, res) => {
   }
 });
 function getAuthTokenSecret() {
-  const secret = process.env.AUTH_TOKEN_SECRET || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL;
-  if (!secret) {
-    throw new Error("Ch\u01B0a c\u1EA5u h\xECnh AUTH_TOKEN_SECRET ho\u1EB7c k\u1EBFt n\u1ED1i Neon.");
-  }
+  const secret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED || "gdt_web_auth_token_default_secret_key_2026";
   return secret;
+}
+function getWebAppAuthUrl(req) {
+  if (process.env.VERCEL) {
+    return "";
+  }
+  const configuredUrl = (process.env.AUTH_WEBAPP_URL || "").trim();
+  if (!configuredUrl) {
+    return "";
+  }
+  const normalizedUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`;
+  const trimmed = normalizedUrl.replace(/\/+$/, "");
+  if (req) {
+    const host = req.get("host");
+    if (host && (trimmed.includes(host) || host.includes("vercel.app"))) {
+      return "";
+    }
+  }
+  return trimmed;
+}
+function mapRemoteUser(user) {
+  if (!user || typeof user.username !== "string") return null;
+  return {
+    id: user.id ?? user.username,
+    username: user.username,
+    password: "",
+    full_name: user.fullName || user.full_name || "",
+    role: user.role === "admin" ? "admin" : "user",
+    duration_months: Number(user.durationMonths ?? user.duration_months) || 1,
+    created_at: user.createdAt || user.created_at || (/* @__PURE__ */ new Date()).toISOString(),
+    expires_at: user.expiresAt || user.expires_at || (/* @__PURE__ */ new Date(864e13)).toISOString(),
+    is_active: user.isActive !== false && user.is_active !== false,
+    notes: user.notes || "",
+    days_remaining: Math.max(0, Number(user.daysRemaining ?? user.days_remaining) || 0),
+    is_expired: user.isExpired === true || user.is_expired === true,
+    status: user.status || "active"
+  };
+}
+async function getRemoteAuthUser(token) {
+  const authUrl = getWebAppAuthUrl();
+  if (!authUrl) return null;
+  const response = await fetch(`${authUrl}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) return null;
+  const payload = await response.json();
+  return mapRemoteUser(payload.user);
+}
+async function proxyWebAppRequest(req, route, method) {
+  const authUrl = getWebAppAuthUrl();
+  const headers = {
+    Authorization: req.headers.authorization || ""
+  };
+  const options = { method, headers };
+  if (method !== "GET" && method !== "DELETE") {
+    headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(req.body || {});
+  }
+  const response = await fetch(`${authUrl}${route}`, options);
+  const payload = await response.json().catch(() => ({
+    success: false,
+    message: `Webapp tr\u1EA3 v\u1EC1 HTTP ${response.status}.`
+  }));
+  return { status: response.status, payload };
 }
 function createWebToken(username) {
   const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString("base64url");
-  const signature = import_crypto.default.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
+  const signature = crypto2.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
   return `${payload}.${signature}`;
 }
 function getUsernameFromToken(token) {
   const [payload, signature] = token.split(".");
   if (!payload || !signature) return null;
-  const expected = import_crypto.default.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
+  const expected = crypto2.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
   const actualBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !import_crypto.default.timingSafeEqual(actualBuffer, expectedBuffer)) {
+  if (actualBuffer.length !== expectedBuffer.length || !crypto2.timingSafeEqual(actualBuffer, expectedBuffer)) {
     return null;
   }
   try {
@@ -10726,6 +11374,22 @@ async function authenticateWebUser(req, res, next) {
     return res.status(401).json({ success: false, message: "Vui l\xF2ng \u0111\u0103ng nh\u1EADp h\u1EC7 th\u1ED1ng." });
   }
   const token = authHeader.substring(7).trim();
+  if (getWebAppAuthUrl(req)) {
+    try {
+      const remoteUser = await getRemoteAuthUser(token);
+      if (!remoteUser || !remoteUser.is_active) {
+        return res.status(401).json({ success: false, message: "Phi\xEAn \u0111\u0103ng nh\u1EADp webapp \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng \u0111\u0103ng nh\u1EADp l\u1EA1i." });
+      }
+      if (remoteUser.is_expired && remoteUser.role !== "admin") {
+        return res.status(403).json({ success: false, expired: true, message: "T\xE0i kho\u1EA3n \u0111\xE3 h\u1EBFt h\u1EA1n s\u1EED d\u1EE5ng." });
+      }
+      req.webUser = remoteUser;
+      return next();
+    } catch (error) {
+      console.error("[Desktop Remote Auth Error]:", error.message);
+      return res.status(502).json({ success: false, message: "Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c m\xE1y ch\u1EE7 x\xE1c th\u1EF1c webapp." });
+    }
+  }
   const username = getUsernameFromToken(token);
   if (!username) {
     return res.status(401).json({ success: false, message: "Phi\xEAn \u0111\u0103ng nh\u1EADp \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng \u0111\u0103ng nh\u1EADp l\u1EA1i." });
@@ -10753,15 +11417,31 @@ function requireAdmin(req, res, next) {
 }
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const dbInit = await initDatabase();
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\u1EADp M\xE3 s\u1ED1 thu\u1EBF v\xE0 m\u1EADt kh\u1EA9u." });
     }
+    const authUrl = getWebAppAuthUrl(req);
+    if (authUrl) {
+      const remoteResponse = await fetch(`${authUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const remotePayload = await remoteResponse.json().catch(() => ({}));
+      if (!remoteResponse.ok || remotePayload.success === false) {
+        return res.status(remoteResponse.status || 502).json(remotePayload);
+      }
+      if (!remotePayload.token || !remotePayload.user) {
+        return res.status(502).json({ success: false, message: "Webapp tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u \u0111\u0103ng nh\u1EADp kh\xF4ng h\u1EE3p l\u1EC7." });
+      }
+      return res.json(remotePayload);
+    }
+    const dbInit = await initDatabase();
     if (!dbInit.success) {
-      return res.status(503).json({
+      return res.status(200).json({
         success: false,
-        message: dbInit.message || "H\u1EC7 th\u1ED1ng ch\u01B0a k\u1EBFt n\u1ED1i t\u1EDBi Neon Database. Vui l\xF2ng c\u1EA5u h\xECnh DATABASE_URL/NEON_DATABASE_URL tr\u01B0\u1EDBc khi \u0111\u0103ng nh\u1EADp."
+        message: dbInit.message || "H\u1EC7 th\u1ED1ng ch\u01B0a k\u1EBFt n\u1ED1i t\u1EDBi Neon Database. Vui l\xF2ng c\u1EA5u h\xECnh DATABASE_URL ho\u1EB7c POSTGRES_URL tr\xEAn Vercel."
       });
     }
     const user = await findUserByUsername(username);
@@ -10808,9 +11488,13 @@ app.post("/api/auth/logout", (req, res) => {
 });
 app.get("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl(req)) {
+      const result = await proxyWebAppRequest(req, "/api/admin/users", "GET");
+      return res.status(result.status).json(result.payload);
+    }
     const dbInit = await initDatabase();
     if (!dbInit.success) {
-      return res.status(503).json({ success: false, message: dbInit.message });
+      return res.status(200).json({ success: false, message: dbInit.message });
     }
     const users = await getAllUsers();
     res.json({
@@ -10823,6 +11507,10 @@ app.get("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res) 
 });
 app.post("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl(req)) {
+      const result2 = await proxyWebAppRequest(req, "/api/admin/users", "POST");
+      return res.status(result2.status).json(result2.payload);
+    }
     const { username, password, fullName, durationMonths, notes, role } = req.body;
     const result = await createUser({
       username,
@@ -10845,6 +11533,10 @@ app.post("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res)
 });
 app.put("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl(req)) {
+      const result2 = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, "PUT");
+      return res.status(result2.status).json(result2.payload);
+    }
     const { password, fullName, extendMonths, newExpiresAt, isActive, notes } = req.body;
     const result = await updateUser(req.params.id, {
       password,
@@ -10867,6 +11559,10 @@ app.put("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req, r
 });
 app.delete("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req, res) => {
   try {
+    if (getWebAppAuthUrl(req)) {
+      const result2 = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, "DELETE");
+      return res.status(result2.status).json(result2.payload);
+    }
     const result = await deleteUser(req.params.id);
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.error });
@@ -10878,6 +11574,14 @@ app.delete("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req
 });
 app.get("/api/admin/db-status", async (req, res) => {
   try {
+    if (getWebAppAuthUrl(req)) {
+      return res.json({
+        success: true,
+        connected: true,
+        type: "remote_webapp",
+        message: "X\xE1c th\u1EF1c Neon \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp."
+      });
+    }
     const status = await getDatabaseStatus();
     res.json({ success: true, ...status });
   } catch (err) {
@@ -10890,6 +11594,16 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[Process unhandledRejection]:", reason);
 });
+app.use("/api", (err, req, res, next) => {
+  console.error("[API Error Handler]:", err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "L\u1ED7i m\xE1y ch\u1EE7 n\u1ED9i b\u1ED9. Vui l\xF2ng th\u1EED l\u1EA1i."
+  });
+});
 async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
@@ -10897,16 +11611,6 @@ async function startServer() {
       console.log(`[Database Init] ${dbInitResult.message}`);
     }).catch((dbErr) => {
       console.warn("[Database Init] Warning:", dbErr.message);
-    });
-  });
-  app.use("/api", (err, req, res, next) => {
-    console.error("[API Error Handler]:", err);
-    if (res.headersSent) {
-      return next(err);
-    }
-    res.status(err.status || 500).json({
-      success: false,
-      message: err.message || "L\u1ED7i m\xE1y ch\u1EE7 n\u1ED9i b\u1ED9. Vui l\xF2ng th\u1EED l\u1EA1i."
     });
   });
   if (process.env.NODE_ENV !== "production") {
@@ -10925,10 +11629,10 @@ async function startServer() {
       console.error("[Vite Init Error]:", viteErr.message);
     }
   } else {
-    const distPath = import_path2.default.join(process.cwd(), "dist");
-    app.use(import_express.default.static(distPath));
+    const distPath = process.env.VERCEL ? path2.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path2.dirname(__filename) : process.cwd();
+    app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(import_path2.default.join(distPath, "index.html"));
+      res.sendFile(path2.join(distPath, "index.html"));
     });
   }
 }
@@ -10936,3 +11640,7 @@ var server_default = app;
 if (!process.env.VERCEL) {
   startServer();
 }
+export {
+  server_default as default
+};
+//# sourceMappingURL=index.js.map
