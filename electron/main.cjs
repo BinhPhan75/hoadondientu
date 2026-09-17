@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const dotenv = require('dotenv');
 const path = require('path');
 
@@ -8,9 +8,33 @@ process.env.PORT = process.env.PORT || '3217';
 process.env.AUTH_WEBAPP_URL = process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app';
 
 let serverStarted = false;
+let gdtWindow = null;
 
 ipcMain.handle('open-gdt-browser', async () => {
-  await shell.openExternal('https://hoadondientu.gdt.gov.vn/');
+  if (gdtWindow && !gdtWindow.isDestroyed()) {
+    gdtWindow.focus();
+    return { success: true };
+  }
+
+  gdtWindow = new BrowserWindow({
+    width: 1440,
+    height: 920,
+    minWidth: 1024,
+    minHeight: 700,
+    title: 'Cổng Hóa đơn điện tử - Tổng cục Thuế',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      partition: 'persist:gdt-official'
+    }
+  });
+
+  gdtWindow.on('closed', () => {
+    gdtWindow = null;
+  });
+
+  await gdtWindow.loadURL('https://hoadondientu.gdt.gov.vn/');
   return { success: true };
 });
 
