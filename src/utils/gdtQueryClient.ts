@@ -307,7 +307,7 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
   // Step 1: Attempt Serverless Proxy
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s timeout for Vercel
+    const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s timeout matching Vercel maxDuration 30s
 
     const res = await fetch('/api/gdt/query-invoices', {
       method: 'POST',

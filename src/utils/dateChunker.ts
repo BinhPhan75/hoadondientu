@@ -1,14 +1,25 @@
 import { MonthSyncChunk } from '../types';
 
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function pad(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
 /**
  * Split a date range into monthly calendar chunks (<= 31 days each)
  * to comply with Vietnam General Department of Taxation (GDT) single-query limits.
+ * Uses integer string parsing to avoid any UTC/local timezone shifts.
  */
 export function generateMonthChunks(fromDateStr: string, toDateStr: string): MonthSyncChunk[] {
-  const start = new Date(fromDateStr);
-  const end = new Date(toDateStr);
+  if (!fromDateStr || !toDateStr) return [];
 
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+  const startParts = fromDateStr.split('-').map(Number);
+  const endParts = toDateStr.split('-').map(Number);
+
+  if (startParts.length !== 3 || endParts.length !== 3 || startParts.some(isNaN) || endParts.some(isNaN)) {
     return [{
       id: `${fromDateStr}_${toDateStr}`,
       monthIndex: 0,
@@ -31,32 +42,44 @@ export function generateMonthChunks(fromDateStr: string, toDateStr: string): Mon
     }];
   }
 
+  const [startY, startM, startD] = startParts;
+  const [endY, endM, endD] = endParts;
+
+  // Validate start <= end
+  if (startY > endY || (startY === endY && startM > endM) || (startY === endY && startM === endM && startD > endD)) {
+    return [];
+  }
+
   const rawChunks: Array<{ from: string; to: string; year: number; month: number }> = [];
-  let cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const finalEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  let curY = startY;
+  let curM = startM;
+  let curD = startD;
 
-  const pad = (n: number) => String(n).padStart(2, '0');
+  while (curY < endY || (curY === endY && curM <= endM)) {
+    const maxDays = getDaysInMonth(curY, curM);
+    const chunkStartD = curD;
+    let chunkEndD = maxDays;
 
-  while (cur <= finalEnd) {
-    const year = cur.getFullYear();
-    const month = cur.getMonth(); // 0-indexed
+    if (curY === endY && curM === endM) {
+      chunkEndD = Math.min(maxDays, endD);
+    }
 
-    // Last day of current month
-    const endOfMonth = new Date(year, month + 1, 0);
-    const chunkEnd = endOfMonth < finalEnd ? endOfMonth : finalEnd;
-
-    const fromStr = `${year}-${pad(month + 1)}-${pad(cur.getDate())}`;
-    const toStr = `${chunkEnd.getFullYear()}-${pad(chunkEnd.getMonth() + 1)}-${pad(chunkEnd.getDate())}`;
+    const chunkFrom = `${curY}-${pad(curM)}-${pad(chunkStartD)}`;
+    const chunkTo = `${curY}-${pad(curM)}-${pad(chunkEndD)}`;
 
     rawChunks.push({
-      from: fromStr,
-      to: toStr,
-      year,
-      month: month + 1
+      from: chunkFrom,
+      to: chunkTo,
+      year: curY,
+      month: curM
     });
 
-    // Advance to the 1st of next month
-    cur = new Date(year, month + 1, 1);
+    curD = 1;
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
   }
 
   const total = rawChunks.length;
@@ -93,16 +116,13 @@ export function generateMonthChunks(fromDateStr: string, toDateStr: string): Mon
  */
 export function isMultiMonthRange(fromDateStr: string, toDateStr: string): boolean {
   if (!fromDateStr || !toDateStr) return false;
-  const start = new Date(fromDateStr);
-  const end = new Date(toDateStr);
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+  const startParts = fromDateStr.split('-').map(Number);
+  const endParts = toDateStr.split('-').map(Number);
+  if (startParts.length !== 3 || endParts.length !== 3 || startParts.some(isNaN) || endParts.some(isNaN)) return false;
 
-  // If different months or years
-  if (start.getFullYear() !== end.getFullYear() || start.getMonth() !== end.getMonth()) {
-    return true;
-  }
+  const [startY, startM] = startParts;
+  const [endY, endM] = endParts;
 
-  // If day difference > 31 days
-  const diffDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-  return diffDays > 31;
+  // If different months or years, it spans multiple months
+  return startY !== endY || startM !== endM;
 }

@@ -763,33 +763,51 @@ app.post('/api/gdt/login', async (req, res) => {
 
 // Split date range into sub-ranges <= 1 calendar month to comply with GDT's 31-day search limit
 function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string): Array<{ from: string; to: string }> {
-  const start = new Date(fromDateStr);
-  const end = new Date(toDateStr);
-
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+  if (!fromDateStr || !toDateStr) return [{ from: fromDateStr, to: toDateStr }];
+  const startParts = fromDateStr.split('-').map(Number);
+  const endParts = toDateStr.split('-').map(Number);
+  if (startParts.length !== 3 || endParts.length !== 3 || startParts.some(isNaN) || endParts.some(isNaN)) {
     return [{ from: fromDateStr, to: toDateStr }];
   }
 
-  const chunks: Array<{ from: string; to: string }> = [];
-  let cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const finalEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const [startY, startM, startD] = startParts;
+  const [endY, endM, endD] = endParts;
 
-  while (cur <= finalEnd) {
-    // End of current month or finalEnd, whichever is earlier
-    const endOfMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-    const chunkEnd = endOfMonth < finalEnd ? endOfMonth : finalEnd;
-
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const fromStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
-    const toStr = `${chunkEnd.getFullYear()}-${pad(chunkEnd.getMonth() + 1)}-${pad(chunkEnd.getDate())}`;
-
-    chunks.push({ from: fromStr, to: toStr });
-
-    // Move to next day
-    cur = new Date(chunkEnd.getFullYear(), chunkEnd.getMonth(), chunkEnd.getDate() + 1);
+  if (startY > endY || (startY === endY && startM > endM) || (startY === endY && startM === endM && startD > endD)) {
+    return [{ from: fromDateStr, to: toDateStr }];
   }
 
-  return chunks;
+  const getDaysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  const chunks: Array<{ from: string; to: string }> = [];
+  let curY = startY;
+  let curM = startM;
+  let curD = startD;
+
+  while (curY < endY || (curY === endY && curM <= endM)) {
+    const maxDays = getDaysInMonth(curY, curM);
+    const chunkStartD = curD;
+    let chunkEndD = maxDays;
+
+    if (curY === endY && curM === endM) {
+      chunkEndD = Math.min(maxDays, endD);
+    }
+
+    chunks.push({
+      from: `${curY}-${pad(curM)}-${pad(chunkStartD)}`,
+      to: `${curY}-${pad(curM)}-${pad(chunkEndD)}`
+    });
+
+    curD = 1;
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+
+  return chunks.length > 0 ? chunks : [{ from: fromDateStr, to: toDateStr }];
 }
 
 // Fetch one invoice detail without delaying the list endpoint.
@@ -888,133 +906,206 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const fetchChunkWithRetry = async (type: 'purchase' | 'sold', chunkFrom: string, chunkTo: string, source: 'query' | 'sco-query' = 'query', maxRetries = 1, page = 0, accumulated: any[] = []): Promise<any[] | { error: string }> => {
+  const fetchChunkWithRetry = async (
+    type: 'purchase' | 'sold',
+    chunkFrom: string,
+    chunkTo: string,
+    source: 'query' | 'sco-query' = 'query',
+    maxRetries = 2
+  ): Promise<any[] | { error: string }> => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
-
     const apiBase = source === 'sco-query' ? 'sco-query' : 'query';
-    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
-    
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const resp = await fetchGDT(url, {
-          method: 'GET',
-          headers: {
-            'Authorization': tokenHeader,
-            'Accept': 'application/json, text/plain, */*',
-            'End-Point': '/tra-cuu/tra-cuu-hoa-don',
-            'Action': '',
-            ...(sanitizedCookie ? { 'Cookie': sanitizedCookie } : {})
-          }
-        }, 1, 15000, vietnamProxy);
-        
-        if (resp.status === 401) {
-          console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
-          if (source === 'sco-query') {
-            return []; // DO NOT fail entire query for POS invoices
-          }
-          return { error: 'AUTH_EXPIRED' };
-        }
 
-        if (resp.status === 403) {
-          console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
-          if (source === 'sco-query') {
-            return []; // DO NOT fail entire query for POS invoices
-          }
-          return { error: 'WAF_BLOCKED' };
-        }
+    let page = 0;
+    let currentState: string | null = null;
+    let accumulated: any[] = [];
+    const seenInChunk = new Set<string>();
+    let hasNextPage = true;
 
-        if (resp.status === 429) {
-          console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
-          if (attempt < maxRetries) {
-            const backoffMs = (attempt + 1) * 1200;
-            await sleep(backoffMs);
-            continue;
-          } else {
-            console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
-            return [];
-          }
-        }
-
-        if (!resp.ok) {
-          const errText = await resp.text();
-          console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
-          return [];
-        }
-
-        const rawText = await resp.text();
-        let data: any = {};
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
-          return [];
-        }
-
-        const list = extractGdtInvoiceList(data);
-        
-        console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
-
-        // Normalize GDT invoice payload
-        const normalizedPage = list.map((item: any) => ({
-          id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
-          khmshdon: item.khmshdon || item.khmhd || '1',
-          khhdon: item.khhdon || '',
-          shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
-          tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
-          nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ''),
-          nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || 'Người bán'),
-          nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ''),
-          nmmst: item.nmmst || '',
-          nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
-          nmdchi: item.nmdchi || '',
-          tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
-          tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
-          tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
-          tgtttbchu: item.tgtttbchu || '',
-          htttoan: item.htttoan || 'TM/CK',
-          tthdon: Number(item.tthdon || 1),
-          tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
-          ttxly: Number(item.ttxly || 1),
-          ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
-          mhdon: item.mhdon || '',
-          hsgcma: Boolean(item.mhdon || item.hsgcma),
-          loaiHdon: type,
-          hasDigitalSignature: true,
-          signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
-          signedDate: item.tdlap,
-          caProvider: 'Tổng cục Thuế CQT',
-          msttcgp: item.msttcgp || item.mst_tcgp || '',
-          tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
-          lookupCode: getLookupCodeFromPayload(item),
-          lookupUrl: getLookupUrlFromPayload(item),
-          items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
-          sourceCompleteness: 'summary',
-          // Hóa đơn khởi tạo từ máy tính tiền dùng endpoint /api/sco-query riêng
-          // của GDT; đánh dấu để các bước lấy chi tiết/xuất XML sau này gọi
-          // đúng endpoint (xem getInvoiceEndpoint trong utils/gdtDetail.ts).
-          isPos: source === 'sco-query'
-        }));
-        const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
-        const firstPageId = normalizedPage[0]?.id;
-        const repeatedPage = Boolean(firstPageId && accumulated[0]?.id === firstPageId);
-        const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
-        if (hasNextPage) {
-          await sleep(250);
-          return fetchChunkWithRetry(type, chunkFrom, chunkTo, source, maxRetries, page + 1, accumulated.concat(normalizedPage));
-        }
-        return accumulated.concat(normalizedPage);
-      } catch (err: any) {
-        console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
-        if (attempt < maxRetries) {
-          await sleep(1000);
-          continue;
-        }
-        return [];
+    while (hasNextPage && page < 100) {
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      if (currentState) {
+        url += `&state=${encodeURIComponent(currentState)}`;
+      } else if (page > 0) {
+        url += `&page=${page}`;
       }
+
+      let attemptSucceeded = false;
+      let data: any = null;
+
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await fetchGDT(url, {
+            method: 'GET',
+            headers: {
+              'Authorization': tokenHeader,
+              'Accept': 'application/json, text/plain, */*',
+              'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+              'Action': '',
+              ...(sanitizedCookie ? { 'Cookie': sanitizedCookie } : {})
+            }
+          }, 1, 15000, vietnamProxy);
+
+          if (resp.status === 401) {
+            console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
+            if (source === 'sco-query') {
+              return accumulated; // DO NOT fail entire query for POS invoices
+            }
+            return { error: 'AUTH_EXPIRED' };
+          }
+
+          if (resp.status === 403) {
+            console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
+            if (source === 'sco-query') {
+              return accumulated;
+            }
+            return { error: 'WAF_BLOCKED' };
+          }
+
+          if (resp.status === 429) {
+            console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
+            if (attempt < maxRetries) {
+              const backoffMs = (attempt + 1) * 1200;
+              await sleep(backoffMs);
+              continue;
+            } else {
+              console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
+              break;
+            }
+          }
+
+          if (!resp.ok) {
+            const errText = await resp.text();
+            console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1000);
+              continue;
+            }
+            break;
+          }
+
+          const rawText = await resp.text();
+          try {
+            data = JSON.parse(rawText);
+            attemptSucceeded = true;
+            break;
+          } catch {
+            console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1000);
+              continue;
+            }
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
+          if (attempt < maxRetries) {
+            await sleep(1000);
+            continue;
+          }
+          break;
+        }
+      }
+
+      if (!attemptSucceeded || !data) {
+        console.warn(`[GDT Query ${source}/${type}] Could not retrieve page ${page} for ${chunkFrom}..${chunkTo}`);
+        break;
+      }
+
+      const list = extractGdtInvoiceList(data);
+      const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? data.data?.total ?? 0);
+      const rawNextState = data.state ?? data.State ?? data.data?.state ?? data.data?.State;
+      const nextState = (typeof rawNextState === 'string' && rawNextState.trim().length > 0) ? rawNextState.trim() : null;
+
+      // Normalize GDT invoice payload
+      const normalizedPage = list.map((item: any) => ({
+        id: item.id || `GDT_${source === 'sco-query' ? 'POS_' : ''}${item.khhdon || ''}_${item.shdon || ''}_${item.nbmst || item.nmmst || ''}_${item.tdlap || ''}`,
+        khmshdon: item.khmshdon || item.khmhd || '1',
+        khhdon: item.khhdon || '',
+        shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
+        tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
+        nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ''),
+        nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || 'Người bán'),
+        nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ''),
+        nmmst: item.nmmst || '',
+        nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
+        nmdchi: item.nmdchi || '',
+        tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+        tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+        tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
+        tgtttbchu: item.tgtttbchu || '',
+        htttoan: item.htttoan || 'TM/CK',
+        tthdon: Number(item.tthdon || 1),
+        tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
+        ttxly: Number(item.ttxly || 1),
+        ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
+        mhdon: item.mhdon || '',
+        hsgcma: Boolean(item.mhdon || item.hsgcma),
+        loaiHdon: type,
+        hasDigitalSignature: true,
+        signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
+        signedDate: item.tdlap,
+        caProvider: 'Tổng cục Thuế CQT',
+        msttcgp: item.msttcgp || item.mst_tcgp || '',
+        tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
+        lookupCode: getLookupCodeFromPayload(item),
+        lookupUrl: getLookupUrlFromPayload(item),
+        items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
+        sourceCompleteness: 'summary',
+        isPos: source === 'sco-query'
+      }));
+
+      // Deduplicate within this chunk
+      let newCount = 0;
+      for (const inv of normalizedPage) {
+        const uniqueKey = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.isPos ? 'pos' : 'std'}`;
+        if (!seenInChunk.has(uniqueKey)) {
+          seenInChunk.add(uniqueKey);
+          accumulated.push(inv);
+          newCount++;
+        }
+      }
+
+      console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo} (page ${page + 1}): fetched ${list.length} raw, ${newCount} new (total: ${accumulated.length}/${total || 'unknown'}, nextState: ${Boolean(nextState)})`);
+
+      // Termination checks:
+      // 1. If 0 new unique invoices were added or empty list returned -> stop
+      if (newCount === 0 || list.length === 0) {
+        hasNextPage = false;
+        break;
+      }
+
+      // 2. If total is known and accumulated has reached or exceeded total -> stop
+      if (total > 0 && accumulated.length >= total) {
+        hasNextPage = false;
+        break;
+      }
+
+      // 3. If GDT returned a state cursor for the next batch
+      if (nextState && nextState !== currentState) {
+        currentState = nextState;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+
+      // 4. If no state cursor provided, but GDT returned a full page (list.length >= size) and total is unknown or greater
+      if (list.length >= Number(size) && (!total || accumulated.length < total)) {
+        currentState = null;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+
+      // Otherwise, no more pages
+      hasNextPage = false;
     }
-    return [];
+
+    return accumulated;
   };
 
   const fetchAllChunksForType = async (type: 'purchase' | 'sold', source: 'query' | 'sco-query' = 'query') => {
