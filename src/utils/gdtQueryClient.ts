@@ -25,6 +25,8 @@ export interface LoginOptions {
   captchaKey?: string;
   captchaCode?: string;
   captchaCookie?: string;
+  vietnamProxy?: string;
+  customApiKey?: string;
 }
 
 export interface LoginResult {
@@ -35,6 +37,16 @@ export interface LoginResult {
   cookieHeader?: string;
   error?: string;
   source?: 'proxy' | 'direct_browser';
+  isWafBlocked?: boolean;
+  needManualCaptcha?: boolean;
+  attemptsUsed?: number;
+}
+
+export interface AutoLoginOptions {
+  taxCode: string;
+  password: string;
+  vietnamProxy?: string;
+  customApiKey?: string;
 }
 
 export interface CaptchaResult {
@@ -143,15 +155,84 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
 }
 
 /**
+ * Auto-Login with Zero-Click Captcha and auto-retry
+ */
+export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<LoginResult> {
+  const { taxCode, password, vietnamProxy, customApiKey } = options;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 35000); // 35s for 3 attempts
+
+    const res = await fetch('/api/gdt/auto-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taxCode: taxCode.trim(),
+        password: password.trim(),
+        vietnamProxy,
+        customApiKey
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch {}
+
+    if (res.ok && data?.success && data.session?.token) {
+      return {
+        success: true,
+        token: data.session.token,
+        taxpayerName: data.session.taxpayerName,
+        address: data.session.address,
+        cookieHeader: data.session.cookieHeader,
+        attemptsUsed: data.attemptsUsed,
+        source: 'proxy'
+      };
+    }
+
+    return {
+      success: false,
+      isWafBlocked: data?.isWafBlocked || res.status === 403,
+      needManualCaptcha: data?.needManualCaptcha,
+      error: data?.message || 'Không thể tự động đăng nhập Cổng Thuế.'
+    };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return {
+        success: false,
+        error: 'Thời gian tự động vượt Captcha kéo dài quá lâu (quá 35s). Vui lòng thử lại hoặc nhập mã thủ công.'
+      };
+    }
+    return {
+      success: false,
+      error: `Lỗi kết nối khi tự động đăng nhập: ${err?.message || err}`
+    };
+  }
+}
+
+/**
  * Resilient GDT Login with Backend proxy only
  */
 export async function executeGdtLogin(options: LoginOptions): Promise<LoginResult> {
-  const { taxCode, password, captchaKey, captchaCode, captchaCookie } = options;
+  const { taxCode, password, captchaKey, captchaCode, captchaCookie, vietnamProxy, customApiKey } = options;
+
+  // If captchaCode is omitted or empty, use executeGdtAutoLogin!
+  if (!captchaCode || !captchaCode.trim()) {
+    return executeGdtAutoLogin({
+      taxCode,
+      password,
+      vietnamProxy,
+      customApiKey
+    });
+  }
 
   // Strategy 1: Serverless Proxy /api/gdt/login
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 25000);
     const res = await fetch('/api/gdt/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -160,7 +241,8 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
         password: password.trim(),
         captchaKey,
         captchaCode: (captchaCode || '').trim(),
-        captchaCookie
+        captchaCookie,
+        vietnamProxy
       }),
       signal: controller.signal
     });
@@ -181,26 +263,29 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
       };
     }
 
-    if (res.status === 400 && data?.message) {
-      // Captcha or password error specifically reported by GDT via proxy
-      // Let's attempt direct fallback anyway just in case the proxy had an issue
-    }
-
     if (data?.message || data?.details) {
       return {
         success: false,
+        isWafBlocked: data?.isWafBlocked || res.status === 403,
         error: data.message || data.details
       };
     }
 
     return {
       success: false,
+      isWafBlocked: res.status === 403,
       error: `Cổng Thuế từ chối đăng nhập (HTTP ${res.status}). Vui lòng kiểm tra Captcha, MST và mật khẩu.`
     };
-  } catch (proxyErr) {
+  } catch (proxyErr: any) {
     console.warn('[Proxy Login Failed]:', proxyErr);
+    if (proxyErr?.name === 'AbortError') {
+      return {
+        success: false,
+        error: 'Thời gian chờ xác thực từ Cổng Thuế quá lâu (quá 25s). Vui lòng thử lại.'
+      };
+    }
   }
-
+
   return {
     success: false,
     error: 'Máy chủ chưa kết nối được Cổng Tổng cục Thuế. Vui lòng thử lại sau.'
@@ -251,23 +336,32 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
         success: false,
         status: 401,
         invoices: [],
-        message: errData.message || 'Phiên Cổng Thuế đã hết hạn. Vui lòng nhập Captcha để đăng nhập lại.'
+        message: errData.message || 'Phiên Cổng Thuế cần xác thực lại. Vui lòng nhập Captcha để tiếp tục.'
+      };
+    }
+
+    if (res.status === 403) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        status: 403,
+        invoices: [],
+        message: errData.message || 'Cổng Tổng cục Thuế chặn truy vấn từ IP máy chủ Cloud nước ngoài (HTTP 403). Phiên đăng nhập vẫn còn hiệu lực.'
       };
     }
 
     if (res.ok) {
       const data = await res.json().catch(() => ({}));
-      if (Array.isArray(data.invoices) && data.invoices.length > 0) {
+      if (Array.isArray(data.invoices)) {
         return {
           success: true,
           invoices: data.invoices,
           source: 'proxy'
         };
       }
-      // If proxy returned 0 invoices, verify with direct browser fetch just in case
-      // Vercel server was throttled or blocked by GDT
     } else {
-      proxyError = `Proxy HTTP ${res.status}`;
+      const errData = await res.json().catch(() => ({}));
+      proxyError = errData.message || `Proxy HTTP ${res.status}`;
     }
   } catch (err: any) {
     proxyError = err?.message || 'Proxy connection error';

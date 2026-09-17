@@ -28,20 +28,36 @@ const LOCAL_USERS_FILE = path.join(DATA_DIR, 'web_users.json');
 
 let pool: Pool | null = null;
 let isPostgresConnected = false;
+let isTableInitialized = false;
 
 function getDatabaseConfig(): { url: string; source: string } {
   const candidates: Array<[string, string | undefined]> = [
     ['POSTGRES_URL', process.env.POSTGRES_URL],
-    ['POSTGRES_PRISMA_URL', process.env.POSTGRES_PRISMA_URL],
     ['DATABASE_URL', process.env.DATABASE_URL],
     ['NEON_DATABASE_URL', process.env.NEON_DATABASE_URL],
+    ['POSTGRES_PRISMA_URL', process.env.POSTGRES_PRISMA_URL],
     ['POSTGRES_URL_NON_POOLING', process.env.POSTGRES_URL_NON_POOLING],
     ['DATABASE_URL_UNPOOLED', process.env.DATABASE_URL_UNPOOLED]
   ];
   const selected = candidates.find(([, value]) => value && value.trim());
+  let url = (selected?.[1] || '').trim().replace(/^["']|["']$/g, '').trim();
+
+  // Kiểm tra nếu Vercel cung cấp các biến thành phần riêng biệt
+  if (!url && process.env.POSTGRES_HOST && process.env.POSTGRES_USER) {
+    const user = encodeURIComponent(process.env.POSTGRES_USER || '');
+    const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || '');
+    const host = process.env.POSTGRES_HOST;
+    const db = process.env.POSTGRES_DATABASE || 'neondb';
+    url = `postgresql://${user}:${pass}@${host}/${db}?sslmode=require`;
+    return {
+      source: 'POSTGRES_HOST_CONFIG',
+      url
+    };
+  }
+
   return {
     source: selected?.[0] || '',
-    url: (selected?.[1] || '').trim().replace(/^["']|["']$/g, '').trim()
+    url
   };
 }
 
@@ -52,8 +68,8 @@ function getDatabaseUrl(): string {
 function safeDatabaseError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message
-    .replace(/postgres(?:ql)?:\/\/[^\\s]+/gi, 'postgresql://[redacted]')
-    .replace(/password=[^&\\s]+/gi, 'password=[redacted]');
+    .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, 'postgresql://[redacted]')
+    .replace(/password=[^&\s]+/gi, 'password=[redacted]');
 }
 
 /**
@@ -72,9 +88,9 @@ export function getPostgresPool(): Pool | null {
       pool = new Pool({
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
-        max: 10,
-        connectionTimeoutMillis: 10000,
-        idleTimeoutMillis: 30000
+        max: process.env.VERCEL ? 3 : 10,
+        connectionTimeoutMillis: 15000,
+        idleTimeoutMillis: 20000
       });
 
       pool.on('error', (err) => {
@@ -138,7 +154,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
     return {
       success: false,
       type: 'local_file',
-      message: 'Chưa cấu hình connection string Neon (DATABASE_URL, NEON_DATABASE_URL hoặc POSTGRES_URL).'
+      message: 'Chưa cấu hình connection string Neon trên Vercel (POSTGRES_URL, DATABASE_URL hoặc NEON_DATABASE_URL).'
     };
   }
 
@@ -146,37 +162,79 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
 
   if (p) {
     try {
-      await p.query(`
-        CREATE TABLE IF NOT EXISTS web_users (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(50) UNIQUE NOT NULL,
-          password VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255),
-          role VARCHAR(20) DEFAULT 'user',
-          duration_months INTEGER DEFAULT 1,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-          is_active BOOLEAN DEFAULT TRUE,
-          notes TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-      `);
+      if (!isTableInitialized) {
+        // Kiểm tra nhanh bảng web_users có tồn tại không
+        let tableExists = false;
+        try {
+          await p.query('SELECT 1 FROM web_users LIMIT 1;');
+          tableExists = true;
+        } catch {
+          tableExists = false;
+        }
 
-      console.log('[Neon PostgreSQL] ✓ Kết nối Neon thành công, bảng web_users đã sẵn sàng.');
+        if (!tableExists) {
+          await p.query(`
+            CREATE TABLE IF NOT EXISTS web_users (
+              id SERIAL PRIMARY KEY,
+              username VARCHAR(50) UNIQUE NOT NULL,
+              password VARCHAR(255) NOT NULL,
+              full_name VARCHAR(255),
+              role VARCHAR(20) DEFAULT 'user',
+              duration_months INTEGER DEFAULT 1,
+              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+              expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+              is_active BOOLEAN DEFAULT TRUE,
+              notes TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+          `);
+          console.log('[Neon PostgreSQL] ✓ Đã khởi tạo bảng web_users trên Neon.');
+        }
+
+        // Tự động kiểm tra và tạo tài khoản Admin mặc định nếu chưa có tài khoản nào
+        try {
+          const countRes = await p.query('SELECT COUNT(*) as count FROM web_users;');
+          const count = parseInt(countRes.rows[0]?.count || '0', 10);
+          if (count === 0) {
+            const defaultAdminExpiry = calculateExpiryDate(new Date(), 120);
+            await p.query(`
+              INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              ON CONFLICT (username) DO NOTHING;
+            `, [
+              'admin',
+              process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123',
+              'Quản trị viên hệ thống',
+              'admin',
+              120,
+              new Date().toISOString(),
+              defaultAdminExpiry.toISOString(),
+              true,
+              'Tài khoản Quản trị viên khởi tạo tự động từ Neon DB'
+            ]);
+            console.log('[Neon PostgreSQL] ✓ Đã tạo tài khoản Admin mặc định (admin / Admin@123)');
+          }
+        } catch (seedErr) {
+          console.warn('[Neon PostgreSQL] Kiểm tra admin seed:', seedErr);
+        }
+
+        isTableInitialized = true;
+      }
 
       isPostgresConnected = true;
       return {
         success: true,
         type: 'neon_postgres',
-        message: 'Đã kết nối thành công tới Database Neon PostgreSQL.'
+        message: `Đã kết nối thành công tới Neon PostgreSQL (${databaseConfig.source}).`
       };
     } catch (err: any) {
-      console.warn('[Neon PostgreSQL] Không thể kết nối hoặc khởi tạo bảng trên Neon:', safeDatabaseError(err));
+      const safeErr = safeDatabaseError(err);
+      console.warn('[Neon PostgreSQL] Không thể kết nối tới Neon:', safeErr);
       isPostgresConnected = false;
       return {
         success: false,
         type: 'local_file',
-        message: `Không thể kết nối tới Neon PostgreSQL (${databaseConfig.source}). Vui lòng kiểm tra connection string và quyền truy cập.`
+        message: `Lỗi kết nối Neon PostgreSQL (${databaseConfig.source}): ${safeErr}`
       };
     }
   }
@@ -184,7 +242,7 @@ export async function initDatabase(): Promise<{ success: boolean; type: 'neon_po
   return {
     success: false,
     type: 'local_file',
-    message: `Không thể khởi tạo pool PostgreSQL (${databaseConfig.source}). Vui lòng kiểm tra connection string và cấu hình Neon.`
+    message: `Không thể khởi tạo pool PostgreSQL (${databaseConfig.source}). Vui lòng kiểm tra connection string.`
   };
 }
 

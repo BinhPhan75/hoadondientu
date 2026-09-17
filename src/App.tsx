@@ -13,7 +13,6 @@ import { ConsoleDock } from './components/ConsoleDock';
 import { AccountConfigModal } from './components/AccountConfigModal';
 import { BatchDownloadModal } from './components/BatchDownloadModal';
 import { InvoiceDetailModal } from './components/InvoiceDetailModal';
-import { PythonSeleniumModal } from './components/PythonSeleniumModal';
 import { MultiMonthSyncModal } from './components/MultiMonthSyncModal';
 import { FloatingSyncBadge } from './components/FloatingSyncBadge';
 import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMonthSyncState, MonthSyncChunk } from './types';
@@ -21,7 +20,6 @@ import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
-import { SAMPLE_PARTNER_INVOICES } from './data/samplePartnerInvoices';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
@@ -84,7 +82,6 @@ export default function App() {
   // Modals Visibility State
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isBatchDownloadModalOpen, setIsBatchDownloadModalOpen] = useState(false);
-  const [isSeleniumModalOpen, setIsSeleniumModalOpen] = useState(false);
   const [isImportXmlModalOpen, setIsImportXmlModalOpen] = useState(false);
   const [isMultiMonthModalOpen, setIsMultiMonthModalOpen] = useState(false);
   const [showFloatingBadge, setShowFloatingBadge] = useState(false);
@@ -198,6 +195,26 @@ export default function App() {
       localStorage.removeItem('gdt_account_config');
     }
   }, [account]);
+
+  // Xóa trắng toàn bộ danh sách hóa đơn khi reload trang hoặc mở mới, loại bỏ dữ liệu cũ/giả lập
+  useEffect(() => {
+    setInvoices([]);
+    setSelectedInvoices([]);
+    setHasSearched(false);
+    try {
+      localStorage.removeItem('gdt_saved_invoices');
+    } catch {}
+  }, []);
+
+  // Tự động tắt thông báo "hoàn tất đồng bộ toàn kỳ" sau khi tải đủ hóa đơn về
+  useEffect(() => {
+    if (syncState.isCompleted) {
+      const timer = setTimeout(() => {
+        setShowFloatingBadge(false);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [syncState.isCompleted]);
 
   // Filter Invoices according to all criteria (Strictly Purchase Invoices Only)
   const filteredInvoices = useMemo(() => {
@@ -318,11 +335,6 @@ export default function App() {
         message: `Đã xuất Bảng kê Excel gồm ${listToExport.length} hóa đơn chuẩn Thông tư 78.`
       }
     ]);
-  };
-
-  // Download Standalone Python Package
-  const handleDownloadPythonScript = () => {
-    window.location.href = '/api/gdt/download-python-package';
   };
 
   // Automated background enrichment status for goods/services line items
@@ -598,19 +610,18 @@ export default function App() {
           ]);
         } else if (queryRes.status === 401) {
           hasEncounteredError = true;
-          setAccount(prev => ({ ...prev, isRealGDT: false }));
           setSyncState(prev => ({
             ...prev,
             hasErrors: true,
-            chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'failed' as const, errorMessage: 'Phiên Cổng Thuế hết hạn, cần nhập Captcha' } : c)
+            chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'failed' as const, errorMessage: 'Phiên Cổng Thuế cần xác thực Captcha' } : c)
           }));
           setConsoleLogs(prev => [
             ...prev,
             {
               id: Math.random().toString(36).substring(2, 9),
               timestamp: new Date().toLocaleTimeString('vi-VN'),
-              level: 'error',
-              message: `[PHIÊN HẾT HẠN] Phiên làm việc Cổng Thuế hết hạn khi đang tra cứu ${chunk.label}. Vui lòng nhập Captcha mới và bấm Thử lại.`
+              level: 'warning',
+              message: `[CẦN XÁC THỰC LẠI] Khi tra cứu ${chunk.label}: Cổng Thuế yêu cầu xác thực lại. Phiên vẫn giữ nguyên.`
             }
           ]);
           break;
@@ -816,27 +827,14 @@ export default function App() {
     // Never query GDT with an empty or stale local session.
     const needLogin = !account.isRealGDT || !activeToken.trim() || (credentials && credentials.taxCode !== account.taxCode) || hasCaptcha;
 
-    if (needLogin && !hasCaptcha) {
-      const message = 'Phiên Cổng Thuế đã mất hoặc hết hạn. Vui lòng nhập lại Captcha để đăng nhập lại trước khi tra cứu.';
-      setAccount(prev => ({ ...prev, isRealGDT: false }));
-      setConsoleLogs(prev => [...prev, {
-        id: Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toLocaleTimeString('vi-VN'),
-        level: 'warning',
-        message: `[PHIÊN CỔNG THUẾ] ${message}`
-      }]);
-      setIsRefreshing(false);
-      return { success: false, error: message };
-    }
-
-    if (needLogin && hasCaptcha) {
+    if (needLogin) {
       setConsoleLogs(prev => [
         ...prev,
         {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: 'step',
-          message: `[XÁC THỰC CỔNG THUẾ] Đang gửi thông tin đăng nhập và Captcha cho MST ${mst}...`
+          message: `[XÁC THỰC CỔNG THUẾ] Đang gửi thông tin đăng nhập và mã Captcha cho MST ${mst}...`
         }
       ]);
 
@@ -846,11 +844,42 @@ export default function App() {
           password: pwd,
           captchaKey: credentials?.captchaKey,
           captchaCode: credentials?.captchaCode,
-          captchaCookie: credentials?.captchaCookie
+          captchaCookie: credentials?.captchaCookie,
+          vietnamProxy: credentials?.vietnamProxy || account.vietnamProxy,
+          customApiKey: credentials?.customApiKey || account.customApiKey
         });
 
         if (!loginResult.success || !loginResult.token) {
           const errMsg = loginResult.error || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc Captcha.';
+          
+          if (loginResult.isWafBlocked) {
+            setConsoleLogs(prev => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString('vi-VN'),
+                level: 'error',
+                message: `[CỔNG THUẾ TỪ CHỐI IP 403] Tường lửa Cổng Thuế phát hiện kết nối từ IP đám mây. Vui lòng thử lại sau giây lát.`
+              }
+            ]);
+            setIsRefreshing(false);
+            return { success: false, error: errMsg, isWafBlocked: true };
+          }
+
+          if (loginResult.needManualCaptcha) {
+            setConsoleLogs(prev => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString('vi-VN'),
+                level: 'warning',
+                message: `[MÃ CAPTCHA CHƯA ĐÚNG] Vui lòng nhìn hình và nhập lại mã Captcha (hoặc bấm Đọc mã OCR).`
+              }
+            ]);
+            setIsRefreshing(false);
+            return { success: false, error: errMsg, needManualCaptcha: true };
+          }
+
           setConsoleLogs(prev => [
             ...prev,
             {
@@ -886,6 +915,7 @@ export default function App() {
         collapseLeftMenu();
 
         const sourceNotice = loginResult.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
+
         setConsoleLogs(prev => [
           ...prev,
           {
@@ -962,8 +992,7 @@ export default function App() {
         // Tự động thu gọn thanh LIVE SELENIUM CONSOLE xuống dưới sau khi chạy kết xuất thành công dữ liệu
         autoCollapseConsole(1200);
         return { success: true };
-      } else if (queryRes.status === 401) {
-        setAccount(prev => ({ ...prev, isRealGDT: false }));
+      } else if (queryRes.status === 403) {
         setHasSearched(true);
         setConsoleLogs(prev => [
           ...prev,
@@ -971,7 +1000,19 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'warning',
-            message: `[PHIÊN HẾT HẠN / CHƯA ĐĂNG NHẬP] ${queryRes.message || 'Vui lòng nhập mã Captcha ở bảng bên trái để kết nối Tổng cục Thuế.'}`
+            message: `[CỔNG THUẾ CHẶN IP 403] ${queryRes.message || 'Cổng Thuế chặn IP Cloud. Phiên đăng nhập của bạn vẫn còn hiệu lực.'}`
+          }
+        ]);
+        return { success: false, error: queryRes.message };
+      } else if (queryRes.status === 401) {
+        setHasSearched(true);
+        setConsoleLogs(prev => [
+          ...prev,
+          {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[YÊU CẦU XÁC THỰC LẠI] ${queryRes.message || 'Phiên làm việc cần làm mới mã Captcha.'}`
           }
         ]);
         return { success: false, error: queryRes.message };
@@ -1067,38 +1108,6 @@ export default function App() {
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'info',
         message: 'Đã đặt lại các điều kiện lọc về mặc định cả năm 2025.'
-      }
-    ]);
-  };
-
-  // Reset & load authentic partner invoices
-  const handleResetToPartnerSamples = () => {
-    const refreshed = SAMPLE_PARTNER_INVOICES.map(inv => {
-      ensureInvoiceItems(inv);
-      return inv;
-    });
-    setInvoices(refreshed);
-    setHasSearched(true);
-    setSelectedInvoices([]);
-    setDataSourceType('imported_xml');
-    setFilters({
-      invoiceType: 'purchase',
-      fromDate: '2025-01-01',
-      toDate: '2026-12-31',
-      status: 'all',
-      cqtCodeStatus: 'all',
-      sellerTaxCode: '',
-      buyerTaxCode: '',
-      searchKeyword: '',
-      taxRateFilter: 'all'
-    });
-    setConsoleLogs(prev => [
-      ...prev,
-      {
-        id: Math.random().toString(36).substring(2, 9),
-        timestamp: new Date().toLocaleTimeString('vi-VN'),
-        level: 'success',
-        message: '✓ Đã tải 7 hóa đơn mẫu gốc của các đối tác chính (Bảo Duy, PNJ, Tài Trâm Anh, Xuân Vinh, Kim Loan Tuấn, TKJ, Nghĩa Sơn) với danh sách hàng hóa chi tiết thực tế.'
       }
     ]);
   };
@@ -1262,7 +1271,6 @@ export default function App() {
           filters={filters}
           onFilterChange={setFilters}
           onResetFilters={handleResetFilters}
-          onResetToPartnerSamples={handleResetToPartnerSamples}
           totalFilteredCount={filteredInvoices.length}
         />
 
@@ -1358,14 +1366,6 @@ export default function App() {
           cookieHeader={gdtSession?.cookieHeader}
         />
       )}
-
-      {/* Python Selenium Execution Modal */}
-      <PythonSeleniumModal
-        isOpen={isSeleniumModalOpen}
-        account={account}
-        onClose={() => setIsSeleniumModalOpen(false)}
-        onDownloadPackage={handleDownloadPythonScript}
-      />
 
       {/* Import Real XML / ZIP Modal */}
       <ImportXmlModal

@@ -6,12 +6,115 @@
  */
 
 import { createWorker, Worker } from 'tesseract.js';
+import { GoogleGenAI } from '@google/genai';
 import { CaptchaSolveOptions, CaptchaSolveResult } from '../types';
+
+let aiClient: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({ apiKey });
+  }
+  return aiClient;
+}
 
 export class CaptchaSolver {
   private static workerInstance: Worker | null = null;
   private static isInitializing = false;
   private static initPromise: Promise<Worker> | null = null;
+
+  /**
+   * Giải Captcha bằng AI (Gemini Vision) theo chỉ thị trích xuất ký tự chuyên sâu
+   */
+  public static async solveWithAI(
+    imageInput: Buffer | string | Uint8Array,
+    options?: CaptchaSolveOptions
+  ): Promise<CaptchaSolveResult | null> {
+    const ai = getGenAI();
+    if (!ai) return null;
+
+    const startTime = Date.now();
+    try {
+      let buf: Buffer;
+      let mimeType = 'image/png';
+
+      if (Buffer.isBuffer(imageInput)) {
+        buf = imageInput;
+      } else if (imageInput instanceof Uint8Array) {
+        buf = Buffer.from(imageInput);
+      } else if (typeof imageInput === 'string') {
+        const trimmed = imageInput.trim();
+        if (trimmed.startsWith('data:image/')) {
+          const match = trimmed.match(/^data:(image\/[a-zA-Z+]+);base64,/);
+          if (match) {
+            mimeType = match[1];
+            buf = Buffer.from(trimmed.substring(match[0].length), 'base64');
+          } else {
+            buf = Buffer.from(trimmed, 'base64');
+          }
+        } else {
+          buf = Buffer.from(trimmed, 'base64');
+        }
+      } else {
+        return null;
+      }
+
+      if (buf[0] === 0xFF && buf[1] === 0xD8) {
+        mimeType = 'image/jpeg';
+      } else if (buf[0] === 0x89 && buf[1] === 0x50) {
+        mimeType = 'image/png';
+      } else if (buf[0] === 0x47 && buf[1] === 0x49) {
+        mimeType = 'image/gif';
+      }
+
+      const base64Data = buf.toString('base64');
+      const prompt = `Nhiệm vụ:
+1. Nhìn vào hình ảnh captcha được cung cấp.
+2. Trích xuất chính xác các ký tự/chữ số xuất hiện trong captcha.
+3. Bỏ qua tất cả nhiễu, đường gạch ngang, nền mờ hoặc màu sắc xung quanh.
+
+Quy tắc trả về (BẮT BUỘC):
+- CHỈ trả về đúng chuỗi ký tự/chữ số đã đọc được.
+- KHÔNG giải thích, KHÔNG chào hỏi, KHÔNG đính kèm dấu câu hoặc khoảng trắng dư thừa.`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ]
+      });
+
+      const responseText = response.text ? response.text.trim() : '';
+      const cleanCode = responseText.replace(/[^a-zA-Z0-9]/g, '').trim();
+
+      if (cleanCode.length >= 2 && cleanCode.length <= 10) {
+        console.log(`[CaptchaSolver:AI] Đã trích xuất Captcha bằng AI: "${cleanCode}" (${Date.now() - startTime}ms)`);
+        return {
+          code: cleanCode,
+          confidence: 99,
+          engine: 'gemini',
+          processingTimeMs: Date.now() - startTime
+        };
+      }
+    } catch (aiErr: any) {
+      console.warn('[CaptchaSolver:AI] AI giải Captcha lỗi hoặc timeout, chuyển sang Tesseract/Fallback:', aiErr.message);
+    }
+    return null;
+  }
 
   /**
    * Khởi tạo hoặc lấy worker Tesseract.js dạng Singleton để tối ưu hiệu năng
@@ -132,7 +235,13 @@ export class CaptchaSolver {
       }
     }
 
-    // 2. Chuyển đổi input về Buffer hoặc URL tương thích với Tesseract
+    // 2. Thử giải bằng AI (Gemini Vision) theo chỉ thị nhận diện hình ảnh ký tự
+    const aiResult = await this.solveWithAI(imageInput, options);
+    if (aiResult && aiResult.code) {
+      return aiResult;
+    }
+
+    // 3. Chuyển đổi input về Buffer hoặc URL tương thích với Tesseract OCR
     const imagePayload = this.normalizeImagePayload(imageInput);
 
     // Kiểm tra tính hợp lệ của Buffer ảnh
@@ -148,7 +257,7 @@ export class CaptchaSolver {
       }
     }
 
-    // 3. Thực hiện OCR qua Tesseract với cơ chế Timeout
+    // 4. Thực hiện OCR qua Tesseract với cơ chế Timeout
     try {
       const worker = await this.getWorker(options?.lang || 'eng');
 

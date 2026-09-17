@@ -4,6 +4,8 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
+import { ProxyAgent } from 'undici';
+import Tesseract from 'tesseract.js';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
@@ -37,6 +39,23 @@ app.use((req, res, next) => {
   next();
 });
 
+// Chuẩn hóa path cho môi trường Vercel Serverless Functions
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/api')) {
+    if (
+      req.url.startsWith('/auth') ||
+      req.url.startsWith('/admin') ||
+      req.url.startsWith('/gdt') ||
+      req.url.startsWith('/invoice-downloader') ||
+      req.url.startsWith('/health') ||
+      req.url.startsWith('/selenium')
+    ) {
+      req.url = '/api' + req.url;
+    }
+  }
+  next();
+});
+
 // Memory store for active sessions and logs
 interface SessionData {
   taxCode: string;
@@ -65,12 +84,30 @@ let seleniumLogs: Array<{
 
 // Helper headers for GDT Portal with full Chrome fingerprint
 const GDT_HEADERS: Record<string, string> = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
   'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-  'Referer': 'https://hoadondientu.gdt.gov.vn/',
   'Origin': 'https://hoadondientu.gdt.gov.vn',
+  'Referer': 'https://hoadondientu.gdt.gov.vn/',
+  'sec-ch-ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
 };
+
+function getGdtDispatcher(customProxy?: string) {
+  const proxyUrl = (customProxy || process.env.VIETNAM_PROXY_URL || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || '').trim();
+  if (proxyUrl) {
+    try {
+      return new ProxyAgent(proxyUrl);
+    } catch (e) {
+      console.warn('[Proxy Initialization Warning]:', e);
+    }
+  }
+  return undefined;
+}
 
 function extractGdtInvoiceList(data: any): any[] {
   if (Array.isArray(data)) return data;
@@ -108,27 +145,95 @@ function extractCookies(res: any): string {
     .join('; ');
 }
 
-// Resilient GDT Fetch with Retry & Timeout Protection
-async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 7000): Promise<Response> {
+let globalF5Cookie = '';
+let lastF5CookieTime = 0;
+
+async function ensureF5Session(customProxy?: string): Promise<string> {
+  const now = Date.now();
+  if (globalF5Cookie && (now - lastF5CookieTime < 10 * 60 * 1000)) {
+    return globalF5Cookie;
+  }
+  try {
+    const dispatcher = getGdtDispatcher(customProxy);
+    const fetchOpt: any = {
+      headers: {
+        ...GDT_HEADERS,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none'
+      },
+      signal: AbortSignal.timeout(6000)
+    };
+    if (dispatcher) fetchOpt.dispatcher = dispatcher;
+    const homeRes = await fetch('https://hoadondientu.gdt.gov.vn/', fetchOpt);
+    const cookie = extractCookies(homeRes);
+    if (cookie) {
+      globalF5Cookie = cookie;
+      lastF5CookieTime = now;
+    }
+  } catch (e) {
+    // Ignore error
+  }
+  return globalF5Cookie;
+}
+
+// Resilient GDT Fetch with Retry, Proxy & Timeout Protection
+async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, timeoutMs = 12000, customProxy?: string): Promise<Response> {
   let lastError: any = null;
+  const dispatcher = getGdtDispatcher(customProxy);
+  const f5Cookie = await ensureF5Session(customProxy);
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let timer: NodeJS.Timeout | null = null;
     try {
       const controller = new AbortController();
       timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      const mergedHeaders = {
+      const callerHeaders = (options.headers as Record<string, string> || {});
+      const existingCookie = callerHeaders['Cookie'] || callerHeaders['cookie'] || '';
+      const mergedCookie = [f5Cookie, existingCookie].filter(Boolean).join('; ');
+
+      const mergedHeaders: Record<string, string> = {
         ...GDT_HEADERS,
-        ...(options.headers as Record<string, string> || {})
+        'request-id': crypto.randomUUID ? crypto.randomUUID() : `req_${Date.now()}`,
+        'End-Point': '/',
+        'Action': '',
+        ...callerHeaders
       };
 
-      const resp = await fetch(url, {
+      if (mergedCookie) {
+        mergedHeaders['Cookie'] = mergedCookie;
+      }
+
+      const fetchOptions: any = {
         ...options,
         headers: mergedHeaders,
         signal: controller.signal
-      });
+      };
+      if (dispatcher) {
+        fetchOptions.dispatcher = dispatcher;
+      }
+
+      const resp = await fetch(url, fetchOptions);
 
       if (timer) clearTimeout(timer);
+
+      // Cập nhật F5 cookie nếu server trả về cookie mới
+      const newCookies = extractCookies(resp);
+      if (newCookies) {
+        const set1 = new Set((globalF5Cookie || '').split('; ').filter(Boolean));
+        for (const c of newCookies.split('; ').filter(Boolean)) {
+          const key = c.split('=')[0];
+          for (const item of Array.from(set1)) {
+            if (item.startsWith(`${key}=`)) set1.delete(item);
+          }
+          set1.add(c);
+        }
+        globalF5Cookie = Array.from(set1).join('; ');
+        lastF5CookieTime = Date.now();
+      }
 
       if (resp.ok || resp.status === 400 || resp.status === 401 || resp.status === 403) {
         return resp;
@@ -147,6 +252,12 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
   throw lastError || new Error('Không thể kết nối đến Cổng Tổng cục Thuế.');
 }
 
+// Clean GDT SVG noise lines: removes wavy background interference lines (<path stroke="..." fill="none"/>)
+function cleanGdtSvgNoise(svg: string): string {
+  if (!svg || typeof svg !== 'string') return svg;
+  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
+}
+
 // Gemini AI OCR Client Lazy Initializer
 import { GoogleGenAI } from '@google/genai';
 
@@ -154,12 +265,16 @@ let geminiAiClient: GoogleGenAI | null = null;
 let geminiSpendingCapBlockedUntil = 0;
 let geminiRateLimitBlockedUntil = 0;
 
-function getGeminiClient(): GoogleGenAI | null {
-  if (!geminiAiClient && process.env.GEMINI_API_KEY) {
-    geminiAiClient = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+function getGeminiClient(customKey?: string): GoogleGenAI | null {
+  const apiKey = customKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!geminiAiClient || customKey) {
+    const client = new GoogleGenAI({
+      apiKey,
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
     });
+    if (!customKey) geminiAiClient = client;
+    return client;
   }
   return geminiAiClient;
 }
@@ -172,8 +287,11 @@ interface OCRResult {
   isSpendingCap?: boolean;
 }
 
-// AI Captcha OCR Engine for Real GDT Portal SVGs (Powered by Gemini 3.1 Flash Lite / Flash)
-async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
+// Multi-Tier Captcha OCR Engine for GDT Portal
+// Tier 1: SVG direct extraction (if text present)
+// Tier 2: Gemini Vision AI (if key available)
+// Tier 3: Local Tesseract.js OCR (offline/free fallback)
+async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
   let rawSvg = svgOrDataUri;
@@ -194,11 +312,12 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     }
   }
 
-  if (!isBitmap && !rawSvg.includes('<svg') && !rawSvg.includes('xmlns')) {
-    return { code: '', error: 'Định dạng SVG không hợp lệ' };
+  // Clean SVG noise lines if it is SVG
+  if (!isBitmap && (rawSvg.includes('<svg') || rawSvg.includes('xmlns'))) {
+    rawSvg = cleanGdtSvgNoise(rawSvg);
   }
 
-  // 1. Quick regex extraction if SVG contains direct <text> tags (0 token cost, instant)
+  // Tier 1: Direct text extraction if SVG contains <text> tags
   if (!isBitmap) {
     const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
     if (textTagMatches) {
@@ -211,135 +330,94 @@ async function solveCaptchaOCR(svgOrDataUri: string): Promise<OCRResult> {
     }
   }
 
-  // 2. Check if circuit breaker is active for spending cap or rate limits
-  if (Date.now() < geminiSpendingCapBlockedUntil) {
-    return {
-      code: '',
-      isSpendingCap: true,
-      error: 'Dự án đã chạm hạn mức chi tiêu hàng tháng của API Gemini (Spending cap). Bạn có thể nhìn ảnh và nhập mã Captcha 4-6 ký tự.'
-    };
-  }
+  // Tier 2: Gemini Vision AI (if key provided or available)
+  const activeAi = getGeminiClient(customApiKey);
+  if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
+    const candidateModels = [
+      'gemini-2.5-flash',
+      'gemini-3.6-flash',
+      'gemini-flash-latest'
+    ];
 
-  if (Date.now() < geminiRateLimitBlockedUntil) {
-    return {
-      code: '',
-      error: 'Hạn mức API tạm thời bận (Rate limit). Vui lòng nhập mã Captcha 4-6 ký tự.'
-    };
-  }
-
-  // 3. Check if GEMINI_API_KEY is configured
-  if (!process.env.GEMINI_API_KEY) {
-    return {
-      code: '',
-      isMissingApiKey: true,
-      error: 'Chưa cấu hình biến môi trường GEMINI_API_KEY. Bạn có thể nhập Captcha thủ công.'
-    };
-  }
-
-  // 4. High-precision Gemini AI OCR with Gemini 3.1 Flash Lite / Gemini Flash
-  const ai = getGeminiClient();
-  if (!ai) {
-    return {
-      code: '',
-      isMissingApiKey: true,
-      error: 'Không thể khởi tạo Gemini AI Client.'
-    };
-  }
-
-  // Candidate models: Gemini 3.1 Flash Lite as primary, fallback to Gemini Flash Latest and Gemini 3.8 Flash
-  const candidateModels = [
-    'gemini-3.1-flash-lite',
-    'gemini-flash-latest',
-    'gemini-3.8-flash'
-  ];
-
-  let lastErrorMsg = '';
-  const svgSnippet = rawSvg.substring(0, 4000);
-
-  for (const modelName of candidateModels) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const contentsPayload: any[] = isBitmap && bitmapBase64
-          ? [
-              {
-                inlineData: {
-                  mimeType: bitmapMime,
-                  data: bitmapBase64
-                }
-              },
-              {
-                text: 'This is a captcha image. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without any spaces, markdown, or punctuation.'
-              }
-            ]
-          : [
-              {
-                text: `This is a Vietnamese GDT tax portal captcha SVG image.
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without any spaces, markdown, or punctuation.
+    const svgSnippet = rawSvg.substring(0, 4000);
+    const contentsPayload: any[] = isBitmap && bitmapBase64
+      ? [
+          {
+            inlineData: {
+              mimeType: bitmapMime,
+              data: bitmapBase64
+            }
+          },
+          {
+            text: 'This is a captcha image from Vietnamese tax portal. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation.'
+          }
+        ]
+      : [
+          {
+            text: `This is a Vietnamese GDT tax portal captcha SVG image (noise lines removed).
+Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without spaces, markdown, or punctuation.
 SVG Source:
 \`\`\`xml
 ${svgSnippet}
 \`\`\``
-              }
-            ];
+          }
+        ];
 
-        const ocrPromise = ai.models.generateContent({
+    for (const modelName of candidateModels) {
+      try {
+        const ocrPromise = activeAi.models.generateContent({
           model: modelName,
           contents: contentsPayload
         });
 
         const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 8000)
+          setTimeout(() => resolve(null), 7000)
         );
 
         const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
         if (aiResp && aiResp.text) {
           const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-          if (extracted && extracted.length >= 3 && extracted.length <= 8) {
-            console.log(`[Gemini OCR (${modelName})] Successfully recognized GDT Captcha: "${extracted}"`);
+          if (extracted && extracted.length >= 4 && extracted.length <= 6) {
+            console.log(`[Gemini OCR (${modelName})] Successfully recognized Captcha: "${extracted}"`);
             return { code: extracted, modelUsed: modelName };
           }
         }
-        break; // Got response without error but no matching chars, fallback to next model
+        break;
       } catch (err: any) {
-        lastErrorMsg = err?.message || String(err);
-        const isSpendingCap = lastErrorMsg.includes('spending cap') || lastErrorMsg.includes('monthly spending cap');
-        const isRateLimit = lastErrorMsg.includes('429') || lastErrorMsg.includes('RESOURCE_EXHAUSTED') || lastErrorMsg.includes('quota');
-        const isUnavailable = lastErrorMsg.includes('503') || lastErrorMsg.includes('high demand') || lastErrorMsg.includes('UNAVAILABLE');
-
-        if (isSpendingCap) {
-          geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1000;
-          console.log('[Gemini OCR] Monthly spending cap reached. OCR paused for 15 minutes.');
-          break; // Stop immediately without warning
-        }
-
-        if (isRateLimit) {
-          geminiRateLimitBlockedUntil = Date.now() + 60 * 1000;
-          console.log('[Gemini OCR] Rate limit (429) reached. OCR paused for 60 seconds.');
+        const msg = err?.message || String(err);
+        if (msg.includes('spending cap')) {
+          if (!customApiKey) geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1000;
           break;
         }
-
-        if (isUnavailable && attempt === 0) {
-          await new Promise(r => setTimeout(r, 600));
-          continue; // Retry once on transient backpressure
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+          if (!customApiKey) geminiRateLimitBlockedUntil = Date.now() + 60 * 1000;
+          break;
         }
-        break; // Move to next fallback candidate model
       }
-    }
-    if (Date.now() < geminiSpendingCapBlockedUntil || Date.now() < geminiRateLimitBlockedUntil) {
-      break; // Do not try other models if project spending cap or rate limit is active
     }
   }
 
-  const isSpendingCapFinal = Date.now() < geminiSpendingCapBlockedUntil || lastErrorMsg.includes('spending cap') || lastErrorMsg.includes('monthly spending cap');
-  const isRateLimitFinal = Date.now() < geminiRateLimitBlockedUntil || lastErrorMsg.includes('429') || lastErrorMsg.includes('quota') || lastErrorMsg.includes('RESOURCE_EXHAUSTED');
+  // Tier 3: Local Tesseract.js OCR (Works offline, 0 cost, reliable on clean bitmaps)
+  if (isBitmap && bitmapBase64) {
+    try {
+      console.log('[Tesseract OCR] Running local fallback OCR on bitmap...');
+      const imageBuffer = Buffer.from(bitmapBase64, 'base64');
+      const { data } = await Tesseract.recognize(imageBuffer, 'eng');
+      if (data && data.text) {
+        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        if (cleaned.length >= 4 && cleaned.length <= 6) {
+          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
+          return { code: cleaned, modelUsed: 'tesseract-local' };
+        }
+      }
+    } catch (tessErr: any) {
+      console.warn('[Tesseract OCR] Recognition error:', tessErr?.message);
+    }
+  }
+
   return {
     code: '',
-    isSpendingCap: isSpendingCapFinal,
-    error: isSpendingCapFinal
-      ? 'Dự án đã chạm hạn mức chi tiêu hàng tháng của API Gemini (Spending cap). Bạn có thể nhìn hình và nhập mã Captcha thủ công.'
-      : isRateLimitFinal
-        ? 'Hạn mức API Gemini tạm thời bị giới hạn (429 Rate Limit). Vui lòng nhập Captcha thủ công hoặc thử lại sau 1 phút.'
-        : (lastErrorMsg ? `Lỗi Gemini API: ${lastErrorMsg.substring(0, 120)}` : 'Không nhận diện được mã Captcha.')
+    error: 'Không tự động nhận diện được mã Captcha. Vui lòng nhìn hình và nhập mã thủ công.'
   };
 }
 
@@ -448,9 +526,140 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
   }
 });
 
+// 2.2 Auto-Login Endpoint (Zero-Click Captcha with Auto-Retry & Bypass)
+app.post('/api/gdt/auto-login', async (req, res) => {
+  const { taxCode, password, vietnamProxy, customApiKey } = req.body;
+  if (!taxCode || !taxCode.trim()) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
+  }
+  if (!password || !password.trim()) {
+    return res.status(400).json({ success: false, message: 'Vui lòng nhập Mật khẩu do CQT cấp.' });
+  }
+
+  const maxAttempts = 3;
+  let lastGdtError = '';
+  let isWafBlocked = false;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[Auto-Login] Lần thử ${attempt}/${maxAttempts} cho MST ${taxCode.trim()}...`);
+
+      // 1. Tải Captcha từ Cổng Tổng cục Thuế
+      const gdtRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {}, 1, 8000, vietnamProxy);
+      if (!gdtRes.ok) {
+        if (gdtRes.status === 403) {
+          isWafBlocked = true;
+          lastGdtError = 'Hệ thống phát hiện hành vi không hợp lệ. Yêu cầu đã bị chặn.';
+          break;
+        }
+        continue;
+      }
+
+      const cookieStr = extractCookies(gdtRes);
+      const capData = await gdtRes.json() as { key: string; content: string };
+      if (!capData?.key || !capData?.content) continue;
+
+      captchaCookieJar.set(capData.key, cookieStr);
+      captchaContentMap.set(capData.key, capData.content);
+
+      // 2. Làm sạch nhiễu và giải Captcha
+      const cleanedSvg = cleanGdtSvgNoise(capData.content);
+      const ocrResult = await solveCaptchaOCR(cleanedSvg, customApiKey);
+      const solvedCode = (ocrResult.code || '').trim().toUpperCase();
+
+      if (!solvedCode || solvedCode.length < 4) {
+        console.log(`[Auto-Login] Lần ${attempt}: OCR chưa ra mã ký tự, đổi Captcha mới...`);
+        continue;
+      }
+
+      console.log(`[Auto-Login] Lần ${attempt}: Mã Captcha "${solvedCode}" (Model: ${ocrResult.modelUsed || 'default'}). Đang gửi xác thực...`);
+
+      // 3. Gửi yêu cầu xác thực tới Cổng Thuế
+      const authRes = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(cookieStr ? { 'Cookie': cookieStr } : {})
+        },
+        body: JSON.stringify({
+          username: taxCode.trim(),
+          password: password.trim(),
+          ckey: capData.key,
+          cvalue: solvedCode
+        })
+      }, 1, 15000, vietnamProxy);
+
+      const newCookieStr = extractCookies(authRes);
+      const combinedCookies = [cookieStr, newCookieStr].filter(Boolean).join('; ');
+      const rawAuthText = await authRes.text();
+
+      let authData: any = {};
+      try { authData = JSON.parse(rawAuthText); } catch {}
+
+      if (authRes.status === 403 || authData?.message?.includes('bị chặn') || authData?.message?.includes('không hợp lệ')) {
+        isWafBlocked = true;
+        lastGdtError = authData?.message || 'Cổng Thuế chặn kết nối từ máy chủ (HTTP 403)';
+        break;
+      }
+
+      if (authRes.ok && (authData.token || authData.jwt || authData.access_token)) {
+        const realToken = authData.token || authData.jwt || authData.access_token;
+        const cleanToken = realToken.startsWith('Bearer ') ? realToken : `Bearer ${realToken}`;
+
+        currentSession = {
+          taxCode: taxCode.trim(),
+          taxpayerName: authData.user?.fullName || authData.user?.tenNnt || authData.user?.name || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode.trim()})`,
+          address: authData.user?.address || authData.user?.dchi || 'Đăng ký tại Tổng cục Thuế Việt Nam',
+          token: cleanToken,
+          cookieHeader: combinedCookies,
+          isRealGDT: true,
+          createdAt: Date.now()
+        };
+
+        console.log(`[Auto-Login] ĐĂNG NHẬP THÀNH CÔNG cho MST ${taxCode.trim()} ở lần thử ${attempt}!`);
+        return res.json({
+          success: true,
+          isRealGDT: true,
+          message: `Đã tự động vượt Captcha thành công (lần thử ${attempt}) và đăng nhập Cổng Tổng cục Thuế!`,
+          session: currentSession,
+          attemptsUsed: attempt
+        });
+      }
+
+      if (authData?.message?.toLowerCase().includes('mật khẩu') || authData?.message?.toLowerCase().includes('tên đăng nhập')) {
+        return res.status(400).json({
+          success: false,
+          message: authData.message || 'Mã số thuế hoặc Mật khẩu không chính xác.'
+        });
+      }
+
+      lastGdtError = authData?.message || 'Mã xác thực không chính xác';
+      console.log(`[Auto-Login] Lần ${attempt} chưa đúng mã (${lastGdtError}). Tự động thử lại...`);
+      await new Promise(r => setTimeout(r, 400));
+    } catch (e: any) {
+      console.warn(`[Auto-Login] Lỗi lần thử ${attempt}:`, e.message);
+      lastGdtError = e.message;
+    }
+  }
+
+  if (isWafBlocked) {
+    return res.status(403).json({
+      success: false,
+      isWafBlocked: true,
+      message: 'Cổng Tổng cục Thuế đã chặn IP của máy chủ Cloud nước ngoài (HTTP 403: Yêu cầu đã bị chặn). Vui lòng sử dụng bản Desktop (.exe) chạy trực tiếp tại Việt Nam hoặc cấu hình Proxy IP Việt Nam để truy cập ổn định.'
+    });
+  }
+
+  return res.status(400).json({
+    success: false,
+    needManualCaptcha: true,
+    message: `Tự động vượt Captcha chưa thành công sau ${maxAttempts} lần thử (${lastGdtError}). Bạn có thể chuyển sang nhập Captcha thủ công để tiếp tục.`
+  });
+});
+
 // 3. Login directly to GDT Portal / Authenticate Session
 app.post('/api/gdt/login', async (req, res) => {
-  let { taxCode, password, captchaKey, captchaCode, captchaCookie } = req.body;
+  let { taxCode, password, captchaKey, captchaCode, captchaCookie, vietnamProxy } = req.body;
 
   if (!taxCode) {
     return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế (MST).' });
@@ -479,7 +688,7 @@ app.post('/api/gdt/login', async (req, res) => {
         ckey: captchaKey || '',
         cvalue: captchaCode.trim()
       })
-    }, 2, 20000);
+    }, 1, 20000, vietnamProxy);
 
     const newCookieStr = extractCookies(authRes);
     const combinedCookies = [cookieHeader, newCookieStr].filter(Boolean).join('; ');
@@ -517,10 +726,18 @@ app.post('/api/gdt/login', async (req, res) => {
         session: currentSession
       });
     } else {
-      const errorMsg = authData.message || authData.details || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.';
+      const isWafBlocked = authRes.status === 403 || 
+        (authData.message && authData.message.includes('bị chặn')) ||
+        (authData.message && authData.message.includes('không hợp lệ'));
+
+      const errorMsg = isWafBlocked
+        ? 'Cổng Tổng cục Thuế chặn kết nối từ máy chủ đám mây nước ngoài (HTTP 403: Yêu cầu đã bị chặn). Vui lòng sử dụng bản Desktop (.exe) chạy trực tiếp tại Việt Nam hoặc cấu hình Proxy IP Việt Nam để không bị chặn.'
+        : (authData.message || authData.details || 'Xác thực thất bại từ Cổng Tổng cục Thuế. Vui lòng kiểm tra lại MST, Mật khẩu hoặc mã Captcha.');
+
       return res.status(authRes.status || 400).json({
         success: false,
         isRealGDT: true,
+        isWafBlocked,
         message: errorMsg,
         rawGdtResponse: authData
       });
@@ -531,7 +748,7 @@ app.post('/api/gdt/login', async (req, res) => {
       success: false,
       isRealGDT: true,
       isNetworkBlocked: true,
-      message: `Không thể kết nối đến máy chủ Cổng Thuế (${err.message}). Vui lòng thử lại hoặc sử dụng công cụ Python trên máy tính để kết nối trực tiếp.`
+      message: `Không thể kết nối đến máy chủ Cổng Thuế (${err.message}). Vui lòng thử lại hoặc sử dụng bản Desktop tại Việt Nam để kết nối trực tiếp.`
     });
   }
 });
@@ -617,7 +834,7 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie } = req.body;
+  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
 
   const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
   const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
@@ -645,7 +862,21 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   // Chunk the requested period into <= 1-month slices to satisfy GDT's API rule
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
-  const tokenHeader = authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`;
+  const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+  const tokenHeader = rawToken ? `Bearer ${rawToken}` : '';
+
+  // Clean and sanitize cookies (strip empty jwt= and append jwt=<token>)
+  const cleanCookies = (cookieHeader || '')
+    .split(';')
+    .map(c => c.trim())
+    .filter(c => {
+      const parts = c.split('=');
+      return parts.length >= 2 && parts[1].trim().length > 0 && parts[0].trim() !== 'jwt';
+    });
+  if (rawToken) {
+    cleanCookies.push(`jwt=${rawToken}`);
+  }
+  const sanitizedCookie = cleanCookies.join('; ');
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -659,18 +890,31 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        const resp = await fetch(url, {
+        const resp = await fetchGDT(url, {
+          method: 'GET',
           headers: {
-            ...GDT_HEADERS,
             'Authorization': tokenHeader,
-            ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
-          },
-            signal: AbortSignal.timeout(15000)
-        });
+            'Accept': 'application/json, text/plain, */*',
+            'End-Point': '/tra-cuu/tra-cuu-hoa-don',
+            'Action': '',
+            ...(sanitizedCookie ? { 'Cookie': sanitizedCookie } : {})
+          }
+        }, 1, 15000, vietnamProxy);
         
-        if (resp.status === 401 || resp.status === 403) {
-          console.warn(`[GDT Query ${source}/${type} Unauthorized]: Session token expired.`);
+        if (resp.status === 401) {
+          console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
+          if (source === 'sco-query') {
+            return []; // DO NOT fail entire query for POS invoices
+          }
           return { error: 'AUTH_EXPIRED' };
+        }
+
+        if (resp.status === 403) {
+          console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
+          if (source === 'sco-query') {
+            return []; // DO NOT fail entire query for POS invoices
+          }
+          return { error: 'WAF_BLOCKED' };
         }
 
         if (resp.status === 429) {
@@ -777,6 +1021,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       if ((chunkResult as any)?.error === 'AUTH_EXPIRED') {
         return { error: 'AUTH_EXPIRED' };
       }
+      if ((chunkResult as any)?.error === 'WAF_BLOCKED') {
+        return { error: 'WAF_BLOCKED' };
+      }
       if (Array.isArray(chunkResult)) {
         allInvoices = allInvoices.concat(chunkResult);
       }
@@ -789,32 +1036,44 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     // User requirement: "Phần mềm chỉ cần chức năng lấy hóa đơn mua vào ko cần bán ra"
     const purchaseList = await fetchAllChunksForType('purchase', 'query');
     if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
-      currentSession = null;
+      // Check if session was created recently (< 10 min). If recent, keep session intact.
+      const isFresh = currentSession?.createdAt && (Date.now() - currentSession.createdAt < 10 * 60 * 1000);
+      if (!isFresh) {
+        currentSession = null;
+      }
       return res.status(401).json({
         success: false,
         isExpired: true,
-        message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
+        sessionValid: Boolean(isFresh),
+        message: 'Phiên làm việc Cổng Tổng cục Thuế cần xác thực lại. Vui lòng nhập mã Captcha để tiếp tục.'
       });
     }
+
+    if ((purchaseList as any)?.error === 'WAF_BLOCKED') {
+      // 403 Forbidden / WAF block: The session is VALID! Do NOT destroy session!
+      return res.status(403).json({
+        success: false,
+        isWafBlocked: true,
+        sessionValid: true,
+        invoices: [],
+        message: 'Cổng Tổng cục Thuế tạm thời từ chối truy vấn (HTTP 403: Yêu cầu bị hạn chế). Phiên đăng nhập của bạn vẫn còn hiệu lực. Vui lòng thử lại sau giây lát.'
+      });
+    }
+
     if (Array.isArray(purchaseList)) {
       results = results.concat(purchaseList);
     }
 
     // Hóa đơn khởi tạo từ máy tính tiền (POS) nằm ở một cổng dữ liệu riêng
-    // của GDT (/api/sco-query) và KHÔNG xuất hiện trong /api/query ở trên.
-    // Gọi thêm nguồn này để không bỏ sót hóa đơn bán hàng từ máy tính tiền.
-    await sleep(250);
-    const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query');
-    if ((posPurchaseList as any)?.error === 'AUTH_EXPIRED') {
-      currentSession = null;
-      return res.status(401).json({
-        success: false,
-        isExpired: true,
-        message: 'Phiên làm việc Cổng Tổng cục Thuế đã hết hạn (Token Expired). Vui lòng nhập mã Captcha để kết nối lại.'
-      });
-    }
-    if (Array.isArray(posPurchaseList)) {
-      results = results.concat(posPurchaseList);
+    // của GDT (/api/sco-query). Thử lấy nhưng KHÔNG BAO GIỜ được làm hỏng phiên hoặc báo lỗi toàn cục.
+    try {
+      await sleep(250);
+      const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query');
+      if (Array.isArray(posPurchaseList)) {
+        results = results.concat(posPurchaseList);
+      }
+    } catch (posErr: any) {
+      console.info('[GDT sco-query POS notice]:', posErr?.message || posErr);
     }
 
     // Deduplicate by unique invoice key
@@ -834,7 +1093,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       try {
         const detailHeaders = {
           Authorization: tokenHeader,
-          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+          ...(sanitizedCookie ? { Cookie: sanitizedCookie } : (cookieHeader ? { Cookie: cookieHeader } : {}))
         };
         let detail = null;
         try { detail = await fetchGdtInvoiceDetail(invoice, detailHeaders); } catch (error: any) { console.warn('[GDT detail]', error?.message || error); }
@@ -967,14 +1226,22 @@ app.get('/api/gdt/selenium-logs', (req, res) => {
   res.json({ logs: seleniumLogs });
 });
 
-// 8. Download standalone Python Selenium Package (.zip)
+// 8. Download standalone Python & Native Desktop Package (.zip)
 app.get('/api/gdt/download-python-package', async (req, res) => {
   try {
     const zip = new JSZip();
     const fs = await import('fs');
 
     const pythonDir = path.join(process.cwd(), 'python');
-    const files = ['gdt_selenium_crawler.py', 'requirements.txt', 'README_GDT.md'];
+    const files = [
+      'gdt_selenium_crawler.py',
+      'requirements.txt',
+      'README_GDT.md',
+      'gdt_crawler.ps1',
+      'run_powershell.bat',
+      'run_windows.bat',
+      'HUONG_DAN_SUA_LOI_PYTHON.txt'
+    ];
 
     for (const file of files) {
       const fullPath = path.join(pythonDir, file);
@@ -984,28 +1251,128 @@ app.get('/api/gdt/download-python-package', async (req, res) => {
       }
     }
 
-    // Add quick run scripts for Windows (.bat) and Mac/Linux (.sh)
+    // Smart run scripts for Windows (.bat) with auto-detection & fallback
     const runBat = `@echo off
-echo ========================================================
+chcp 65001 >nul
+title TOOL TỰ ĐỘNG HÓA TẢI HÓA ĐƠN ĐIỆN TỬ TỔNG CỤC THUẾ (GDT)
+echo ==============================================================================
 echo  KHOI DONG TOOL TAI HOA DON DIEN TU TONG CUC THUE GDT
-echo ========================================================
-python -m pip install -r requirements.txt
-python gdt_selenium_crawler.py --mst 0316892345 --type purchase
+echo ==============================================================================
+echo.
+
+:: 1. Kiem tra lenh python trong PATH
+set PYTHON_CMD=
+where python >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set PYTHON_CMD=python
+    goto :FOUND_PYTHON
+)
+
+:: 2. Kiem tra py launcher tren Windows
+where py >nul 2>nul
+if %ERRORLEVEL% EQU 0 (
+    set PYTHON_CMD=py
+    goto :FOUND_PYTHON
+)
+
+:: 3. Tim trong thu muc cai dat mac dinh cua Windows
+for /d %%D in ("%LOCALAPPDATA%\\Programs\\Python\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+for /d %%D in ("C:\\Program Files\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+for /d %%D in ("C:\\Python3*") do (
+    if exist "%%D\\python.exe" (
+        set PYTHON_CMD="%%D\\python.exe"
+        goto :FOUND_PYTHON
+    )
+)
+
+:: 4. Neu khong tim thay Python: Hien thi menu lua chon thong minh
+cls
+echo ==============================================================================
+echo  THONG BAO: MAY TINH CHUA CAI PYTHON HOAC CHUA TICK 'ADD PYTHON TO PATH'
+echo ==============================================================================
+echo.
+echo He thong khong tim thay trinh thuc thi Python tren may tinh cua ban.
+echo Ban co the chon 1 trong cac phuong an sau:
+echo.
+echo   [1] Chay ngay bang Windows PowerShell (KHONG CAN CAI PYTHON - KHUYEN DUNG)
+echo   [2] Tu dong cai dat Python 3 qua Windows winget (Tu dong 100%%)
+echo   [3] Mo trang chu python.org de tai bo cai thu cong
+echo   [4] Xem huong dan chi tiet khac phuc loi
+echo   [5] Thoat
+echo.
+set /p USER_CHOICE="Nhap lua chon cua ban (1/2/3/4/5) [Mac dinh: 1]: "
+if "%USER_CHOICE%"=="" set USER_CHOICE=1
+
+if "%USER_CHOICE%"=="1" (
+    echo.
+    echo Dang khoi dong tool truc tiep qua Windows PowerShell...
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0gdt_crawler.ps1"
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="2" (
+    echo.
+    echo Dang tu dong cai dat Python qua winget...
+    winget install Python.Python.3.12 --accept-package-agreements --accept-source-agreements
+    echo.
+    echo Cai dat hoan tat! Vui long dong cua so nay va khoi dong lai run_windows.bat.
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="3" (
+    start https://www.python.org/downloads/
+    echo.
+    echo Luu y quan trong: Khi cai dat, nho TICK CHON vao o "Add python.exe to PATH" o man hinh dau tien!
+    pause
+    exit /b
+)
+
+if "%USER_CHOICE%"=="4" (
+    notepad "%~dp0HUONG_DAN_SUA_LOI_PYTHON.txt"
+    exit /b
+)
+
+pause
+exit /b
+
+:FOUND_PYTHON
+echo [OK] Da tim thay trinh thuc thi Python: %PYTHON_CMD%
+echo.
+echo Khoi dong Tool tai hoa don...
+%PYTHON_CMD% "%~dp0gdt_selenium_crawler.py"
+echo.
 pause
 `;
+
     const runSh = `#!/bin/bash
 echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
-python3 gdt_selenium_crawler.py --mst 0316892345 --type purchase
+python3 gdt_selenium_crawler.py --type purchase
 `;
 
-    zip.file('run_windows.bat', runBat);
+    if (fs.existsSync(path.join(pythonDir, 'run_windows.bat'))) {
+      zip.file('run_windows.bat', fs.readFileSync(path.join(pythonDir, 'run_windows.bat'), 'utf-8'));
+    } else {
+      zip.file('run_windows.bat', runBat);
+    }
     zip.file('run_mac_linux.sh', runSh);
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer' });
 
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="GDT_Selenium_Crawler_Python.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="GDT_Invoice_Crawler_Desktop.zip"');
     res.send(buffer);
   } catch (error: any) {
     res.status(500).json({ error: error.message });

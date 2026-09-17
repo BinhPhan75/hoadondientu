@@ -22,6 +22,13 @@ const value = (source: any, keys: string[]): string => {
 
 const isXml = (source: string) => /^\s*(?:<\?xml|<[^>]+>)/i.test(source);
 
+const getRequestId = () => {
+  if (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function') {
+    return (crypto as any).randomUUID();
+  }
+  return 'req-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now();
+};
+
 const GDT_REQUEST_HEADERS: Record<string, string> = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -130,6 +137,7 @@ export async function fetchGdtInvoiceXml(
       const response = await fetch(url, {
         headers: {
           ...GDT_REQUEST_HEADERS,
+          'request-id': getRequestId(),
           Accept: 'application/zip, application/xml, text/xml, application/octet-stream, */*',
           'End-Point': '/tra-cuu/tra-cuu-hoa-don',
           Action: getInvoiceAction(invoice, true),
@@ -199,6 +207,7 @@ export async function fetchGdtInvoiceDetail(
       const response = await fetch(`https://hoadondientu.gdt.gov.vn${path}?${params.toString()}`, {
         headers: {
           ...GDT_REQUEST_HEADERS,
+          'request-id': getRequestId(),
           Accept: 'application/json, text/plain, */*',
           'End-Point': '/tra-cuu/tra-cuu-hoa-don',
           Action: getInvoiceAction(invoice),

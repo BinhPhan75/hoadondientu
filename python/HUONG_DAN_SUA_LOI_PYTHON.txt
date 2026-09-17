@@ -1,0 +1,46 @@
+==============================================================================
+HƯỚNG DẪN SỬ DỤNG TOOL TẢI HÓA ĐƠN TỔNG CỤC THUẾ (BẢN DESKTOP TẠI VIỆT NAM)
+Tương thích hoàn hảo với Python 3.8, 3.9, 3.10, 3.11, 3.12 (Kể cả Python 3.9.11)
+==============================================================================
+
+1. TẠI SAO PHIÊN BẢN TRƯỚC BỊ TỰ TẮT TERMINAL VÀ CHƯA THẤY KẾT QUẢ?
+- Trước đó, chương trình kết thúc mà không có lệnh chờ, khiến cửa sổ terminal của Windows tự đóng ngay lập tức khi hoàn thành tiến trình.
+- ĐỒNG THỜI, phiên bản mới đã được NÂNG CẤP TOÀN DIỆN:
+  + Kết nối trực tiếp máy chủ Tổng cục Thuế (hoadondientu.gdt.gov.vn).
+  + Tự động mở ảnh Captcha lên màn hình và gợi ý mã nhận diện để bạn chỉ cần nhấn Enter.
+  + Tải về toàn bộ tệp XML gốc của từng hóa đơn (định dạng Quyết định 1450).
+  + Xuất Bảng kê hóa đơn ra tệp Excel (.csv UTF-8 BOM chuẩn mở bằng Excel không lỗi font tiếng Việt).
+  + TỰ ĐỘNG MỞ THƯ MỤC CHỨA HÓA ĐƠN trên máy tính ngay khi tải xong.
+  + CỬA SỔ TERMINAL ĐƯỢC GIỮ NGUYÊN (có lệnh dừng "Nhấn Enter để đóng...") để bạn kiểm tra đầy đủ số lượng và tổng tiền.
+
+------------------------------------------------------------------------------
+2. CÁCH CHẠY KHI MÁY TÍNH ĐÃ CÓ PYTHON 3.9.11:
+------------------------------------------------------------------------------
+Bước 1: Nhấp đúp vào tệp "run_windows.bat"
+        (Hệ thống sẽ tự động nhận diện Python 3.9.11 của bạn).
+Bước 2: Màn hình hiển thị:
+        - Nhập MST doanh nghiệp (ví dụ: 4000926165).
+        - Nhập Mật khẩu Cổng Thuế cấp.
+        - Xem ảnh Captcha vừa mở trên màn hình và xác nhận mã (hoặc nhấn Enter nếu đã gợi ý đúng).
+Bước 3: Chờ 5 - 15 giây:
+        - Tool sẽ tự động tải các tệp XML và xuất bảng kê Excel.
+        - Thư mục "downloads/4000926165" sẽ tự động bật lên trên màn hình của bạn!
+        - Bạn có thể xem kết quả chi tiết trên cửa sổ Terminal và nhấn Enter khi muốn đóng.
+
+------------------------------------------------------------------------------
+3. VỊ TRÍ KẾT QUẢ VÀ CÁCH DÙNG TRÊN WEB:
+------------------------------------------------------------------------------
+- Tệp XML và Bảng kê: Nằm trong thư mục: downloads\[Mã_Số_Thuế]\
+- Tệp Token: Nằm tại file "token_gdt_moi_nhat.txt"
+  * Mẹo: Mở file này, copy toàn bộ chuỗi Token, sau đó vào giao diện Web:
+    Mục "Cấu hình tài khoản & Captcha" -> "Tùy chọn nâng cao" -> Dán Token vào ô "Token Bearer"
+    Sau đó bấm "Xác nhận & Tra cứu ngay". Bạn sẽ xem được toàn bộ hóa đơn trên giao diện Web với biểu đồ, bộ lọc, xem chi tiết và in PDF cực kỳ đẹp mắt!
+
+------------------------------------------------------------------------------
+4. NẾU VẪN GẶP LỖI 'PYTHON' IS NOT RECOGNIZED:
+------------------------------------------------------------------------------
+- Hãy dùng "run_powershell.bat": Chạy ngay bằng Windows PowerShell có sẵn mà KHÔNG CẦN đụng đến Python!
+- Hoặc thêm Python 3.9 vào PATH:
+  1. Bấm Windows + R -> gõ sysdm.cpl -> Enter -> Tab Advanced -> Environment Variables.
+  2. Tại mục System variables hoặc User variables, chọn Path -> Edit -> New:
+     Thêm đường dẫn cài Python 3.9 (ví dụ: C:\Users\<TenBan>\AppData\Local\Programs\Python\Python39\ và thư mục Scripts\).

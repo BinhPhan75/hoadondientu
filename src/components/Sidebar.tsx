@@ -28,6 +28,8 @@ export interface CrawlerCredentials {
   captchaKey?: string;
   captchaCode?: string;
   captchaCookie?: string;
+  vietnamProxy?: string;
+  customApiKey?: string;
 }
 
 interface SidebarProps {
@@ -35,7 +37,7 @@ interface SidebarProps {
   filters: FilterParams;
   onFilterChange: (filters: FilterParams) => void;
   onUpdateAccount: (account: GDTAccountConfig) => void;
-  onRunCrawler: (credentials?: CrawlerCredentials) => Promise<{ success: boolean; error?: string } | void>;
+  onRunCrawler: (credentials?: CrawlerCredentials) => Promise<{ success: boolean; error?: string; isWafBlocked?: boolean; needManualCaptcha?: boolean } | void>;
   isLoading: boolean;
   onOpenConfigModal: () => void;
   onCloseMobileSidebar?: () => void;
@@ -68,6 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [ocrSuccess, setOcrSuccess] = useState(false);
   const [ocrNotice, setOcrNotice] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isWafBlocked, setIsWafBlocked] = useState<boolean>(false);
 
   // Synchronize local input state if parent account updates
   useEffect(() => {
@@ -187,6 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
+    setIsWafBlocked(false);
 
     const mst = localMst.trim();
     const pwd = localPassword.trim();
@@ -206,7 +210,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }
       
       if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhìn hình và nhập mã Captcha (4-6 ký tự) vào ô bên cạnh.');
+        setAuthError('Vui lòng nhìn hình và nhập mã Captcha hoặc bấm "Đọc mã OCR" để gán vào.');
         return;
       }
     }
@@ -216,15 +220,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
       password: pwd,
       captchaKey,
       captchaCode: activeCaptchaCode,
-      captchaCookie
+      captchaCookie,
+      vietnamProxy: account.vietnamProxy,
+      customApiKey: account.customApiKey
     });
 
     if (result && result.success) {
+      setIsWafBlocked(false);
       // Khi nhấn vào bắt đầu truy xuất, nếu kết nối thành công với cổng tổng cục thuế, menu trên trái sẽ tự động ẩn để gọn màn hình
       if (onCollapseSidebar) onCollapseSidebar();
       if (onCloseMobileSidebar) onCloseMobileSidebar();
-    } else if (result && !result.success && result.error) {
-      setAuthError(result.error);
+    } else if (result && !result.success) {
+      if (result.isWafBlocked) {
+        setIsWafBlocked(true);
+      }
+      if (result.needManualCaptcha) {
+        fetchCaptcha();
+      }
+      if (result.error) {
+        setAuthError(result.error);
+      }
       // Auto refresh captcha on failure so user can retry immediately
       fetchCaptcha();
     }
@@ -350,98 +365,132 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Captcha Section with Direct Manual Input */}
+          {/* Captcha Section: Nhập thủ công hoặc bấm Đọc mã OCR để gán vào */}
           <div className="bg-gray-900/90 p-2.5 rounded border border-gray-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+            <div className="flex items-center justify-between pb-1.5 border-b border-gray-800/80">
+              <span className="text-[11px] font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
                 <span>Mã Captcha</span>
-              </label>
+              </span>
 
+              {/* Nút bấm đọc OCR và gán vào */}
+              <button
+                type="button"
+                onClick={() => handleScanOcr(undefined, undefined, true)}
+                disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
+                className="text-[10px] text-amber-300 hover:text-amber-200 font-semibold flex items-center gap-1 bg-amber-500/15 hover:bg-amber-500/25 px-2 py-0.5 rounded border border-amber-500/40 transition-colors cursor-pointer disabled:opacity-40"
+                title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
+              >
+                <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
+                <span>{isScanningOcr ? 'Đang đọc OCR...' : 'Đọc mã OCR (Gán vào)'}</span>
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
               <div className="flex items-center gap-2">
+                {/* Khung ảnh Captcha thật */}
+                <div 
+                  className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[120px] flex-1 relative group"
+                  onClick={fetchCaptcha}
+                  title="Nhấn vào hình để đổi ảnh Captcha khác"
+                >
+                  {isLoadingCaptcha ? (
+                    <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
+                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang tải...
+                    </div>
+                  ) : captchaImg ? (
+                    <img
+                      src={captchaImg}
+                      alt="GDT Captcha"
+                      className="max-h-full object-contain filter contrast-125 select-none"
+                    />
+                  ) : (
+                    <div className="text-[10px] text-red-600 font-medium flex items-center gap-1">
+                      <RefreshCw className="w-2.5 h-2.5" /> Bấm thử lại
+                    </div>
+                  )}
+                </div>
+
+                {/* Ô Nhập Captcha */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={captchaCode}
+                    onChange={(e) => {
+                      setCaptchaCode(e.target.value.toUpperCase());
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder="Mã ảnh"
+                    maxLength={8}
+                    className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 py-1.5 focus:border-amber-400 ${
+                      ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-gray-600 text-amber-300'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Thông tin hỗ trợ */}
+              <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 pt-0.5">
+                {ocrNotice ? (
+                  <span className={ocrSuccess ? 'text-emerald-400 font-semibold flex items-center gap-1' : 'text-amber-400'}>
+                    {ocrSuccess && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                    {ocrNotice}
+                  </span>
+                ) : captchaCode ? (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    Đã nhập: <strong>{captchaCode}</strong>
+                  </span>
+                ) : (
+                  <span>Nhập tay hoặc bấm "Đọc mã OCR" để gán</span>
+                )}
+
                 <button
                   type="button"
                   onClick={fetchCaptcha}
                   disabled={isLoadingCaptcha || isScanningOcr}
-                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono cursor-pointer transition-colors"
-                  title="Đổi ảnh Captcha mới từ Cổng Thuế"
+                  className="text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer shrink-0"
                 >
-                  <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
-                  <span>Đổi mã</span>
+                  <RefreshCw className={`w-2.5 h-2.5 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
+                  <span>Đổi ảnh</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* WAF 403 Warning */}
+          {isWafBlocked && (
+            <div className="p-2.5 bg-amber-950/90 border border-amber-600 rounded text-amber-200 text-[11px] leading-tight space-y-1.5 animate-fadeIn shadow-lg">
+              <div className="flex items-start gap-1.5 font-bold text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>Cổng Thuế tạm từ chối kết nối IP (HTTP 403)</span>
+              </div>
+              <p className="text-[10px] text-amber-200/90">
+                Tường lửa Tổng cục Thuế phát hiện kết nối từ IP đám mây. Bạn hãy thử lại sau giây lát hoặc làm mới mã Captcha.
+              </p>
+              <div className="flex items-center gap-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={onOpenConfigModal}
+                  className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <Settings className="w-3 h-3" />
+                  <span>Cấu hình tài khoản</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleScanOcr(undefined, undefined, true)}
-                  disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
-                  className="text-[9px] text-gray-400 hover:text-amber-300 flex items-center gap-0.5 font-mono cursor-pointer transition-colors disabled:opacity-40"
-                  title="Thử quét OCR tự động (tùy chọn)"
+                  onClick={fetchCaptcha}
+                  className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded text-[10px] font-mono cursor-pointer transition-colors flex items-center gap-1"
                 >
-                  <Sparkles className={`w-2.5 h-2.5 ${isScanningOcr ? 'animate-spin text-amber-400' : ''}`} />
-                  <span>{isScanningOcr ? 'Quét...' : 'Thử OCR'}</span>
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Đổi mã Captcha</span>
                 </button>
               </div>
             </div>
-
-            {/* Captcha Image Display & Input */}
-            <div className="flex items-center gap-2">
-              <div 
-                className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[120px] flex-1 relative group"
-                onClick={fetchCaptcha}
-                title="Nhấn vào hình để đổi ảnh Captcha khác"
-              >
-                {isLoadingCaptcha ? (
-                  <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
-                    <RefreshCw className="w-3 h-3 animate-spin" /> Đang tải...
-                  </div>
-                ) : captchaImg ? (
-                  <img
-                    src={captchaImg}
-                    alt="GDT Captcha"
-                    className="max-h-full object-contain filter contrast-125 select-none"
-                  />
-                ) : (
-                  <div className="text-[10px] text-red-600 font-medium flex items-center gap-1">
-                    <RefreshCw className="w-2.5 h-2.5" /> Bấm thử lại
-                  </div>
-                )}
-              </div>
-
-              {/* Captcha Input */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={captchaCode}
-                  onChange={(e) => {
-                    setCaptchaCode(e.target.value.toUpperCase());
-                    if (authError) setAuthError(null);
-                  }}
-                  placeholder="Nhập mã"
-                  maxLength={8}
-                  className="w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 border-gray-600 py-1.5 text-amber-300 focus:border-amber-400"
-                  required={!account.isRealGDT}
-                />
-              </div>
-            </div>
-
-            {/* Manual Entry Status Line */}
-            {(captchaCode || isScanningOcr) && (
-              <div className="flex items-center justify-between text-[10px] font-mono px-0.5">
-                {captchaCode ? (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    Mã đã nhập: <strong className="text-white bg-emerald-950 px-1 rounded">{captchaCode}</strong>
-                  </span>
-                ) : (
-                  <span className="text-amber-400 flex items-center gap-1 animate-pulse">
-                    <Sparkles className="w-3 h-3 animate-spin text-amber-400" />
-                    Đang nhận diện...
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Error Message if Authentication Failed */}
-          {authError && (
+          {authError && !isWafBlocked && (
             <div className="p-2.5 bg-red-950/90 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex items-start gap-1.5 animate-fadeIn shadow-md">
               <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
               <div>

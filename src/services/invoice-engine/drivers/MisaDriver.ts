@@ -17,7 +17,7 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
     providerCode: 'MISA',
     description: 'Tra cứu và tải PDF HĐĐT gốc từ cổng MISA meInvoice (meinvoice.vn) qua Mã tra cứu và MST bên bán',
     sampleUrl: 'https://www.meinvoice.vn/tra-cuu',
-    supportsCaptcha: false,
+    supportsCaptcha: true,
     requiredFields: ['sellerTaxCode', 'lookupCode']
   };
 

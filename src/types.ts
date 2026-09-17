@@ -8,6 +8,10 @@ export interface GDTAccountConfig {
   autoSaveSession: boolean;
   useHeadlessBrowser?: boolean;
   isRealGDT?: boolean; // True nếu đã đăng nhập thành công với Tổng cục Thuế thật
+  autoSolveCaptcha?: boolean; // Tự động giải Captcha (như taihoadon.online)
+  vietnamProxy?: string; // Proxy IP Việt Nam để truy cập Cổng Thuế không bị chặn
+  customApiKey?: string; // API Key giải Captcha riêng (nếu có)
+  manualToken?: string; // Token nạp trực tiếp từ Cổng Thuế
 }
 
 export interface InvoiceItem {

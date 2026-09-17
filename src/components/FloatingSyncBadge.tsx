@@ -13,6 +13,18 @@ export const FloatingSyncBadge: React.FC<FloatingSyncBadgeProps> = ({
   onOpenModal,
   onDismiss
 }) => {
+  // Tự động tắt thông báo sau khi tải đủ hóa đơn về (hoàn tất đồng bộ toàn kỳ)
+  React.useEffect(() => {
+    if (syncState.isCompleted) {
+      const timer = setTimeout(() => {
+        if (onDismiss) {
+          onDismiss();
+        }
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [syncState.isCompleted, onDismiss]);
+
   if (!syncState.isActive && !syncState.isCompleted) return null;
 
   return (
