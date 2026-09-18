@@ -6,7 +6,7 @@ import crypto2 from "crypto";
 import { spawn } from "child_process";
 import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
-import Tesseract2 from "tesseract.js";
+import Tesseract from "tesseract.js";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -7738,7 +7738,7 @@ Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
     this.initPromise = (async () => {
       try {
         console.log("[CaptchaSolver] \u0110ang kh\u1EDFi t\u1EA1o Tesseract.js OCR Worker...");
-        const worker = await createWorker(lang, 1, {
+        const worker2 = await createWorker(lang, 1, {
           errorHandler: (err) => {
             if (process.env.DEBUG_OCR) {
               console.warn("[CaptchaSolver] Worker error handled safely:", err);
@@ -7750,14 +7750,14 @@ Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
             }
           }
         });
-        await worker.setParameters({
+        await worker2.setParameters({
           tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
           tessedit_pageseg_mode: "7"
         });
-        this.workerInstance = worker;
+        this.workerInstance = worker2;
         this.isInitializing = false;
         console.log("[CaptchaSolver] Kh\u1EDFi t\u1EA1o Tesseract.js Worker th\xE0nh c\xF4ng.");
-        return worker;
+        return worker2;
       } catch (error) {
         this.isInitializing = false;
         this.initPromise = null;
@@ -7829,13 +7829,13 @@ Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
       }
     }
     try {
-      const worker = await this.getWorker(options?.lang || "eng");
+      const worker2 = await this.getWorker(options?.lang || "eng");
       if (options?.whitelist) {
-        await worker.setParameters({
+        await worker2.setParameters({
           tessedit_char_whitelist: options.whitelist
         });
       }
-      const ocrPromise = worker.recognize(imagePayload);
+      const ocrPromise = worker2.recognize(imagePayload);
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error(`[CaptchaSolver] Qu\xE1 th\u1EDDi gian OCR (${timeoutMs}ms)`)), timeoutMs);
       });
@@ -9037,8 +9037,51 @@ import axios5 from "axios";
 import * as cheerio2 from "cheerio";
 import zlib from "zlib";
 import JSZip2 from "jszip";
-import Tesseract from "tesseract.js";
 import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+
+// src/services/invoice-engine/captcha/easyInvoiceCaptchaWorker.ts
+import { createWorker as createWorker2 } from "tesseract.js";
+var worker = null;
+var workerPromise = null;
+var recognitionQueue = Promise.resolve();
+async function initializeWorker() {
+  if (worker) return worker;
+  if (workerPromise) return workerPromise;
+  workerPromise = createWorker2("eng", 1).then(async (createdWorker) => {
+    await createdWorker.setParameters({
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: "7"
+    });
+    worker = createdWorker;
+    return createdWorker;
+  }).catch((error) => {
+    workerPromise = null;
+    throw error;
+  });
+  return workerPromise;
+}
+function initializeEasyInvoiceCaptchaWorker() {
+  return initializeWorker().then(() => void 0);
+}
+function solveCaptcha(imageBase64) {
+  const input = imageBase64.trim();
+  if (!input) {
+    return Promise.reject(new Error("D\u1EEF li\u1EC7u Captcha r\u1ED7ng."));
+  }
+  const image = input.startsWith("data:image/") ? Buffer.from(input.slice(input.indexOf(",") + 1), "base64") : Buffer.from(input, "base64");
+  const job = recognitionQueue.then(async () => {
+    const activeWorker = await initializeWorker();
+    const result = await activeWorker.recognize(image);
+    return (result.data.text || "").replace(/[^0-9]/g, "");
+  });
+  recognitionQueue = job.catch(() => void 0);
+  return job;
+}
+
+// src/services/easyInvoiceService.ts
+void initializeEasyInvoiceCaptchaWorker().catch((error) => {
+  console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o Tesseract worker l\xFAc app load:", error?.message || error);
+});
 var aiClient2 = null;
 function getGenAI2() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -9144,15 +9187,8 @@ async function solveEasyInvoiceCaptcha(captchaBuf) {
   try {
     const decoded = decodePngRgba(captchaBuf);
     const bmp = createBinarizedBmp(decoded, 3);
-    const worker = await Tesseract.createWorker("eng");
-    await worker.setParameters({
-      tessedit_char_whitelist: "0123456789",
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
-    });
-    const res = await worker.recognize(bmp);
-    await worker.terminate();
-    const digits = (res.data.text || "").replace(/[^0-9]/g, "");
-    const confidence = res.data.confidence || 0;
+    const digits = await solveCaptcha(bmp.toString("base64"));
+    const confidence = digits.length === 4 ? 60 : 0;
     if (digits.length === 4 && confidence >= 60) {
       console.log(`[EasyInvoice] Tesseract OCR gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}" (${confidence}%)`);
       return { code: digits, confidence, engine: "tesseract" };
@@ -10896,7 +10932,7 @@ ${svgSnippet}
     try {
       console.log("[Tesseract OCR] Running local fallback OCR on bitmap...");
       const imageBuffer = Buffer.from(bitmapBase64, "base64");
-      const { data } = await Tesseract2.recognize(imageBuffer, "eng");
+      const { data } = await Tesseract.recognize(imageBuffer, "eng");
       if (data && data.text) {
         const cleaned = data.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
         if (cleaned.length >= 4 && cleaned.length <= 6) {

@@ -2,8 +2,12 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import zlib from 'zlib';
 import JSZip from 'jszip';
-import Tesseract from 'tesseract.js';
 import { GoogleGenAI } from '@google/genai';
+import { initializeEasyInvoiceCaptchaWorker, solveCaptcha } from './invoice-engine/captcha/easyInvoiceCaptchaWorker';
+
+void initializeEasyInvoiceCaptchaWorker().catch((error) => {
+  console.warn('[EasyInvoice] Không thể khởi tạo Tesseract worker lúc app load:', error?.message || error);
+});
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
@@ -139,18 +143,8 @@ export async function solveEasyInvoiceCaptcha(captchaBuf: Buffer): Promise<{ cod
   try {
     const decoded = decodePngRgba(captchaBuf);
     const bmp = createBinarizedBmp(decoded, 3);
-
-    const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({
-      tessedit_char_whitelist: '0123456789',
-      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE,
-    });
-
-    const res = await worker.recognize(bmp);
-    await worker.terminate();
-
-    const digits = (res.data.text || '').replace(/[^0-9]/g, '');
-    const confidence = res.data.confidence || 0;
+    const digits = await solveCaptcha(bmp.toString('base64'));
+    const confidence = digits.length === 4 ? 60 : 0;
 
     if (digits.length === 4 && confidence >= 60) {
       console.log(`[EasyInvoice] Tesseract OCR giải Captcha thành công: "${digits}" (${confidence}%)`);
