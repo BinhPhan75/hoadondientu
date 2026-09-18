@@ -89,7 +89,8 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   const nbten = (inv.nbten || '').toUpperCase();
   const provider = (inv.provider || '').toUpperCase();
   const rawLookupUrl = (inv.lookupUrl || '').trim();
-  const rawLookupCode = (inv.lookupCode || inv.mhdon || '').trim();
+  const isViettel = msttcgp.replace(/[^0-9]/g, '') === '0100109106' || provider === 'VIETTEL';
+  const rawLookupCode = (isViettel ? inv.lookupCode : (inv.lookupCode || inv.mhdon))?.trim() || '';
 
   // 1. LCS Soft (PNJ: 0315018466 hoặc MST TCGP: 0302999571 hoặc domain eip.lcssoft.com.vn)
   if (

@@ -396,7 +396,35 @@ function getFromStructuredArrays(source: any, fieldNames: string[]): string {
       }
     }
   }
-  return '';
+  const seen = new Set<any>();
+  const findNested = (value: any, depth: number): string => {
+    if (!value || typeof value !== 'object' || depth > 8 || seen.has(value)) return '';
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const found = checkItem(entry) || findNested(entry, depth + 1);
+        if (found) return found;
+      }
+      return '';
+    }
+    for (const child of Object.values(value)) {
+      const found = checkItem(child) || findNested(child, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  };
+  return findNested(source, 0);
+}
+
+function hasPayloadMarker(source: any, keys: string[], expected: string[], depth = 0, seen = new Set<any>()): boolean {
+  if (!source || typeof source !== 'object' || depth > 8 || seen.has(source)) return false;
+  seen.add(source);
+  const normalizedExpected = expected.map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const key of keys) {
+    const value = getPayloadValue(source, [key]);
+    if (value !== undefined && normalizedExpected.includes(String(value).toLowerCase().replace(/[^a-z0-9]/g, ''))) return true;
+  }
+  return Object.values(source).some(value => hasPayloadMarker(value, keys, expected, depth + 1, seen));
 }
 
 function normalizeLookupLabel(value: string): string {
@@ -445,6 +473,8 @@ export function isVnptSource(source: any): boolean {
  */
 export function isViettelSource(source: any): boolean {
   if (!source) return false;
+  if (hasPayloadMarker(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP'], ['0100109106'])) return true;
+  if (hasPayloadMarker(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT'], ['tvan_viettel'])) return true;
   const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '').replace(/[^0-9]/g, '');
   const tentvandnknt = String(getPayloadValue(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT']) || '').toLowerCase();
   const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toLowerCase();

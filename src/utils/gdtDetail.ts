@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { extractLookupDetailsFromXml, getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isPlaceholderItemName, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
+import { extractLookupDetailsFromXml, getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isPlaceholderItemName, isViettelSource, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -294,8 +294,11 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
   const resolvedMhdon = value(detailSource, ['mhdon', 'mccqt', 'MCCQT']) || invoice.mhdon;
   const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
   const isMisa = isMisaSource(detailSource) || isMisaSource(invoice);
+  const isViettel = isViettelSource(detail) || isViettelSource(detailSource) || isViettelSource(invoice);
 
-  const finalLookupCode = (isVnpt && resolvedMhdon) 
+  const finalLookupCode = isViettel
+    ? (detailLookup || xmlLookup?.lookupCode || undefined)
+    : (isVnpt && resolvedMhdon) 
     ? resolvedMhdon 
     : (detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || undefined);
 
@@ -315,7 +318,7 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
     mhdon: resolvedMhdon,
     msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || (isMisa ? '0101243150' : invoice.msttcgp),
-    provider: isMisa ? 'MISA' : (isVnpt ? 'VNPT' : (invoice.provider || undefined)),
+    provider: isMisa ? 'MISA' : (isVnpt ? 'VNPT' : (isViettel ? 'VIETTEL' : (invoice.provider || undefined))),
     lookupCode: finalLookupCode,
     lookupUrl: finalLookupUrl,
     items: authoritativeItems,
