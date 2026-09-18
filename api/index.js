@@ -688,7 +688,34 @@ function getFromStructuredArrays(source, fieldNames) {
       }
     }
   }
-  return "";
+  const seen = /* @__PURE__ */ new Set();
+  const findNested = (value2, depth) => {
+    if (!value2 || typeof value2 !== "object" || depth > 8 || seen.has(value2)) return "";
+    seen.add(value2);
+    if (Array.isArray(value2)) {
+      for (const entry of value2) {
+        const found = checkItem(entry) || findNested(entry, depth + 1);
+        if (found) return found;
+      }
+      return "";
+    }
+    for (const child of Object.values(value2)) {
+      const found = checkItem(child) || findNested(child, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  };
+  return findNested(source, 0);
+}
+function hasPayloadMarker(source, keys, expected, depth = 0, seen = /* @__PURE__ */ new Set()) {
+  if (!source || typeof source !== "object" || depth > 8 || seen.has(source)) return false;
+  seen.add(source);
+  const normalizedExpected = expected.map((value2) => value2.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  for (const key of keys) {
+    const value2 = getPayloadValue(source, [key]);
+    if (value2 !== void 0 && normalizedExpected.includes(String(value2).toLowerCase().replace(/[^a-z0-9]/g, ""))) return true;
+  }
+  return Object.values(source).some((value2) => hasPayloadMarker(value2, keys, expected, depth + 1, seen));
 }
 function normalizeLookupLabel(value2) {
   return cleanLookupValue(value2).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
@@ -711,6 +738,8 @@ function isVnptSource(source) {
 }
 function isViettelSource(source) {
   if (!source) return false;
+  if (hasPayloadMarker(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"], ["0100109106"])) return true;
+  if (hasPayloadMarker(source, ["tentvandnkntt", "tentvandnknt", "ten_tvandnknt", "TENTVANDNKNTT"], ["tvan_viettel"])) return true;
   const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "").replace(/[^0-9]/g, "");
   const tentvandnknt = String(getPayloadValue(source, ["tentvandnkntt", "tentvandnknt", "ten_tvandnknt", "TENTVANDNKNTT"]) || "").toLowerCase();
   const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toLowerCase();
@@ -9883,7 +9912,8 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
   const resolvedMhdon = value(detailSource, ["mhdon", "mccqt", "MCCQT"]) || invoice.mhdon;
   const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
   const isMisa = isMisaSource(detailSource) || isMisaSource(invoice);
-  const finalLookupCode = isVnpt && resolvedMhdon ? resolvedMhdon : detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || void 0;
+  const isViettel = isViettelSource(detail) || isViettelSource(detailSource) || isViettelSource(invoice);
+  const finalLookupCode = isViettel ? detailLookup || xmlLookup?.lookupCode || void 0 : isVnpt && resolvedMhdon ? resolvedMhdon : detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || void 0;
   const finalLookupUrl = isVnpt ? detailUrl || invoice.lookupUrl || `https://${seller.taxCode || invoice.nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn` : isMisa ? detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || "https://www.meinvoice.vn/tra-cuu" : detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || void 0;
   return {
     ...invoice,
@@ -9895,7 +9925,7 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
     nmdchi: value(detailSource, ["nmdchi"]) || invoice.nmdchi,
     mhdon: resolvedMhdon,
     msttcgp: value(detailSource, ["msttcgp", "mst_tcgp", "tvandnkntt"]) || (isMisa ? "0101243150" : invoice.msttcgp),
-    provider: isMisa ? "MISA" : isVnpt ? "VNPT" : invoice.provider || void 0,
+    provider: isMisa ? "MISA" : isVnpt ? "VNPT" : isViettel ? "VIETTEL" : invoice.provider || void 0,
     lookupCode: finalLookupCode,
     lookupUrl: finalLookupUrl,
     items: authoritativeItems,
