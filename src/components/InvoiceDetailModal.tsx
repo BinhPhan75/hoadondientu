@@ -148,7 +148,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           viewOnly: true
         })
       });
-      const data = await resp.json();
+      const responseText = await resp.text();
+      let data: { success?: boolean; htmlContent?: string; error?: string } = {};
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        throw new Error(
+          resp.status === 504
+            ? 'Máy chủ tra cứu hết thời gian chờ. Vui lòng thử lại sau vài giây.'
+            : `Máy chủ trả về lỗi không hợp lệ (HTTP ${resp.status}).`
+        );
+      }
       if (!resp.ok || !data.success || !data.htmlContent) {
         throw new Error(data.error || 'Không nhận được bản HTML gốc từ EasyInvoice.');
       }
