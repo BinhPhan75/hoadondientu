@@ -717,23 +717,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <span>Tải XML Gốc</span>
             </button>
 
-            <button
-              onClick={handleDownloadPdfFile}
-              disabled={isExportingPdf}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
-              title={`Tải tệp PDF sắc nét theo mẫu ${currentProviderMeta.name}`}
-            >
-              <Download className="w-4 h-4" />
-              <span>
-                {isExportingPdf
-                  ? 'Đang tải PDF...'
-                  : isEasyInvoice
-                  ? 'Tải PDF gốc EasyInvoice'
-                  : isMisaInvoice
-                  ? 'Tải PDF gốc MISA'
-                  : 'Tải PDF theo mẫu GDT'}
-              </span>
-            </button>
+            {!isEasyInvoice && !isMisaInvoice && (
+              <button
+                onClick={handleDownloadPdfFile}
+                disabled={isExportingPdf}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                title={`Tải tệp PDF sắc nét theo mẫu ${currentProviderMeta.name}`}
+              >
+                <Download className="w-4 h-4" />
+                <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
