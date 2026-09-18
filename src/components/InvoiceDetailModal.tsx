@@ -363,10 +363,78 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleDownloadPdfFile = async () => {
     setIsExportingPdf(true);
     try {
+      if (isEasyInvoice || isMisaInvoice) {
+        const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+        if (!lookupCode) {
+          throw new Error(`Không tìm thấy mã tra cứu ${isMisaInvoice ? 'MISA' : 'EasyInvoice'} của hóa đơn.`);
+        }
+
+        let filename = `HD_${effectiveInvoice.khhdon}_${String(effectiveInvoice.shdon).padStart(7, '0')}_${effectiveInvoice.nbmst}.pdf`;
+        let contentType = 'application/pdf';
+        let pdfBase64 = '';
+
+        if (isEasyInvoice) {
+          const response = await fetch('/api/easyinvoice/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lookupCode: lookupCode.trim(),
+              sellerTaxCode: effectiveInvoice.nbmst,
+              lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+              khhdon: effectiveInvoice.khhdon,
+              shdon: effectiveInvoice.shdon
+            })
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success || !data.pdfBase64) {
+            throw new Error(data.error || 'Nhà cung cấp không trả về file PDF gốc EasyInvoice.');
+          }
+          filename = data.filename || filename;
+          contentType = data.contentType || contentType;
+          pdfBase64 = data.pdfBase64;
+        } else {
+          const response = await fetch('/api/invoice-downloader/download?format=binary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              xml: effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice),
+              overrideProvider: 'MISA',
+              forceFallback: false
+            })
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Nhà cung cấp không trả về file PDF gốc MISA.');
+          }
+          const pdfBlob = await response.blob();
+          const blobUrl = URL.createObjectURL(pdfBlob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          return;
+        }
+
+        const byteCharacters = atob(pdfBase64);
+        const byteArray = Uint8Array.from(byteCharacters, char => char.charCodeAt(0));
+        const blobUrl = URL.createObjectURL(new Blob([byteArray], { type: contentType }));
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        return;
+      }
+
       await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, effectiveTemplateId);
     } catch (err) {
       console.error('Lỗi khi xuất PDF:', err);
-      window.print();
+      alert(`Không thể tải PDF gốc từ nhà cung cấp: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsExportingPdf(false);
     }
@@ -656,7 +724,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               title={`Tải tệp PDF sắc nét theo mẫu ${currentProviderMeta.name}`}
             >
               <Download className="w-4 h-4" />
-              <span>{isExportingPdf ? 'Đang tạo PDF...' : `Tải File PDF (.pdf)`}</span>
+              <span>
+                {isExportingPdf
+                  ? 'Đang tải PDF...'
+                  : isEasyInvoice
+                  ? 'Tải PDF gốc EasyInvoice'
+                  : isMisaInvoice
+                  ? 'Tải PDF gốc MISA'
+                  : 'Tải PDF theo mẫu GDT'}
+              </span>
             </button>
           </div>
         </div>
