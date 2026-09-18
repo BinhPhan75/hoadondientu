@@ -64,6 +64,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   useEffect(() => {
     setCurrentInvoice(invoice);
+    setOriginalEasyInvoiceHtml(null);
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -72,6 +73,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     : null;
 
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -120,6 +122,44 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (openInvoiceIdRef.current === targetInv.id) {
         setIsLoadingDetail(false);
       }
+    }
+  };
+
+  const handleViewOriginalEasyInvoice = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tra cứu bản gốc.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang nhập mã tra cứu và giải Captcha...');
+    try {
+      const resp = await fetch('/api/easyinvoice/download?format=view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+          khhdon: effectiveInvoice.khhdon,
+          shdon: effectiveInvoice.shdon,
+          viewOnly: true
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success || !data.htmlContent) {
+        throw new Error(data.error || 'Không nhận được bản HTML gốc từ EasyInvoice.');
+      }
+      setOriginalEasyInvoiceHtml(data.htmlContent);
+      setEasyInvoiceDownloadStatus('Đã tải bản thể hiện gốc.');
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem EasyInvoice gốc:', err);
+      alert(`Không thể hiển thị bản gốc EasyInvoice: ${err.message}`);
+      setEasyInvoiceDownloadStatus(null);
+    } finally {
+      setIsDownloadingEasyInvoice(false);
     }
   };
 
@@ -490,8 +530,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="w-[820px] min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
                   <iframe
                     ref={iframeRef}
-                    srcDoc={standaloneHtml}
-                    title="Bản Thể Hiện Hóa Đơn Điện Tử"
+                    srcDoc={originalEasyInvoiceHtml || standaloneHtml}
+                    title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
                     className="w-full h-[1200px] border-0 bg-white"
                     sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                   />
@@ -500,7 +540,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
               {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
-                Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • 
+                {originalEasyInvoiceHtml ? (
+                  <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ EasyInvoice</span> • </>
+                ) : (
+                  <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
+                )}
                 Đã nạp <span className="text-white font-bold">{safeItems.length}</span> dòng hàng hóa • 
                 Ký hiệu: <span className="text-amber-400">{effectiveInvoice.khhdon}</span> • 
                 Số HĐ: <span className="text-cyan-400">{effectiveInvoice.shdon}</span>
@@ -520,17 +564,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="inline-flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={handleDownloadEasyInvoice}
+                  onClick={handleViewOriginalEasyInvoice}
                   disabled={isDownloadingEasyInvoice}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title={`Tự động vượt Captcha bằng Tesseract.js và tải HĐ gốc từ Cổng EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
+                  title={`Tra cứu mã FKey và hiển thị bản thể hiện gốc EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
                 >
                   {isDownloadingEasyInvoice ? (
                     <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
                   ) : (
                     <Download className="w-3.5 h-3.5 text-emerald-400" />
                   )}
-                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang giải captcha & tải HĐ...') : 'Tải hóa đơn gốc'}</span>
+                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tra cứu...') : 'Xem hóa đơn gốc'}</span>
                 </button>
                 {directLookupUrl && (
                   <a

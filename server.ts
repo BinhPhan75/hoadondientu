@@ -1620,7 +1620,7 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
 // 16. Softdreams EasyInvoice: Tự động giải Captcha bằng Tesseract.js & Tải hóa đơn gốc
 app.post('/api/easyinvoice/download', async (req, res) => {
   try {
-    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon } = req.body;
+    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon, viewOnly } = req.body;
     if (!lookupCode) {
       return res.status(400).json({ success: false, error: 'Mã tra cứu EasyInvoice (FKey) không được để trống' });
     }
@@ -1630,7 +1630,8 @@ app.post('/api/easyinvoice/download', async (req, res) => {
       sellerTaxCode: sellerTaxCode ? String(sellerTaxCode).trim() : undefined,
       lookupUrl: lookupUrl ? String(lookupUrl).trim() : undefined,
       khhdon: khhdon ? String(khhdon).trim() : undefined,
-      shdon: shdon ? String(shdon).trim() : undefined
+      shdon: shdon ? String(shdon).trim() : undefined,
+      viewOnly: Boolean(viewOnly)
     });
 
     if (req.query.format === 'binary') {
@@ -1644,6 +1645,7 @@ app.post('/api/easyinvoice/download', async (req, res) => {
       filename: result.filename,
       contentType: result.contentType,
       pdfBase64: result.pdfBase64 || result.buffer.toString('base64'),
+      htmlContent: result.htmlContent || '',
       message: 'Đã tự động vượt Captcha và tải về hóa đơn gốc thành công.'
     });
   } catch (error: any) {

@@ -4,9 +4,9 @@ import express from "express";
 import path2 from "path";
 import crypto2 from "crypto";
 import { spawn } from "child_process";
-import JSZip3 from "jszip";
+import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
-import Tesseract from "tesseract.js";
+import Tesseract2 from "tesseract.js";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -46,6 +46,30 @@ function detectProviderWithDetails(xmlString) {
       priority: 1,
       matchedPattern: "vnpt-invoice",
       sourceDescription: "Ph\xE1t hi\u1EC7n Domain/Chu\u1ED7i tra c\u1EE9u VNPT Invoice (vnpt-invoice)"
+    };
+  }
+  if (/eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlString)) {
+    return {
+      provider: "LCS",
+      priority: 1,
+      matchedPattern: "eip.lcssoft.com.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u LCS Soft EIP (eip.lcssoft.com.vn)"
+    };
+  }
+  if (/vnpayinvoice|vnpay\.vn/i.test(xmlString)) {
+    return {
+      provider: "VNPAY",
+      priority: 1,
+      matchedPattern: "vnpayinvoice.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u VNPAY Invoice (portal.vnpayinvoice.vn)"
+    };
+  }
+  if (/hoadon\.ftg\.vn|hoadondientu\.fpt|fpt\.com\.vn/i.test(xmlString)) {
+    return {
+      provider: "FPT",
+      priority: 1,
+      matchedPattern: "hoadon.ftg.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u FPT Electronic Invoice"
     };
   }
   if (/inv\.4si\.vn|4si\.vn/i.test(xmlString)) {
@@ -131,6 +155,30 @@ function detectProviderWithDetails(xmlString) {
         sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p Softdreams EasyInvoice qua th\u1EBB <MSTTCGP> (0105987432)"
       };
     }
+    if (msttcgp === "0302999571") {
+      return {
+        provider: "LCS",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0302999571",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty TNHH L.C.S (LCS Soft) qua th\u1EBB <MSTTCGP> (0302999571)"
+      };
+    }
+    if (msttcgp === "0102182292") {
+      return {
+        provider: "VNPAY",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0102182292",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty C\u1ED5 ph\u1EA7n Gi\u1EA3i ph\xE1p Thanh to\xE1n Vi\u1EC7t Nam (VNPAY) qua th\u1EBB <MSTTCGP> (0102182292)"
+      };
+    }
+    if (msttcgp === "0104128565") {
+      return {
+        provider: "FPT",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0104128565",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty TNHH H\u1EC7 th\u1ED1ng Th\xF4ng tin FPT qua th\u1EBB <MSTTCGP> (0104128565)"
+      };
+    }
     if (msttcgp === "0315744883") {
       return {
         provider: "4SI",
@@ -174,6 +222,15 @@ function detectProviderWithDetails(xmlString) {
     if (tentcgp.includes("SOFTDREAMS") || tentcgp.includes("EASYINVOICE")) {
       return { provider: "EASYINVOICE", priority: 1.5, matchedPattern: "TenTCGP: SOFTDREAMS", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: Softdreams EasyInvoice" };
     }
+    if (tentcgp.includes("L.C.S") || tentcgp.includes("LCSSOFT")) {
+      return { provider: "LCS", priority: 1.5, matchedPattern: "TenTCGP: LCS", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: C\xF4ng ty TNHH L.C.S (LCS Soft)" };
+    }
+    if (tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM")) {
+      return { provider: "VNPAY", priority: 1.5, matchedPattern: "TenTCGP: VNPAY", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: VNPAY Invoice" };
+    }
+    if (tentcgp.includes("FPT")) {
+      return { provider: "FPT", priority: 1.5, matchedPattern: "TenTCGP: FPT", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: FPT Information System" };
+    }
     if (tentcgp.includes("4SI")) {
       return { provider: "4SI", priority: 1.5, matchedPattern: "TenTCGP: 4SI", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: 4Si" };
     }
@@ -190,6 +247,14 @@ function detectProviderWithDetails(xmlString) {
       priority: 1.8,
       matchedPattern: "MISA Partner (T\xE2n Thanh Danh / T\xE0i Tr\xE2m Anh / Xu\xE2n Vinh)",
       sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng MISA meInvoice"
+    };
+  }
+  if (/0315018466/i.test(xmlString) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(xmlString)) {
+    return {
+      provider: "LCS",
+      priority: 1.8,
+      matchedPattern: "PNJ (C\xF4ng ty C\u1ED5 ph\u1EA7n V\xE0ng b\u1EA1c \u0110\xE1 qu\xFD Ph\xFA Nhu\u1EADn / LCS Soft)",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng LCS Soft EIP (PNJ)"
     };
   }
   const signatureIssuers = extractSignatureIssuers(xmlString);
@@ -645,6 +710,39 @@ function isVnptSource(source) {
   nbten.includes("NGH\u0128A S\u01A0N") || nbten.includes("NGHIA SON") || msttcgp === "0100684378" || // MST VNPT TCGP
   tentcgp.includes("VNPT") || provider === "VNPT" || provider === "NGHIA_SON" || lookupUrl.includes("vnpt-invoice.com.vn");
 }
+function isLcsSource(source) {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "taxCodeNguoiBan", "MST"]) || "");
+  const nbten = String(getPayloadValue(source, ["nbten", "nbtnnt", "sellerName", "supplierName", "Ten"]) || "").toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0302999571" || // CÔNG TY TNHH L.C.S
+  tentcgp.includes("L.C.S") || tentcgp.includes("LCSSOFT") || provider === "LCS" || nbmst === "0315018466" || // CÔNG TY TNHH MTV CHẾ TÁC VÀ KINH DOANH TRANG SỨC PNJ
+  nbten.includes("TRANG S\u1EE8C PNJ") || nbten.includes("TRANG SUC PNJ") || lookupUrl.includes("lcssoft.com.vn") || lookupUrl.includes("eip.lcssoft");
+}
+function isVnpaySource(source) {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "taxCodeNguoiBan", "MST"]) || "");
+  const nbten = String(getPayloadValue(source, ["nbten", "nbtnnt", "sellerName", "supplierName", "Ten"]) || "").toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0102182292" || // VNPAY
+  tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM") || provider === "VNPAY" || nbmst === "0100112437" || // Vietcombank
+  nbten.includes("VIETCOMBANK") || lookupUrl.includes("vnpayinvoice.vn");
+}
+function isFptSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0104128565" || // FPT
+  tentcgp.includes("FPT") || provider === "FPT" || lookupUrl.includes("ftg.vn") || lookupUrl.includes("fpt.com.vn");
+}
 function isMisaSource(source) {
   if (!source) return false;
   const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
@@ -665,6 +763,13 @@ function getLookupCodeFromPayload(source) {
   const misaTransactionId = getFromStructuredArrays(source, ["TransactionID", "TransactionId", "transactionID"]) || getPayloadValue(source, ["transactionID", "TransactionID"]);
   if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
     return cleanLookupValue(misaTransactionId);
+  }
+  if (isLcsSource(source)) {
+    const cqtCode = getPayloadValue(source, ["mhdon", "mccqt", "MCCQT", "cqtCode"]);
+    if (cqtCode) {
+      const cleanCqt = cleanLookupValue(cqtCode);
+      if (cleanCqt) return cleanCqt;
+    }
   }
   const values = [
     misaTransactionId,
@@ -696,9 +801,21 @@ function getLookupCodeFromPayload(source) {
       if (cleanCqt) return cleanCqt;
     }
   }
+  if (isVnpaySource(source)) {
+    return "Vietcombank";
+  }
   return "";
 }
 function getLookupUrlFromPayload(source) {
+  if (isLcsSource(source)) {
+    return "https://eip.lcssoft.com.vn/desktop/#/login";
+  }
+  if (isVnpaySource(source)) {
+    return "https://portal.vnpayinvoice.vn/";
+  }
+  if (isFptSource(source)) {
+    return "https://hoadon.ftg.vn/";
+  }
   if (isVnptSource(source)) {
     const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "MST"]) || "4000344946");
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
@@ -884,7 +1001,24 @@ function extractLookupDetailsFromXml(rawXml) {
     const nbmst = extractTagValue(rawXml, "MST", "") || extractTagValue(rawXml, "nbmst", "") || "4000344946";
     lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
-  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883|0302999571|0315018466/i.test(rawXml);
+  const isLcs = /eip\.lcssoft\.com\.vn|lcssoft|0302999571|0315018466/i.test(rawXml) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(rawXml);
+  if (isLcs) {
+    if (!lookupUrl) lookupUrl = "https://eip.lcssoft.com.vn/desktop/#/login";
+    if (!lookupCode) {
+      const mhdon = extractTagValue(rawXml, "mhdon", "") || extractTagValue(rawXml, "MCQTCap", "");
+      if (mhdon) lookupCode = mhdon;
+    }
+  }
+  const isVnpay = /vnpayinvoice|0102182292/i.test(rawXml);
+  if (isVnpay) {
+    if (!lookupUrl) lookupUrl = "https://portal.vnpayinvoice.vn/";
+    if (!lookupCode) lookupCode = "Vietcombank";
+  }
+  const isFpt = /hoadon\.ftg\.vn|0104128565/i.test(rawXml);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = "https://hoadon.ftg.vn/";
+  }
+  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883/i.test(rawXml);
   if (is4Si) {
     if (!lookupUrl) lookupUrl = "https://inv.4si.vn/tra-cuu-hoa-don";
     if (!extractTagValue(rawXml, "MTCuu") && !extractTagValue(rawXml, "MaTraCuu") && !extractTagValue(rawXml, "FKey")) {
@@ -1568,6 +1702,24 @@ function parseGDTInvoiceXml(xmlString, filename) {
       lookupUrl = `https://${nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn`;
     }
   }
+  const isLcs = provider === "LCS" || msttcgp === "0302999571" || tentcgp.toUpperCase().includes("L.C.S") || tentcgp.toUpperCase().includes("LCSSOFT") || nbmst === "0315018466" || nbten.toUpperCase().includes("PNJ") || /eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlSource);
+  if (isLcs) {
+    if (!lookupCode && mhdon) {
+      lookupCode = mhdon;
+    }
+    if (!lookupUrl) {
+      lookupUrl = "https://eip.lcssoft.com.vn/desktop/#/login";
+    }
+  }
+  const isVnpay = provider === "VNPAY" || msttcgp === "0102182292" || tentcgp.toUpperCase().includes("VNPAY") || nbmst === "0100112437" || /vnpayinvoice/i.test(xmlSource);
+  if (isVnpay) {
+    if (!lookupUrl) lookupUrl = "https://portal.vnpayinvoice.vn/";
+    if (!lookupCode) lookupCode = "Vietcombank";
+  }
+  const isFpt = provider === "FPT" || msttcgp === "0104128565" || tentcgp.toUpperCase().includes("FPT") || /hoadon\.ftg\.vn/i.test(xmlSource);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = "https://hoadon.ftg.vn/";
+  }
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;
   const draftInvoice = {
     id,
@@ -1748,7 +1900,19 @@ function buildDirectLookupUrl(portalUrl, lookupCode, providerOrTemplateId, selle
     }
     return cleanUrl;
   }
-  const is4Si = provider.includes("4SI") || provider.includes("PNJ") || /4si\.vn/i.test(url);
+  const isLcs = provider.includes("LCS") || provider.includes("PNJ") || sellerTaxCode === "0315018466" || sellerTaxCode === "0302999571" || /eip\.lcssoft\.com\.vn|lcssoft/i.test(url);
+  if (isLcs) {
+    return "https://eip.lcssoft.com.vn/desktop/#/login";
+  }
+  const isVnpay = provider.includes("VNPAY") || sellerTaxCode === "0100112437" || /vnpayinvoice/i.test(url);
+  if (isVnpay) {
+    return "https://portal.vnpayinvoice.vn/";
+  }
+  const isFpt = provider.includes("FPT") || /hoadon\.ftg\.vn|fpt\.com\.vn/i.test(url);
+  if (isFpt) {
+    return "https://hoadon.ftg.vn/";
+  }
+  const is4Si = provider.includes("4SI") || /4si\.vn/i.test(url);
   if (is4Si) {
     return "https://inv.4si.vn/tra-cuu-hoa-don";
   }
@@ -8868,8 +9032,348 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
-// src/services/invoice-engine/drivers/EasyInvoiceDriver.ts
+// src/services/easyInvoiceService.ts
 import axios5 from "axios";
+import * as cheerio2 from "cheerio";
+import zlib from "zlib";
+import JSZip2 from "jszip";
+import Tesseract from "tesseract.js";
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+var aiClient2 = null;
+function getGenAI2() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiClient2) {
+    aiClient2 = new GoogleGenAI2({ apiKey });
+  }
+  return aiClient2;
+}
+function decodePngRgba(buf) {
+  let offset = 8;
+  const idatChunks = [];
+  let width = 0;
+  let height = 0;
+  while (offset < buf.length) {
+    const len = buf.readUInt32BE(offset);
+    const type = buf.slice(offset + 4, offset + 8).toString("ascii");
+    if (type === "IHDR") {
+      width = buf.readUInt32BE(offset + 8);
+      height = buf.readUInt32BE(offset + 12);
+    } else if (type === "IDAT") {
+      idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
+    }
+    offset += 12 + len;
+  }
+  const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
+  const rawRgba = Buffer.alloc(width * height * 4);
+  const stride = width * 4 + 1;
+  const prevRow = Buffer.alloc(width * 4);
+  for (let y = 0; y < height; y++) {
+    const filter = decompressed[y * stride];
+    const rowOffset = y * stride + 1;
+    const destOffset = y * width * 4;
+    for (let x = 0; x < width * 4; x++) {
+      const bpp = 4;
+      const raw = decompressed[rowOffset + x];
+      const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
+      const b = prevRow[x];
+      const c = x >= bpp ? prevRow[x - bpp] : 0;
+      let val = raw;
+      if (filter === 1) {
+        val = raw + a & 255;
+      } else if (filter === 2) {
+        val = raw + b & 255;
+      } else if (filter === 3) {
+        val = raw + Math.floor((a + b) / 2) & 255;
+      } else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
+      }
+      rawRgba[destOffset + x] = val;
+      prevRow[x] = val;
+    }
+  }
+  return { width, height, data: rawRgba };
+}
+function createBinarizedBmp(decoded, scale = 3) {
+  const { width, height, data } = decoded;
+  const cropX1 = 30;
+  const cropX2 = Math.min(142, width);
+  const cropW = cropX2 - cropX1;
+  const cropH = height;
+  const newW = cropW * scale;
+  const newH = cropH * scale;
+  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
+  const imageSize = rowSize * newH;
+  const fileSize = 54 + imageSize;
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write("BM", 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(newW, 18);
+  bmp.writeInt32LE(newH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+  for (let destY = 0; destY < newH; destY++) {
+    const srcY = Math.floor((newH - 1 - destY) / scale);
+    const rowStart = 54 + destY * rowSize;
+    for (let destX = 0; destX < newW; destX++) {
+      const srcX = cropX1 + Math.floor(destX / scale);
+      const srcIdx = (srcY * width + srcX) * 4;
+      const r = data[srcIdx];
+      const g = data[srcIdx + 1];
+      const b = data[srcIdx + 2];
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      const isText = lum > 140;
+      const val = isText ? 0 : 255;
+      const pxOffset = rowStart + destX * 3;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+  return bmp;
+}
+async function solveEasyInvoiceCaptcha(captchaBuf) {
+  try {
+    const decoded = decodePngRgba(captchaBuf);
+    const bmp = createBinarizedBmp(decoded, 3);
+    const worker = await Tesseract.createWorker("eng");
+    await worker.setParameters({
+      tessedit_char_whitelist: "0123456789",
+      tessedit_pageseg_mode: Tesseract.PSM.SINGLE_LINE
+    });
+    const res = await worker.recognize(bmp);
+    await worker.terminate();
+    const digits = (res.data.text || "").replace(/[^0-9]/g, "");
+    const confidence = res.data.confidence || 0;
+    if (digits.length === 4 && confidence >= 60) {
+      console.log(`[EasyInvoice] Tesseract OCR gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}" (${confidence}%)`);
+      return { code: digits, confidence, engine: "tesseract" };
+    }
+    console.log(`[EasyInvoice] Tesseract OCR k\u1EBFt qu\u1EA3 ch\u01B0a ch\u1EAFc ch\u1EAFn: "${digits}" (${confidence}%), th\u1EED gi\u1EA3i b\u1EB1ng Gemini Vision...`);
+  } catch (tessErr) {
+    console.warn("[EasyInvoice] Tesseract l\u1ED7i ti\u1EC1n x\u1EED l\xFD:", tessErr.message);
+  }
+  const ai = getGenAI2();
+  if (ai) {
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType: "image/png",
+                  data: captchaBuf.toString("base64")
+                }
+              },
+              {
+                text: "H\xE3y \u0111\u1ECDc 4 ch\u1EEF s\u1ED1 xu\u1EA5t hi\u1EC7n trong \u1EA3nh captcha n\xE0y. Ch\u1EC9 tr\u1EA3 v\u1EC1 \u0111\xFAng 4 ch\u1EEF s\u1ED1, kh\xF4ng th\xEAm b\u1EA5t k\u1EF3 ch\u1EEF n\xE0o kh\xE1c."
+              }
+            ]
+          }
+        ]
+      });
+      const aiDigits = (response.text || "").replace(/[^0-9]/g, "").trim();
+      if (aiDigits.length === 4) {
+        console.log(`[EasyInvoice] Gemini Vision gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${aiDigits}"`);
+        return { code: aiDigits, confidence: 99, engine: "gemini" };
+      }
+    } catch (aiErr) {
+      console.warn("[EasyInvoice] Gemini Vision gi\u1EA3i captcha l\u1ED7i:", aiErr.message);
+    }
+  }
+  return { code: "", confidence: 0, engine: "none" };
+}
+async function downloadOriginalEasyInvoice(params) {
+  const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon } = params;
+  if (!lookupCode) {
+    throw new Error("M\xE3 tra c\u1EE9u h\xF3a \u0111\u01A1n EasyInvoice (FKey) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng.");
+  }
+  let domain = "";
+  if (lookupUrl && /easyinvoice\.com\.vn|easyinvoice\.vn/i.test(lookupUrl)) {
+    try {
+      const parsedUrl = new URL(lookupUrl);
+      domain = `${parsedUrl.protocol}//${parsedUrl.host}`;
+    } catch {
+    }
+  }
+  if (!domain && sellerTaxCode) {
+    domain = `http://${sellerTaxCode.trim()}hd.easyinvoice.com.vn`;
+  }
+  if (!domain) {
+    domain = "https://tracuu.easyinvoice.vn";
+  }
+  console.log(`[EasyInvoice] Kh\u1EDFi \u0111\u1ED9ng t\u1EA3i H\u0110 g\u1ED1c: FKey="${lookupCode}", MST="${sellerTaxCode || ""}", C\u1ED5ng="${domain}"`);
+  const maxRetries = 3;
+  let lastError = "";
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[EasyInvoice] L\u1EA7n th\u1EED ${attempt}/${maxRetries}: L\u1EA5y Captcha t\u1EEB ${domain}/Captcha/Show...`);
+      const cRes = await axios5.get(`${domain}/Captcha/Show`, {
+        responseType: "arraybuffer",
+        timeout: 8e3,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          "Referer": `${domain}/Search/Index`
+        }
+      });
+      const cookie = cRes.headers["set-cookie"] ? Array.isArray(cRes.headers["set-cookie"]) ? cRes.headers["set-cookie"].join("; ") : cRes.headers["set-cookie"] : "";
+      const captchaBuf = Buffer.from(cRes.data);
+      const { code, confidence, engine } = await solveEasyInvoiceCaptcha(captchaBuf);
+      if (!code || code.length !== 4) {
+        console.warn(`[EasyInvoice] Ch\u01B0a \u0111\u1ECDc \u0111\u01B0\u1EE3c m\xE3 4 s\u1ED1 \u1EDF l\u1EA7n th\u1EED ${attempt}. Ti\u1EBFp t\u1EE5c th\u1EED l\u1EA1i...`);
+        continue;
+      }
+      console.log(`[EasyInvoice] \u0110\xE3 gi\u1EA3i Captcha: "${code}" (Engine: ${engine}, \u0110\u1ED9 tin c\u1EADy: ${confidence}%). G\u1EEDi y\xEAu c\u1EA7u t\xECm ki\u1EBFm...`);
+      const postRes = await axios5.post(
+        `${domain}/Search/Search`,
+        `typeSearch=&FKey=${encodeURIComponent(lookupCode.trim())}&Capcha=${encodeURIComponent(code)}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Cookie": cookie,
+            "Referer": `${domain}/Search/Index?fkey=${encodeURIComponent(lookupCode.trim())}`,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+          },
+          timeout: 12e3
+        }
+      );
+      const $ = cheerio2.load(postRes.data);
+      const msg = $("#msg").val();
+      if (msg) {
+        console.warn(`[EasyInvoice] Th\xF4ng b\xE1o t\u1EEB c\u1ED5ng: "${msg}"`);
+        if (msg.includes("M\xE3 x\xE1c th\u1EF1c kh\xF4ng ch\xEDnh x\xE1c") || msg.includes("sai m\xE3 x\xE1c th\u1EF1c") || msg.includes("captcha")) {
+          console.log("[EasyInvoice] Sai Captcha, th\u1EED l\u1EA1i...");
+          continue;
+        }
+        if (msg.includes("Kh\xF4ng t\xECm th\u1EA5y") || msg.includes("kh\xF4ng t\u1ED3n t\u1EA1i")) {
+          throw new Error(`C\u1ED5ng EasyInvoice th\xF4ng b\xE1o: ${msg}`);
+        }
+      }
+      const invDataStr = $("#InvData").val();
+      if (!invDataStr) {
+        console.warn(`[EasyInvoice] Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c InvData \u1EDF l\u1EA7n th\u1EED ${attempt}.`);
+        continue;
+      }
+      let invData = {};
+      try {
+        invData = JSON.parse(invDataStr);
+      } catch (e) {
+        console.error("[EasyInvoice] Kh\xF4ng th\u1EC3 parse InvData JSON:", e.message);
+      }
+      const scriptMatch = postRes.data.match(/showInv\([^;]+,\s*'([^']+)'\);/);
+      const token = scriptMatch ? scriptMatch[1] : "";
+      const invoiceHtml = invData.str || "";
+      const b64Html = Buffer.from(invoiceHtml, "utf-8").toString("base64");
+      let downloadFileName = `HOADON_${sellerTaxCode || "EASYINVOICE"}_${khhdon || "HD"}_${shdon || lookupCode}`;
+      if (params.viewOnly && invoiceHtml) {
+        return {
+          success: true,
+          filename: `${downloadFileName}.html`,
+          contentType: "text/html",
+          buffer: Buffer.from(invoiceHtml, "utf-8"),
+          htmlContent: invoiceHtml,
+          message: "\u0110\xE3 tra c\u1EE9u v\xE0 nh\u1EADn b\u1EA3n th\u1EC3 hi\u1EC7n g\u1ED1c EasyInvoice."
+        };
+      }
+      if (token && b64Html) {
+        try {
+          console.log("[EasyInvoice] G\u1ECDi API t\u1EA1o g\xF3i PDF ch\xEDnh th\u1EE9c...");
+          const pdfGenRes = await axios5.post(
+            `${domain}/Invoice/DownloadPdfAndFileAttachFromAvailableHtml`,
+            new URLSearchParams({ token, html: b64Html }).toString(),
+            {
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": cookie,
+                "Referer": `${domain}/Search/Index`,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+              },
+              timeout: 15e3
+            }
+          );
+          if (pdfGenRes.data && pdfGenRes.data.fileGuid) {
+            const dlFileName = pdfGenRes.data.fileName || `${downloadFileName}.zip`;
+            const dlUrl = `${domain}/Invoice/Download?fileGuid=${encodeURIComponent(pdfGenRes.data.fileGuid)}&fileName=${encodeURIComponent(dlFileName)}`;
+            console.log(`[EasyInvoice] T\u1EA3i file t\u1EEB: ${dlUrl}`);
+            const dlRes = await axios5.get(dlUrl, {
+              headers: { "Cookie": cookie },
+              responseType: "arraybuffer",
+              timeout: 15e3
+            });
+            const downloadedBuf = Buffer.from(dlRes.data);
+            if (downloadedBuf.length > 4 && downloadedBuf[0] === 80 && downloadedBuf[1] === 75) {
+              try {
+                const zip = new JSZip2();
+                const unzipped = await zip.loadAsync(downloadedBuf);
+                const pdfFile = Object.values(unzipped.files).find((f) => !f.dir && f.name.toLowerCase().endsWith(".pdf"));
+                if (pdfFile) {
+                  const pdfBuf = await pdfFile.async("nodebuffer");
+                  console.log(`[EasyInvoice] \u0110\xE3 tr\xEDch xu\u1EA5t th\xE0nh c\xF4ng PDF "${pdfFile.name}" (${(pdfBuf.length / 1024).toFixed(1)} KB)`);
+                  return {
+                    success: true,
+                    filename: pdfFile.name,
+                    contentType: "application/pdf",
+                    buffer: pdfBuf,
+                    pdfBase64: pdfBuf.toString("base64"),
+                    htmlContent: invoiceHtml
+                  };
+                }
+              } catch (zipErr) {
+                console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 gi\u1EA3i n\xE9n ZIP, g\u1EEDi nguy\xEAn file ZIP:", zipErr.message);
+              }
+              return {
+                success: true,
+                filename: dlFileName,
+                contentType: "application/x-zip-compressed",
+                buffer: downloadedBuf,
+                pdfBase64: downloadedBuf.toString("base64"),
+                htmlContent: invoiceHtml
+              };
+            } else if (downloadedBuf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+              return {
+                success: true,
+                filename: `${downloadFileName}.pdf`,
+                contentType: "application/pdf",
+                buffer: downloadedBuf,
+                pdfBase64: downloadedBuf.toString("base64"),
+                htmlContent: invoiceHtml
+              };
+            }
+          }
+        } catch (pdfErr) {
+          console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 t\u1EA3i PDF qua DownloadPdfAndFileAttachFromAvailableHtml:", pdfErr.message);
+        }
+      }
+      if (invoiceHtml) {
+        console.log(`[EasyInvoice] Tr\u1EA3 v\u1EC1 b\u1EA3n th\u1EC3 hi\u1EC7n HTML g\u1ED1c EasyInvoice (${(invoiceHtml.length / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filename: `${downloadFileName}.html`,
+          contentType: "text/html",
+          buffer: Buffer.from(invoiceHtml, "utf-8"),
+          htmlContent: invoiceHtml
+        };
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.warn(`[EasyInvoice] L\u1ED7i \u1EDF l\u1EA7n th\u1EED ${attempt}:`, err.message);
+    }
+  }
+  throw new Error(lastError || "Kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB C\u1ED5ng EasyInvoice sau 3 l\u1EA7n th\u1EED.");
+}
+
+// src/services/invoice-engine/drivers/EasyInvoiceDriver.ts
 var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8921,72 +9425,33 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
     const lookupCode = (info.lookupCode || "").trim();
     const cleanMst = (info.sellerTaxCode || "").trim();
     this.createLog(`M\xE3 tra c\u1EE9u EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
-    const timeoutMs = options?.timeoutMs || 15e3;
-    const portalCandidates = [
-      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, "") : null,
-      "https://easyinvoice.vn",
-      "https://tracuu.easyinvoice.vn",
-      cleanMst ? `https://${cleanMst}.easyinvoice.com.vn` : null
-    ].filter(Boolean);
-    for (const portal of portalCandidates) {
+    if (lookupCode) {
       try {
-        const captchaUrl = `${portal}/Home/GetCaptcha`;
-        this.createLog(`\u0110ang l\u1EA5y \u1EA3nh Captcha t\u1EEB c\u1ED5ng EasyInvoice: ${captchaUrl}`, logs);
-        const captchaResp = await axios5.get(captchaUrl, {
-          timeout: 8e3,
-          responseType: "arraybuffer",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Referer": portal
-          },
-          validateStatus: (s) => s === 200
+        this.createLog(`\u0110ang k\u1EBFt n\u1ED1i c\u1ED5ng EasyInvoice v\xE0 t\u1EF1 \u0111\u1ED9ng gi\u1EA3i Captcha b\u1EB1ng Tesseract.js...`, logs);
+        const dlRes = await downloadOriginalEasyInvoice({
+          lookupCode,
+          sellerTaxCode: cleanMst,
+          lookupUrl: info.lookupUrl,
+          khhdon: info.invoiceSeries,
+          shdon: info.invoiceNo
         });
-        const cookieHeader = captchaResp.headers["set-cookie"] ? Array.isArray(captchaResp.headers["set-cookie"]) ? captchaResp.headers["set-cookie"].join("; ") : captchaResp.headers["set-cookie"] : "";
-        if (captchaResp.data && captchaResp.data.byteLength > 20) {
-          this.createLog("\u0110\xE3 nh\u1EADn \u1EA3nh Captcha EasyInvoice. \u0110ang tr\xEDch xu\u1EA5t m\xE3 Captcha...", logs);
-          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
-          const captchaCode = captchaResult.code;
-          this.createLog(`\u0110\xE3 gi\u1EA3i Captcha EasyInvoice th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
-          const queryUrl = `${portal}/Home/TraCuuHoaDon`;
-          const queryResp = await axios5.post(queryUrl, {
-            Ikey: lookupCode,
-            Mst: cleanMst,
-            Captcha: captchaCode,
-            Pattern: info.templateCode,
-            Serial: info.invoiceSeries
-          }, {
-            timeout: timeoutMs,
-            responseType: "arraybuffer",
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-              "Referer": portal,
-              "Cookie": cookieHeader,
-              ...options?.customHeaders || {}
-            },
-            validateStatus: (s) => s < 500
-          });
-          if (queryResp.data && queryResp.data.byteLength > 50) {
-            const buf = Buffer.from(queryResp.data);
-            if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-              this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB EasyInvoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString("base64"),
-                contentType: "application/pdf",
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: queryUrl,
-                captchaSolved: captchaCode,
-                executionLogs: logs
-              };
-            }
-          }
+        if (dlRes.success && dlRes.buffer && dlRes.buffer.length > 50) {
+          this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: dlRes.buffer,
+            pdfBase64: dlRes.pdfBase64 || dlRes.buffer.toString("base64"),
+            contentType: dlRes.contentType || "application/pdf",
+            filename: dlRes.filename || this.buildPdfFilename(info),
+            isFallback: false,
+            sourceUrl: info.lookupUrl || "https://tracuu.easyinvoice.vn",
+            executionLogs: logs
+          };
         }
-      } catch (portalErr) {
-        this.createLog(`C\u1ED5ng EasyInvoice ${portal} ch\u01B0a ho\xE0n t\u1EA5t: ${portalErr.message}`, logs);
+      } catch (err) {
+        this.createLog(`T\u1EA3i t\u1EEB c\u1ED5ng EasyInvoice ch\u01B0a ho\xE0n t\u1EA5t: ${err.message}`, logs);
       }
     }
     this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78`, logs);
@@ -9057,6 +9522,131 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
       driverName: this.name,
       executionLogs: [...logs, ...fallbackRes.executionLogs]
     };
+  }
+};
+
+// src/services/invoice-engine/drivers/LcsDriver.ts
+import axios6 from "axios";
+var LcsDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "LCS Soft E-Invoice Driver";
+    this.providerCode = "LCS";
+    this.metadata = {
+      name: "LCS Soft E-Invoice Driver",
+      providerCode: "LCS",
+      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T t\u1EEB C\u1ED5ng th\xF4ng tin LCS Soft EIP (https://eip.lcssoft.com.vn) qua M\xE3 CQT c\u1EA5p v\xE0 MST b\xEAn b\xE1n",
+      sampleUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+      supportsCaptcha: true,
+      requiredFields: ["sellerTaxCode", "cqtCode"]
+    };
+  }
+  /**
+   * Nhận diện hóa đơn LCS Soft
+   */
+  canHandle(xmlData) {
+    if (typeof xmlData !== "string") {
+      return xmlData.provider === "LCS";
+    }
+    return detectProvider(xmlData) === "LCS";
+  }
+  /**
+   * Trích xuất thông tin hóa đơn LCS Soft từ XML
+   */
+  extractInfo(xmlData) {
+    const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst") || "0315018466";
+    const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten") || "C\xD4NG TY TNHH MTV CH\u1EBE T\xC1C V\xC0 KINH DOANH TRANG S\u1EE8C PNJ";
+    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
+    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
+    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
+    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon") || this.extractXmlTag(xmlData, "cqtCode");
+    let lookupCode = this.extractCustomField(xmlData, [
+      "M\xE3 tra c\u1EE9u",
+      "MaTraCuu",
+      "MTCuu",
+      "MTC",
+      "FKey",
+      "TransactionID"
+    ]);
+    if (!lookupCode) {
+      lookupCode = this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "InvoiceCode") || cqtCode;
+    }
+    const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
+    const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    return {
+      provider: this.providerCode,
+      providerName: "LCS Soft EIP (C\xF4ng ty TNHH L.C.S)",
+      sellerTaxCode,
+      sellerName,
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+      invoiceDate,
+      lookupCode: lookupCode || void 0,
+      lookupUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+      cqtCode: cqtCode || void 0,
+      totalAmount,
+      totalTaxAmount,
+      currency: this.extractXmlTag(xmlData, "DVTTe") || "VND",
+      rawXml: xmlData,
+      additionalData: {
+        msttcgp: "0302999571"
+      }
+    };
+  }
+  /**
+   * Tải PDF Hóa đơn gốc LCS Soft từ Cổng eip.lcssoft.com.vn
+   */
+  async fetchPdf(info, options) {
+    const logs = [];
+    this.createLog(`Kh\u1EDFi ch\u1EA1y LCS Soft E-Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo} (MST: ${info.sellerTaxCode})`, logs);
+    const client = axios6.create({
+      baseURL: "https://eip.lcssoft.com.vn",
+      timeout: options?.timeoutMs || 15e3,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://eip.lcssoft.com.vn/"
+      }
+    });
+    const lookupCode = (info.lookupCode || info.cqtCode || info.invoiceNo || "").trim();
+    try {
+      this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u tra c\u1EE9u \u0111\u1EBFn C\u1ED5ng LCS Soft EIP (M\xE3 tra c\u1EE9u: ${lookupCode})...`, logs);
+      const response = await client.post("/api/invoice/lookup", {
+        taxCode: info.sellerTaxCode,
+        invoiceNo: info.invoiceNo,
+        series: info.invoiceSeries,
+        lookupCode
+      }, {
+        responseType: "arraybuffer",
+        validateStatus: () => true
+      });
+      if (response.status === 200 && response.data && response.data.length > 500) {
+        const contentType = String(response.headers["content-type"] || "");
+        if (contentType.includes("pdf") || response.data.slice(0, 4).toString() === "%PDF") {
+          this.createLog(`T\u1EA3i PDF H\u0110\u0110T g\u1ED1c th\xE0nh c\xF4ng t\u1EEB LCS Soft EIP (${response.data.length} bytes)`, logs);
+          const pdfBuffer = Buffer.from(response.data);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer,
+            pdfBase64: pdfBuffer.toString("base64"),
+            contentType: "application/pdf",
+            filename: `LCS_HD_${info.sellerTaxCode}_${info.invoiceSeries}_${info.invoiceNo}.pdf`,
+            isFallback: false,
+            captchaSolved: void 0,
+            sourceUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+            executionLogs: logs
+          };
+        }
+      }
+      this.createLog(`C\u1ED5ng eip.lcssoft.com.vn y\xEAu c\u1EA7u phi\xEAn l\xE0m vi\u1EC7c ho\u1EB7c giao di\u1EC7n Desktop. T\u1EF1 \u0111\u1ED9ng k\xEDch ho\u1EA1t c\u01A1 ch\u1EBF Fallback ti\xEAu chu\u1EA9n.`, logs);
+    } catch (err) {
+      this.createLog(`L\u1ED7i k\u1EBFt n\u1ED1i C\u1ED5ng LCS Soft: ${err.message}`, logs);
+    }
+    throw new Error("LCS Soft EIP y\xEAu c\u1EA7u x\xE1c th\u1EF1c ho\u1EB7c \u0111\u0103ng nh\u1EADp desktop.");
   }
 };
 
@@ -9203,6 +9793,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
     this.registerDriver(new MisaDriver());
     this.registerDriver(new ViettelDriver());
     this.registerDriver(new FourSiDriver());
+    this.registerDriver(new LcsDriver());
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
     this.registerDriver(new BkavDriver());
@@ -9388,7 +9979,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
 // src/utils/gdtDetail.ts
-import JSZip2 from "jszip";
+import JSZip3 from "jszip";
 var value = (source, keys) => {
   if (!source || typeof source !== "object") return "";
   for (const key of keys) {
@@ -9434,7 +10025,7 @@ async function readXmlFromExport(bytes, contentType) {
   const text = new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "").trim();
   if (isXml(text) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(text)) return text;
   if (!contentType.toLowerCase().includes("zip") && !(bytes[0] === 80 && bytes[1] === 75)) return "";
-  const zip = await JSZip2.loadAsync(bytes);
+  const zip = await JSZip3.loadAsync(bytes);
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
     const entryText = (await entry.async("text")).replace(/^\uFEFF/, "").trim();
@@ -9648,6 +10239,7 @@ var LOCAL_USERS_FILE = path.join(DATA_DIR, "web_users.json");
 var pool = null;
 var isPostgresConnected = false;
 var isTableInitialized = false;
+var DEFAULT_NEON_DATABASE_URL = "postgresql://neondb_owner:npg_DgrFB8VKyHC4@ep-holy-tooth-az1tfp1l-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require";
 function getDatabaseConfig() {
   const candidates = [
     ["POSTGRES_URL", process.env.POSTGRES_URL],
@@ -9655,7 +10247,8 @@ function getDatabaseConfig() {
     ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL],
     ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
     ["POSTGRES_URL_NON_POOLING", process.env.POSTGRES_URL_NON_POOLING],
-    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED]
+    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED],
+    ["DEFAULT_NEON_FALLBACK", DEFAULT_NEON_DATABASE_URL]
   ];
   const selected = candidates.find(([, value2]) => value2 && value2.trim());
   let url = (selected?.[1] || "").trim().replace(/^["']|["']$/g, "").trim();
@@ -10002,7 +10595,7 @@ async function deleteUser(id) {
 }
 
 // server.ts
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
 var app = express();
 var PORT = Number(process.env.PORT) || 3e3;
 app.use(express.json({ limit: "50mb" }));
@@ -10024,7 +10617,7 @@ app.use((req, res, next) => {
     }
   }
   if (!req.url.startsWith("/api")) {
-    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
+    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/easyinvoice") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
       req.url = "/api" + req.url;
     }
   }
@@ -10199,7 +10792,7 @@ function getGeminiClient(customKey) {
   const apiKey = customKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!geminiAiClient || customKey) {
-    const client = new GoogleGenAI2({
+    const client = new GoogleGenAI3({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
@@ -10303,7 +10896,7 @@ ${svgSnippet}
     try {
       console.log("[Tesseract OCR] Running local fallback OCR on bitmap...");
       const imageBuffer = Buffer.from(bitmapBase64, "base64");
-      const { data } = await Tesseract.recognize(imageBuffer, "eng");
+      const { data } = await Tesseract2.recognize(imageBuffer, "eng");
       if (data && data.text) {
         const cleaned = data.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
         if (cleaned.length >= 4 && cleaned.length <= 6) {
@@ -10598,24 +11191,42 @@ app.post("/api/gdt/login", async (req, res) => {
   }
 });
 function splitDateRangeIntoMonthlyChunks(fromDateStr, toDateStr) {
-  const start = new Date(fromDateStr);
-  const end = new Date(toDateStr);
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+  if (!fromDateStr || !toDateStr) return [{ from: fromDateStr, to: toDateStr }];
+  const startParts = fromDateStr.split("-").map(Number);
+  const endParts = toDateStr.split("-").map(Number);
+  if (startParts.length !== 3 || endParts.length !== 3 || startParts.some(isNaN) || endParts.some(isNaN)) {
     return [{ from: fromDateStr, to: toDateStr }];
   }
-  const chunks = [];
-  let cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const finalEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  while (cur <= finalEnd) {
-    const endOfMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-    const chunkEnd = endOfMonth < finalEnd ? endOfMonth : finalEnd;
-    const pad = (n) => String(n).padStart(2, "0");
-    const fromStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
-    const toStr = `${chunkEnd.getFullYear()}-${pad(chunkEnd.getMonth() + 1)}-${pad(chunkEnd.getDate())}`;
-    chunks.push({ from: fromStr, to: toStr });
-    cur = new Date(chunkEnd.getFullYear(), chunkEnd.getMonth(), chunkEnd.getDate() + 1);
+  const [startY, startM, startD] = startParts;
+  const [endY, endM, endD] = endParts;
+  if (startY > endY || startY === endY && startM > endM || startY === endY && startM === endM && startD > endD) {
+    return [{ from: fromDateStr, to: toDateStr }];
   }
-  return chunks;
+  const getDaysInMonth = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const pad = (n) => String(n).padStart(2, "0");
+  const chunks = [];
+  let curY = startY;
+  let curM = startM;
+  let curD = startD;
+  while (curY < endY || curY === endY && curM <= endM) {
+    const maxDays = getDaysInMonth(curY, curM);
+    const chunkStartD = curD;
+    let chunkEndD = maxDays;
+    if (curY === endY && curM === endM) {
+      chunkEndD = Math.min(maxDays, endD);
+    }
+    chunks.push({
+      from: `${curY}-${pad(curM)}-${pad(chunkStartD)}`,
+      to: `${curY}-${pad(curM)}-${pad(chunkEndD)}`
+    });
+    curD = 1;
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+  return chunks.length > 0 ? chunks : [{ from: fromDateStr, to: toDateStr }];
 }
 app.post("/api/gdt/invoice-detail", async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
@@ -10689,122 +11300,172 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   }
   const sanitizedCookie = cleanCookies.join("; ");
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 1, page = 0, accumulated = []) => {
+  const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 2) => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
     const apiBase = source === "sco-query" ? "sco-query" : "query";
-    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const resp = await fetchGDT(url, {
-          method: "GET",
-          headers: {
-            "Authorization": tokenHeader,
-            "Accept": "application/json, text/plain, */*",
-            "End-Point": "/tra-cuu/tra-cuu-hoa-don",
-            "Action": "",
-            ...sanitizedCookie ? { "Cookie": sanitizedCookie } : {}
-          }
-        }, 1, 15e3, vietnamProxy);
-        if (resp.status === 401) {
-          console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
-          if (source === "sco-query") {
-            return [];
-          }
-          return { error: "AUTH_EXPIRED" };
-        }
-        if (resp.status === 403) {
-          console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
-          if (source === "sco-query") {
-            return [];
-          }
-          return { error: "WAF_BLOCKED" };
-        }
-        if (resp.status === 429) {
-          console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
-          if (attempt < maxRetries) {
-            const backoffMs = (attempt + 1) * 1200;
-            await sleep(backoffMs);
-            continue;
-          } else {
-            console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
-            return [];
-          }
-        }
-        if (!resp.ok) {
-          const errText = await resp.text();
-          console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
-          return [];
-        }
-        const rawText = await resp.text();
-        let data = {};
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
-          return [];
-        }
-        const list = extractGdtInvoiceList(data);
-        console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
-        const normalizedPage = list.map((item) => ({
-          id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
-          khmshdon: item.khmshdon || item.khmhd || "1",
-          khhdon: item.khhdon || "",
-          shdon: String(item.shdon || item.shd || "").padStart(7, "0"),
-          tdlap: item.tdlap ? item.tdlap.replace(" ", "T") : (/* @__PURE__ */ new Date()).toISOString(),
-          nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ""),
-          nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || "Ng\u01B0\u1EDDi b\xE1n"),
-          nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ""),
-          nmmst: item.nmmst || "",
-          nmten: item.nmten || item.nmtnnt || item.nmtlhdon || "Ng\u01B0\u1EDDi mua",
-          nmdchi: item.nmdchi || "",
-          tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
-          tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
-          tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? Number(item.tgtcthue ?? item.thtien ?? 0) + Number(item.tgtthue ?? item.tthue ?? 0)),
-          tgtttbchu: item.tgtttbchu || "",
-          htttoan: item.htttoan || "TM/CK",
-          tthdon: Number(item.tthdon || 1),
-          tthdonLabel: item.tthdon === 1 ? "H\xF3a \u0111\u01A1n g\u1ED1c" : item.tthdon === 2 ? "H\xF3a \u0111\u01A1n thay th\u1EBF" : item.tthdon === 3 ? "H\xF3a \u0111\u01A1n \u0111i\u1EC1u ch\u1EC9nh" : "H\xF3a \u0111\u01A1n h\u1EE7y",
-          ttxly: Number(item.ttxly || 1),
-          ttxlyLabel: item.ttxly === 1 ? "CQT \u0111\xE3 c\u1EA5p m\xE3" : item.ttxly === 2 ? "CQT ch\u01B0a c\u1EA5p m\xE3" : "\u0110\xE3 ti\u1EBFp nh\u1EADn",
-          mhdon: item.mhdon || "",
-          hsgcma: Boolean(item.mhdon || item.hsgcma),
-          loaiHdon: type,
-          hasDigitalSignature: true,
-          signerName: item.nbten || item.nbtnnt || item.nbtlhdon || "Ng\u01B0\u1EDDi n\u1ED9p thu\u1EBF",
-          signedDate: item.tdlap,
-          caProvider: "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT",
-          msttcgp: item.msttcgp || item.mst_tcgp || "",
-          tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || "",
-          lookupCode: getLookupCodeFromPayload(item),
-          lookupUrl: getLookupUrlFromPayload(item),
-          items: getInvoiceItemListFromPayload(item).map((it, idx) => normalizeInvoiceItem(it, idx)),
-          sourceCompleteness: "summary",
-          // Hóa đơn khởi tạo từ máy tính tiền dùng endpoint /api/sco-query riêng
-          // của GDT; đánh dấu để các bước lấy chi tiết/xuất XML sau này gọi
-          // đúng endpoint (xem getInvoiceEndpoint trong utils/gdtDetail.ts).
-          isPos: source === "sco-query"
-        }));
-        const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
-        const firstPageId = normalizedPage[0]?.id;
-        const repeatedPage = Boolean(firstPageId && accumulated[0]?.id === firstPageId);
-        const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
-        if (hasNextPage) {
-          await sleep(250);
-          return fetchChunkWithRetry(type, chunkFrom, chunkTo, source, maxRetries, page + 1, accumulated.concat(normalizedPage));
-        }
-        return accumulated.concat(normalizedPage);
-      } catch (err) {
-        console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
-        if (attempt < maxRetries) {
-          await sleep(1e3);
-          continue;
-        }
-        return [];
+    let page = 0;
+    let currentState = null;
+    let accumulated = [];
+    const seenInChunk = /* @__PURE__ */ new Set();
+    let hasNextPage = true;
+    while (hasNextPage && page < 100) {
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      if (currentState) {
+        url += `&state=${encodeURIComponent(currentState)}`;
+      } else if (page > 0) {
+        url += `&page=${page}`;
       }
+      let attemptSucceeded = false;
+      let data = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await fetchGDT(url, {
+            method: "GET",
+            headers: {
+              "Authorization": tokenHeader,
+              "Accept": "application/json, text/plain, */*",
+              "End-Point": "/tra-cuu/tra-cuu-hoa-don",
+              "Action": "",
+              ...sanitizedCookie ? { "Cookie": sanitizedCookie } : {}
+            }
+          }, 1, 15e3, vietnamProxy);
+          if (resp.status === 401) {
+            console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
+            if (source === "sco-query") {
+              return accumulated;
+            }
+            return { error: "AUTH_EXPIRED" };
+          }
+          if (resp.status === 403) {
+            console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
+            if (source === "sco-query") {
+              return accumulated;
+            }
+            return { error: "WAF_BLOCKED" };
+          }
+          if (resp.status === 429) {
+            console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
+            if (attempt < maxRetries) {
+              const backoffMs = (attempt + 1) * 1200;
+              await sleep(backoffMs);
+              continue;
+            } else {
+              console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
+              break;
+            }
+          }
+          if (!resp.ok) {
+            const errText = await resp.text();
+            console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1e3);
+              continue;
+            }
+            break;
+          }
+          const rawText = await resp.text();
+          try {
+            data = JSON.parse(rawText);
+            attemptSucceeded = true;
+            break;
+          } catch {
+            console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1e3);
+              continue;
+            }
+            break;
+          }
+        } catch (err) {
+          console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
+          if (attempt < maxRetries) {
+            await sleep(1e3);
+            continue;
+          }
+          break;
+        }
+      }
+      if (!attemptSucceeded || !data) {
+        console.warn(`[GDT Query ${source}/${type}] Could not retrieve page ${page} for ${chunkFrom}..${chunkTo}`);
+        break;
+      }
+      const list = extractGdtInvoiceList(data);
+      const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? data.data?.total ?? 0);
+      const rawNextState = data.state ?? data.State ?? data.data?.state ?? data.data?.State;
+      const nextState = typeof rawNextState === "string" && rawNextState.trim().length > 0 ? rawNextState.trim() : null;
+      const normalizedPage = list.map((item) => ({
+        id: item.id || `GDT_${source === "sco-query" ? "POS_" : ""}${item.khhdon || ""}_${item.shdon || ""}_${item.nbmst || item.nmmst || ""}_${item.tdlap || ""}`,
+        khmshdon: item.khmshdon || item.khmhd || "1",
+        khhdon: item.khhdon || "",
+        shdon: String(item.shdon || item.shd || "").padStart(7, "0"),
+        tdlap: item.tdlap ? item.tdlap.replace(" ", "T") : (/* @__PURE__ */ new Date()).toISOString(),
+        nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ""),
+        nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || "Ng\u01B0\u1EDDi b\xE1n"),
+        nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ""),
+        nmmst: item.nmmst || "",
+        nmten: item.nmten || item.nmtnnt || item.nmtlhdon || "Ng\u01B0\u1EDDi mua",
+        nmdchi: item.nmdchi || "",
+        tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+        tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+        tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? Number(item.tgtcthue ?? item.thtien ?? 0) + Number(item.tgtthue ?? item.tthue ?? 0)),
+        tgtttbchu: item.tgtttbchu || "",
+        htttoan: item.htttoan || "TM/CK",
+        tthdon: Number(item.tthdon || 1),
+        tthdonLabel: item.tthdon === 1 ? "H\xF3a \u0111\u01A1n g\u1ED1c" : item.tthdon === 2 ? "H\xF3a \u0111\u01A1n thay th\u1EBF" : item.tthdon === 3 ? "H\xF3a \u0111\u01A1n \u0111i\u1EC1u ch\u1EC9nh" : "H\xF3a \u0111\u01A1n h\u1EE7y",
+        ttxly: Number(item.ttxly || 1),
+        ttxlyLabel: item.ttxly === 1 ? "CQT \u0111\xE3 c\u1EA5p m\xE3" : item.ttxly === 2 ? "CQT ch\u01B0a c\u1EA5p m\xE3" : "\u0110\xE3 ti\u1EBFp nh\u1EADn",
+        mhdon: item.mhdon || "",
+        hsgcma: Boolean(item.mhdon || item.hsgcma),
+        loaiHdon: type,
+        hasDigitalSignature: true,
+        signerName: item.nbten || item.nbtnnt || item.nbtlhdon || "Ng\u01B0\u1EDDi n\u1ED9p thu\u1EBF",
+        signedDate: item.tdlap,
+        caProvider: "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT",
+        msttcgp: item.msttcgp || item.mst_tcgp || "",
+        tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || "",
+        lookupCode: getLookupCodeFromPayload(item),
+        lookupUrl: getLookupUrlFromPayload(item),
+        items: getInvoiceItemListFromPayload(item).map((it, idx) => normalizeInvoiceItem(it, idx)),
+        sourceCompleteness: "summary",
+        isPos: source === "sco-query"
+      }));
+      let newCount = 0;
+      for (const inv of normalizedPage) {
+        const uniqueKey = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.isPos ? "pos" : "std"}`;
+        if (!seenInChunk.has(uniqueKey)) {
+          seenInChunk.add(uniqueKey);
+          accumulated.push(inv);
+          newCount++;
+        }
+      }
+      console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo} (page ${page + 1}): fetched ${list.length} raw, ${newCount} new (total: ${accumulated.length}/${total || "unknown"}, nextState: ${Boolean(nextState)})`);
+      if (newCount === 0 || list.length === 0) {
+        hasNextPage = false;
+        break;
+      }
+      if (total > 0 && accumulated.length >= total) {
+        hasNextPage = false;
+        break;
+      }
+      if (nextState && nextState !== currentState) {
+        currentState = nextState;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+      if (list.length >= Number(size) && (!total || accumulated.length < total)) {
+        currentState = null;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+      hasNextPage = false;
     }
-    return [];
+    return accumulated;
   };
   const fetchAllChunksForType = async (type, source = "query") => {
     let allInvoices = [];
@@ -10998,7 +11659,7 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 });
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
-    const zip = new JSZip3();
+    const zip = new JSZip4();
     const fs = await import("fs");
     const pythonDir = path2.join(process.cwd(), "python");
     const files = [
@@ -11254,6 +11915,38 @@ app.post("/api/invoice-downloader/solve-captcha", async (req, res) => {
       processingTimeMs: result.processingTimeMs
     });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/easyinvoice/download", async (req, res) => {
+  try {
+    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon, viewOnly } = req.body;
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 tra c\u1EE9u EasyInvoice (FKey) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalEasyInvoice({
+      lookupCode: String(lookupCode).trim(),
+      sellerTaxCode: sellerTaxCode ? String(sellerTaxCode).trim() : void 0,
+      lookupUrl: lookupUrl ? String(lookupUrl).trim() : void 0,
+      khhdon: khhdon ? String(khhdon).trim() : void 0,
+      shdon: shdon ? String(shdon).trim() : void 0,
+      viewOnly: Boolean(viewOnly)
+    });
+    if (req.query.format === "binary") {
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+      return res.send(result.buffer);
+    }
+    res.json({
+      success: true,
+      filename: result.filename,
+      contentType: result.contentType,
+      pdfBase64: result.pdfBase64 || result.buffer.toString("base64"),
+      htmlContent: result.htmlContent || "",
+      message: "\u0110\xE3 t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i v\u1EC1 h\xF3a \u0111\u01A1n g\u1ED1c th\xE0nh c\xF4ng."
+    });
+  } catch (error) {
+    console.error("[EasyInvoice] L\u1ED7i t\u1EA3i h\xF3a \u0111\u01A1n g\u1ED1c:", error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

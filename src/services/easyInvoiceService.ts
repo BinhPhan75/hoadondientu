@@ -203,6 +203,7 @@ export interface EasyInvoiceDownloadParams {
   lookupUrl?: string;
   khhdon?: string;
   shdon?: string;
+  viewOnly?: boolean;
 }
 
 export interface EasyInvoiceDownloadResult {
@@ -328,6 +329,19 @@ export async function downloadOriginalEasyInvoice(
       const b64Html = Buffer.from(invoiceHtml, 'utf-8').toString('base64');
 
       let downloadFileName = `HOADON_${sellerTaxCode || 'EASYINVOICE'}_${khhdon || 'HD'}_${shdon || lookupCode}`;
+
+      // The provider's HTML is the authoritative invoice presentation. Return
+      // it before PDF generation when the UI requests an original view.
+      if (params.viewOnly && invoiceHtml) {
+        return {
+          success: true,
+          filename: `${downloadFileName}.html`,
+          contentType: 'text/html',
+          buffer: Buffer.from(invoiceHtml, 'utf-8'),
+          htmlContent: invoiceHtml,
+          message: 'Đã tra cứu và nhận bản thể hiện gốc EasyInvoice.'
+        };
+      }
 
       // Thử gọi endpoint tải PDF chính thức từ server EasyInvoice
       if (token && b64Html) {
