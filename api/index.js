@@ -7632,7 +7632,7 @@ function getModel() {
   if (!model) {
     const client = new GoogleGenerativeAI(apiKey);
     model = client.getGenerativeModel({
-      model: "gemini-2.5-flash-lite",
+      model: "gemini-3.5-flash-lite",
       generationConfig: {
         temperature: 0,
         maxOutputTokens: 10
