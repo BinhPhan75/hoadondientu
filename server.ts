@@ -10,6 +10,7 @@ import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFr
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
+import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -55,6 +56,7 @@ app.use((req, res, next) => {
       req.url.startsWith('/admin') ||
       req.url.startsWith('/gdt') ||
       req.url.startsWith('/invoice-downloader') ||
+      req.url.startsWith('/easyinvoice') ||
       req.url.startsWith('/health') ||
       req.url.startsWith('/selenium')
     ) {
@@ -1611,6 +1613,41 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
       processingTimeMs: result.processingTimeMs
     });
   } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 16. Softdreams EasyInvoice: Tự động giải Captcha bằng Tesseract.js & Tải hóa đơn gốc
+app.post('/api/easyinvoice/download', async (req, res) => {
+  try {
+    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon } = req.body;
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã tra cứu EasyInvoice (FKey) không được để trống' });
+    }
+
+    const result = await downloadOriginalEasyInvoice({
+      lookupCode: String(lookupCode).trim(),
+      sellerTaxCode: sellerTaxCode ? String(sellerTaxCode).trim() : undefined,
+      lookupUrl: lookupUrl ? String(lookupUrl).trim() : undefined,
+      khhdon: khhdon ? String(khhdon).trim() : undefined,
+      shdon: shdon ? String(shdon).trim() : undefined
+    });
+
+    if (req.query.format === 'binary') {
+      res.setHeader('Content-Type', result.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+      return res.send(result.buffer);
+    }
+
+    res.json({
+      success: true,
+      filename: result.filename,
+      contentType: result.contentType,
+      pdfBase64: result.pdfBase64 || result.buffer.toString('base64'),
+      message: 'Đã tự động vượt Captcha và tải về hóa đơn gốc thành công.'
+    });
+  } catch (error: any) {
+    console.error('[EasyInvoice] Lỗi tải hóa đơn gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

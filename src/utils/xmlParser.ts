@@ -441,6 +441,74 @@ export function isVnptSource(source: any): boolean {
 }
 
 /**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp LCS Soft (PNJ - Công ty TNHH L.C.S) hay không.
+ */
+export function isLcsSource(source: any): boolean {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0302999571' || // CÔNG TY TNHH L.C.S
+    tentcgp.includes('L.C.S') ||
+    tentcgp.includes('LCSSOFT') ||
+    provider === 'LCS' ||
+    nbmst === '0315018466' || // CÔNG TY TNHH MTV CHẾ TÁC VÀ KINH DOANH TRANG SỨC PNJ
+    nbten.includes('TRANG SỨC PNJ') ||
+    nbten.includes('TRANG SUC PNJ') ||
+    lookupUrl.includes('lcssoft.com.vn') ||
+    lookupUrl.includes('eip.lcssoft')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp VNPAY Invoice (Vietcombank...) hay không.
+ */
+export function isVnpaySource(source: any): boolean {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0102182292' || // VNPAY
+    tentcgp.includes('VNPAY') ||
+    tentcgp.includes('THANH TOÁN VIỆT NAM') ||
+    tentcgp.includes('THANH TOAN VIET NAM') ||
+    provider === 'VNPAY' ||
+    nbmst === '0100112437' || // Vietcombank
+    nbten.includes('VIETCOMBANK') ||
+    lookupUrl.includes('vnpayinvoice.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp FPT hay không.
+ */
+export function isFptSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0104128565' || // FPT
+    tentcgp.includes('FPT') ||
+    provider === 'FPT' ||
+    lookupUrl.includes('ftg.vn') ||
+    lookupUrl.includes('fpt.com.vn')
+  );
+}
+
+/**
  * Kiểm tra xem hóa đơn/payload có thuộc giải pháp MISA meInvoice (Tân Thanh Danh, Tài Trâm Anh, Xuân Vinh...) hay không.
  */
 export function isMisaSource(source: any): boolean {
@@ -485,6 +553,15 @@ export function getLookupCodeFromPayload(source: any): string {
     return cleanLookupValue(misaTransactionId);
   }
 
+  // Đối với hóa đơn LCS Soft (PNJ): mã tra cứu chính là mã CQT cấp (mhdon / mccqt 32 ký tự hex)
+  if (isLcsSource(source)) {
+    const cqtCode = getPayloadValue(source, ['mhdon', 'mccqt', 'MCCQT', 'cqtCode']);
+    if (cqtCode) {
+      const cleanCqt = cleanLookupValue(cqtCode);
+      if (cleanCqt) return cleanCqt;
+    }
+  }
+
   const values = [
     misaTransactionId,
     getPayloadValue(source, ['lookupCode', 'LookupCode']),
@@ -519,10 +596,27 @@ export function getLookupCodeFromPayload(source: any): string {
     }
   }
 
+  // Đối với hóa đơn VNPAY: nếu không có mã thì trả về định danh bên bán (như Vietcombank)
+  if (isVnpaySource(source)) {
+    return 'Vietcombank';
+  }
+
   return '';
 }
 
 export function getLookupUrlFromPayload(source: any): string {
+  if (isLcsSource(source)) {
+    return 'https://eip.lcssoft.com.vn/desktop/#/login';
+  }
+
+  if (isVnpaySource(source)) {
+    return 'https://portal.vnpayinvoice.vn/';
+  }
+
+  if (isFptSource(source)) {
+    return 'https://hoadon.ftg.vn/';
+  }
+
   if (isVnptSource(source)) {
     const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '4000344946');
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
@@ -737,11 +831,34 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
 
-  // 6c. 4SI / LCS (PNJ):
-  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883|0302999571|0315018466/i.test(rawXml);
+  // 6c. LCS Soft (PNJ - eip.lcssoft.com.vn)
+  const isLcs = /eip\.lcssoft\.com\.vn|lcssoft|0302999571|0315018466/i.test(rawXml) ||
+    /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(rawXml);
+  if (isLcs) {
+    if (!lookupUrl) lookupUrl = 'https://eip.lcssoft.com.vn/desktop/#/login';
+    if (!lookupCode) {
+      const mhdon = extractTagValue(rawXml, 'mhdon', '') || extractTagValue(rawXml, 'MCQTCap', '');
+      if (mhdon) lookupCode = mhdon;
+    }
+  }
+
+  // 6d. VNPAY Invoice
+  const isVnpay = /vnpayinvoice|0102182292/i.test(rawXml);
+  if (isVnpay) {
+    if (!lookupUrl) lookupUrl = 'https://portal.vnpayinvoice.vn/';
+    if (!lookupCode) lookupCode = 'Vietcombank';
+  }
+
+  // 6e. FPT Invoice
+  const isFpt = /hoadon\.ftg\.vn|0104128565/i.test(rawXml);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = 'https://hoadon.ftg.vn/';
+  }
+
+  // 6f. 4SI
+  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883/i.test(rawXml);
   if (is4Si) {
     if (!lookupUrl) lookupUrl = 'https://inv.4si.vn/tra-cuu-hoa-don';
-    // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
     if (!extractTagValue(rawXml, 'MTCuu') && !extractTagValue(rawXml, 'MaTraCuu') && !extractTagValue(rawXml, 'FKey')) {
       lookupCode = '';
     }
@@ -1575,6 +1692,46 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     if (!lookupUrl) {
       lookupUrl = `https://${nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
     }
+  }
+
+  // Đối với hóa đơn LCS Soft (PNJ): mã tra cứu chính là mã CQT cấp (mhdon) và link tra cứu là eip.lcssoft.com.vn
+  const isLcs = provider === 'LCS' ||
+    msttcgp === '0302999571' ||
+    tentcgp.toUpperCase().includes('L.C.S') ||
+    tentcgp.toUpperCase().includes('LCSSOFT') ||
+    nbmst === '0315018466' ||
+    nbten.toUpperCase().includes('PNJ') ||
+    /eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlSource);
+
+  if (isLcs) {
+    if (!lookupCode && mhdon) {
+      lookupCode = mhdon;
+    }
+    if (!lookupUrl) {
+      lookupUrl = 'https://eip.lcssoft.com.vn/desktop/#/login';
+    }
+  }
+
+  // Đối với VNPAY Invoice
+  const isVnpay = provider === 'VNPAY' ||
+    msttcgp === '0102182292' ||
+    tentcgp.toUpperCase().includes('VNPAY') ||
+    nbmst === '0100112437' ||
+    /vnpayinvoice/i.test(xmlSource);
+
+  if (isVnpay) {
+    if (!lookupUrl) lookupUrl = 'https://portal.vnpayinvoice.vn/';
+    if (!lookupCode) lookupCode = 'Vietcombank';
+  }
+
+  // Đối với FPT Invoice
+  const isFpt = provider === 'FPT' ||
+    msttcgp === '0104128565' ||
+    tentcgp.toUpperCase().includes('FPT') ||
+    /hoadon\.ftg\.vn/i.test(xmlSource);
+
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = 'https://hoadon.ftg.vn/';
   }
 
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;

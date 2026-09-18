@@ -257,13 +257,13 @@ export const SAMPLE_PARTNER_INVOICES: GDTInvoice[] = [
     ]
   },
 
-  // 5. CÔNG TY TNHH KINH DOANH VÀNG BẠC KIM LOAN TUẤN
+  // 5. CÔNG TY TNHH KINH DOANH VÀNG BẠC KIM LOAN TUẤN (EasyInvoice)
   {
-    id: 'HD_KIM_LOAN_TUAN_00000025',
-    khmshdon: '1',
-    khhdon: '1M26TKL',
-    shdon: '00000025',
-    tdlap: '2026-07-28T14:10:00',
+    id: 'HD_KIM_LOAN_TUAN_00001683',
+    khmshdon: '2',
+    khhdon: '2C26MAA',
+    shdon: '0001683',
+    tdlap: '2026-03-15T10:20:00',
     nbmst: '0318391940',
     nbten: 'CÔNG TY TNHH KINH DOANH VÀNG BẠC KIM LOAN TUẤN',
     nbdchi: 'Số 55 - 57 Đường Nghĩa Thục, Phường An Đông, Thành phố Hồ Chí Minh, Việt Nam',
@@ -289,9 +289,10 @@ export const SAMPLE_PARTNER_INVOICES: GDTInvoice[] = [
     loaiHdon: 'purchase',
     hasDigitalSignature: true,
     signerName: 'CÔNG TY TNHH KINH DOANH VÀNG BẠC KIM LOAN TUẤN',
-    signedDate: '2026-07-28T14:11:45',
+    signedDate: '2026-03-15T10:22:15',
     caProvider: 'EASYCA-SOFTDREAMS',
-    lookupCode: 'KLT-2026-00000025',
+    provider: 'EASYINVOICE',
+    lookupCode: 'LI5JWBR7V',
     lookupUrl: 'http://0318391940hd.easyinvoice.com.vn',
     items: [
       {

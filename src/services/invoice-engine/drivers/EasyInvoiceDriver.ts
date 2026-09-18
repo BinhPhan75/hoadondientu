@@ -7,8 +7,8 @@ import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
-import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { GenericFallbackDriver } from './GenericFallbackDriver';
+import { downloadOriginalEasyInvoice } from '../../easyInvoiceService';
 
 export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
   readonly name = 'Softdreams EasyInvoice Driver';
@@ -68,83 +68,35 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
     const cleanMst = (info.sellerTaxCode || '').trim();
     this.createLog(`Mã tra cứu EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
 
-    const timeoutMs = options?.timeoutMs || 15000;
-
-    // 1. Thử cơ chế vượt Captcha trên các cổng Portal EasyInvoice
-    const portalCandidates = [
-      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, '') : null,
-      'https://easyinvoice.vn',
-      'https://tracuu.easyinvoice.vn',
-      cleanMst ? `https://${cleanMst}.easyinvoice.com.vn` : null
-    ].filter(Boolean) as string[];
-
-    for (const portal of portalCandidates) {
+    // 1. Nếu có mã tra cứu, thử tải trực tiếp hóa đơn gốc qua Cổng EasyInvoice với Tesseract Captcha Solver
+    if (lookupCode) {
       try {
-        const captchaUrl = `${portal}/Home/GetCaptcha`;
-        this.createLog(`Đang lấy ảnh Captcha từ cổng EasyInvoice: ${captchaUrl}`, logs);
-
-        const captchaResp = await axios.get(captchaUrl, {
-          timeout: 8000,
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Referer': portal
-          },
-          validateStatus: (s) => s === 200
+        this.createLog(`Đang kết nối cổng EasyInvoice và tự động giải Captcha bằng Tesseract.js...`, logs);
+        const dlRes = await downloadOriginalEasyInvoice({
+          lookupCode,
+          sellerTaxCode: cleanMst,
+          lookupUrl: info.lookupUrl,
+          khhdon: info.invoiceSeries,
+          shdon: info.invoiceNo
         });
 
-        const cookieHeader = captchaResp.headers['set-cookie']
-          ? (Array.isArray(captchaResp.headers['set-cookie']) ? captchaResp.headers['set-cookie'].join('; ') : captchaResp.headers['set-cookie'])
-          : '';
-
-        if (captchaResp.data && captchaResp.data.byteLength > 20) {
-          this.createLog('Đã nhận ảnh Captcha EasyInvoice. Đang trích xuất mã Captcha...', logs);
-          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
-          const captchaCode = captchaResult.code;
-          this.createLog(`Đã giải Captcha EasyInvoice thành công: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
-
-          // Gửi yêu cầu xác thực tải PDF hóa đơn
-          const queryUrl = `${portal}/Home/TraCuuHoaDon`;
-          const queryResp = await axios.post(queryUrl, {
-            Ikey: lookupCode,
-            Mst: cleanMst,
-            Captcha: captchaCode,
-            Pattern: info.templateCode,
-            Serial: info.invoiceSeries
-          }, {
-            timeout: timeoutMs,
-            responseType: 'arraybuffer',
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-              'Referer': portal,
-              'Cookie': cookieHeader,
-              ...(options?.customHeaders || {})
-            },
-            validateStatus: (s) => s < 500
-          });
-
-          if (queryResp.data && queryResp.data.byteLength > 50) {
-            const buf = Buffer.from(queryResp.data);
-            if (buf.toString('utf-8', 0, 5).startsWith('%PDF')) {
-              this.createLog(`Vượt Captcha và tải thành công file PDF gốc từ EasyInvoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString('base64'),
-                contentType: 'application/pdf',
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: queryUrl,
-                captchaSolved: captchaCode,
-                executionLogs: logs
-              };
-            }
-          }
+        if (dlRes.success && dlRes.buffer && dlRes.buffer.length > 50) {
+          this.createLog(`Vượt Captcha và tải thành công hóa đơn gốc từ EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: dlRes.buffer,
+            pdfBase64: dlRes.pdfBase64 || dlRes.buffer.toString('base64'),
+            contentType: dlRes.contentType || 'application/pdf',
+            filename: dlRes.filename || this.buildPdfFilename(info),
+            isFallback: false,
+            sourceUrl: info.lookupUrl || 'https://tracuu.easyinvoice.vn',
+            executionLogs: logs
+          };
         }
-      } catch (portalErr: any) {
-        this.createLog(`Cổng EasyInvoice ${portal} chưa hoàn tất: ${portalErr.message}`, logs);
+      } catch (err: any) {
+        this.createLog(`Tải từ cổng EasyInvoice chưa hoàn tất: ${err.message}`, logs);
       }
     }
 

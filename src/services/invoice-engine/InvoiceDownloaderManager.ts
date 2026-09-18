@@ -17,6 +17,7 @@ import { CaptchaSolver } from './captcha/CaptchaSolver';
 import { MisaDriver } from './drivers/MisaDriver';
 import { ViettelDriver } from './drivers/ViettelDriver';
 import { FourSiDriver } from './drivers/FourSiDriver';
+import { LcsDriver } from './drivers/LcsDriver';
 import { VnptDriver } from './drivers/VnptDriver';
 import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
 import { BkavDriver } from './drivers/BkavDriver';
@@ -40,6 +41,7 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new MisaDriver());
     this.registerDriver(new ViettelDriver());
     this.registerDriver(new FourSiDriver());
+    this.registerDriver(new LcsDriver());
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
     this.registerDriver(new BkavDriver());

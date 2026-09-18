@@ -184,9 +184,28 @@ export function buildDirectLookupUrl(
     return cleanUrl;
   }
 
-  // 4. 4Si / LCS (PNJ)
-  // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
-  const is4Si = provider.includes('4SI') || provider.includes('PNJ') || /4si\.vn/i.test(url);
+  // 4. LCS Soft EIP (PNJ: 0315018466, LCS: 0302999571)
+  const isLcs = provider.includes('LCS') || provider.includes('PNJ') ||
+    sellerTaxCode === '0315018466' || sellerTaxCode === '0302999571' ||
+    /eip\.lcssoft\.com\.vn|lcssoft/i.test(url);
+  if (isLcs) {
+    return 'https://eip.lcssoft.com.vn/desktop/#/login';
+  }
+
+  // 4b. VNPAY Invoice (Vietcombank: 0100112437, VNPAY: 0102182292)
+  const isVnpay = provider.includes('VNPAY') || sellerTaxCode === '0100112437' || /vnpayinvoice/i.test(url);
+  if (isVnpay) {
+    return 'https://portal.vnpayinvoice.vn/';
+  }
+
+  // 4c. FPT Electronic Invoice
+  const isFpt = provider.includes('FPT') || /hoadon\.ftg\.vn|fpt\.com\.vn/i.test(url);
+  if (isFpt) {
+    return 'https://hoadon.ftg.vn/';
+  }
+
+  // 4d. 4Si
+  const is4Si = provider.includes('4SI') || /4si\.vn/i.test(url);
   if (is4Si) {
     return 'https://inv.4si.vn/tra-cuu-hoa-don';
   }

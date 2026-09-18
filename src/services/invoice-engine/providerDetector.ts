@@ -23,11 +23,14 @@ export type DetectedInvoiceProvider =
   | 'MISA' 
   | 'VIETTEL' 
   | 'VNPT' 
+  | 'LCS'
   | '4SI' 
   | 'EASYINVOICE' 
   | 'BKAV' 
   | 'THAISON'
   | 'CYBERBILL'
+  | 'VNPAY'
+  | 'FPT'
   | 'UNKNOWN';
 
 export interface DetectionResultDetails {
@@ -90,6 +93,36 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
       priority: 1,
       matchedPattern: 'vnpt-invoice',
       sourceDescription: 'Phát hiện Domain/Chuỗi tra cứu VNPT Invoice (vnpt-invoice)'
+    };
+  }
+
+  // 1.3b eip.lcssoft.com.vn / lcssoft -> 'LCS'
+  if (/eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlString)) {
+    return {
+      provider: 'LCS',
+      priority: 1,
+      matchedPattern: 'eip.lcssoft.com.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu LCS Soft EIP (eip.lcssoft.com.vn)'
+    };
+  }
+
+  // 1.3c vnpayinvoice.vn / vnpay -> 'VNPAY'
+  if (/vnpayinvoice|vnpay\.vn/i.test(xmlString)) {
+    return {
+      provider: 'VNPAY',
+      priority: 1,
+      matchedPattern: 'vnpayinvoice.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu VNPAY Invoice (portal.vnpayinvoice.vn)'
+    };
+  }
+
+  // 1.3d hoadon.ftg.vn / fpt.com.vn -> 'FPT'
+  if (/hoadon\.ftg\.vn|hoadondientu\.fpt|fpt\.com\.vn/i.test(xmlString)) {
+    return {
+      provider: 'FPT',
+      priority: 1,
+      matchedPattern: 'hoadon.ftg.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu FPT Electronic Invoice'
     };
   }
 
@@ -190,6 +223,30 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
         sourceDescription: 'Phát hiện Tổ chức giải pháp Softdreams EasyInvoice qua thẻ <MSTTCGP> (0105987432)'
       };
     }
+    if (msttcgp === '0302999571') {
+      return {
+        provider: 'LCS',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0302999571',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH L.C.S (LCS Soft) qua thẻ <MSTTCGP> (0302999571)'
+      };
+    }
+    if (msttcgp === '0102182292') {
+      return {
+        provider: 'VNPAY',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0102182292',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty Cổ phần Giải pháp Thanh toán Việt Nam (VNPAY) qua thẻ <MSTTCGP> (0102182292)'
+      };
+    }
+    if (msttcgp === '0104128565') {
+      return {
+        provider: 'FPT',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0104128565',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH Hệ thống Thông tin FPT qua thẻ <MSTTCGP> (0104128565)'
+      };
+    }
     if (msttcgp === '0315744883') {
       return {
         provider: '4SI',
@@ -235,6 +292,15 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     if (tentcgp.includes('SOFTDREAMS') || tentcgp.includes('EASYINVOICE')) {
       return { provider: 'EASYINVOICE', priority: 1.5, matchedPattern: 'TenTCGP: SOFTDREAMS', sourceDescription: 'Tổ chức giải pháp: Softdreams EasyInvoice' };
     }
+    if (tentcgp.includes('L.C.S') || tentcgp.includes('LCSSOFT')) {
+      return { provider: 'LCS', priority: 1.5, matchedPattern: 'TenTCGP: LCS', sourceDescription: 'Tổ chức giải pháp: Công ty TNHH L.C.S (LCS Soft)' };
+    }
+    if (tentcgp.includes('VNPAY') || tentcgp.includes('THANH TOÁN VIỆT NAM') || tentcgp.includes('THANH TOAN VIET NAM')) {
+      return { provider: 'VNPAY', priority: 1.5, matchedPattern: 'TenTCGP: VNPAY', sourceDescription: 'Tổ chức giải pháp: VNPAY Invoice' };
+    }
+    if (tentcgp.includes('FPT')) {
+      return { provider: 'FPT', priority: 1.5, matchedPattern: 'TenTCGP: FPT', sourceDescription: 'Tổ chức giải pháp: FPT Information System' };
+    }
     if (tentcgp.includes('4SI')) {
       return { provider: '4SI', priority: 1.5, matchedPattern: 'TenTCGP: 4SI', sourceDescription: 'Tổ chức giải pháp: 4Si' };
     }
@@ -259,6 +325,16 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
       priority: 1.8,
       matchedPattern: 'MISA Partner (Tân Thanh Danh / Tài Trâm Anh / Xuân Vinh)',
       sourceDescription: 'Hóa đơn phát hành qua hệ thống MISA meInvoice'
+    };
+  }
+
+  // Quét bên bán PNJ (0315018466) sử dụng LCS Soft EIP
+  if (/0315018466/i.test(xmlString) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(xmlString)) {
+    return {
+      provider: 'LCS',
+      priority: 1.8,
+      matchedPattern: 'PNJ (Công ty Cổ phần Vàng bạc Đá quý Phú Nhuận / LCS Soft)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống LCS Soft EIP (PNJ)'
     };
   }
 

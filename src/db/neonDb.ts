@@ -30,6 +30,8 @@ let pool: Pool | null = null;
 let isPostgresConnected = false;
 let isTableInitialized = false;
 
+const DEFAULT_NEON_DATABASE_URL = 'postgresql://neondb_owner:npg_DgrFB8VKyHC4@ep-holy-tooth-az1tfp1l-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require';
+
 function getDatabaseConfig(): { url: string; source: string } {
   const candidates: Array<[string, string | undefined]> = [
     ['POSTGRES_URL', process.env.POSTGRES_URL],
@@ -37,7 +39,8 @@ function getDatabaseConfig(): { url: string; source: string } {
     ['NEON_DATABASE_URL', process.env.NEON_DATABASE_URL],
     ['POSTGRES_PRISMA_URL', process.env.POSTGRES_PRISMA_URL],
     ['POSTGRES_URL_NON_POOLING', process.env.POSTGRES_URL_NON_POOLING],
-    ['DATABASE_URL_UNPOOLED', process.env.DATABASE_URL_UNPOOLED]
+    ['DATABASE_URL_UNPOOLED', process.env.DATABASE_URL_UNPOOLED],
+    ['DEFAULT_NEON_FALLBACK', DEFAULT_NEON_DATABASE_URL]
   ];
   const selected = candidates.find(([, value]) => value && value.trim());
   let url = (selected?.[1] || '').trim().replace(/^["']|["']$/g, '').trim();

@@ -11,7 +11,8 @@ import {
   Sparkles, 
   RefreshCw, 
   ExternalLink,
-  FileText
+  FileText,
+  Loader2
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
@@ -267,6 +268,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId === 'VIETTEL' || 
     Boolean(effectiveInvoice?.caProvider?.includes('VIETTEL'));
 
+  const isEasyInvoice = /easyinvoice/i.test(directLookupUrl) ||
+    /easyinvoice/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === 'EASYINVOICE' || 
+    effectiveTemplateId === 'BAO_DUY' || 
+    effectiveTemplateId === 'KIM_LOAN_TUAN' || 
+    effectiveTemplateId === 'TKJ' ||
+    effectiveInvoice?.provider === 'EASYINVOICE' ||
+    effectiveInvoice?.msttcgp === '0105987432' ||
+    effectiveInvoice?.nbmst === '0318391940';
+
   if (!renderError) {
     try {
       // Tạo HTML chuẩn theo template của nhà cung cấp
@@ -317,6 +328,68 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const handlePrint = () => {
     openInvoicePrintWindow(effectiveInvoice, theme, effectiveTemplateId);
+  };
+
+  const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
+  const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
+
+  const handleDownloadEasyInvoice = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang giải mã Captcha & tải HĐ...');
+    try {
+      const resp = await fetch('/api/easyinvoice/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+          khhdon: effectiveInvoice.khhdon,
+          shdon: effectiveInvoice.shdon
+        })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Tải hóa đơn từ EasyInvoice thất bại.');
+      }
+
+      // Tải file về máy
+      const filename = data.filename || `HOADON_${effectiveInvoice.khhdon}_${effectiveInvoice.shdon}.pdf`;
+      const contentType = data.contentType || 'application/pdf';
+      const byteCharacters = atob(data.pdfBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: contentType });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+
+      setEasyInvoiceDownloadStatus('Đã tải thành công!');
+      setTimeout(() => setEasyInvoiceDownloadStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải EasyInvoice:', err);
+      alert(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message}\nBạn có thể nhấn nút "Mở Cổng" để tra cứu trực tiếp.`);
+      setEasyInvoiceDownloadStatus(null);
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
   };
 
   const isRed = theme === 'red';
@@ -443,7 +516,36 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {directLookupUrl && (
+            {isEasyInvoice ? (
+              <div className="inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleDownloadEasyInvoice}
+                  disabled={isDownloadingEasyInvoice}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title={`Tự động vượt Captcha bằng Tesseract.js và tải HĐ gốc từ Cổng EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
+                >
+                  {isDownloadingEasyInvoice ? (
+                    <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang giải captcha & tải HĐ...') : 'Tải hóa đơn gốc'}</span>
+                </button>
+                {directLookupUrl && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    title="Mở cổng tra cứu EasyInvoice (Đã dán sẵn mã FKey)"
+                  >
+                    <ExternalLink className="w-3 h-3 text-gray-400" />
+                    <span>Mở Cổng</span>
+                  </a>
+                )}
+              </div>
+            ) : directLookupUrl && (
               <a
                 href={directLookupUrl}
                 target="_blank"
