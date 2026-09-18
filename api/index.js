@@ -6,7 +6,6 @@ import crypto2 from "crypto";
 import { spawn } from "child_process";
 import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
-import Tesseract from "tesseract.js";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -7621,312 +7620,102 @@ var OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 
 </xsl:stylesheet>`;
 
-// src/services/invoice-engine/captcha/CaptchaSolver.ts
-import { createWorker } from "tesseract.js";
-import { GoogleGenAI } from "@google/genai";
-var aiClient = null;
-function getGenAI() {
+// src/services/invoice-engine/captcha/geminiCaptchaSolver.ts
+import { GoogleGenerativeAI } from "@google/generative-ai";
+var CAPTCHA_PROMPT = "Extract the 4-digit captcha code from this image. Output ONLY the 4 digits, nothing else.";
+var model = null;
+function getModel() {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey });
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5u h\xECnh.");
   }
-  return aiClient;
+  if (!model) {
+    const client = new GoogleGenerativeAI(apiKey);
+    model = client.getGenerativeModel({
+      model: "gemini-2.5-flash-lite",
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 10
+      }
+    });
+  }
+  return model;
 }
-var CaptchaSolver = class {
-  static {
-    this.workerInstance = null;
+function toImagePart(image) {
+  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
+    return { data: Buffer.from(image).toString("base64"), mimeType: "image/png" };
   }
-  static {
-    this.isInitializing = false;
+  const source = image.trim();
+  const dataUri = source.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+  if (dataUri) {
+    return { data: dataUri[2], mimeType: dataUri[1] };
   }
-  static {
-    this.initPromise = null;
+  return { data: source, mimeType: "image/png" };
+}
+async function solveCaptchaWithGemini(base64Image) {
+  try {
+    const image = toImagePart(base64Image);
+    const result = await getModel().generateContent([
+      { inlineData: image },
+      CAPTCHA_PROMPT
+    ]);
+    const rawText = result.response.text();
+    const digits = rawText.replace(/\D/g, "");
+    if (digits.length !== 4) {
+      throw new Error(`Gemini tr\u1EA3 v\u1EC1 m\xE3 Captcha kh\xF4ng h\u1EE3p l\u1EC7: "${rawText.trim()}"`);
+    }
+    return digits;
+  } catch (error) {
+    console.error("[Gemini CAPTCHA] Gi\u1EA3i Captcha th\u1EA5t b\u1EA1i:", error?.message || error);
+    throw error;
   }
-  /**
-   * Giải Captcha bằng AI (Gemini Vision) theo chỉ thị trích xuất ký tự chuyên sâu
-   */
-  static async solveWithAI(imageInput, options) {
-    const ai = getGenAI();
-    if (!ai) return null;
-    const startTime = Date.now();
-    try {
-      let buf;
-      let mimeType = "image/png";
-      if (Buffer.isBuffer(imageInput)) {
-        buf = imageInput;
-      } else if (imageInput instanceof Uint8Array) {
-        buf = Buffer.from(imageInput);
-      } else if (typeof imageInput === "string") {
-        const trimmed = imageInput.trim();
-        if (trimmed.startsWith("data:image/")) {
-          const match = trimmed.match(/^data:(image\/[a-zA-Z+]+);base64,/);
-          if (match) {
-            mimeType = match[1];
-            buf = Buffer.from(trimmed.substring(match[0].length), "base64");
-          } else {
-            buf = Buffer.from(trimmed, "base64");
-          }
-        } else {
-          buf = Buffer.from(trimmed, "base64");
-        }
-      } else {
-        return null;
-      }
-      if (buf[0] === 255 && buf[1] === 216) {
-        mimeType = "image/jpeg";
-      } else if (buf[0] === 137 && buf[1] === 80) {
-        mimeType = "image/png";
-      } else if (buf[0] === 71 && buf[1] === 73) {
-        mimeType = "image/gif";
-      }
-      const base64Data = buf.toString("base64");
-      const prompt = `Nhi\u1EC7m v\u1EE5:
-1. Nh\xECn v\xE0o h\xECnh \u1EA3nh captcha \u0111\u01B0\u1EE3c cung c\u1EA5p.
-2. Tr\xEDch xu\u1EA5t ch\xEDnh x\xE1c c\xE1c k\xFD t\u1EF1/ch\u1EEF s\u1ED1 xu\u1EA5t hi\u1EC7n trong captcha.
-3. B\u1ECF qua t\u1EA5t c\u1EA3 nhi\u1EC5u, \u0111\u01B0\u1EDDng g\u1EA1ch ngang, n\u1EC1n m\u1EDD ho\u1EB7c m\xE0u s\u1EAFc xung quanh.
+}
 
-Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
-- CH\u1EC8 tr\u1EA3 v\u1EC1 \u0111\xFAng chu\u1ED7i k\xFD t\u1EF1/ch\u1EEF s\u1ED1 \u0111\xE3 \u0111\u1ECDc \u0111\u01B0\u1EE3c.
-- KH\xD4NG gi\u1EA3i th\xEDch, KH\xD4NG ch\xE0o h\u1ECFi, KH\xD4NG \u0111\xEDnh k\xE8m d\u1EA5u c\xE2u ho\u1EB7c kho\u1EA3ng tr\u1EAFng d\u01B0 th\u1EEBa.`;
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data
-                }
-              },
-              {
-                text: prompt
-              }
-            ]
-          }
-        ]
-      });
-      const responseText = response.text ? response.text.trim() : "";
-      const cleanCode = responseText.replace(/[^a-zA-Z0-9]/g, "").trim();
-      if (cleanCode.length >= 2 && cleanCode.length <= 10) {
-        console.log(`[CaptchaSolver:AI] \u0110\xE3 tr\xEDch xu\u1EA5t Captcha b\u1EB1ng AI: "${cleanCode}" (${Date.now() - startTime}ms)`);
-        return {
-          code: cleanCode,
-          confidence: 99,
-          engine: "gemini",
-          processingTimeMs: Date.now() - startTime
-        };
-      }
-    } catch (aiErr) {
-      console.warn("[CaptchaSolver:AI] AI gi\u1EA3i Captcha l\u1ED7i ho\u1EB7c timeout, chuy\u1EC3n sang Tesseract/Fallback:", aiErr.message);
+// src/services/invoice-engine/captcha/CaptchaSolver.ts
+var CaptchaSolver = class {
+  static async solveWithAI(imageInput, _options) {
+    try {
+      const startTime = Date.now();
+      const code = await solveCaptchaWithGemini(imageInput);
+      return {
+        code,
+        confidence: 99,
+        engine: "gemini",
+        processingTimeMs: Date.now() - startTime
+      };
+    } catch {
+      return null;
     }
-    return null;
   }
-  /**
-   * Khởi tạo hoặc lấy worker Tesseract.js dạng Singleton để tối ưu hiệu năng
-   */
-  static async getWorker(lang = "eng") {
-    if (this.workerInstance) {
-      return this.workerInstance;
-    }
-    if (this.initPromise) {
-      return this.initPromise;
-    }
-    this.isInitializing = true;
-    this.initPromise = (async () => {
-      try {
-        console.log("[CaptchaSolver] \u0110ang kh\u1EDFi t\u1EA1o Tesseract.js OCR Worker...");
-        const worker2 = await createWorker(lang, 1, {
-          errorHandler: (err) => {
-            if (process.env.DEBUG_OCR) {
-              console.warn("[CaptchaSolver] Worker error handled safely:", err);
-            }
-          },
-          logger: (m) => {
-            if (process.env.DEBUG_OCR) {
-              console.log(`[Tesseract Log] ${m.status}: ${(m.progress * 100).toFixed(0)}%`);
-            }
-          }
-        });
-        await worker2.setParameters({
-          tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-          tessedit_pageseg_mode: "7"
-        });
-        this.workerInstance = worker2;
-        this.isInitializing = false;
-        console.log("[CaptchaSolver] Kh\u1EDFi t\u1EA1o Tesseract.js Worker th\xE0nh c\xF4ng.");
-        return worker2;
-      } catch (error) {
-        this.isInitializing = false;
-        this.initPromise = null;
-        console.error("[CaptchaSolver] L\u1ED7i kh\u1EDFi t\u1EA1o Tesseract Worker:", error);
-        throw error;
-      }
-    })();
-    return this.initPromise;
-  }
-  /**
-   * Kiểm tra xem Buffer có phải là ảnh Raster (PNG, JPG, GIF, BMP, TIFF, WebP) hợp lệ không
-   */
   static isValidImageBuffer(buf) {
     if (!buf || buf.length < 8) return false;
-    const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-    if (b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71) return true;
-    if (b[0] === 255 && b[1] === 216 && b[2] === 255) return true;
-    if (b[0] === 71 && b[1] === 73 && b[2] === 70) return true;
-    if (b[0] === 66 && b[1] === 77) return true;
-    if (b[0] === 82 && b[1] === 73 && b[2] === 70 && b[3] === 70) return true;
-    if (b[0] === 73 && b[1] === 73 || b[0] === 77 && b[1] === 77) return true;
-    return false;
+    const image = Buffer.from(buf);
+    return image[0] === 137 && image[1] === 80 && image[2] === 78 && image[3] === 71 || image[0] === 255 && image[1] === 216 && image[2] === 255 || image[0] === 71 && image[1] === 73 && image[2] === 70 || image[0] === 66 && image[1] === 77 || image[0] === 82 && image[1] === 73 && image[2] === 70 && image[3] === 70;
   }
-  /**
-   * Giải mã Captcha từ ảnh (Buffer, Base64 String, hoặc SVG)
-   * @param imageInput Buffer hoặc chuỗi Base64 / SVG
-   * @param options Cấu hình whitelist, timeout, v.v.
-   * @returns Chuỗi text kết quả đã được làm sạch
-   */
   static async solve(imageInput, options) {
     const result = await this.solveWithDetails(imageInput, options);
     return result.code;
   }
-  /**
-   * Giải mã Captcha kèm chi tiết (độ tin cậy, thời gian xử lý, engine)
-   */
-  static async solveWithDetails(imageInput, options) {
+  static async solveWithDetails(imageInput, _options) {
     const startTime = Date.now();
-    const timeoutMs = options?.timeoutMs || 1e4;
     if (!imageInput) {
       throw new Error("[CaptchaSolver] D\u1EEF li\u1EC7u \u1EA3nh Captcha r\u1ED7ng.");
     }
-    const asString = typeof imageInput === "string" ? imageInput : Buffer.isBuffer(imageInput) ? imageInput.toString("utf-8", 0, 100) : "";
-    if (asString.includes("<svg") || asString.startsWith("data:image/svg+xml")) {
-      const fullSvgStr = typeof imageInput === "string" ? imageInput : imageInput.toString("utf-8");
-      const svgText = this.tryExtractTextFromSvg(fullSvgStr);
-      if (svgText) {
-        return {
-          code: svgText,
-          confidence: 100,
-          engine: "regex",
-          processingTimeMs: Date.now() - startTime
-        };
-      }
-    }
-    const aiResult = await this.solveWithAI(imageInput, options);
-    if (aiResult && aiResult.code) {
-      return aiResult;
-    }
-    const imagePayload = this.normalizeImagePayload(imageInput);
-    if (Buffer.isBuffer(imagePayload)) {
-      const isRaster = this.isValidImageBuffer(imagePayload);
-      if (!isRaster) {
-        const textPreview = imagePayload.toString("utf-8", 0, 80).toLowerCase();
-        if (textPreview.includes("<html") || textPreview.includes("<!doctype")) {
-          throw new Error("[CaptchaSolver] Server tr\u1EA3 v\u1EC1 trang HTML thay v\xEC \u1EA3nh Captcha (404/Login required).");
-        }
-        throw new Error("[CaptchaSolver] \u0110\u1ECBnh d\u1EA1ng \u1EA3nh kh\xF4ng \u0111\u01B0\u1EE3c h\u1ED7 tr\u1EE3 ho\u1EB7c kh\xF4ng ph\u1EA3i \u1EA3nh h\u1EE3p l\u1EC7.");
-      }
-    }
     try {
-      const worker2 = await this.getWorker(options?.lang || "eng");
-      if (options?.whitelist) {
-        await worker2.setParameters({
-          tessedit_char_whitelist: options.whitelist
-        });
-      }
-      const ocrPromise = worker2.recognize(imagePayload);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`[CaptchaSolver] Qu\xE1 th\u1EDDi gian OCR (${timeoutMs}ms)`)), timeoutMs);
-      });
-      const { data } = await Promise.race([ocrPromise, timeoutPromise]);
-      const rawText = data.text || "";
-      const cleanCode = rawText.replace(/[^a-zA-Z0-9]/g, "").trim();
-      console.log(`[CaptchaSolver] \u0110\xE3 gi\u1EA3i Captcha: "${cleanCode}" (Confidence: ${data.confidence?.toFixed(1)}%, Time: ${Date.now() - startTime}ms)`);
+      const code = await solveCaptchaWithGemini(imageInput);
       return {
-        code: cleanCode,
-        confidence: data.confidence,
-        engine: "tesseract",
+        code,
+        confidence: 99,
+        engine: "gemini",
         processingTimeMs: Date.now() - startTime
       };
     } catch (error) {
-      console.warn("[CaptchaSolver] Tesseract OCR th\u1EA5t b\u1EA1i ho\u1EB7c timeout:", error.message);
-      await this.resetWorker();
-      throw new Error(`Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha t\u1EF1 \u0111\u1ED9ng b\u1EB1ng OCR: ${error.message}`);
+      throw new Error(`Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha b\u1EB1ng Gemini: ${error?.message || error}`);
     }
   }
-  /**
-   * Trích xuất văn bản trực tiếp từ thẻ SVG nếu có
-   */
-  static tryExtractTextFromSvg(svgString) {
-    try {
-      let rawSvg = svgString;
-      if (rawSvg.startsWith("data:image/svg+xml;base64,")) {
-        rawSvg = Buffer.from(rawSvg.replace("data:image/svg+xml;base64,", ""), "base64").toString("utf-8");
-      } else if (rawSvg.startsWith("data:image/svg+xml;utf8,")) {
-        rawSvg = decodeURIComponent(rawSvg.replace("data:image/svg+xml;utf8,", ""));
-      }
-      const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
-      if (textTagMatches && textTagMatches.length > 0) {
-        const textContent = textTagMatches.map((m) => m.replace(/<[^>]+>/g, "").trim()).join("");
-        const clean = textContent.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-        if (clean.length >= 2 && clean.length <= 10) {
-          return clean;
-        }
-      }
-    } catch {
-    }
-    return null;
-  }
-  /**
-   * Chuẩn hóa đầu vào ảnh về dạng Buffer hoặc String Data URI
-   */
-  static normalizeImagePayload(input) {
-    if (Buffer.isBuffer(input)) {
-      return input;
-    }
-    if (input instanceof Uint8Array) {
-      return Buffer.from(input);
-    }
-    if (typeof input === "string") {
-      const trimmed = input.trim();
-      if (trimmed.startsWith("data:image/")) {
-        const base64Index = trimmed.indexOf(";base64,");
-        if (base64Index !== -1) {
-          const rawBase64 = trimmed.substring(base64Index + 8);
-          return Buffer.from(rawBase64, "base64");
-        }
-      }
-      if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 50) {
-        try {
-          return Buffer.from(trimmed, "base64");
-        } catch {
-        }
-      }
-      return trimmed;
-    }
-    throw new Error("[CaptchaSolver] \u0110\u1ECBnh d\u1EA1ng \u0111\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7");
-  }
-  /**
-   * Đặt lại worker khi xảy ra lỗi nghiêm trọng
-   */
   static async resetWorker() {
-    if (this.workerInstance) {
-      try {
-        await this.workerInstance.terminate();
-      } catch {
-      }
-      this.workerInstance = null;
-    }
-    this.initPromise = null;
-    this.isInitializing = false;
   }
-  /**
-   * Giải phóng worker khi ứng dụng tắt
-   */
   static async terminate() {
-    await this.resetWorker();
-    console.log("[CaptchaSolver] \u0110\xE3 gi\u1EA3i ph\xF3ng OCR Worker.");
   }
 };
 
@@ -9035,219 +8824,15 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
 // src/services/easyInvoiceService.ts
 import axios5 from "axios";
 import * as cheerio2 from "cheerio";
-import zlib from "zlib";
 import JSZip2 from "jszip";
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
-
-// src/services/invoice-engine/captcha/easyInvoiceCaptchaWorker.ts
-import { createWorker as createWorker2 } from "tesseract.js";
-var worker = null;
-var workerPromise = null;
-var recognitionQueue = Promise.resolve();
-var terminationPromise = null;
-async function initializeWorker() {
-  if (terminationPromise) {
-    await terminationPromise;
-  }
-  if (worker) return worker;
-  if (workerPromise) return workerPromise;
-  workerPromise = createWorker2("eng", 1).then(async (createdWorker) => {
-    await createdWorker.setParameters({
-      tessedit_char_whitelist: "0123456789",
-      tessedit_pageseg_mode: "7"
-    });
-    worker = createdWorker;
-    return createdWorker;
-  }).catch((error) => {
-    workerPromise = null;
-    throw error;
-  });
-  return workerPromise;
-}
-function initializeEasyInvoiceCaptchaWorker() {
-  return initializeWorker().then(() => void 0);
-}
-async function resolveImageSource(imageSource) {
-  if (Buffer.isBuffer(imageSource)) return imageSource;
-  if (imageSource instanceof Uint8Array) return Buffer.from(imageSource);
-  const input = imageSource.trim();
-  if (!input) throw new Error("D\u1EEF li\u1EC7u Captcha r\u1ED7ng.");
-  if (/^https?:\/\//i.test(input)) {
-    const response = await fetch(input);
-    if (!response.ok) {
-      throw new Error(`Kh\xF4ng th\u1EC3 t\u1EA3i \u1EA3nh Captcha (HTTP ${response.status}).`);
-    }
-    return Buffer.from(await response.arrayBuffer());
-  }
-  const base64 = input.startsWith("data:image/") ? input.slice(input.indexOf(",") + 1) : input;
-  const image = Buffer.from(base64, "base64");
-  if (image.length === 0) throw new Error("\u1EA2nh Captcha Base64 kh\xF4ng h\u1EE3p l\u1EC7.");
-  return image;
-}
-function solveCaptcha(imageSource) {
-  if (terminationPromise) {
-    return Promise.reject(new Error("Captcha worker \u0111ang \u0111\u01B0\u1EE3c gi\u1EA3i ph\xF3ng, vui l\xF2ng th\u1EED l\u1EA1i."));
-  }
-  const job = recognitionQueue.then(async () => {
-    const image = await resolveImageSource(imageSource);
-    const activeWorker = await initializeWorker();
-    const result = await activeWorker.recognize(image);
-    const digits = (result.data.text || "").replace(/[^0-9]/g, "");
-    return digits.length === 4 ? digits : "";
-  });
-  recognitionQueue = job.catch(() => void 0);
-  return job;
-}
-
-// src/services/easyInvoiceService.ts
-void initializeEasyInvoiceCaptchaWorker().catch((error) => {
-  console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o Tesseract worker l\xFAc app load:", error?.message || error);
-});
-var aiClient2 = null;
-function getGenAI2() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient2) {
-    aiClient2 = new GoogleGenAI2({ apiKey });
-  }
-  return aiClient2;
-}
-function decodePngRgba(buf) {
-  let offset = 8;
-  const idatChunks = [];
-  let width = 0;
-  let height = 0;
-  while (offset < buf.length) {
-    const len = buf.readUInt32BE(offset);
-    const type = buf.slice(offset + 4, offset + 8).toString("ascii");
-    if (type === "IHDR") {
-      width = buf.readUInt32BE(offset + 8);
-      height = buf.readUInt32BE(offset + 12);
-    } else if (type === "IDAT") {
-      idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
-    }
-    offset += 12 + len;
-  }
-  const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
-  const rawRgba = Buffer.alloc(width * height * 4);
-  const stride = width * 4 + 1;
-  const prevRow = Buffer.alloc(width * 4);
-  for (let y = 0; y < height; y++) {
-    const filter = decompressed[y * stride];
-    const rowOffset = y * stride + 1;
-    const destOffset = y * width * 4;
-    for (let x = 0; x < width * 4; x++) {
-      const bpp = 4;
-      const raw = decompressed[rowOffset + x];
-      const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
-      const b = prevRow[x];
-      const c = x >= bpp ? prevRow[x - bpp] : 0;
-      let val = raw;
-      if (filter === 1) {
-        val = raw + a & 255;
-      } else if (filter === 2) {
-        val = raw + b & 255;
-      } else if (filter === 3) {
-        val = raw + Math.floor((a + b) / 2) & 255;
-      } else if (filter === 4) {
-        const p = a + b - c;
-        const pa = Math.abs(p - a);
-        const pb = Math.abs(p - b);
-        const pc = Math.abs(p - c);
-        val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
-      }
-      rawRgba[destOffset + x] = val;
-      prevRow[x] = val;
-    }
-  }
-  return { width, height, data: rawRgba };
-}
-function createBinarizedBmp(decoded, scale = 3) {
-  const { width, height, data } = decoded;
-  const cropX1 = 30;
-  const cropX2 = Math.min(142, width);
-  const cropW = cropX2 - cropX1;
-  const cropH = height;
-  const newW = cropW * scale;
-  const newH = cropH * scale;
-  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
-  const imageSize = rowSize * newH;
-  const fileSize = 54 + imageSize;
-  const bmp = Buffer.alloc(fileSize);
-  bmp.write("BM", 0);
-  bmp.writeUInt32LE(fileSize, 2);
-  bmp.writeUInt32LE(54, 10);
-  bmp.writeUInt32LE(40, 14);
-  bmp.writeInt32LE(newW, 18);
-  bmp.writeInt32LE(newH, 22);
-  bmp.writeUInt16LE(1, 26);
-  bmp.writeUInt16LE(24, 28);
-  bmp.writeUInt32LE(0, 30);
-  bmp.writeUInt32LE(imageSize, 34);
-  for (let destY = 0; destY < newH; destY++) {
-    const srcY = Math.floor((newH - 1 - destY) / scale);
-    const rowStart = 54 + destY * rowSize;
-    for (let destX = 0; destX < newW; destX++) {
-      const srcX = cropX1 + Math.floor(destX / scale);
-      const srcIdx = (srcY * width + srcX) * 4;
-      const r = data[srcIdx];
-      const g = data[srcIdx + 1];
-      const b = data[srcIdx + 2];
-      const lum = r * 0.299 + g * 0.587 + b * 0.114;
-      const isText = lum > 140;
-      const val = isText ? 0 : 255;
-      const pxOffset = rowStart + destX * 3;
-      bmp[pxOffset] = val;
-      bmp[pxOffset + 1] = val;
-      bmp[pxOffset + 2] = val;
-    }
-  }
-  return bmp;
-}
+import { GoogleGenAI } from "@google/genai";
 async function solveEasyInvoiceCaptcha(captchaBuf) {
   try {
-    const decoded = decodePngRgba(captchaBuf);
-    const bmp = createBinarizedBmp(decoded, 3);
-    const digits = await solveCaptcha(bmp.toString("base64"));
-    const confidence = digits.length === 4 ? 60 : 0;
-    if (digits.length === 4 && confidence >= 60) {
-      console.log(`[EasyInvoice] Tesseract OCR gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}" (${confidence}%)`);
-      return { code: digits, confidence, engine: "tesseract" };
-    }
-    console.log(`[EasyInvoice] Tesseract OCR k\u1EBFt qu\u1EA3 ch\u01B0a ch\u1EAFc ch\u1EAFn: "${digits}" (${confidence}%), th\u1EED gi\u1EA3i b\u1EB1ng Gemini Vision...`);
-  } catch (tessErr) {
-    console.warn("[EasyInvoice] Tesseract l\u1ED7i ti\u1EC1n x\u1EED l\xFD:", tessErr.message);
-  }
-  const ai = getGenAI2();
-  if (ai) {
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: captchaBuf.toString("base64")
-                }
-              },
-              {
-                text: "H\xE3y \u0111\u1ECDc 4 ch\u1EEF s\u1ED1 xu\u1EA5t hi\u1EC7n trong \u1EA3nh captcha n\xE0y. Ch\u1EC9 tr\u1EA3 v\u1EC1 \u0111\xFAng 4 ch\u1EEF s\u1ED1, kh\xF4ng th\xEAm b\u1EA5t k\u1EF3 ch\u1EEF n\xE0o kh\xE1c."
-              }
-            ]
-          }
-        ]
-      });
-      const aiDigits = (response.text || "").replace(/[^0-9]/g, "").trim();
-      if (aiDigits.length === 4) {
-        console.log(`[EasyInvoice] Gemini Vision gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${aiDigits}"`);
-        return { code: aiDigits, confidence: 99, engine: "gemini" };
-      }
-    } catch (aiErr) {
-      console.warn("[EasyInvoice] Gemini Vision gi\u1EA3i captcha l\u1ED7i:", aiErr.message);
-    }
+    const digits = await solveCaptchaWithGemini(captchaBuf);
+    console.log(`[EasyInvoice] Gemini gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}"`);
+    return { code: digits, confidence: 99, engine: "gemini" };
+  } catch (error) {
+    console.warn("[EasyInvoice] Gemini gi\u1EA3i Captcha l\u1ED7i:", error?.message || error);
   }
   return { code: "", confidence: 0, engine: "none" };
 }
@@ -10652,7 +10237,7 @@ async function deleteUser(id) {
 }
 
 // server.ts
-import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 var app = express();
 var PORT = Number(process.env.PORT) || 3e3;
 app.use(express.json({ limit: "50mb" }));
@@ -10849,7 +10434,7 @@ function getGeminiClient(customKey) {
   const apiKey = customKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!geminiAiClient || customKey) {
-    const client = new GoogleGenAI3({
+    const client = new GoogleGenAI2({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
@@ -10947,22 +10532,6 @@ ${svgSnippet}
           break;
         }
       }
-    }
-  }
-  if (isBitmap && bitmapBase64) {
-    try {
-      console.log("[Tesseract OCR] Running local fallback OCR on bitmap...");
-      const imageBuffer = Buffer.from(bitmapBase64, "base64");
-      const { data } = await Tesseract.recognize(imageBuffer, "eng");
-      if (data && data.text) {
-        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-        if (cleaned.length >= 4 && cleaned.length <= 6) {
-          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
-          return { code: cleaned, modelUsed: "tesseract-local" };
-        }
-      }
-    } catch (tessErr) {
-      console.warn("[Tesseract OCR] Recognition error:", tessErr?.message);
     }
   }
   return {

@@ -68,10 +68,10 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
     const cleanMst = (info.sellerTaxCode || '').trim();
     this.createLog(`Mã tra cứu EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
 
-    // 1. Nếu có mã tra cứu, thử tải trực tiếp hóa đơn gốc qua Cổng EasyInvoice với Tesseract Captcha Solver
+    // 1. Nếu có mã tra cứu, thử tải trực tiếp hóa đơn gốc qua Cổng EasyInvoice với Gemini Captcha Solver
     if (lookupCode) {
       try {
-        this.createLog(`Đang kết nối cổng EasyInvoice và tự động giải Captcha bằng Tesseract.js...`, logs);
+        this.createLog(`Đang kết nối cổng EasyInvoice và giải Captcha bằng Gemini...`, logs);
         const dlRes = await downloadOriginalEasyInvoice({
           lookupCode,
           sellerTaxCode: cleanMst,

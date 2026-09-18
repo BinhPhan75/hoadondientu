@@ -3,11 +3,7 @@ import * as cheerio from 'cheerio';
 import zlib from 'zlib';
 import JSZip from 'jszip';
 import { GoogleGenAI } from '@google/genai';
-import { initializeEasyInvoiceCaptchaWorker, solveCaptcha } from './invoice-engine/captcha/easyInvoiceCaptchaWorker';
-
-void initializeEasyInvoiceCaptchaWorker().catch((error) => {
-  console.warn('[EasyInvoice] Không thể khởi tạo Tesseract worker lúc app load:', error?.message || error);
-});
+import { solveCaptchaWithGemini } from './invoice-engine/captcha/geminiCaptchaSolver';
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
@@ -82,8 +78,8 @@ function decodePngRgba(buf: Buffer): { width: number; height: number; data: Buff
 /**
  * Tiền xử lý ảnh Captcha EasyInvoice:
  * - Cắt bớt dải đen/gradient mép trái (x: 30 -> 140)
- * - Phóng to 3x để Tesseract OCR nhận diện nét chữ tốt nhất
- * - Binarize & Đảo ngược màu: Chữ sáng -> đen, Nền tối -> trắng
+ * - Chuẩn bị ảnh PNG cho bộ nhận diện Gemini
+ * - Giữ nguyên dữ liệu ảnh để Gemini nhận diện trực quan
  * - Xuất ra file BMP 24-bit không nén
  */
 function createBinarizedBmp(decoded: { width: number; height: number; data: Buffer }, scale = 3): Buffer {
@@ -137,55 +133,15 @@ function createBinarizedBmp(decoded: { width: number; height: number; data: Buff
 }
 
 /**
- * Giải Captcha EasyInvoice bằng Tesseract.js (kết hợp AI fallback nếu cần)
+ * Giải Captcha EasyInvoice bằng Gemini Vision
  */
 export async function solveEasyInvoiceCaptcha(captchaBuf: Buffer): Promise<{ code: string; confidence: number; engine: string }> {
   try {
-    const decoded = decodePngRgba(captchaBuf);
-    const bmp = createBinarizedBmp(decoded, 3);
-    const digits = await solveCaptcha(bmp.toString('base64'));
-    const confidence = digits.length === 4 ? 60 : 0;
-
-    if (digits.length === 4 && confidence >= 60) {
-      console.log(`[EasyInvoice] Tesseract OCR giải Captcha thành công: "${digits}" (${confidence}%)`);
-      return { code: digits, confidence, engine: 'tesseract' };
-    }
-    console.log(`[EasyInvoice] Tesseract OCR kết quả chưa chắc chắn: "${digits}" (${confidence}%), thử giải bằng Gemini Vision...`);
-  } catch (tessErr: any) {
-    console.warn('[EasyInvoice] Tesseract lỗi tiền xử lý:', tessErr.message);
-  }
-
-  // AI Fallback (Gemini Vision) nếu có API key
-  const ai = getGenAI();
-  if (ai) {
-    try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'image/png',
-                  data: captchaBuf.toString('base64'),
-                },
-              },
-              {
-                text: 'Hãy đọc 4 chữ số xuất hiện trong ảnh captcha này. Chỉ trả về đúng 4 chữ số, không thêm bất kỳ chữ nào khác.',
-              },
-            ],
-          },
-        ],
-      });
-      const aiDigits = (response.text || '').replace(/[^0-9]/g, '').trim();
-      if (aiDigits.length === 4) {
-        console.log(`[EasyInvoice] Gemini Vision giải Captcha thành công: "${aiDigits}"`);
-        return { code: aiDigits, confidence: 99, engine: 'gemini' };
-      }
-    } catch (aiErr: any) {
-      console.warn('[EasyInvoice] Gemini Vision giải captcha lỗi:', aiErr.message);
-    }
+    const digits = await solveCaptchaWithGemini(captchaBuf);
+    console.log(`[EasyInvoice] Gemini giải Captcha thành công: "${digits}"`);
+    return { code: digits, confidence: 99, engine: 'gemini' };
+  } catch (error: any) {
+    console.warn('[EasyInvoice] Gemini giải Captcha lỗi:', error?.message || error);
   }
 
   return { code: '', confidence: 0, engine: 'none' };

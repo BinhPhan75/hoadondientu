@@ -5,7 +5,6 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { ProxyAgent } from 'undici';
-import Tesseract from 'tesseract.js';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
@@ -300,7 +299,7 @@ interface OCRResult {
 // Multi-Tier Captcha OCR Engine for GDT Portal
 // Tier 1: SVG direct extraction (if text present)
 // Tier 2: Gemini Vision AI (if key available)
-// Tier 3: Local Tesseract.js OCR (offline/free fallback)
+// Tier 3: Không dùng OCR cục bộ; Gemini là bộ giải Captcha duy nhất
 async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
@@ -404,24 +403,6 @@ ${svgSnippet}
           break;
         }
       }
-    }
-  }
-
-  // Tier 3: Local Tesseract.js OCR (Works offline, 0 cost, reliable on clean bitmaps)
-  if (isBitmap && bitmapBase64) {
-    try {
-      console.log('[Tesseract OCR] Running local fallback OCR on bitmap...');
-      const imageBuffer = Buffer.from(bitmapBase64, 'base64');
-      const { data } = await Tesseract.recognize(imageBuffer, 'eng');
-      if (data && data.text) {
-        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-        if (cleaned.length >= 4 && cleaned.length <= 6) {
-          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
-          return { code: cleaned, modelUsed: 'tesseract-local' };
-        }
-      }
-    } catch (tessErr: any) {
-      console.warn('[Tesseract OCR] Recognition error:', tessErr?.message);
     }
   }
 
@@ -1593,7 +1574,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
   }
 });
 
-// 15. Tesseract OCR Captcha Solver endpoint
+// 15. Gemini Vision Captcha Solver endpoint
 app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   try {
     const { image, whitelist } = req.body;
@@ -1617,7 +1598,7 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   }
 });
 
-// 16. Softdreams EasyInvoice: Tự động giải Captcha bằng Tesseract.js & Tải hóa đơn gốc
+// 16. Softdreams EasyInvoice: Giải Captcha bằng Gemini & Tải hóa đơn gốc
 app.post('/api/easyinvoice/download', async (req, res) => {
   try {
     const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon, viewOnly } = req.body;

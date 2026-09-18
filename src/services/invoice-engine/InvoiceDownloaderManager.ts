@@ -2,7 +2,7 @@
  * InvoiceDownloaderManager: Bộ điều phối trung tâm (Provider Manager / Factory)
  * - Tự động quản lý danh sách các Driver đã đăng ký (MISA, Viettel, 4Si, VNPT, Fallback...)
  * - Tự động nhận diện nhà cung cấp từ XML
- * - Tự động giải Captcha bằng OCR Tesseract khi cần
+ * - Tự động giải Captcha bằng Gemini khi cần
  * - Tự động kích hoạt GenericFallbackDriver khi gặp lỗi, bảo đảm hệ thống không bao giờ bị gián đoạn
  */
 

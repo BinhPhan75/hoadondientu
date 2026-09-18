@@ -60,7 +60,7 @@ export interface CaptchaSolveOptions {
 export interface CaptchaSolveResult {
   code: string;
   confidence?: number;
-  engine: 'tesseract' | 'gemini' | 'regex';
+  engine: 'gemini' | 'regex';
   processingTimeMs: number;
 }
 
