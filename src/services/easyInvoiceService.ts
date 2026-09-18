@@ -136,15 +136,9 @@ function createBinarizedBmp(decoded: { width: number; height: number; data: Buff
  * Giải Captcha EasyInvoice bằng Gemini Vision
  */
 export async function solveEasyInvoiceCaptcha(captchaBuf: Buffer): Promise<{ code: string; confidence: number; engine: string }> {
-  try {
-    const digits = await solveCaptchaWithGemini(captchaBuf);
-    console.log(`[EasyInvoice] Gemini giải Captcha thành công: "${digits}"`);
-    return { code: digits, confidence: 99, engine: 'gemini' };
-  } catch (error: any) {
-    console.warn('[EasyInvoice] Gemini giải Captcha lỗi:', error?.message || error);
-  }
-
-  return { code: '', confidence: 0, engine: 'none' };
+  const digits = await solveCaptchaWithGemini(captchaBuf);
+  console.log(`[EasyInvoice] Gemini giải Captcha thành công: "${digits}"`);
+  return { code: digits, confidence: 99, engine: 'gemini' };
 }
 
 export interface EasyInvoiceDownloadParams {
@@ -220,9 +214,25 @@ export async function downloadOriginalEasyInvoice(
         : '';
 
       const captchaBuf = Buffer.from(cRes.data);
-      const { code, confidence, engine } = await solveEasyInvoiceCaptcha(captchaBuf);
+      let code = '';
+      let confidence = 0;
+      let engine = 'gemini';
+      try {
+        const solved = await solveEasyInvoiceCaptcha(captchaBuf);
+        code = solved.code;
+        confidence = solved.confidence;
+        engine = solved.engine;
+      } catch (error: any) {
+        lastError = `Gemini không giải được Captcha: ${error?.message || error}`;
+        console.warn(`[EasyInvoice] ${lastError}`);
+        if (/GEMINI_API_KEY|quota|rate limit|429|403|permission|model/i.test(lastError)) {
+          break;
+        }
+        continue;
+      }
 
       if (!code || code.length !== 4) {
+        lastError = 'Gemini không trả về đủ 4 chữ số Captcha.';
         console.warn(`[EasyInvoice] Chưa đọc được mã 4 số ở lần thử ${attempt}. Tiếp tục thử lại...`);
         continue;
       }
@@ -391,5 +401,5 @@ export async function downloadOriginalEasyInvoice(
     }
   }
 
-  throw new Error(lastError || 'Không thể tự động vượt Captcha và tải hóa đơn gốc từ Cổng EasyInvoice sau 3 lần thử.');
+  throw new Error(lastError || 'Không thể tra cứu hóa đơn từ Cổng EasyInvoice sau 3 lần thử.');
 }

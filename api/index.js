@@ -8827,14 +8827,9 @@ import * as cheerio2 from "cheerio";
 import JSZip2 from "jszip";
 import { GoogleGenAI } from "@google/genai";
 async function solveEasyInvoiceCaptcha(captchaBuf) {
-  try {
-    const digits = await solveCaptchaWithGemini(captchaBuf);
-    console.log(`[EasyInvoice] Gemini gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}"`);
-    return { code: digits, confidence: 99, engine: "gemini" };
-  } catch (error) {
-    console.warn("[EasyInvoice] Gemini gi\u1EA3i Captcha l\u1ED7i:", error?.message || error);
-  }
-  return { code: "", confidence: 0, engine: "none" };
+  const digits = await solveCaptchaWithGemini(captchaBuf);
+  console.log(`[EasyInvoice] Gemini gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}"`);
+  return { code: digits, confidence: 99, engine: "gemini" };
 }
 async function downloadOriginalEasyInvoice(params) {
   const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon } = params;
@@ -8871,8 +8866,24 @@ async function downloadOriginalEasyInvoice(params) {
       });
       const cookie = cRes.headers["set-cookie"] ? Array.isArray(cRes.headers["set-cookie"]) ? cRes.headers["set-cookie"].join("; ") : cRes.headers["set-cookie"] : "";
       const captchaBuf = Buffer.from(cRes.data);
-      const { code, confidence, engine } = await solveEasyInvoiceCaptcha(captchaBuf);
+      let code = "";
+      let confidence = 0;
+      let engine = "gemini";
+      try {
+        const solved = await solveEasyInvoiceCaptcha(captchaBuf);
+        code = solved.code;
+        confidence = solved.confidence;
+        engine = solved.engine;
+      } catch (error) {
+        lastError = `Gemini kh\xF4ng gi\u1EA3i \u0111\u01B0\u1EE3c Captcha: ${error?.message || error}`;
+        console.warn(`[EasyInvoice] ${lastError}`);
+        if (/GEMINI_API_KEY|quota|rate limit|429|403|permission|model/i.test(lastError)) {
+          break;
+        }
+        continue;
+      }
       if (!code || code.length !== 4) {
+        lastError = "Gemini kh\xF4ng tr\u1EA3 v\u1EC1 \u0111\u1EE7 4 ch\u1EEF s\u1ED1 Captcha.";
         console.warn(`[EasyInvoice] Ch\u01B0a \u0111\u1ECDc \u0111\u01B0\u1EE3c m\xE3 4 s\u1ED1 \u1EDF l\u1EA7n th\u1EED ${attempt}. Ti\u1EBFp t\u1EE5c th\u1EED l\u1EA1i...`);
         continue;
       }
@@ -9012,7 +9023,7 @@ async function downloadOriginalEasyInvoice(params) {
       console.warn(`[EasyInvoice] L\u1ED7i \u1EDF l\u1EA7n th\u1EED ${attempt}:`, err.message);
     }
   }
-  throw new Error(lastError || "Kh\xF4ng th\u1EC3 t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB C\u1ED5ng EasyInvoice sau 3 l\u1EA7n th\u1EED.");
+  throw new Error(lastError || "Kh\xF4ng th\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng EasyInvoice sau 3 l\u1EA7n th\u1EED.");
 }
 
 // src/services/invoice-engine/drivers/EasyInvoiceDriver.ts
@@ -9069,7 +9080,7 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
     this.createLog(`M\xE3 tra c\u1EE9u EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
     if (lookupCode) {
       try {
-        this.createLog(`\u0110ang k\u1EBFt n\u1ED1i c\u1ED5ng EasyInvoice v\xE0 t\u1EF1 \u0111\u1ED9ng gi\u1EA3i Captcha b\u1EB1ng Tesseract.js...`, logs);
+        this.createLog(`\u0110ang k\u1EBFt n\u1ED1i c\u1ED5ng EasyInvoice v\xE0 gi\u1EA3i Captcha b\u1EB1ng Gemini...`, logs);
         const dlRes = await downloadOriginalEasyInvoice({
           lookupCode,
           sellerTaxCode: cleanMst,
