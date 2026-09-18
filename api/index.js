@@ -9707,6 +9707,8 @@ async function lookupOriginalVnptInvoice(params) {
     responseType: "arraybuffer",
     timeout: 15e3
   });
+  const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+  const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
   const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data))).code;
   const form = new URLSearchParams({
     __RequestVerificationToken: token,
@@ -9719,7 +9721,7 @@ async function lookupOriginalVnptInvoice(params) {
       ...headers,
       "Content-Type": "application/x-www-form-urlencoded",
       Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
-      Cookie: cookies
+      Cookie: sessionCookie
     },
     maxRedirects: 5,
     timeout: 3e4,
