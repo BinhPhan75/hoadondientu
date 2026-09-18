@@ -9044,7 +9044,11 @@ import { createWorker as createWorker2 } from "tesseract.js";
 var worker = null;
 var workerPromise = null;
 var recognitionQueue = Promise.resolve();
+var terminationPromise = null;
 async function initializeWorker() {
+  if (terminationPromise) {
+    await terminationPromise;
+  }
   if (worker) return worker;
   if (workerPromise) return workerPromise;
   workerPromise = createWorker2("eng", 1).then(async (createdWorker) => {
@@ -9063,16 +9067,33 @@ async function initializeWorker() {
 function initializeEasyInvoiceCaptchaWorker() {
   return initializeWorker().then(() => void 0);
 }
-function solveCaptcha(imageBase64) {
-  const input = imageBase64.trim();
-  if (!input) {
-    return Promise.reject(new Error("D\u1EEF li\u1EC7u Captcha r\u1ED7ng."));
+async function resolveImageSource(imageSource) {
+  if (Buffer.isBuffer(imageSource)) return imageSource;
+  if (imageSource instanceof Uint8Array) return Buffer.from(imageSource);
+  const input = imageSource.trim();
+  if (!input) throw new Error("D\u1EEF li\u1EC7u Captcha r\u1ED7ng.");
+  if (/^https?:\/\//i.test(input)) {
+    const response = await fetch(input);
+    if (!response.ok) {
+      throw new Error(`Kh\xF4ng th\u1EC3 t\u1EA3i \u1EA3nh Captcha (HTTP ${response.status}).`);
+    }
+    return Buffer.from(await response.arrayBuffer());
   }
-  const image = input.startsWith("data:image/") ? Buffer.from(input.slice(input.indexOf(",") + 1), "base64") : Buffer.from(input, "base64");
+  const base64 = input.startsWith("data:image/") ? input.slice(input.indexOf(",") + 1) : input;
+  const image = Buffer.from(base64, "base64");
+  if (image.length === 0) throw new Error("\u1EA2nh Captcha Base64 kh\xF4ng h\u1EE3p l\u1EC7.");
+  return image;
+}
+function solveCaptcha(imageSource) {
+  if (terminationPromise) {
+    return Promise.reject(new Error("Captcha worker \u0111ang \u0111\u01B0\u1EE3c gi\u1EA3i ph\xF3ng, vui l\xF2ng th\u1EED l\u1EA1i."));
+  }
   const job = recognitionQueue.then(async () => {
+    const image = await resolveImageSource(imageSource);
     const activeWorker = await initializeWorker();
     const result = await activeWorker.recognize(image);
-    return (result.data.text || "").replace(/[^0-9]/g, "");
+    const digits = (result.data.text || "").replace(/[^0-9]/g, "");
+    return digits.length === 4 ? digits : "";
   });
   recognitionQueue = job.catch(() => void 0);
   return job;
