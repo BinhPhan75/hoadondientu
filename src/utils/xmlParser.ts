@@ -441,6 +441,25 @@ export function isVnptSource(source: any): boolean {
 }
 
 /**
+ * Kiểm tra hóa đơn Viettel S-Invoice theo MST tổ chức cung cấp hoặc tên T-VAN.
+ */
+export function isViettelSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '').replace(/[^0-9]/g, '');
+  const tentvandnknt = String(getPayloadValue(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT']) || '').toLowerCase();
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toLowerCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return msttcgp === '0100109106' ||
+    tentvandnknt === 'tvan_viettel' ||
+    tentvandnknt === 'tvan viettel' ||
+    tentcgp.includes('viettel') ||
+    provider === 'VIETTEL' ||
+    lookupUrl.includes('sinvoice.viettel.vn');
+}
+
+/**
  * Kiểm tra xem hóa đơn/payload có thuộc giải pháp LCS Soft (PNJ - Công ty TNHH L.C.S) hay không.
  */
 export function isLcsSource(source: any): boolean {
@@ -545,12 +564,20 @@ export function getLookupCodeFromPayload(source: any): string {
   if (!source) return '';
 
   const isMisa = isMisaSource(source);
+  const isViettel = isViettelSource(source);
   const misaTransactionId = getFromStructuredArrays(source, ['TransactionID', 'TransactionId', 'transactionID']) ||
     getPayloadValue(source, ['transactionID', 'TransactionID']);
 
   // Đối với hóa đơn MISA: TransactionID là mã tra cứu chính thức in trên hóa đơn
   if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
     return cleanLookupValue(misaTransactionId);
+  }
+
+  // Viettel: "Mã số bí mật" trong ttkhac[] là mã tra cứu duy nhất.
+  // Không fallback sang mhdon hoặc mã nội bộ nếu trường này không tồn tại.
+  if (isViettel) {
+    const secretCode = cleanLookupValue(getFromStructuredArrays(source, ['Mã số bí mật']));
+    return isLookupCodeCandidate(secretCode) ? secretCode : '';
   }
 
   // Đối với hóa đơn LCS Soft (PNJ): mã tra cứu chính là mã CQT cấp (mhdon / mccqt 32 ký tự hex)
@@ -729,6 +756,19 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   if (!lookupCode) {
     const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
+  }
+
+  // Viettel S-Invoice: chỉ dùng dlieu của TTKhac có TTruong "Mã số bí mật".
+  // Nếu thiếu trường này thì để trống, tuyệt đối không dùng mhdon thay thế.
+  const isViettelXml = /0100109106|tvan[_\s-]*viettel|sinvoice\.viettel\.vn/i.test(rawXml);
+  if (isViettelXml) {
+    const secretBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
+    const secretBlock = secretBlocks.find(block =>
+      normalizeLookupLabel(extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong')) === 'ma so bi mat'
+    );
+    lookupCode = secretBlock
+      ? cleanLookupValue(extractTagValue(secretBlock, 'DLieu') || extractTagValue(secretBlock, 'Data') || '')
+      : '';
   }
 
   // 3. Kiểm tra các khối mở rộng TTin / TTKhac

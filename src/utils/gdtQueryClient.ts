@@ -107,7 +107,7 @@ export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', is
     signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
     signedDate: item.tdlap,
     caProvider: 'Tổng cục Thuế CQT',
-    msttcgp: item.msttcgp || item.mst_tcgp || '',
+    msttcgp: item.msttcgp || item.mst_tcgp || item.tvandnkntt || '',
     tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
     lookupCode: getLookupCodeFromPayload(item),
     lookupUrl: getLookupUrlFromPayload(item),

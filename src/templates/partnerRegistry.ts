@@ -146,6 +146,18 @@ export const PARTNER_METAS: PartnerMeta[] = [
     isCustomPartner: true
   },
   {
+    id: 'VIETTEL',
+    name: 'Tập đoàn Công nghiệp - Viễn thông Quân đội',
+    shortName: 'Viettel S-Invoice',
+    taxCode: '0100109106',
+    portalUrl: 'https://sinvoice.viettel.vn',
+    providerBrand: 'Viettel S-Invoice',
+    badge: 'Viettel',
+    color: '#ee0033',
+    description: 'Hóa đơn điện tử Viettel S-Invoice, dùng Mã số bí mật trong ttkhac để tra cứu',
+    isCustomPartner: false
+  },
+  {
     id: 'DEFAULT',
     name: 'Mẫu Hóa Đơn Điện Tử Chuẩn Tổng Cục Thuế (GDT)',
     shortName: 'Mẫu Tổng cục Thuế',
@@ -195,6 +207,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp)
   const msttcgp = (invoice.msttcgp || '').replace(/[^0-9]/g, '');
+  if (msttcgp === '0100109106') return 'VIETTEL';
   if (msttcgp === '0302999571' || msttcgp === '0315744883') return 'DEFAULT'; // 4SI / LCS -> Dùng mẫu GDT
   if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT Nghĩa Sơn)
 

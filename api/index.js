@@ -709,6 +709,15 @@ function isVnptSource(source) {
   nbten.includes("NGH\u0128A S\u01A0N") || nbten.includes("NGHIA SON") || msttcgp === "0100684378" || // MST VNPT TCGP
   tentcgp.includes("VNPT") || provider === "VNPT" || provider === "NGHIA_SON" || lookupUrl.includes("vnpt-invoice.com.vn");
 }
+function isViettelSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "").replace(/[^0-9]/g, "");
+  const tentvandnknt = String(getPayloadValue(source, ["tentvandnkntt", "tentvandnknt", "ten_tvandnknt", "TENTVANDNKNTT"]) || "").toLowerCase();
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toLowerCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0100109106" || tentvandnknt === "tvan_viettel" || tentvandnknt === "tvan viettel" || tentcgp.includes("viettel") || provider === "VIETTEL" || lookupUrl.includes("sinvoice.viettel.vn");
+}
 function isLcsSource(source) {
   if (!source) return false;
   const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "taxCodeNguoiBan", "MST"]) || "");
@@ -759,9 +768,14 @@ function isMisaSource(source) {
 function getLookupCodeFromPayload(source) {
   if (!source) return "";
   const isMisa = isMisaSource(source);
+  const isViettel = isViettelSource(source);
   const misaTransactionId = getFromStructuredArrays(source, ["TransactionID", "TransactionId", "transactionID"]) || getPayloadValue(source, ["transactionID", "TransactionID"]);
   if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
     return cleanLookupValue(misaTransactionId);
+  }
+  if (isViettel) {
+    const secretCode = cleanLookupValue(getFromStructuredArrays(source, ["M\xE3 s\u1ED1 b\xED m\u1EADt"]));
+    return isLookupCodeCandidate(secretCode) ? secretCode : "";
   }
   if (isLcsSource(source)) {
     const cqtCode = getPayloadValue(source, ["mhdon", "mccqt", "MCCQT", "cqtCode"]);
@@ -932,6 +946,14 @@ function extractLookupDetailsFromXml(rawXml) {
   if (!lookupCode) {
     const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
+  }
+  const isViettelXml = /0100109106|tvan[_\s-]*viettel|sinvoice\.viettel\.vn/i.test(rawXml);
+  if (isViettelXml) {
+    const secretBlocks = [...extractTagBlocks(rawXml, "TTin"), ...extractTagBlocks(rawXml, "TTKhac")];
+    const secretBlock = secretBlocks.find(
+      (block) => normalizeLookupLabel(extractTagValue(block, "TTruong") || extractTagValue(block, "TenTruong")) === "ma so bi mat"
+    );
+    lookupCode = secretBlock ? cleanLookupValue(extractTagValue(secretBlock, "DLieu") || extractTagValue(secretBlock, "Data") || "") : "";
   }
   const ttinBlocks = [...extractTagBlocks(rawXml, "TTin"), ...extractTagBlocks(rawXml, "TTKhac")];
   for (const block of ttinBlocks) {
@@ -1791,6 +1813,7 @@ function detectPartnerTemplate(invoice, rawXml) {
   if (nbmst === "4000344946") return "NGHIA_SON";
   if (nbmst === "0317978711") return "TAN_THANH_DANH";
   const msttcgp = (invoice.msttcgp || "").replace(/[^0-9]/g, "");
+  if (msttcgp === "0100109106") return "VIETTEL";
   if (msttcgp === "0302999571" || msttcgp === "0315744883") return "DEFAULT";
   if (msttcgp === "0100684378") return "NGHIA_SON";
   if (nbten.includes("baoduy")) return "BAO_DUY";
