@@ -298,7 +298,7 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
 
   const finalLookupCode = isViettel
     ? (detailLookup || xmlLookup?.lookupCode || undefined)
-    : (isVnpt && resolvedMhdon) 
+    : (isVnpt && resolvedMhdon)
     ? resolvedMhdon 
     : (detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || undefined);
 
