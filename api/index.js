@@ -9683,6 +9683,56 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 // src/services/invoice-engine/index.ts
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
+// src/services/vnptInvoiceService.ts
+import axios7 from "axios";
+import * as cheerio3 from "cheerio";
+async function lookupOriginalVnptInvoice(params) {
+  const lookupCode = params.lookupCode.trim();
+  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u VNPT kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng");
+  const portal = (params.lookupUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn")).replace(/\/+$/, "");
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36",
+    Accept: "text/html,application/xhtml+xml"
+  };
+  const page = await axios7.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
+    headers,
+    timeout: 2e4,
+    validateStatus: (status) => status >= 200 && status < 400
+  });
+  const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
+  const $ = cheerio3.load(page.data);
+  const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
+  const captcha = await axios7.get(`${portal}/Captcha/Show`, {
+    headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
+    responseType: "arraybuffer",
+    timeout: 15e3
+  });
+  const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data))).code;
+  const form = new URLSearchParams({
+    __RequestVerificationToken: token,
+    strFkey: lookupCode,
+    captch: captchaCode,
+    submit: ""
+  });
+  const result = await axios7.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+    headers: {
+      ...headers,
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    },
+    maxRedirects: 5,
+    timeout: 3e4,
+    responseType: "text",
+    validateStatus: (status) => status >= 200 && status < 400
+  });
+  const html = String(result.data || "");
+  if (!html || /captcha|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html)) {
+    throw new Error("VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n.");
+  }
+  return { htmlContent: html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`) };
+}
+
 // src/utils/gdtDetail.ts
 import JSZip3 from "jszip";
 var value = (source, keys) => {
@@ -11621,6 +11671,19 @@ app.post("/api/easyinvoice/download", async (req, res) => {
       khhdon: khhdon ? String(khhdon).trim() : void 0,
       shdon: shdon ? String(shdon).trim() : void 0,
       viewOnly: Boolean(viewOnly)
+    });
+    app.post("/api/vnpt/view-original", async (req2, res2) => {
+      try {
+        const result2 = await lookupOriginalVnptInvoice({
+          lookupCode: String(req2.body.lookupCode || ""),
+          sellerTaxCode: req2.body.sellerTaxCode ? String(req2.body.sellerTaxCode) : void 0,
+          lookupUrl: req2.body.lookupUrl ? String(req2.body.lookupUrl) : void 0
+        });
+        res2.json({ success: true, htmlContent: result2.htmlContent });
+      } catch (error) {
+        console.error("[VNPT] L\u1ED7i xem h\xF3a \u0111\u01A1n g\u1ED1c:", error.message);
+        res2.status(500).json({ success: false, error: error.message });
+      }
     });
     if (req.query.format === "binary") {
       res.setHeader("Content-Type", result.contentType);

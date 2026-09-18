@@ -10,6 +10,7 @@ import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
+import { lookupOriginalVnptInvoice } from './src/services/vnptInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -1613,6 +1614,20 @@ app.post('/api/easyinvoice/download', async (req, res) => {
       khhdon: khhdon ? String(khhdon).trim() : undefined,
       shdon: shdon ? String(shdon).trim() : undefined,
       viewOnly: Boolean(viewOnly)
+    });
+
+    app.post('/api/vnpt/view-original', async (req, res) => {
+      try {
+        const result = await lookupOriginalVnptInvoice({
+          lookupCode: String(req.body.lookupCode || ''),
+          sellerTaxCode: req.body.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined,
+          lookupUrl: req.body.lookupUrl ? String(req.body.lookupUrl) : undefined
+        });
+        res.json({ success: true, htmlContent: result.htmlContent });
+      } catch (error: any) {
+        console.error('[VNPT] Lỗi xem hóa đơn gốc:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+      }
     });
 
     if (req.query.format === 'binary') {

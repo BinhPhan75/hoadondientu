@@ -65,6 +65,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   useEffect(() => {
     setCurrentInvoice(invoice);
     setOriginalEasyInvoiceHtml(null);
+    setOriginalVnptHtml(null);
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -74,6 +75,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
+  const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
+  const [isLoadingVnptOriginal, setIsLoadingVnptOriginal] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -122,6 +125,37 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (openInvoiceIdRef.current === targetInv.id) {
         setIsLoadingDetail(false);
       }
+    }
+  };
+
+  const handleViewOriginalVnpt = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn VNPT không có mã tra cứu để tra cứu bản gốc.');
+      return;
+    }
+    setIsLoadingVnptOriginal(true);
+    try {
+      const resp = await fetch('/api/vnpt/view-original', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success || !data.htmlContent) {
+        throw new Error(data.error || 'Không nhận được bản thể hiện gốc từ VNPT.');
+      }
+      setOriginalVnptHtml(data.htmlContent);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem VNPT gốc:', err);
+      alert(`Không thể hiển thị bản gốc VNPT: ${err.message}`);
+    } finally {
+      setIsLoadingVnptOriginal(false);
     }
   };
 
@@ -313,6 +347,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId === 'XUAN_VINH' || 
     effectiveTemplateId === 'TAN_THANH_DANH' ||
     effectiveInvoice?.nbmst === '0101243150';
+
+  const isVnptInvoice =
+    /vnpt-invoice|portaltool-miennam/i.test(directLookupUrl) ||
+    effectiveTemplateId === 'VNPT' ||
+    effectiveTemplateId === 'NGHIA_SON' ||
+    effectiveInvoice?.provider === 'VNPT' ||
+    effectiveInvoice?.msttcgp === '0100684378' ||
+    effectiveInvoice?.nbmst === '4000344946';
 
   const isViettelInvoice = /sinvoice/i.test(directLookupUrl) || 
     effectiveTemplateId === 'VIETTEL' || 
@@ -608,8 +650,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div className="w-[820px] min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
                   <iframe
                     ref={iframeRef}
-                    srcDoc={originalEasyInvoiceHtml || standaloneHtml}
-                    title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
+                    srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
+                    title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
                     className="w-full h-[1200px] border-0 bg-white"
                     sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                   />
@@ -667,6 +709,25 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </a>
                 )}
               </div>
+            ) : isVnptInvoice ? (
+              <div className="inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleViewOriginalVnpt}
+                  disabled={isLoadingVnptOriginal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600 transition-all disabled:opacity-60"
+                  title={`Tự động nhập mã tra cứu và giải Captcha VNPT (${lookupDetails.lookupCode || ''})`}
+                >
+                  {isLoadingVnptOriginal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
+                  <span>{isLoadingVnptOriginal ? 'Đang tra cứu...' : 'Xem hóa đơn gốc VNPT'}</span>
+                </button>
+                {directLookupUrl && (
+                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 rounded-md border border-gray-700">
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Mở Cổng</span>
+                  </a>
+                )}
+              </div>
             ) : directLookupUrl && (
               <a
                 href={directLookupUrl}
@@ -717,7 +778,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <span>Tải XML Gốc</span>
             </button>
 
-            {!isEasyInvoice && !isMisaInvoice && (
+            {!isEasyInvoice && !isMisaInvoice && !isVnptInvoice && (
               <button
                 onClick={handleDownloadPdfFile}
                 disabled={isExportingPdf}
