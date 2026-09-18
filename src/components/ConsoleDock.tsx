@@ -76,7 +76,7 @@ export const ConsoleDock: React.FC<ConsoleDockProps> = ({
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <Terminal className="w-3.5 h-3.5 text-[#ef4444] shrink-0" />
           <span className="text-white font-bold tracking-wide shrink-0">
-            LIVE SELENIUM CONSOLE
+            NHẬT KÝ
           </span>
           <span className="text-gray-500 shrink-0">|</span>
           <span className="text-amber-300 font-semibold text-[11px] tracking-wide shrink-0">
