@@ -16,6 +16,7 @@ import {
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
 import { buildDirectLookupUrl } from '../templates/templateUtils';
+import { getInvoiceProviderBadge } from '../utils/providerMapping';
 
 interface InvoiceTableProps {
   invoices: GDTInvoice[];
@@ -276,16 +277,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           </span>
                         )}
                         {(() => {
-                          const pId = detectPartnerTemplate(inv);
-                          const pMeta = getPartnerMeta(pId);
-                          if (pMeta.isCustomPartner) {
+                          const pBadge = getInvoiceProviderBadge(inv);
+                          if (!pBadge.isDefault) {
                             return (
                               <span 
-                                className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0"
-                                style={{ color: pMeta.color, backgroundColor: `${pMeta.color}15`, border: `1px solid ${pMeta.color}35` }}
-                                title={`Mẫu hóa đơn thiết kế chính xác riêng cho ${pMeta.shortName}`}
+                                className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-bold shrink-0 border ${pBadge.badgeClass}`}
+                                title={pBadge.title}
                               >
-                                {pMeta.badge}
+                                {pBadge.label}
                               </span>
                             );
                           }
@@ -317,24 +316,33 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {/* Mã tra cứu trực tiếp */}
                       {inv.lookupCode && (
                         <div className="flex items-center gap-1 text-[10.5px] text-gray-500 font-mono mt-0.5">
-                          <span className="text-gray-400">
-                            {/viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) ? 'Mã bí mật:' : 'Mã TC:'}
-                          </span>
-                          <a
-                            href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
-                            title={/meinvoice/i.test(inv.lookupUrl || '') || inv.provider === 'MISA' || inv.nbmst === '0101243150'
-                              ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
-                              : /viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) || /sinvoice/i.test(inv.lookupUrl || '')
-                              ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
-                              : `Mã tra cứu: ${inv.lookupCode}`}
-                          >
-                            <span>{inv.lookupCode}</span>
-                            <ExternalLink className="w-2.5 h-2.5 opacity-70" />
-                          </a>
+                          {(() => {
+                            const pBadge = getInvoiceProviderBadge(inv);
+                            const isViettel = pBadge.label === 'Viettel';
+                            const isMisa = pBadge.label === 'Misa';
+                            return (
+                              <>
+                                <span className="text-gray-400">
+                                  {isViettel ? 'Mã bí mật:' : 'Mã TC:'}
+                                </span>
+                                <a
+                                  href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
+                                  title={isMisa
+                                    ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
+                                    : isViettel
+                                    ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
+                                    : `Mã tra cứu: ${inv.lookupCode}`}
+                                >
+                                  <span>{inv.lookupCode}</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                                </a>
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
 
@@ -407,21 +415,17 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
                         {/* Tra cứu trực tiếp trên Cổng NCC */}
                         {(() => {
+                          const pBadge = getInvoiceProviderBadge(inv);
                           const directUrl = buildDirectLookupUrl(
                             inv.lookupUrl,
                             inv.lookupCode,
                             inv.provider,
                             inv.nbmst
                           );
-                          const isMisa = /meinvoice/i.test(directUrl) || 
-                            inv.provider === 'MISA' || 
-                            inv.provider === 'TAN_THANH_DANH' || 
-                            inv.provider === 'TAI_TRAM_ANH' || 
-                            inv.provider === 'XUAN_VINH' || 
-                            inv.nbmst === '0101243150';
-                          const isViettel = /sinvoice/i.test(directUrl) ||
-                            inv.provider === 'VIETTEL' ||
-                            Boolean(inv.caProvider?.includes('VIETTEL'));
+                          const isMisa = pBadge.label === 'Misa' || /meinvoice/i.test(directUrl);
+                          const isViettel = pBadge.label === 'Viettel' || /sinvoice/i.test(directUrl);
+                          const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
+                          const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
                           return (
                             <a
                               href={directUrl}
@@ -429,15 +433,23 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                               rel="noopener noreferrer"
                               className={`p-1 rounded transition-colors cursor-pointer ${
                                 isMisa 
-                                  ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50' 
+                                  ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-50' 
                                   : isViettel
                                   ? 'text-red-600 hover:text-red-800 hover:bg-red-50'
+                                  : isVnpt
+                                  ? 'text-sky-600 hover:text-sky-800 hover:bg-sky-50'
+                                  : isEasyInvoice
+                                  ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
                                 ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${inv.lookupCode || ''})` 
                                 : isViettel
                                 ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${inv.lookupCode || ''})`
+                                : isVnpt
+                                ? `Tra cứu VNPT Invoice (Mã: ${inv.lookupCode || ''})`
+                                : isEasyInvoice
+                                ? `Tra cứu Softdreams EasyInvoice (Mã: ${inv.lookupCode || ''})`
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
