@@ -338,6 +338,16 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
+  // Quét bên bán Vietcombank (0100112437) sử dụng Cổng VNPAY Invoice
+  if (/0100112437/i.test(xmlString) || /VIETCOMBANK|NGOẠI THƯƠNG VIỆT NAM|NGOAI THUONG VIET NAM/i.test(xmlString)) {
+    return {
+      provider: 'VNPAY',
+      priority: 1.8,
+      matchedPattern: 'Vietcombank (VNPAY Invoice)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống VNPAY Invoice (Ngân hàng Vietcombank)'
+    };
+  }
+
   // =========================================================================
   // ƯU TIÊN 1.9: Nhận diện Viettel S-Invoice / vInvoice qua "Mã số bí mật" hoặc email Viettel
   // =========================================================================

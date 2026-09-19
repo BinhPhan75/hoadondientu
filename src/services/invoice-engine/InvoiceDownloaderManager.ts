@@ -23,6 +23,7 @@ import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
 import { BkavDriver } from './drivers/BkavDriver';
 import { ThaiSonDriver } from './drivers/ThaiSonDriver';
 import { CyberBillDriver } from './drivers/CyberBillDriver';
+import { VnpayDriver } from './drivers/VnpayDriver';
 import { GenericFallbackDriver } from './drivers/GenericFallbackDriver';
 import { detectProvider, detectProviderWithDetails, DetectedInvoiceProvider, DetectionResultDetails } from './providerDetector';
 
@@ -47,6 +48,7 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());
+    this.registerDriver(new VnpayDriver());
   }
 
   /**

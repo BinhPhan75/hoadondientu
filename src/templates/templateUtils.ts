@@ -193,9 +193,17 @@ export function buildDirectLookupUrl(
   }
 
   // 4b. VNPAY Invoice (Vietcombank: 0100112437, VNPAY: 0102182292)
-  const isVnpay = provider.includes('VNPAY') || sellerTaxCode === '0100112437' || /vnpayinvoice/i.test(url);
+  const isVnpay = provider.includes('VNPAY') ||
+    sellerTaxCode === '0100112437' ||
+    sellerTaxCode === '0102182292' ||
+    /vnpayinvoice/i.test(url);
   if (isVnpay) {
-    return 'https://portal.vnpayinvoice.vn/';
+    const baseVnpayUrl = 'https://portal.vnpayinvoice.vn';
+    const params = new URLSearchParams();
+    if (code) params.set('lookupCode', code);
+    if (sellerTaxCode) params.set('taxCode', sellerTaxCode);
+    const qs = params.toString();
+    return qs ? `${baseVnpayUrl}/?${qs}` : `${baseVnpayUrl}/`;
   }
 
   // 4c. FPT Electronic Invoice

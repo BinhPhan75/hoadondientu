@@ -13,6 +13,7 @@ export * from './drivers/FourSiDriver';
 export * from './drivers/VnptDriver';
 export * from './drivers/EasyInvoiceDriver';
 export * from './drivers/BkavDriver';
+export * from './drivers/VnpayDriver';
 export * from './drivers/GenericFallbackDriver';
 export * from './InvoiceDownloaderManager';
 

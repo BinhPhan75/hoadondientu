@@ -570,6 +570,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       // Không gán mã CQT làm mã tra cứu cho 4SI, để trống nếu chưa có
     }
 
+    const isVnpayModalCheck =
+      effectiveInvoice.provider === 'VNPAY' ||
+      effectiveInvoice.msttcgp === '0102182292' ||
+      effectiveInvoice.nbmst === '0100112437' ||
+      autoDetectedProvider === 'VNPAY' ||
+      (effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
+
+    if (isVnpayModalCheck && !lookupDetails.lookupUrl) {
+      lookupDetails.lookupUrl = 'https://portal.vnpayinvoice.vn/';
+    }
+
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
     console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);
@@ -622,6 +633,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveInvoice?.provider === 'EASYINVOICE' ||
     effectiveInvoice?.msttcgp === '0105987432' ||
     effectiveInvoice?.nbmst === '0318391940';
+
+  const isVnpayInvoice = /vnpayinvoice/i.test(directLookupUrl) ||
+    /vnpayinvoice/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === 'VNPAY' ||
+    effectiveInvoice?.provider === 'VNPAY' ||
+    effectiveInvoice?.msttcgp === '0102182292' ||
+    effectiveInvoice?.nbmst === '0100112437';
 
   if (!renderError) {
     try {
@@ -1130,14 +1148,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
                   isMisaInvoice
                     ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
+                    : isVnpayInvoice
+                    ? 'text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30'
                     : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
                 }`}
                 title={isMisaInvoice 
                   ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
+                  : isVnpayInvoice
+                  ? `Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`
                   : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
               >
-                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : 'text-cyan-400'}`} />
-                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : 'Tra cứu Cổng NCC'}</span>
+                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isVnpayInvoice ? 'text-indigo-400' : 'text-cyan-400'}`} />
+                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isVnpayInvoice ? 'Tra cứu VNPAY' : 'Tra cứu Cổng NCC'}</span>
               </a>
             )}
 

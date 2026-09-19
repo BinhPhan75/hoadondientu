@@ -12,6 +12,7 @@ import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
 import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
+import { lookupVnpayInvoice, downloadOriginalVnpayPdf, downloadOriginalVnpayXml, buildVnpayPortalUrl } from './src/services/vnpayInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -58,6 +59,9 @@ app.use((req, res, next) => {
       req.url.startsWith('/gdt') ||
       req.url.startsWith('/invoice-downloader') ||
       req.url.startsWith('/easyinvoice') ||
+      req.url.startsWith('/vnpt') ||
+      req.url.startsWith('/viettel') ||
+      req.url.startsWith('/vnpay') ||
       req.url.startsWith('/health') ||
       req.url.startsWith('/selenium')
     ) {
@@ -1782,6 +1786,153 @@ app.all('/api/viettel/download-zip', async (req, res) => {
     res.send(result.zipBuffer);
   } catch (error: any) {
     console.error('[Viettel] Lỗi tải ZIP gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 21. VNPAY Invoice: Tra cứu hóa đơn điện tử VNPAY (portal.vnpayinvoice.vn)
+app.post('/api/vnpay/lookup', async (req, res) => {
+  try {
+    const lookupCode = String(req.body?.lookupCode || req.query?.lookupCode || '').trim();
+    const taxCode = String(req.body?.taxCode || req.body?.sellerTaxCode || req.query?.taxCode || '').trim();
+    const captchaToken = req.body?.captchaToken || req.query?.captchaToken;
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã tra cứu hóa đơn VNPAY không được để trống' });
+    }
+    if (!taxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán không được để trống' });
+    }
+
+    const result = await lookupVnpayInvoice({
+      lookupCode,
+      taxCode,
+      captchaToken: captchaToken ? String(captchaToken) : undefined
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tra cứu hóa đơn:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 22. VNPAY Invoice: Tải trực tiếp file PDF gốc từ Cổng VNPAY Invoice
+app.all('/api/vnpay/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.code ||
+      req.body?.lookupCode || req.body?.code || ''
+    ).trim();
+
+    const stringId = String(
+      req.query.stringId || req.query.id ||
+      req.body?.stringId || req.body?.id || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+    const captchaToken = req.query.captchaToken || req.body?.captchaToken;
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({ success: false, error: 'Cần cung cấp stringId hoặc Mã tra cứu (lookupCode)' });
+    }
+
+    const result = await downloadOriginalVnpayPdf({
+      sellerTaxCode,
+      lookupCode: lookupCode || undefined,
+      stringId: stringId || undefined,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined,
+      captchaToken: captchaToken ? String(captchaToken) : undefined
+    });
+
+    if (result.requiresCaptcha) {
+      return res.status(200).json({
+        success: false,
+        requiresCaptcha: true,
+        error: result.error,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer!.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 23. VNPAY Invoice: Tải trực tiếp file XML gốc từ Cổng VNPAY Invoice
+app.all('/api/vnpay/download-xml', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.code ||
+      req.body?.lookupCode || req.body?.code || ''
+    ).trim();
+
+    const stringId = String(
+      req.query.stringId || req.query.id ||
+      req.body?.stringId || req.body?.id || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({ success: false, error: 'Cần cung cấp stringId hoặc Mã tra cứu (lookupCode)' });
+    }
+
+    const result = await downloadOriginalVnpayXml({
+      sellerTaxCode,
+      lookupCode: lookupCode || undefined,
+      stringId: stringId || undefined,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        xmlContent: result.xmlContent,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tải XML gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });

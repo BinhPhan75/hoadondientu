@@ -426,6 +426,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           const isViettel = pBadge.label === 'Viettel' || /sinvoice/i.test(directUrl);
                           const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
                           const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
+                          const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl);
                           return (
                             <a
                               href={directUrl}
@@ -440,6 +441,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   ? 'text-sky-600 hover:text-sky-800 hover:bg-sky-50'
                                   : isEasyInvoice
                                   ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                                  : isVnpay
+                                  ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
@@ -450,6 +453,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                 ? `Tra cứu VNPT Invoice (Mã: ${inv.lookupCode || ''})`
                                 : isEasyInvoice
                                 ? `Tra cứu Softdreams EasyInvoice (Mã: ${inv.lookupCode || ''})`
+                                : isVnpay
+                                ? `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${inv.lookupCode || ''})`
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

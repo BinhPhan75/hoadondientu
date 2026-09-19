@@ -318,6 +318,16 @@ export function buildDirectLookupUrl(
     return `https://www.meinvoice.vn/tra-cuu?fkey=${encodeURIComponent(code)}`;
   }
 
+  // VNPAY: thêm tham số lookupCode & taxCode để tự động điền form
+  if (info.shortBrand === 'VNPAY') {
+    const params = new URLSearchParams();
+    if (code && code !== 'Vietcombank') params.set('lookupCode', code);
+    const taxCode = sellerTaxCode || (info.mst !== '0102182292' ? info.mst : '');
+    if (taxCode) params.set('taxCode', taxCode);
+    const qs = params.toString();
+    return qs ? `https://portal.vnpayinvoice.vn/?${qs}` : 'https://portal.vnpayinvoice.vn/';
+  }
+
   return info.portalUrl;
 }
 
