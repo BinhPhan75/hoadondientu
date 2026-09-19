@@ -1662,9 +1662,13 @@ app.post('/api/vnpt/view-original', async (req, res) => {
 app.all('/api/vnpt/download-pdf', async (req, res) => {
   try {
     const lookupCode = String(req.query.lookupCode || req.query.fkey || req.body?.lookupCode || req.body?.fkey || '').trim();
-    const checkCode = req.query.checkCode ? String(req.query.checkCode) : (req.body?.checkCode ? String(req.body.checkCode) : undefined);
+    let checkCode = req.query.checkCode ? String(req.query.checkCode) : (req.body?.checkCode ? String(req.body.checkCode) : undefined);
+    if (checkCode === 'undefined' || checkCode === 'null' || !checkCode?.trim()) {
+      checkCode = undefined;
+    }
     const sellerTaxCode = req.query.sellerTaxCode ? String(req.query.sellerTaxCode) : (req.body?.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined);
     const portalUrl = req.query.portalUrl || req.query.portal ? String(req.query.portalUrl || req.query.portal) : (req.body?.portalUrl ? String(req.body.portalUrl) : undefined);
+    const invoiceNumber = req.query.invoiceNumber ? String(req.query.invoiceNumber) : (req.body?.invoiceNumber ? String(req.body.invoiceNumber) : undefined);
 
     if (!lookupCode) {
       return res.status(400).json({ success: false, error: 'Mã tra cứu VNPT (fkey) không được để trống' });
@@ -1674,7 +1678,8 @@ app.all('/api/vnpt/download-pdf', async (req, res) => {
       lookupCode,
       checkCode,
       sellerTaxCode,
-      portalUrl
+      portalUrl,
+      invoiceNumber
     });
 
     res.setHeader('Content-Type', result.contentType);

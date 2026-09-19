@@ -217,46 +217,96 @@ export async function downloadOriginalVnptPdf(params: {
   checkCode?: string;
   lookupCode: string;
   sellerTaxCode?: string;
+  invoiceNumber?: string;
 }): Promise<{ data: Buffer; filename: string; contentType: string }> {
   let portal = params.portalUrl || (params.sellerTaxCode
     ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn`
     : 'https://4000344946-tt78.vnpt-invoice.com.vn');
   portal = portal.replace(/\/+$/, '');
 
-  let checkCode = params.checkCode;
+  let checkCode = (params.checkCode && params.checkCode !== 'undefined' && params.checkCode !== 'null')
+    ? params.checkCode.trim()
+    : undefined;
   const lookupCode = params.lookupCode.trim();
-
-  if (!checkCode) {
-    // Nếu chưa có checkCode, tra cứu trước để lấy checkCode
-    const lookupRes = await lookupOriginalVnptInvoice({
-      lookupCode,
-      sellerTaxCode: params.sellerTaxCode,
-      lookupUrl: portal
-    });
-    checkCode = lookupRes.checkCode;
-    if (!checkCode) {
-      throw new Error('Không thể tìm thấy mã kiểm tra hóa đơn (checkCode) trên cổng VNPT.');
-    }
-  }
-
-  const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-  console.log(`[VNPT] Đang tải file PDF gốc từ: ${pdfUrl}`);
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
     Referer: `${portal}/HomeNoLogin/SearchByFkey/`
   };
 
-  const res = await axios.get(pdfUrl, {
-    headers,
-    responseType: 'arraybuffer',
-    timeout: 30000
-  });
+  let validPdfBuffer: Buffer | null = null;
 
-  const buffer = Buffer.from(res.data);
+  // 1. Nếu có checkCode sẵn (ví dụ vừa mở xem bản gốc), thử tải nhanh bằng checkCode này
+  if (checkCode) {
+    const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+    console.log(`[VNPT] Đang thử tải file PDF gốc bằng checkCode có sẵn: ${pdfUrl}`);
+    try {
+      const res = await axios.get(pdfUrl, {
+        headers,
+        responseType: 'arraybuffer',
+        timeout: 25000,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1000) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith('%PDF')) {
+          validPdfBuffer = tempBuf;
+          console.log(`[VNPT] Tải thành công PDF gốc bằng checkCode có sẵn (${validPdfBuffer.length} bytes)`);
+        } else {
+          console.warn(`[VNPT] Dữ liệu tải về từ checkCode có sẵn không phải định dạng PDF (bắt đầu bằng: "${tempBuf.slice(0, 20).toString()}"). Sẽ tra cứu lại.`);
+        }
+      } else {
+        console.warn(`[VNPT] checkCode có sẵn trả về file rỗng (${res.data ? res.data.byteLength : 0} bytes). Sẽ tra cứu lại với Captcha mới.`);
+      }
+    } catch (err: any) {
+      console.warn(`[VNPT] Không thể tải bằng checkCode có sẵn: ${err.message}. Đang chuẩn bị tra cứu lại.`);
+    }
+  }
+
+  // 2. Nếu chưa có checkCode hoặc checkCode cũ đã hết hạn / trả về file rỗng:
+  // Tự động giải Captcha và thực hiện tra cứu mới trên cổng VNPT để lấy checkCode mới
+  if (!validPdfBuffer) {
+    console.log(`[VNPT] Đang thực hiện tra cứu tự động trên cổng ${portal} (Mã tra cứu: ${lookupCode}) để lấy checkCode mới...`);
+    const lookupRes = await lookupOriginalVnptInvoice({
+      lookupCode,
+      sellerTaxCode: params.sellerTaxCode,
+      lookupUrl: portal
+    });
+
+    if (!lookupRes.checkCode) {
+      throw new Error('Không thể tìm thấy mã kiểm tra hóa đơn (checkCode) trên cổng VNPT sau khi giải Captcha.');
+    }
+
+    const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+    console.log(`[VNPT] Đang tải file PDF gốc bằng checkCode mới: ${freshPdfUrl}`);
+
+    const res = await axios.get(freshPdfUrl, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 30000,
+      validateStatus: (s) => s === 200
+    });
+
+    if (res.data && res.data.byteLength > 1000) {
+      const tempBuf = Buffer.from(res.data);
+      if (tempBuf.slice(0, 5).toString().startsWith('%PDF')) {
+        validPdfBuffer = tempBuf;
+        console.log(`[VNPT] Tải thành công PDF gốc bằng checkCode mới (${validPdfBuffer.length} bytes)`);
+      }
+    }
+  }
+
+  if (!validPdfBuffer || validPdfBuffer.length === 0 || !validPdfBuffer.slice(0, 5).toString().startsWith('%PDF')) {
+    throw new Error('Cổng VNPT không trả về tệp PDF hợp lệ cho hóa đơn này (tệp bị rỗng hoặc lỗi phân quyền).');
+  }
+
+  const cleanShd = params.invoiceNumber 
+    ? String(params.invoiceNumber).padStart(7, '0') 
+    : lookupCode.slice(0, 16);
+
   return {
-    data: buffer,
-    filename: `HoaDon_VNPT_${lookupCode.slice(0, 16)}.pdf`,
+    data: validPdfBuffer,
+    filename: `HoaDon_VNPT_${cleanShd}.pdf`,
     contentType: 'application/pdf'
   };
 }

@@ -177,17 +177,57 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsDownloadingVnptPdf(true);
     try {
       const portal = vnptPortalUrl || lookupDetails.lookupUrl || currentProviderMeta.portalUrl;
-      const downloadUrl = `/api/vnpt/download-pdf?lookupCode=${encodeURIComponent(lookupCode.trim())}&sellerTaxCode=${encodeURIComponent(effectiveInvoice.nbmst || '')}&portalUrl=${encodeURIComponent(portal || '')}${vnptCheckCode ? `&checkCode=${encodeURIComponent(vnptCheckCode)}` : ''}`;
+      const cleanCheckCode = (vnptCheckCode && vnptCheckCode !== 'undefined' && vnptCheckCode !== 'null') ? vnptCheckCode : undefined;
       
+      const resp = await fetch('/api/vnpt/download-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          portalUrl: portal,
+          checkCode: cleanCheckCode,
+          invoiceNumber: effectiveInvoice.shdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errorMsg = 'Không thể tải file PDF gốc từ cổng VNPT.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errorMsg = errJson.error;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF nhận được từ cổng VNPT bị rỗng hoặc không hợp lệ.');
+      }
+
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : lookupCode.slice(0, 8);
+      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `HoaDon_VNPT_${effectiveInvoice.shdon || lookupCode.slice(0, 8)}.pdf`;
+      link.href = blobUrl;
+      link.download = `HoaDon_VNPT_${cleanShd}.pdf`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải PDF gốc VNPT:', err);
-      alert(`Không thể tải PDF gốc VNPT: ${err.message}`);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp file PDF từ cổng VNPT (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét từ bản thể hiện ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
     } finally {
       setIsDownloadingVnptPdf(false);
     }
@@ -439,6 +479,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleDownloadPdfFile = async () => {
     setIsExportingPdf(true);
     try {
+      if (isVnptInvoice) {
+        await handleDownloadVnptPdf();
+        return;
+      }
+
       if (isEasyInvoice || isMisaInvoice) {
         const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
         if (!lookupCode) {
