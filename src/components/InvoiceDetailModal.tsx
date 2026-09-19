@@ -12,7 +12,8 @@ import {
   RefreshCw, 
   ExternalLink,
   FileText,
-  Loader2
+  Loader2,
+  Eye
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
@@ -66,6 +67,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setCurrentInvoice(invoice);
     setOriginalEasyInvoiceHtml(null);
     setOriginalVnptHtml(null);
+    setVnptCheckCode(null);
+    setVnptPortalUrl(null);
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -76,7 +79,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
   const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
+  const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
+  const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
   const [isLoadingVnptOriginal, setIsLoadingVnptOriginal] = useState(false);
+  const [isDownloadingVnptPdf, setIsDownloadingVnptPdf] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -151,11 +157,39 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         throw new Error(data.error || 'Không nhận được bản thể hiện gốc từ VNPT.');
       }
       setOriginalVnptHtml(data.htmlContent);
+      if (data.checkCode) setVnptCheckCode(data.checkCode);
+      if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi xem VNPT gốc:', err);
       alert(`Không thể hiển thị bản gốc VNPT: ${err.message}`);
     } finally {
       setIsLoadingVnptOriginal(false);
+    }
+  };
+
+  const handleDownloadVnptPdf = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn VNPT không có mã tra cứu để tải PDF gốc.');
+      return;
+    }
+    setIsDownloadingVnptPdf(true);
+    try {
+      const portal = vnptPortalUrl || lookupDetails.lookupUrl || currentProviderMeta.portalUrl;
+      const downloadUrl = `/api/vnpt/download-pdf?lookupCode=${encodeURIComponent(lookupCode.trim())}&sellerTaxCode=${encodeURIComponent(effectiveInvoice.nbmst || '')}&portalUrl=${encodeURIComponent(portal || '')}${vnptCheckCode ? `&checkCode=${encodeURIComponent(vnptCheckCode)}` : ''}`;
+      
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `HoaDon_VNPT_${effectiveInvoice.shdon || lookupCode.slice(0, 8)}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải PDF gốc VNPT:', err);
+      alert(`Không thể tải PDF gốc VNPT: ${err.message}`);
+    } finally {
+      setIsDownloadingVnptPdf(false);
     }
   };
 
@@ -643,11 +677,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             <div 
               className="flex justify-center"
               style={{
-                width: '820px',
+                width: originalVnptHtml ? '890px' : '820px',
                 minHeight: '1160px',
               }}
             >
-                <div className="w-[820px] min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
+                <div className={`${originalVnptHtml ? 'w-[890px]' : 'w-[820px]'} min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300`}>
                   <iframe
                     ref={iframeRef}
                     srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
@@ -662,6 +696,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
                 {originalEasyInvoiceHtml ? (
                   <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ EasyInvoice</span> • </>
+                ) : originalVnptHtml ? (
+                  <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
                 ) : (
                   <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
                 )}
@@ -710,19 +746,60 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 )}
               </div>
             ) : isVnptInvoice ? (
-              <div className="inline-flex items-center gap-1.5">
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={handleViewOriginalVnpt}
                   disabled={isLoadingVnptOriginal}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600 transition-all disabled:opacity-60"
-                  title={`Tự động nhập mã tra cứu và giải Captcha VNPT (${lookupDetails.lookupCode || ''})`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalVnptHtml
+                      ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
+                      : 'text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600'
+                  }`}
+                  title={`Tự động nhập mã tra cứu, giải Captcha và mở xem hóa đơn gốc ở mục Thao tác VNPT (${lookupDetails.lookupCode || ''})`}
                 >
-                  {isLoadingVnptOriginal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
-                  <span>{isLoadingVnptOriginal ? 'Đang tra cứu...' : 'Xem hóa đơn gốc VNPT'}</span>
+                  {isLoadingVnptOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isLoadingVnptOriginal ? 'Đang mở HĐ gốc...' : originalVnptHtml ? 'Đang xem bản gốc VNPT' : 'Xem hóa đơn gốc VNPT'}</span>
                 </button>
+
+                {originalVnptHtml && (
+                  <button
+                    type="button"
+                    onClick={() => setOriginalVnptHtml(null)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu thể hiện nội bộ"
+                  >
+                    <span>Mẫu nội bộ</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleDownloadVnptPdf}
+                  disabled={isDownloadingVnptPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ cổng VNPT (mục Tải file)"
+                >
+                  {isDownloadingVnptPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                  )}
+                  <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
+                </button>
+
                 {directLookupUrl && (
-                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 rounded-md border border-gray-700">
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    title="Mở cổng tra cứu trực tiếp của VNPT trên tab mới"
+                  >
                     <ExternalLink className="w-3 h-3" />
                     <span>Mở Cổng</span>
                   </a>

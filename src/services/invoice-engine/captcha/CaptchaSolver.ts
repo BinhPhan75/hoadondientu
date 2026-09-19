@@ -4,11 +4,11 @@ import { solveCaptchaWithGemini } from './geminiCaptchaSolver';
 export class CaptchaSolver {
   public static async solveWithAI(
     imageInput: Buffer | string | Uint8Array,
-    _options?: CaptchaSolveOptions
+    options?: CaptchaSolveOptions
   ): Promise<CaptchaSolveResult | null> {
     try {
       const startTime = Date.now();
-      const code = await solveCaptchaWithGemini(imageInput);
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
       return {
         code,
         confidence: 99,
@@ -42,7 +42,7 @@ export class CaptchaSolver {
 
   public static async solveWithDetails(
     imageInput: Buffer | string | Uint8Array,
-    _options?: CaptchaSolveOptions
+    options?: CaptchaSolveOptions
   ): Promise<CaptchaSolveResult> {
     const startTime = Date.now();
     if (!imageInput) {
@@ -50,7 +50,7 @@ export class CaptchaSolver {
     }
 
     try {
-      const code = await solveCaptchaWithGemini(imageInput);
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
       return {
         code,
         confidence: 99,

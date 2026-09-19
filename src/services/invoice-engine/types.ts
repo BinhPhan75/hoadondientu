@@ -55,6 +55,7 @@ export interface CaptchaSolveOptions {
   timeoutMs?: number; // Timeout OCR
   preprocess?: boolean; // Tiền xử lý ảnh
   lang?: string; // 'eng' | 'vie'
+  prompt?: string; // Tùy chỉnh prompt gửi cho Gemini AI
 }
 
 export interface CaptchaSolveResult {

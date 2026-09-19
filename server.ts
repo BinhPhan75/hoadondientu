@@ -10,7 +10,7 @@ import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
-import { lookupOriginalVnptInvoice } from './src/services/vnptInvoiceService';
+import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -344,7 +344,7 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
   const activeAi = getGeminiClient(customApiKey);
   if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
     const candidateModels = [
-      'gemini-2.5-flash',
+      'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-flash-latest'
     ];
@@ -1616,20 +1616,6 @@ app.post('/api/easyinvoice/download', async (req, res) => {
       viewOnly: Boolean(viewOnly)
     });
 
-    app.post('/api/vnpt/view-original', async (req, res) => {
-      try {
-        const result = await lookupOriginalVnptInvoice({
-          lookupCode: String(req.body.lookupCode || ''),
-          sellerTaxCode: req.body.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined,
-          lookupUrl: req.body.lookupUrl ? String(req.body.lookupUrl) : undefined
-        });
-        res.json({ success: true, htmlContent: result.htmlContent });
-      } catch (error: any) {
-        console.error('[VNPT] Lỗi xem hóa đơn gốc:', error.message);
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
     if (req.query.format === 'binary') {
       res.setHeader('Content-Type', result.contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
@@ -1646,6 +1632,57 @@ app.post('/api/easyinvoice/download', async (req, res) => {
     });
   } catch (error: any) {
     console.error('[EasyInvoice] Lỗi tải hóa đơn gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 17. VNPT Invoice: Tra cứu và xem hóa đơn gốc trực tiếp qua API & Gemini AI Captcha
+app.post('/api/vnpt/view-original', async (req, res) => {
+  try {
+    const result = await lookupOriginalVnptInvoice({
+      lookupCode: String(req.body.lookupCode || ''),
+      sellerTaxCode: req.body.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined,
+      lookupUrl: req.body.lookupUrl ? String(req.body.lookupUrl) : undefined
+    });
+    res.json({
+      success: true,
+      htmlContent: result.htmlContent,
+      checkCode: result.checkCode,
+      pdfDownloadUrl: result.pdfDownloadUrl,
+      portalUrl: result.portalUrl,
+      invoiceInfo: result.invoiceInfo
+    });
+  } catch (error: any) {
+    console.error('[VNPT] Lỗi xem hóa đơn gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 18. VNPT Invoice: Tải trực tiếp file PDF gốc từ cổng VNPT
+app.all('/api/vnpt/download-pdf', async (req, res) => {
+  try {
+    const lookupCode = String(req.query.lookupCode || req.query.fkey || req.body?.lookupCode || req.body?.fkey || '').trim();
+    const checkCode = req.query.checkCode ? String(req.query.checkCode) : (req.body?.checkCode ? String(req.body.checkCode) : undefined);
+    const sellerTaxCode = req.query.sellerTaxCode ? String(req.query.sellerTaxCode) : (req.body?.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined);
+    const portalUrl = req.query.portalUrl || req.query.portal ? String(req.query.portalUrl || req.query.portal) : (req.body?.portalUrl ? String(req.body.portalUrl) : undefined);
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã tra cứu VNPT (fkey) không được để trống' });
+    }
+
+    const result = await downloadOriginalVnptPdf({
+      lookupCode,
+      checkCode,
+      sellerTaxCode,
+      portalUrl
+    });
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.data.length);
+    res.send(result.data);
+  } catch (error: any) {
+    console.error('[VNPT] Lỗi tải PDF gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
