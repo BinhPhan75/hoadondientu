@@ -339,6 +339,21 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   }
 
   // =========================================================================
+  // ƯU TIÊN 1.9: Nhận diện Viettel S-Invoice / vInvoice qua "Mã số bí mật" hoặc email Viettel
+  // =========================================================================
+  if (
+    /Mã số bí mật|Ma so bi mat|ReservationCode/i.test(xmlString) ||
+    /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-ca|@viettel|@viettrel/i.test(xmlString)
+  ) {
+    return {
+      provider: 'VIETTEL',
+      priority: 1.8,
+      matchedPattern: 'Viettel vInvoice / S-Invoice (Mã số bí mật / ReservationCode)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống Viettel vInvoice / S-Invoice'
+    };
+  }
+
+  // =========================================================================
   // ƯU TIÊN 2: Đọc thẻ <Signature> / Chữ ký số
   // Đọc giá trị trong <X509IssuerName> hoặc thông tin Chữ ký số bên bán
   // Nhận diện đúng tên CA phát hành (MISA-CA, VIETTEL-CA, VNPT-CA...)
@@ -440,12 +455,26 @@ function extractSignatureIssuers(xml: string): string[] {
   }
 
   // 4. Các thẻ CA độc lập ở cấp Root / TTin / TTKhac
-  for (const tag of ['CAProvider', 'TenToChucChungThuc', 'NhaCungCapChungThuSo', 'ToChucChungThuc']) {
+  for (const tag of ['CAProvider', 'TenToChucChungThuc', 'NhaCungCapChungThuSo', 'ToChucChungThuc', 'X509SubjectName']) {
     const vals = extractTags(xml, tag);
     for (const v of vals) {
       if (!issuers.includes(v)) {
         issuers.push(v);
       }
+    }
+  }
+
+  // 5. Giải mã thẻ <X509Certificate> (nếu có) để tìm chuỗi tên CA trong chứng thư số DER/X509
+  const certList = extractTags(xml, 'X509Certificate');
+  for (const certB64 of certList) {
+    try {
+      const cleanB64 = certB64.replace(/[\r\n\s]/g, '');
+      const decoded = Buffer.from(cleanB64, 'base64').toString('latin1');
+      if (decoded) {
+        issuers.push(decoded);
+      }
+    } catch {
+      // Bỏ qua nếu không parse được certificate
     }
   }
 

@@ -69,6 +69,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setOriginalVnptHtml(null);
     setVnptCheckCode(null);
     setVnptPortalUrl(null);
+    if (originalViettelPdfUrl) {
+      window.URL.revokeObjectURL(originalViettelPdfUrl);
+      setOriginalViettelPdfUrl(null);
+    }
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -83,6 +87,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
   const [isLoadingVnptOriginal, setIsLoadingVnptOriginal] = useState(false);
   const [isDownloadingVnptPdf, setIsDownloadingVnptPdf] = useState(false);
+  const [originalViettelPdfUrl, setOriginalViettelPdfUrl] = useState<string | null>(null);
+  const [isLoadingViettelOriginal, setIsLoadingViettelOriginal] = useState(false);
+  const [isDownloadingViettelPdf, setIsDownloadingViettelPdf] = useState(false);
+  const [isDownloadingViettelZip, setIsDownloadingViettelZip] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -230,6 +238,173 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
     } finally {
       setIsDownloadingVnptPdf(false);
+    }
+  };
+
+  const handleDownloadViettelPdf = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật để tải PDF gốc.');
+      return;
+    }
+
+    setIsDownloadingViettelPdf(true);
+    try {
+      const resp = await fetch('/api/viettel/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon,
+          invoiceSeries: effectiveInvoice.khhdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải file PDF gốc từ cổng Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF nhận được từ Viettel bị rỗng.');
+      }
+
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const cleanKhhdon = (effectiveInvoice.khhdon || '').replace(/[^a-zA-Z0-9]/g, '');
+      const filename = `HoaDon_Viettel_${supplierTaxCode}_${cleanKhhdon ? cleanKhhdon + '_' : ''}${cleanShd}_${reservationCode}.pdf`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải PDF Viettel:', err);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp PDF từ cổng Viettel (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét theo mẫu ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
+    } finally {
+      setIsDownloadingViettelPdf(false);
+    }
+  };
+
+  const handleViewOriginalViettel = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
+      return;
+    }
+
+    setIsLoadingViettelOriginal(true);
+    try {
+      const resp = await fetch('/api/viettel/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon,
+          invoiceSeries: effectiveInvoice.khhdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải bản gốc từ Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF từ Viettel bị rỗng.');
+      }
+
+      const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(pdfBlob);
+      if (originalViettelPdfUrl) {
+        window.URL.revokeObjectURL(originalViettelPdfUrl);
+      }
+      setOriginalViettelPdfUrl(blobUrl);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem PDF Viettel:', err);
+      alert(`Không thể hiển thị bản gốc Viettel: ${err.message}`);
+    } finally {
+      setIsLoadingViettelOriginal(false);
+    }
+  };
+
+  const handleDownloadViettelZip = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
+      return;
+    }
+
+    setIsDownloadingViettelZip(true);
+    try {
+      const resp = await fetch('/api/viettel/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải tệp ZIP từ Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const filename = `HoaDon_Viettel_${supplierTaxCode}_${cleanShd}_${reservationCode}.zip`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err: any) {
+      alert(`Không thể tải ZIP Viettel: ${err.message}`);
+    } finally {
+      setIsDownloadingViettelZip(false);
     }
   };
 
@@ -430,9 +605,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveInvoice?.msttcgp === '0100684378' ||
     effectiveInvoice?.nbmst === '4000344946';
 
-  const isViettelInvoice = /sinvoice/i.test(directLookupUrl) || 
+  const isViettelInvoice = /vinvoice|sinvoice/i.test(directLookupUrl) || 
+    /vinvoice|sinvoice/i.test(lookupDetails.lookupUrl || '') ||
     effectiveTemplateId === 'VIETTEL' || 
-    Boolean(effectiveInvoice?.caProvider?.includes('VIETTEL'));
+    effectiveInvoice?.provider === 'VIETTEL' ||
+    effectiveInvoice?.msttcgp === '0100109106' ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('VIETTEL')) ||
+    (Boolean(lookupDetails.lookupCode) && (lookupDetails.lookupUrl?.includes('viettel') || effectiveInvoice?.nbmst === '049163008476'));
 
   const isEasyInvoice = /easyinvoice/i.test(directLookupUrl) ||
     /easyinvoice/i.test(lookupDetails.lookupUrl || '') ||
@@ -481,6 +660,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     try {
       if (isVnptInvoice) {
         await handleDownloadVnptPdf();
+        return;
+      }
+
+      if (isViettelInvoice) {
+        await handleDownloadViettelPdf();
         return;
       }
 
@@ -727,13 +911,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               }}
             >
                 <div className={`${originalVnptHtml ? 'w-[890px]' : 'w-[820px]'} min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300`}>
-                  <iframe
-                    ref={iframeRef}
-                    srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
-                    title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
-                    className="w-full h-[1200px] border-0 bg-white"
-                    sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
-                  />
+                  {originalViettelPdfUrl ? (
+                    <iframe
+                      src={originalViettelPdfUrl}
+                      title="Bản gốc PDF Viettel vInvoice"
+                      className="w-full h-[1200px] border-0 bg-white"
+                    />
+                  ) : (
+                    <iframe
+                      ref={iframeRef}
+                      srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
+                      title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
+                      className="w-full h-[1200px] border-0 bg-white"
+                      sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -743,6 +935,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ EasyInvoice</span> • </>
                 ) : originalVnptHtml ? (
                   <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
+                ) : originalViettelPdfUrl ? (
+                  <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
                 ) : (
                   <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
                 )}
@@ -850,6 +1044,84 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </a>
                 )}
               </div>
+            ) : isViettelInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleViewOriginalViettel}
+                  disabled={isLoadingViettelOriginal}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalViettelPdfUrl
+                      ? 'text-red-200 bg-red-900 border-red-400 ring-1 ring-red-400/40'
+                      : 'text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600'
+                  }`}
+                  title={`Tải và xem trực tiếp bản PDF gốc ký số từ Viettel (Mã bí mật: ${lookupDetails.lookupCode || ''})`}
+                >
+                  {isLoadingViettelOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 text-red-400" />
+                  )}
+                  <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : originalViettelPdfUrl ? 'Đang xem PDF gốc Viettel' : 'Xem PDF gốc Viettel'}</span>
+                </button>
+
+                {originalViettelPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (originalViettelPdfUrl) window.URL.revokeObjectURL(originalViettelPdfUrl);
+                      setOriginalViettelPdfUrl(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu thể hiện nội bộ"
+                  >
+                    <span>Mẫu nội bộ</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleDownloadViettelPdf}
+                  disabled={isDownloadingViettelPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600 hover:border-red-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
+                >
+                  {isDownloadingViettelPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-red-400" />
+                  )}
+                  <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadViettelZip}
+                  disabled={isDownloadingViettelZip}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-md border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
+                  title="Tải tệp ZIP gốc (chứa XML và chữ ký) từ Viettel"
+                >
+                  {isDownloadingViettelZip ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                  ) : (
+                    <FileCode2 className="w-3 h-3 text-amber-400" />
+                  )}
+                  <span>Tải ZIP</span>
+                </button>
+
+                {directLookupUrl && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Mở Cổng</span>
+                  </a>
+                )}
+              </div>
             ) : directLookupUrl && (
               <a
                 href={directLookupUrl}
@@ -858,18 +1130,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
                   isMisaInvoice
                     ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
-                    : isViettelInvoice
-                    ? 'text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600 hover:border-red-500 ring-1 ring-red-500/30'
                     : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
                 }`}
                 title={isMisaInvoice 
                   ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
-                  : isViettelInvoice
-                  ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${effectiveInvoice?.nbmst || ''} & Mã bí mật ${lookupDetails.lookupCode || ''})`
                   : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
               >
-                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isViettelInvoice ? 'text-red-400' : 'text-cyan-400'}`} />
-                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isViettelInvoice ? 'Tra cứu Viettel S-Invoice' : 'Tra cứu Cổng NCC'}</span>
+                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : 'text-cyan-400'}`} />
+                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : 'Tra cứu Cổng NCC'}</span>
               </a>
             )}
 
@@ -900,7 +1168,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <span>Tải XML Gốc</span>
             </button>
 
-            {!isEasyInvoice && !isMisaInvoice && !isVnptInvoice && (
+            {!isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice && (
               <button
                 onClick={handleDownloadPdfFile}
                 disabled={isExportingPdf}

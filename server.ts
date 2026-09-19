@@ -11,6 +11,7 @@ import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
+import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -1688,6 +1689,99 @@ app.all('/api/vnpt/download-pdf', async (req, res) => {
     res.send(result.data);
   } catch (error: any) {
     console.error('[VNPT] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 19. Viettel Invoice: Tải trực tiếp file PDF gốc từ cổng Viettel vInvoice / S-Invoice
+app.all('/api/viettel/download-pdf', async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode ||
+      req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+
+    if (!supplierTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (supplierTaxCode) không được để trống' });
+    }
+    if (!reservationCode) {
+      return res.status(400).json({ success: false, error: 'Mã bí mật (reservationCode / Mã số bí mật) không được để trống' });
+    }
+
+    const result = await downloadOriginalViettelPdf({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined
+    });
+
+    if (req.query.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer!.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[Viettel] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 20. Viettel Invoice: Tải trực tiếp file ZIP gốc từ cổng Viettel
+app.all('/api/viettel/download-zip', async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode ||
+      req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+
+    if (!supplierTaxCode || !reservationCode) {
+      return res.status(400).json({ success: false, error: 'Thiếu MST bên bán hoặc Mã bí mật để tải ZIP' });
+    }
+
+    const result = await downloadOriginalViettelZip({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined
+    });
+
+    if (req.query.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        zipBase64: result.zipBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.zipBuffer!.length);
+    res.send(result.zipBuffer);
+  } catch (error: any) {
+    console.error('[Viettel] Lỗi tải ZIP gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
