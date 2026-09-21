@@ -11,11 +11,11 @@ export interface InvoiceProviderInfo {
 }
 
 export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPortalUrl: string; shortBrand: string }> = {
-  // 1. LCS Soft (PNJ)
+  // 1. LCS Soft (PNJ / 4Si)
   '0302999571': {
-    name: 'Công ty TNHH L.C.S',
-    defaultPortalUrl: 'https://eip.lcssoft.com.vn/desktop/#/login',
-    shortBrand: 'LCS Soft'
+    name: 'Công ty TNHH L.C.S (LCS Soft / 4Si)',
+    defaultPortalUrl: 'https://dochoadon.lcssoft.com.vn/',
+    shortBrand: '4Si'
   },
   // 2. VNPAY Invoice (Vietcombank)
   '0102182292': {
@@ -47,10 +47,10 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
     defaultPortalUrl: 'https://www.meinvoice.vn/tra-cuu',
     shortBrand: 'MISA'
   },
-  // 7. 4Si
+  // 7. 4Si / LCS Soft
   '0315744883': {
-    name: 'Công ty Cổ phần 4Si',
-    defaultPortalUrl: 'https://inv.4si.vn/tra-cuu-hoa-don',
+    name: 'Công ty Cổ phần 4Si (LCS Soft)',
+    defaultPortalUrl: 'https://dochoadon.lcssoft.com.vn/',
     shortBrand: '4Si'
   },
   // 8. Softdreams EasyInvoice
@@ -229,13 +229,20 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     };
   }
 
-  // 7. 4Si
-  if (msttcgp === '0315744883' || provider === '4SI' || rawLookupUrl.includes('4si.vn')) {
+  // 7. 4Si / LCS Soft
+  if (
+    msttcgp === '0315744883' ||
+    msttcgp === '0302999571' ||
+    provider === '4SI' ||
+    provider === 'LCS_SOFT' ||
+    rawLookupUrl.includes('4si.vn') ||
+    rawLookupUrl.includes('lcssoft.com.vn')
+  ) {
     return {
-      mst: '0315744883',
-      name: 'Công ty Cổ phần 4Si',
-      fullDisplay: '0315744883 - Công ty Cổ phần 4Si',
-      portalUrl: 'https://inv.4si.vn/tra-cuu-hoa-don',
+      mst: msttcgp || '0315744883',
+      name: 'Công ty Cổ phần 4Si (LCS Soft)',
+      fullDisplay: `${msttcgp || '0315744883'} - Công ty Cổ phần 4Si (LCS Soft)`,
+      portalUrl: rawLookupUrl || 'https://dochoadon.lcssoft.com.vn/',
       lookupCode: rawLookupCode || '',
       shortBrand: '4Si'
     };
@@ -322,7 +329,19 @@ export function buildDirectLookupUrl(
 
   // MISA: thêm tham số fkey
   if (info.shortBrand === 'MISA' && code) {
-    return `https://www.meinvoice.vn/tra-cuu?fkey=${encodeURIComponent(code)}`;
+    return `https://www.meinvoice.vn/tra-cuu?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
+  }
+
+  // EasyInvoice: thêm tham số fkey vào Search/Index
+  if (info.shortBrand === 'EASYINVOICE' && info.portalUrl) {
+    const cleanUrl = info.portalUrl.split('?')[0].replace(/\/+$/, '').replace(/\/Search\/Index\/?$/i, '');
+    return code ? `${cleanUrl}/Search/Index?fkey=${encodeURIComponent(code)}` : `${cleanUrl}/Search/Index`;
+  }
+
+  // VNPT: dẫn tới trang SearchByFkey
+  if (info.shortBrand === 'VNPT' && info.portalUrl) {
+    const cleanUrl = info.portalUrl.split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
+    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
   }
 
   // VNPAY: thêm tham số lookupCode & taxCode để tự động điền form
@@ -345,6 +364,14 @@ export function buildDirectLookupUrl(
       return 'https://einvoice.vietcombank.com.vn/';
     }
     return qs ? `https://portal.vnpayinvoice.vn/?${qs}` : (isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/');
+  }
+
+  // 4Si / LCS Soft: ưu tiên cổng đọc hóa đơn XML dochoadon.lcssoft.com.vn
+  if (info.shortBrand === '4Si') {
+    if (portalUrl && (portalUrl.includes('4si.vn') || portalUrl.includes('lcssoft.com.vn'))) {
+      return portalUrl;
+    }
+    return 'https://dochoadon.lcssoft.com.vn/';
   }
 
   return info.portalUrl;

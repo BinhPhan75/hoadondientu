@@ -73,6 +73,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       window.URL.revokeObjectURL(originalViettelPdfUrl);
       setOriginalViettelPdfUrl(null);
     }
+    if (originalFourSiPdfUrl) {
+      window.URL.revokeObjectURL(originalFourSiPdfUrl);
+      setOriginalFourSiPdfUrl(null);
+    }
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -91,6 +95,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isLoadingViettelOriginal, setIsLoadingViettelOriginal] = useState(false);
   const [isDownloadingViettelPdf, setIsDownloadingViettelPdf] = useState(false);
   const [isDownloadingViettelZip, setIsDownloadingViettelZip] = useState(false);
+  const [originalFourSiPdfUrl, setOriginalFourSiPdfUrl] = useState<string | null>(null);
+  const [isLoadingFourSiOriginal, setIsLoadingFourSiOriginal] = useState(false);
+  const [isDownloadingFourSiPdf, setIsDownloadingFourSiPdf] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -408,6 +415,98 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
+  const handleViewFourSiPdf = async () => {
+    if (!effectiveInvoice) return;
+    setIsLoadingFourSiOriginal(true);
+    try {
+      const xmlToUse = effectiveInvoice.rawXml || '';
+      const resp = await fetch('/api/foursi/render-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml: xmlToUse,
+          invoice: effectiveInvoice
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tạo bản thể hiện từ LCS Soft (dochoadon.lcssoft.com.vn).';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const resData = await resp.json();
+      if (!resData.success || !resData.pdfBase64) {
+        throw new Error(resData.error || 'Không nhận được dữ liệu PDF từ cổng LCS Soft.');
+      }
+
+      const byteCharacters = atob(resData.pdfBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const pdfBlob = new Blob([byteArray], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(pdfBlob);
+
+      if (originalFourSiPdfUrl) {
+        window.URL.revokeObjectURL(originalFourSiPdfUrl);
+      }
+      setOriginalFourSiPdfUrl(blobUrl);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem PDF 4Si qua LCS Soft:', err);
+      alert(`Không thể hiển thị bản thể hiện 4Si từ LCS Soft: ${err.message}`);
+    } finally {
+      setIsLoadingFourSiOriginal(false);
+    }
+  };
+
+  const handleDownloadFourSiPdf = async () => {
+    if (!effectiveInvoice) return;
+    setIsDownloadingFourSiPdf(true);
+    try {
+      const xmlToUse = effectiveInvoice.rawXml || '';
+      const resp = await fetch('/api/foursi/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml: xmlToUse,
+          invoice: effectiveInvoice
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải tệp PDF từ cổng LCS Soft.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const cleanKhh = effectiveInvoice.khhdon || '4SI';
+      const filename = `HoaDon_4SI_LCS_${cleanKhh}_${cleanShd}.pdf`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err: any) {
+      alert(`Không thể tải PDF 4Si từ LCS Soft: ${err.message}`);
+    } finally {
+      setIsDownloadingFourSiPdf(false);
+    }
+  };
+
   const handleViewOriginalEasyInvoice = async () => {
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
@@ -665,6 +764,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const isVietcombankInvoice = effectiveInvoice?.nbmst === '0100112437' ||
     Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
 
+  const is4SiInvoice =
+    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(directLookupUrl) ||
+    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === '4SI' ||
+    effectiveTemplateId === 'PNJ' ||
+    effectiveTemplateId === 'LCS_SOFT' ||
+    effectiveInvoice?.provider === '4SI' ||
+    effectiveInvoice?.provider === 'LCS_SOFT' ||
+    effectiveInvoice?.msttcgp === '0315744883' ||
+    effectiveInvoice?.msttcgp === '0302999571' ||
+    effectiveInvoice?.nbmst === '0315018466' ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('4SI')) ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('LCS'));
+
   if (!renderError) {
     try {
       // Tạo HTML chuẩn theo template của nhà cung cấp
@@ -897,6 +1010,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <Sparkles className="w-3 h-3 text-amber-400" />
                   NCC: {currentProviderMeta.shortName}
                 </span>
+                {is4SiInvoice && (
+                  <span className="px-2 py-0.5 rounded bg-purple-900/60 text-purple-300 text-[10px] font-mono font-semibold border border-purple-700 flex items-center gap-1" title="Hóa đơn 4Si của Công ty L.C.S (lcssoft.com.vn) - Hỗ trợ đọc qua dochoadon.lcssoft.com.vn">
+                    <span>LCS Soft / 4Si</span>
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">
                 Bên bán: <span className="text-gray-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-amber-300 font-bold">{effectiveInvoice.nbmst}</span>)
@@ -960,6 +1078,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       title="Bản gốc PDF Viettel vInvoice"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
+                  ) : originalFourSiPdfUrl ? (
+                    <iframe
+                      src={originalFourSiPdfUrl}
+                      title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
+                      className="w-full h-[1200px] border-0 bg-white"
+                    />
                   ) : (
                     <iframe
                       ref={iframeRef}
@@ -980,6 +1104,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
                 ) : originalViettelPdfUrl ? (
                   <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
+                ) : originalFourSiPdfUrl ? (
+                  <>Bản thể hiện <span className="text-amber-400 font-bold">mẫu 4Si từ dochoadon.lcssoft.com.vn (bản thể hiện hiển thị, chưa phải bản gốc có CKS)</span> • </>
+                ) : is4SiInvoice ? (
+                  <>Bản thể hiện mẫu <span className="text-amber-400 font-bold">chuẩn Tổng cục Thuế (GDT)</span> • </>
                 ) : (
                   <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
                 )}
@@ -1240,7 +1368,89 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <span>Tải XML Gốc</span>
             </button>
 
-            {!isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice && (
+            {is4SiInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* Nút Xem bản thể hiện 4Si từ LCS Soft */}
+                <button
+                  type="button"
+                  onClick={handleViewFourSiPdf}
+                  disabled={isLoadingFourSiOriginal}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalFourSiPdfUrl
+                      ? 'text-amber-200 bg-amber-900 border-amber-400 ring-1 ring-amber-400/40'
+                      : 'text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600'
+                  }`}
+                  title="Tạo và xem trực tiếp bản thể hiện mẫu 4Si qua cổng Đọc hóa đơn XML của LCS Soft (dochoadon.lcssoft.com.vn)"
+                >
+                  {isLoadingFourSiOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>
+                    {isLoadingFourSiOriginal
+                      ? 'Đang nạp 4Si (LCS)...'
+                      : originalFourSiPdfUrl
+                      ? 'Đang xem bản thể hiện 4Si'
+                      : 'Xem bản thể hiện 4Si (LCS)'}
+                  </span>
+                </button>
+
+                {/* Nút Chuyển về mẫu GDT nếu đang xem bản thể hiện 4Si */}
+                {originalFourSiPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (originalFourSiPdfUrl) window.URL.revokeObjectURL(originalFourSiPdfUrl);
+                      setOriginalFourSiPdfUrl(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 rounded-md border border-emerald-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu chuẩn Tổng cục Thuế (GDT)"
+                  >
+                    <span>Mẫu chuẩn GDT</span>
+                  </button>
+                )}
+
+                {/* Nút Tải PDF qua LCS Soft */}
+                <button
+                  type="button"
+                  onClick={handleDownloadFourSiPdf}
+                  disabled={isDownloadingFourSiPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600 hover:border-amber-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải tệp PDF bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc)"
+                >
+                  {isDownloadingFourSiPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>{isDownloadingFourSiPdf ? 'Đang tải...' : 'Tải PDF qua LCS Soft (Bản thể hiện)'}</span>
+                </button>
+
+                {/* Link mở Cổng Đọc HĐ XML dochoadon.lcssoft.com.vn */}
+                <a
+                  href="https://dochoadon.lcssoft.com.vn/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/40 hover:bg-amber-900/60 rounded-md border border-amber-800 transition-colors cursor-pointer"
+                  title="Mở cổng Đọc hóa đơn XML của LCS Soft (dochoadon.lcssoft.com.vn) - Import file XML thu được từ GDT để hiển thị"
+                >
+                  <ExternalLink className="w-3 h-3 text-amber-400" />
+                  <span>dochoadon.lcssoft.com.vn</span>
+                </a>
+
+                {/* Nút tải PDF theo mẫu GDT chuẩn luôn luôn có mặt bên cạnh */}
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
+                </button>
+              </div>
+            ) : !isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
                 {effectiveTemplateId !== 'DEFAULT' && (
                   <button
@@ -1264,7 +1474,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>

@@ -18,6 +18,7 @@ import * as XLSX from 'xlsx';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
+import { useNotification } from '../context/NotificationContext';
 
 interface BatchDownloadModalProps {
   isOpen: boolean;
@@ -38,6 +39,8 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
   const [isPackaging, setIsPackaging] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
+
+  const { toast, showAlert } = useNotification();
 
   if (!isOpen) return null;
 
@@ -61,7 +64,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
   const handleStartBatchDownload = async () => {
     if (invoices.length === 0) return;
     if (!includeXml && !includePdfHtml && !includeExcel) {
-      alert('Vui lòng chọn ít nhất một định dạng tệp cần tải về.');
+      toast.warning('Vui lòng chọn ít nhất một định dạng tệp (XML, PDF/HTML hoặc Excel) cần tải về.', 'Chưa Chọn Định Dạng');
       return;
     }
 
@@ -184,7 +187,12 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
         onClose();
       }, 800);
     } catch (error: any) {
-      alert(`Có lỗi xảy ra trong quá trình nén tệp: ${error.message}`);
+      showAlert({
+        title: 'Lỗi Đóng Gói Tệp ZIP',
+        message: `Có lỗi xảy ra trong quá trình nén và đóng gói tệp: ${error.message}`,
+        type: 'error',
+        confirmText: 'Đã hiểu'
+      });
       setIsPackaging(false);
     }
   };

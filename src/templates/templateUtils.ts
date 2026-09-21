@@ -151,11 +151,8 @@ export function buildDirectLookupUrl(
     if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
       vnptUrl = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
     }
-    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
-    if (code) {
-      return `${cleanUrl}/?strFkey=${encodeURIComponent(code)}`;
-    }
-    return cleanUrl;
+    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
+    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
   }
 
   // 3. Softdreams EasyInvoice

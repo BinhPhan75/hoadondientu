@@ -4,6 +4,7 @@ import zlib from 'zlib';
 import JSZip from 'jszip';
 import { GoogleGenAI } from '@google/genai';
 import { solveCaptchaWithGemini } from './invoice-engine/captcha/geminiCaptchaSolver';
+import { solveCaptchaWithTesseract } from './invoice-engine/captcha/tesseractCaptchaSolver';
 
 let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
@@ -133,9 +134,26 @@ function createBinarizedBmp(decoded: { width: number; height: number; data: Buff
 }
 
 /**
- * Giải Captcha EasyInvoice bằng Gemini Vision
+ * Giải Captcha EasyInvoice bằng Tesseract.js (cục bộ) hoặc Gemini Vision
  */
 export async function solveEasyInvoiceCaptcha(captchaBuf: Buffer): Promise<{ code: string; confidence: number; engine: string }> {
+  // 1. Thử giải bằng Tesseract.js cục bộ trước
+  try {
+    const tessResult = await solveCaptchaWithTesseract(captchaBuf, {
+      digitsOnly: true,
+      expectedLength: 4,
+      preprocessEasyInvoice: true,
+    });
+    if (tessResult.code && tessResult.code.length === 4) {
+      console.log(`[EasyInvoice] Tesseract.js giải Captcha thành công: "${tessResult.code}" (Độ tin cậy: ${tessResult.confidence}%)`);
+      return { code: tessResult.code, confidence: tessResult.confidence, engine: 'tesseract' };
+    }
+    console.log(`[EasyInvoice] Tesseract đọc được "${tessResult.code}" (${tessResult.code.length} ký tự), chuyển sang Gemini...`);
+  } catch (err: any) {
+    console.warn(`[EasyInvoice] Tesseract.js gặp lỗi: ${err.message}, thử Gemini...`);
+  }
+
+  // 2. Fallback sang Gemini Vision
   const digits = await solveCaptchaWithGemini(captchaBuf);
   console.log(`[EasyInvoice] Gemini giải Captcha thành công: "${digits}"`);
   return { code: digits, confidence: 99, engine: 'gemini' };
@@ -223,16 +241,13 @@ export async function downloadOriginalEasyInvoice(
         confidence = solved.confidence;
         engine = solved.engine;
       } catch (error: any) {
-        lastError = `Gemini không giải được Captcha: ${error?.message || error}`;
+        lastError = `Không thể giải Captcha: ${error?.message || error}`;
         console.warn(`[EasyInvoice] ${lastError}`);
-        if (/GEMINI_API_KEY|quota|rate limit|429|403|permission|model/i.test(lastError)) {
-          break;
-        }
         continue;
       }
 
       if (!code || code.length !== 4) {
-        lastError = 'Gemini không trả về đủ 4 chữ số Captcha.';
+        lastError = 'Chưa nhận diện đủ 4 chữ số Captcha EasyInvoice.';
         console.warn(`[EasyInvoice] Chưa đọc được mã 4 số ở lần thử ${attempt}. Tiếp tục thử lại...`);
         continue;
       }

@@ -65,12 +65,18 @@ export abstract class BaseInvoiceProviderDriver implements InvoiceProviderDriver
    * Nhiều nhà cung cấp HĐĐT (MISA, Viettel, 4Si, VNPT) để Mã tra cứu trong <TTin><TTruong>...</TTruong><DLieu>...</DLieu></TTin>
    */
   protected extractCustomField(xml: string, fieldKeywords: string[]): string {
-    const ttinBlocks = this.extractXmlBlocks(xml, 'TTin');
-    for (const block of ttinBlocks) {
-      const truong = this.extractXmlTag(block, 'TTruong').toLowerCase();
-      for (const kw of fieldKeywords) {
-        if (truong.includes(kw.toLowerCase())) {
-          return this.extractXmlTag(block, 'DLieu');
+    const blocks = [...this.extractXmlBlocks(xml, 'TTin'), ...this.extractXmlBlocks(xml, 'TTKhac')];
+    const strip = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '');
+    const wanted = fieldKeywords.map(strip);
+
+    for (const block of blocks) {
+      const truong = strip(this.extractXmlTag(block, 'TTruong') || this.extractXmlTag(block, 'TenTruong') || this.extractXmlTag(block, 'Name'));
+      if (!truong) continue;
+      for (const kw of wanted) {
+        if (truong.includes(kw) || kw.includes(truong)) {
+          const val = this.extractXmlTag(block, 'DLieu') || this.extractXmlTag(block, 'Data') || this.extractXmlTag(block, 'Value');
+          if (val) return val;
         }
       }
     }

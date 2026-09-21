@@ -10,6 +10,7 @@ import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
+import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL } from '../../fourSiInvoiceService';
 
 export class FourSiDriver extends BaseInvoiceProviderDriver {
   readonly name = '4Si E-Invoice Driver';
@@ -237,9 +238,40 @@ export class FourSiDriver extends BaseInvoiceProviderDriver {
         }
       }
     } catch (err: any) {
-      this.createLog(`Lỗi xử lý 4Si Driver: ${err.message}`, logs);
+      this.createLog(`Lỗi xử lý trực tiếp qua inv.4si.vn: ${err.message}`, logs);
     }
 
-    throw new Error(`[FourSiDriver] Không thể tải PDF từ inv.4si.vn. Hệ thống sẽ tự động kích hoạt GenericFallbackDriver.`);
+    // Nếu không tải được qua cổng inv.4si.vn, áp dụng giải pháp đọc hóa đơn XML qua LCS Soft (dochoadon.lcssoft.com.vn)
+    try {
+      this.createLog(`Khởi động giải pháp tạo bản thể hiện 4Si qua LCS Soft (dochoadon.lcssoft.com.vn)...`, logs);
+      const lcsResult = await renderFourSiPdfViaLcs(info.rawXml, {
+        khhdon: info.invoiceSeries,
+        shdon: info.invoiceNo,
+        nbmst: info.sellerTaxCode
+      });
+
+      if (lcsResult.success && lcsResult.pdfBuffer) {
+        this.createLog(`Tạo bản thể hiện 4Si thành công từ dochoadon.lcssoft.com.vn (${(lcsResult.pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: `${this.name} (LCS Soft dochoadon)`,
+          pdfBuffer: lcsResult.pdfBuffer,
+          pdfBase64: lcsResult.pdfBase64 || lcsResult.pdfBuffer.toString('base64'),
+          contentType: 'application/pdf',
+          filename: lcsResult.filename || this.buildPdfFilename(info),
+          isFallback: false,
+          sourceUrl: FOUR_SI_LCS_READER_URL,
+          executionLogs: logs
+        };
+      }
+      if (lcsResult.error) {
+        this.createLog(`dochoadon.lcssoft.com.vn phản hồi: ${lcsResult.error}`, logs);
+      }
+    } catch (lcsErr: any) {
+      this.createLog(`Lỗi giải pháp LCS Soft dochoadon: ${lcsErr.message}`, logs);
+    }
+
+    throw new Error(`[FourSiDriver] Không thể tải PDF từ inv.4si.vn hay dochoadon.lcssoft.com.vn. Hệ thống sẽ tự động kích hoạt GenericFallbackDriver.`);
   }
 }

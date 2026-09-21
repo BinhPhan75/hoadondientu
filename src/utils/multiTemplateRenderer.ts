@@ -377,11 +377,11 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         id: '4SI',
         name: 'Mẫu Chuẩn Tổng cục Thuế (4Si / LCS / PNJ)',
         shortName: '4Si / GDT',
-        domain: 'hoadondientu.gdt.gov.vn',
-        badge: '🏛️ Mẫu Tổng cục Thuế',
+        domain: 'dochoadon.lcssoft.com.vn',
+        badge: '🏛️ Mẫu GDT (4Si / LCS)',
         color: '#915715',
-        portalUrl: 'https://hoadondientu.gdt.gov.vn',
-        description: 'Sử dụng mẫu chuẩn Tổng cục Thuế (GDT) áp dụng cho hóa đơn 4Si / PNJ'
+        portalUrl: 'https://dochoadon.lcssoft.com.vn/',
+        description: 'Mẫu chuẩn Tổng cục Thuế (GDT) cho hóa đơn 4Si / LCS Soft; hỗ trợ đọc và xuất bản thể hiện qua dochoadon.lcssoft.com.vn'
       };
     case 'BKAV':
       return {

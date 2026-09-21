@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useNotification } from '../context/NotificationContext';
 import {
   Users, UserPlus, Database, Search, Copy, Check, RefreshCw, X,
   Shield, Calendar, Clock, AlertTriangle, CheckCircle2, Lock,
@@ -45,6 +46,8 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
 
   // Extend duration state
   const [extendingUserId, setExtendingUserId] = useState<string | number | null>(null);
+
+  const { toast, showAlert, showConfirm } = useNotification();
 
   const fetchUsers = async () => {
     if (!token) return;
@@ -187,9 +190,12 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
   };
 
   const handleDeleteUser = async (user: AdminUserRow) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa tài khoản MST: ${user.username} (${user.fullName || 'Người dùng'})?`)) {
-      return;
-    }
+    const confirmed = await showConfirm(
+      `Bạn có chắc chắn muốn xóa tài khoản MST: ${user.username} (${user.fullName || 'Người dùng'})? Dữ liệu này sẽ không thể khôi phục.`,
+      'Xóa Tài Khoản Người Dùng'
+    );
+    if (!confirmed) return;
+
     try {
       const res = await fetch(`/api/admin/users/${user.id}`, {
         method: 'DELETE',
@@ -198,14 +204,25 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
         }
       });
       if (res.ok) {
+        toast.success(`Đã xóa tài khoản MST: ${user.username} thành công.`);
         fetchUsers();
         refreshDbStatus();
       } else {
         const d = await res.json();
-        alert(d.message || 'Không thể xóa tài khoản');
+        showAlert({
+          title: 'Không Thể Xóa Tài Khoản',
+          message: d.message || 'Không thể xóa tài khoản người dùng này.',
+          type: 'error',
+          confirmText: 'Đã hiểu'
+        });
       }
     } catch (err: any) {
-      alert(err.message || 'Lỗi kết nối máy chủ');
+      showAlert({
+        title: 'Lỗi Kết Nối',
+        message: err.message || 'Lỗi kết nối tới máy chủ.',
+        type: 'error',
+        confirmText: 'Đã hiểu'
+      });
     }
   };
 

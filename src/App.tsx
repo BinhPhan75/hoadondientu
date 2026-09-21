@@ -24,11 +24,13 @@ import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
+import { useNotification } from './context/NotificationContext';
 import { LoginForm } from './components/LoginForm';
 import { AdminUserModal } from './components/AdminUserModal';
 
 export default function App() {
   const { currentUser, isLoading: isAuthLoading, logout: logoutWeb } = useAuth();
+  const { toast, showAlert } = useNotification();
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [dismissExpiryWarning, setDismissExpiryWarning] = useState(false);
 
@@ -321,7 +323,7 @@ export default function App() {
   const handleExportExcel = (targetInvoices?: GDTInvoice[]) => {
     const listToExport = targetInvoices && targetInvoices.length > 0 ? targetInvoices : filteredInvoices;
     if (listToExport.length === 0) {
-      alert('Không có dữ liệu hóa đơn nào để xuất Excel.');
+      toast.warning('Không có dữ liệu hóa đơn nào để xuất Excel.', 'Chưa Có Dữ Liệu');
       return;
     }
     exportInvoicesToExcel(listToExport, `Bang_Ke_Hoa_Don_GDT_${account.taxCode}`);
@@ -814,7 +816,7 @@ export default function App() {
     const pwd = credentials?.password?.trim() || account.password?.trim() || '';
 
     if (!mst) {
-      alert('Vui lòng nhập Mã số thuế để tra cứu.');
+      toast.warning('Vui lòng nhập Mã số thuế để tra cứu.', 'Thiếu Mã Số Thuế');
       setIsRefreshing(false);
       return { success: false, error: 'Chưa có Mã số thuế' };
     }

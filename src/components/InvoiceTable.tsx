@@ -443,10 +443,11 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
                           const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
                           const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl) || /vietcombank\.com\.vn/i.test(directUrl);
+                          const is4Si = pBadge.label === '4Si' || /4si|lcssoft|dochoadon/i.test(directUrl) || inv.msttcgp === '0315744883' || inv.msttcgp === '0302999571' || (inv.provider || '').toUpperCase().includes('4SI');
                           const isVcb = inv.nbmst === '0100112437' || /vietcombank/i.test(inv.nbten || '');
                           return (
                             <a
-                              href={directUrl}
+                              href={is4Si && !directUrl.includes('inv.4si.vn') ? 'https://dochoadon.lcssoft.com.vn/' : directUrl}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={`p-1 rounded transition-colors cursor-pointer ${
@@ -460,6 +461,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
                                   : isVnpay
                                   ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50'
+                                  : is4Si
+                                  ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
@@ -474,6 +477,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                 ? (isVcb 
                                     ? `Tra cứu hóa đơn Vietcombank / VNPAY (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Mã: ${sanitizedLookupCode}` : ''})`
                                     : `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${sanitizedLookupCode || ''})`)
+                                : is4Si
+                                ? 'Đọc hóa đơn XML 4Si (LCS Soft - dochoadon.lcssoft.com.vn)'
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

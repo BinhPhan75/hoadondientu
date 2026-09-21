@@ -13,6 +13,7 @@ import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
 import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
 import { lookupVnpayInvoice, downloadOriginalVnpayPdf, downloadOriginalVnpayXml, buildVnpayPortalUrl } from './src/services/vnpayInvoiceService';
+import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFourSiInvoice } from './src/services/fourSiInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -62,6 +63,7 @@ app.use((req, res, next) => {
       req.url.startsWith('/vnpt') ||
       req.url.startsWith('/viettel') ||
       req.url.startsWith('/vnpay') ||
+      req.url.startsWith('/foursi') ||
       req.url.startsWith('/health') ||
       req.url.startsWith('/selenium')
     ) {
@@ -1988,6 +1990,71 @@ app.all('/api/vnpay/download-xml', async (req, res) => {
   } catch (error: any) {
     console.error('[VNPAY] Lỗi tải XML gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 24. 4Si / LCS Soft: Render & Download bản thể hiện 4Si qua dochoadon.lcssoft.com.vn
+app.post('/api/foursi/render-pdf', async (req, res) => {
+  try {
+    const { xml, invoice } = req.body || {};
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Không thể tạo bản thể hiện 4Si qua LCS Soft',
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+
+    res.json({
+      success: true,
+      filename: result.filename,
+      pdfBase64: result.pdfBase64,
+      sourceUrl: result.sourceUrl,
+      portalUrl: result.portalUrl,
+      isDisplayOnly: true,
+      message: 'Bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc, không phải hóa đơn gốc có chữ ký số)'
+    });
+  } catch (error: any) {
+    console.error('[FourSi] Lỗi render bản thể hiện:', error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+
+app.all('/api/foursi/download-pdf', async (req, res) => {
+  try {
+    const xml = req.body?.xml || req.query.xml ? String(req.body?.xml || req.query.xml) : '';
+    const invoice = req.body?.invoice || undefined;
+
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Không thể tạo PDF từ cổng dochoadon.lcssoft.com.vn',
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        portalUrl: result.portalUrl,
+        isDisplayOnly: true
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[FourSi] Lỗi tải PDF qua LCS Soft:', error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
   }
 });
 
