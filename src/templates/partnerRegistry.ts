@@ -158,6 +158,18 @@ export const PARTNER_METAS: PartnerMeta[] = [
     isCustomPartner: false
   },
   {
+    id: 'VNPAY',
+    name: 'CÔNG TY CỔ PHẦN GIẢI PHÁP THANH TOÁN VIỆT NAM',
+    shortName: 'VNPAY Invoice',
+    taxCode: '0102182292',
+    portalUrl: 'https://portal.vnpayinvoice.vn',
+    providerBrand: 'VNPAY Invoice',
+    badge: 'VNPAY',
+    color: '#005baa',
+    description: 'Hóa đơn điện tử phát hành qua giải pháp VNPAY Invoice (bao gồm Vietcombank, Cổng thanh toán VNPAY)',
+    isCustomPartner: false
+  },
+  {
     id: 'DEFAULT',
     name: 'Mẫu Hóa Đơn Điện Tử Chuẩn Tổng Cục Thuế (GDT)',
     shortName: 'Mẫu Tổng cục Thuế',
@@ -196,7 +208,8 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 1. Check Tax Codes (Highest Accuracy)
   if (nbmst === '0318657735') return 'BAO_DUY';
-  // PNJ và 4SI: Theo chỉ đạo của người dùng, sử dụng theo mẫu của GDT cung cấp (DEFAULT)
+  // PNJ, 4SI, VNPAY & Vietcombank: Không có mã tra cứu công khai trong XML GDT,
+  // theo chỉ đạo của người dùng: Sử dụng theo mẫu chuẩn của GDT cung cấp (DEFAULT) để đảm bảo thông tin bên bán chính xác 100%
   if (nbmst === '0315018466') return 'DEFAULT';
   if (nbmst === '0312105174') return 'TAI_TRAM_ANH';
   if (nbmst === '0400557356') return 'XUAN_VINH';
@@ -204,10 +217,12 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '0318443500') return 'TKJ';
   if (nbmst === '4000344946') return 'NGHIA_SON';
   if (nbmst === '0317978711') return 'TAN_THANH_DANH';
+  if (nbmst === '0102182292' || nbmst === '0100112437') return 'DEFAULT'; // VNPAY & Vietcombank -> Dùng mẫu chuẩn GDT
 
   // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp)
   const msttcgp = (invoice.msttcgp || '').replace(/[^0-9]/g, '');
   if (msttcgp === '0100109106') return 'VIETTEL';
+  if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY T-VAN -> Dùng mẫu chuẩn GDT
   if (msttcgp === '0302999571' || msttcgp === '0315744883') return 'DEFAULT'; // 4SI / LCS -> Dùng mẫu GDT
   if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT Nghĩa Sơn)
 
@@ -220,6 +235,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbten.includes('tkj')) return 'TKJ';
   if (nbten.includes('nghiason')) return 'NGHIA_SON';
   if (nbten.includes('tanthanhdanh') || nbten.includes('thanhdanh')) return 'TAN_THANH_DANH';
+  if (nbten.includes('vnpay') || nbten.includes('vietcombank')) return 'DEFAULT'; // VNPAY / VCB -> Dùng mẫu GDT
 
   // 3. Check raw XML content if available
   if (xml) {
@@ -231,7 +247,12 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
     if (xml.includes('0318443500') || xml.includes('tkj')) return 'TKJ';
     if (xml.includes('4000344946') || xml.includes('nghĩa sơn') || xml.includes('nghia son')) return 'NGHIA_SON';
     if (xml.includes('0317978711') || xml.includes('tân thanh danh') || xml.includes('tan thanh danh')) return 'TAN_THANH_DANH';
+    if (xml.includes('vnpayinvoice') || xml.includes('0102182292') || xml.includes('vietcombank')) return 'DEFAULT';
   }
+
+  // 3b. Check invoice provider string
+  const p = (invoice.provider || '').toUpperCase();
+  if (p.includes('VNPAY')) return 'DEFAULT';
 
   // 4. Mặc định: Tất cả các hóa đơn chưa nhận diện, viễn thông, điện lực, phí ngân hàng... đều dùng mẫu Tổng cục Thuế (DEFAULT)
   return 'DEFAULT';

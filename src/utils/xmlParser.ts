@@ -437,11 +437,18 @@ function normalizeLookupLabel(value: string): string {
 
 function isLookupCodeCandidate(value: string): boolean {
   if (!value || value.length < 4 || value.length > 120) return false;
+  const trimmed = value.trim();
+  // Không bao giờ coi tên bên bán 'Vietcombank' là mã tra cứu
+  if (/^vietcombank$/i.test(trimmed)) return false;
+  // Không bao giờ coi Mã thông điệp truyền nhận CQT (MTDiep / mtdtchieu có dạng V/T/M/B + 10-14 số MST + UUID Hex) là mã tra cứu
+  if (/^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(trimmed)) return false;
+  // Không bao giờ coi mã tham chiếu thông điệp chứa MST T-VAN VNPAY 0102182292 là mã tra cứu
+  if (trimmed.includes('0102182292') && trimmed.length > 20) return false;
   // Lookup codes are machine identifiers. A sentence, whitespace-separated
   // text, or markup from a generic TTin field must never become a code merely
   // because its label happens to mention "tra cứu".
-  return !/^https?:\/\//i.test(value)
-    && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(value);
+  return !/^https?:\/\//i.test(trimmed)
+    && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(trimmed);
 }
 
 /**
@@ -619,6 +626,34 @@ export function getLookupCodeFromPayload(source: any): string {
     }
   }
 
+  // Đối với hóa đơn VNPAY (Vietcombank...):
+  // Kiểm tra các trường mở rộng đặc thù của VNPAY/Vietcombank: SoBaoMat, MaBaoMat, MaNhanHDon, MTCuu,...
+  // LƯU Ý: Tuyệt đối KHÔNG gán mhdon (mã CQT) hay mtdtchieu (mã thông điệp T-VAN) làm mã tra cứu VNPAY,
+  // vì Cổng VNPAY tra cứu theo Số bảo mật riêng. Nếu không có Số bảo mật, để trống để Cổng VNPAY không bị lỗi "Không tìm thấy hóa đơn".
+  if (isVnpaySource(source)) {
+    const vnpayCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'SoBaoMat', 'Số bảo mật', 'soBaoMat', 'sobaomat',
+        'MaSoBaoMat', 'Mã số bảo mật', 'maSoBaoMat',
+        'MaBaoMat', 'Mã bảo mật', 'maBaoMat', 'mabaomat',
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'maNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Mã tra cứu HĐ',
+        'Fkey', 'FKey', 'LookupCode', 'SecretCode', 'SecurityCode', 'AccessCode'
+      ]) ||
+      getPayloadValue(source, [
+        'soBaoMat', 'sobaomat', 'SoBaoMat',
+        'maSoBaoMat', 'maBaoMat', 'mabaomat', 'MaBaoMat',
+        'maNhanHDon', 'manhanhdon', 'MaNhanHDon', 'maNhanHoaDon',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu', 'matracuu'
+      ])
+    );
+    if (isLookupCodeCandidate(vnpayCode)) {
+      return vnpayCode;
+    }
+    // Không fallback sang mhdon cho VNPAY
+    return '';
+  }
+
   const values = [
     misaTransactionId,
     getPayloadValue(source, ['lookupCode', 'LookupCode']),
@@ -628,17 +663,18 @@ export function getLookupCodeFromPayload(source: any): string {
     // Cấu trúc mảng { ttruong: "Fkey", dlieu: "..." } - đã xác nhận đây là
     // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
     // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
-    getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC']),
+    getFromStructuredArrays(source, [
+      'Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC',
+      'SoBaoMat', 'Số bảo mật', 'MaSoBaoMat', 'Mã số bảo mật', 'MaBaoMat', 'Mã bảo mật',
+      'MaNhanHDon', 'Mã nhận hóa đơn', 'MaNhanHoaDon', 'Mã tra cứu'
+    ]),
     getPayloadValue(source, ['fkey', 'FKey']),
+    getPayloadValue(source, ['soBaoMat', 'sobaomat', 'SoBaoMat', 'maBaoMat', 'MaBaoMat', 'maNhanHDon', 'MaNhanHDon']),
     getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
     // MISA meInvoice: mã tra cứu THẬT in trên hóa đơn nằm trong mảng cttkhac
     // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc).
     getFromStructuredArrays(source, ['TransactionID', 'TransactionId']),
-    getPayloadValue(source, ['transactionID', 'TransactionID']),
-    // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
-    // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
-    // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
-    getPayloadValue(source, ['mtdtchieu', 'MTDTCChieu', 'maDoiChieu', 'MaDoiChieu'])
+    getPayloadValue(source, ['transactionID', 'TransactionID'])
   ];
 
   const foundCode = values.map(cleanLookupValue).find(isLookupCodeCandidate);
@@ -653,11 +689,6 @@ export function getLookupCodeFromPayload(source: any): string {
     }
   }
 
-  // Đối với hóa đơn VNPAY: nếu không có mã thì trả về định danh bên bán (như Vietcombank)
-  if (isVnpaySource(source)) {
-    return 'Vietcombank';
-  }
-
   return '';
 }
 
@@ -667,6 +698,11 @@ export function getLookupUrlFromPayload(source: any): string {
   }
 
   if (isVnpaySource(source)) {
+    const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '');
+    const nbten = String(getPayloadValue(source, ['nbten', 'sellerName', 'supplierName']) || '').toUpperCase();
+    if (nbmst === '0100112437' || nbten.includes('VIETCOMBANK')) {
+      return 'https://einvoice.vietcombank.com.vn/';
+    }
     return 'https://portal.vnpayinvoice.vn/';
   }
 
@@ -779,12 +815,19 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   };
 
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
-  const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode', 'TransactionID'];
+  const codeTags = [
+    'SoBaoMat', 'sobaomat', 'SOBAOMAT',
+    'MaSoBaoMat', 'maSoBaoMat', 'MaBaoMat', 'mabaomat',
+    'MaNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+    'MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey',
+    'LookupCode', 'InvoiceLookupCode', 'TransactionID',
+    'SecretCode', 'SecurityCode', 'AccessCode'
+  ];
   let lookupCode = tagValue(codeTags);
 
-  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:"
+  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:" hoặc "Mã nhận hóa đơn:" hoặc "Số bảo mật:"
   if (!lookupCode) {
-    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don|Số\s+bảo\s+mật|So\s+bao\s+mat|Mã\s+số\s+bảo\s+mật|Mã\s+bảo\s+mật)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
   }
 
@@ -809,7 +852,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
       extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name')
     );
     if (!label || label.includes('bi mat') || label.includes('secret')) continue;
-    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc/i.test(label);
+    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc|bao\s*mat|nhan\s*h.*don/i.test(label);
     if (!lookupCode && isExplicitLookupLabel) {
       const value = cleanLookupValue(extractTagValue(block, 'DLieu') || extractTagValue(block, 'Data') || extractTagValue(block, 'Value'));
       if (isLookupCodeCandidate(value)) {
@@ -913,11 +956,17 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     }
   }
 
-  // 6d. VNPAY Invoice
-  const isVnpay = /vnpayinvoice|0102182292/i.test(rawXml);
+  // 6d. VNPAY Invoice (Vietcombank: 0100112437, VNPAY: 0102182292)
+  const isVnpay = /vnpayinvoice|0102182292|0100112437/i.test(rawXml) || /VIETCOMBANK/i.test(rawXml);
   if (isVnpay) {
-    if (!lookupUrl) lookupUrl = 'https://portal.vnpayinvoice.vn/';
-    if (!lookupCode) lookupCode = 'Vietcombank';
+    const isVcb = /0100112437|VIETCOMBANK/i.test(rawXml);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+    }
+    // Với VNPAY Invoice: Mã tra cứu là Số bảo mật riêng (không dùng mhdon/mccqt vì Cổng VNPAY sẽ báo không tìm thấy)
+    if (!lookupCode || lookupCode.toLowerCase() === 'vietcombank' || !isLookupCodeCandidate(lookupCode)) {
+      lookupCode = '';
+    }
   }
 
   // 6e. FPT Invoice
@@ -1793,11 +1842,17 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     msttcgp === '0102182292' ||
     tentcgp.toUpperCase().includes('VNPAY') ||
     nbmst === '0100112437' ||
+    /VIETCOMBANK/i.test(xmlSource) ||
     /vnpayinvoice/i.test(xmlSource);
 
   if (isVnpay) {
-    if (!lookupUrl) lookupUrl = 'https://portal.vnpayinvoice.vn/';
-    if (!lookupCode) lookupCode = 'Vietcombank';
+    const isVcb = nbmst === '0100112437' || /VIETCOMBANK/i.test(xmlSource);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+    }
+    if (lookupCode && (lookupCode.toLowerCase() === 'vietcombank' || !isLookupCodeCandidate(lookupCode))) {
+      lookupCode = '';
+    }
   }
 
   // Đối với FPT Invoice

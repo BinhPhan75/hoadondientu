@@ -37,10 +37,13 @@ export class VnpayDriver extends BaseInvoiceProviderDriver {
    * Trích xuất thông tin hóa đơn VNPAY từ XML
    */
   extractInfo(xmlData: string): ExtractedInvoiceInfo {
-    const sellerTaxCode = this.extractXmlTag(xmlData, 'MST') || this.extractXmlTag(xmlData, 'nbmst') || '0102182292';
-    const sellerName = this.extractXmlTag(xmlData, 'Ten') || this.extractXmlTag(xmlData, 'nbten') || 'CÔNG TY CỔ PHẦN GIẢI PHÁP THANH TOÁN VIỆT NAM';
-    const buyerTaxCode = this.extractXmlTag(xmlData, 'MST') || this.extractXmlTag(xmlData, 'nm_mst') || this.extractXmlTag(xmlData, 'nmmst');
-    const buyerName = this.extractXmlTag(xmlData, 'Ten') || this.extractXmlTag(xmlData, 'nm_ten') || this.extractXmlTag(xmlData, 'nmten');
+    const nbanBlock = this.extractXmlBlocks(xmlData, 'NBan')[0] || '';
+    const nmuaBlock = this.extractXmlBlocks(xmlData, 'NMua')[0] || '';
+
+    const sellerTaxCode = this.extractXmlTag(nbanBlock, 'MST') || this.extractXmlTag(xmlData, 'nbmst') || this.extractXmlTag(xmlData, 'MST') || '';
+    const sellerName = this.extractXmlTag(nbanBlock, 'Ten') || this.extractXmlTag(xmlData, 'nbten') || this.extractXmlTag(xmlData, 'Ten') || '';
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, 'MST') || this.extractXmlTag(xmlData, 'nmmst') || this.extractXmlTag(xmlData, 'nm_mst');
+    const buyerName = this.extractXmlTag(nmuaBlock, 'Ten') || this.extractXmlTag(xmlData, 'nmten') || this.extractXmlTag(xmlData, 'nm_ten');
     const invoiceNo = (this.extractXmlTag(xmlData, 'SHDon') || this.extractXmlTag(xmlData, 'shdon') || '1').padStart(7, '0');
     const invoiceSeries = this.extractXmlTag(xmlData, 'KHHDon') || this.extractXmlTag(xmlData, 'khhdon') || '1C24TGT';
     const templateCode = this.extractXmlTag(xmlData, 'KHMSHDon') || this.extractXmlTag(xmlData, 'khmshdon') || '1';
@@ -81,9 +84,17 @@ export class VnpayDriver extends BaseInvoiceProviderDriver {
       }
     }
 
+    // VNPAY không có mã tra cứu công khai trên hóa đơn XML chuẩn GDT; loại bỏ các giá trị sai định dạng
+    const isInvalidVnpayCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    const validLookupCode = (!isInvalidVnpayCode(lookupCode)) ? (lookupCode?.trim() || '') : '';
+
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTThue') || '0') || 0;
-    const directUrl = buildVnpayPortalUrl(lookupCode, sellerTaxCode);
+    const directUrl = validLookupCode ? buildVnpayPortalUrl(validLookupCode, sellerTaxCode) : '';
 
     return {
       provider: this.providerCode,
@@ -96,8 +107,8 @@ export class VnpayDriver extends BaseInvoiceProviderDriver {
       invoiceSeries,
       templateCode,
       invoiceDate,
-      lookupCode: lookupCode || undefined,
-      lookupUrl: directUrl,
+      lookupCode: validLookupCode || undefined,
+      lookupUrl: directUrl || undefined,
       cqtCode: cqtCode || undefined,
       totalAmount,
       totalTaxAmount,

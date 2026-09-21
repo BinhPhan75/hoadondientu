@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { extractLookupDetailsFromXml, getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isPlaceholderItemName, isViettelSource, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
+import { extractLookupDetailsFromXml, getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isPlaceholderItemName, isViettelSource, isVnpaySource, isVnptSource, normalizeInvoiceItem, parseGDTInvoiceXml } from './xmlParser';
 
 type GdtInvoiceKey = {
   nbmst?: string;
@@ -270,7 +270,7 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
       const xml = [candidate.xml, candidate.xmlData, candidate.dataXml, candidate.invoiceXml];
       return xml.some(v => typeof v === 'string' && isXml(v));
     })
-    || candidates.find(candidate => getLookupCodeFromPayload(candidate) || value(candidate, ['mtdtchieu', 'mhdon', 'nbmst']))
+    || candidates.find(candidate => getLookupCodeFromPayload(candidate) || value(candidate, ['mhdon', 'nbmst']))
     || detail;
   const seller = getSellerFromPayload(detailSource);
   // Extract from the entire payload, not only the selected metadata object.
@@ -295,18 +295,35 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
   const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
   const isMisa = isMisaSource(detailSource) || isMisaSource(invoice);
   const isViettel = isViettelSource(detail) || isViettelSource(detailSource) || isViettelSource(invoice);
+  const isVnpay = isVnpaySource(detailSource) || isVnpaySource(invoice);
 
-  const finalLookupCode = isViettel
+  let rawLookup = isViettel
     ? (detailLookup || xmlLookup?.lookupCode || undefined)
     : (isVnpt && resolvedMhdon)
     ? resolvedMhdon 
     : (detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || undefined);
 
+  if (isVnpay) {
+    // Không bao giờ gán 'Vietcombank' làm mã tra cứu
+    if (rawLookup && rawLookup.toLowerCase() === 'vietcombank') {
+      rawLookup = undefined;
+    }
+    // Nếu không có mã tra cứu riêng, dùng mã CQT cấp
+    if (!rawLookup && resolvedMhdon) {
+      rawLookup = resolvedMhdon;
+    }
+  }
+
+  const finalLookupCode = rawLookup;
+
+  const isVcb = (invoice.nbmst === '0100112437') || (seller.taxCode === '0100112437') || /vietcombank/i.test(seller.name || invoice.nbten || '');
   const finalLookupUrl = isVnpt 
     ? (detailUrl || invoice.lookupUrl || `https://${seller.taxCode || invoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`)
     : isMisa 
       ? (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || 'https://www.meinvoice.vn/tra-cuu')
-      : (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || undefined);
+      : isVnpay
+        ? (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || (isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/'))
+        : (detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || undefined);
 
   return {
     ...invoice,
@@ -317,8 +334,8 @@ export function mergeGdtInvoiceDetail(invoice: any, detail: any, exportedXml = '
     nmten: value(detailSource, ['nmten', 'nmtnnt', 'nmtlhdon']) || invoice.nmten,
     nmdchi: value(detailSource, ['nmdchi']) || invoice.nmdchi,
     mhdon: resolvedMhdon,
-    msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || (isMisa ? '0101243150' : invoice.msttcgp),
-    provider: isMisa ? 'MISA' : (isVnpt ? 'VNPT' : (isViettel ? 'VIETTEL' : (invoice.provider || undefined))),
+    msttcgp: value(detailSource, ['msttcgp', 'mst_tcgp', 'tvandnkntt']) || (isMisa ? '0101243150' : (isVnpay ? '0102182292' : invoice.msttcgp)),
+    provider: isMisa ? 'MISA' : (isVnpt ? 'VNPT' : (isViettel ? 'VIETTEL' : (isVnpay ? 'VNPAY' : (invoice.provider || undefined)))),
     lookupCode: finalLookupCode,
     lookupUrl: finalLookupUrl,
     items: authoritativeItems,

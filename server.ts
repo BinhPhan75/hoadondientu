@@ -1793,12 +1793,27 @@ app.all('/api/viettel/download-zip', async (req, res) => {
 // 21. VNPAY Invoice: Tra cứu hóa đơn điện tử VNPAY (portal.vnpayinvoice.vn)
 app.post('/api/vnpay/lookup', async (req, res) => {
   try {
-    const lookupCode = String(req.body?.lookupCode || req.query?.lookupCode || '').trim();
+    let lookupCode = String(req.body?.lookupCode || req.query?.lookupCode || '').trim();
     const taxCode = String(req.body?.taxCode || req.body?.sellerTaxCode || req.query?.taxCode || '').trim();
+    const cqtCode = String(req.body?.cqtCode || req.body?.mhdon || req.query?.cqtCode || req.query?.mhdon || '').trim();
     const captchaToken = req.body?.captchaToken || req.query?.captchaToken;
 
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
+
     if (!lookupCode) {
-      return res.status(400).json({ success: false, error: 'Mã tra cứu hóa đơn VNPAY không được để trống' });
+      const portalUrl = buildVnpayPortalUrl('', taxCode);
+      return res.status(400).json({ 
+        success: false, 
+        directUrl: portalUrl,
+        error: 'Cổng VNPAY yêu cầu Số bảo mật in trên hóa đơn. Cổng không hỗ trợ tra cứu trực tiếp qua mã CQT cấp (mhdon).' 
+      });
     }
     if (!taxCode) {
       return res.status(400).json({ success: false, error: 'Mã số thuế bên bán không được để trống' });
@@ -1807,6 +1822,7 @@ app.post('/api/vnpay/lookup', async (req, res) => {
     const result = await lookupVnpayInvoice({
       lookupCode,
       taxCode,
+      cqtCode: cqtCode || undefined,
       captchaToken: captchaToken ? String(captchaToken) : undefined
     });
 
@@ -1825,10 +1841,24 @@ app.all('/api/vnpay/download-pdf', async (req, res) => {
       req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
     ).trim();
 
-    const lookupCode = String(
+    let lookupCode = String(
       req.query.lookupCode || req.query.code ||
       req.body?.lookupCode || req.body?.code || ''
     ).trim();
+
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon ||
+      req.body?.cqtCode || req.body?.mhdon || ''
+    ).trim();
+
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
 
     const stringId = String(
       req.query.stringId || req.query.id ||
@@ -1843,12 +1873,17 @@ app.all('/api/vnpay/download-pdf', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
     }
     if (!stringId && !lookupCode) {
-      return res.status(400).json({ success: false, error: 'Cần cung cấp stringId hoặc Mã tra cứu (lookupCode)' });
+      return res.status(400).json({ 
+        success: false, 
+        sourceUrl: buildVnpayPortalUrl('', sellerTaxCode),
+        error: 'Cần Số bảo mật (lookupCode) hoặc stringId để tải file từ Cổng VNPAY.' 
+      });
     }
 
     const result = await downloadOriginalVnpayPdf({
       sellerTaxCode,
       lookupCode: lookupCode || undefined,
+      cqtCode: cqtCode || undefined,
       stringId: stringId || undefined,
       invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
       invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined,
@@ -1891,10 +1926,24 @@ app.all('/api/vnpay/download-xml', async (req, res) => {
       req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
     ).trim();
 
-    const lookupCode = String(
+    let lookupCode = String(
       req.query.lookupCode || req.query.code ||
       req.body?.lookupCode || req.body?.code || ''
     ).trim();
+
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon ||
+      req.body?.cqtCode || req.body?.mhdon || ''
+    ).trim();
+
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
 
     const stringId = String(
       req.query.stringId || req.query.id ||
@@ -1908,12 +1957,17 @@ app.all('/api/vnpay/download-xml', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
     }
     if (!stringId && !lookupCode) {
-      return res.status(400).json({ success: false, error: 'Cần cung cấp stringId hoặc Mã tra cứu (lookupCode)' });
+      return res.status(400).json({ 
+        success: false, 
+        sourceUrl: buildVnpayPortalUrl('', sellerTaxCode),
+        error: 'Cần Số bảo mật (lookupCode) hoặc stringId để tải file từ Cổng VNPAY.' 
+      });
     }
 
     const result = await downloadOriginalVnpayXml({
       sellerTaxCode,
       lookupCode: lookupCode || undefined,
+      cqtCode: cqtCode || undefined,
       stringId: stringId || undefined,
       invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
       invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined

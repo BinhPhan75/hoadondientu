@@ -575,10 +575,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       effectiveInvoice.msttcgp === '0102182292' ||
       effectiveInvoice.nbmst === '0100112437' ||
       autoDetectedProvider === 'VNPAY' ||
-      (effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
+      Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
 
-    if (isVnpayModalCheck && !lookupDetails.lookupUrl) {
-      lookupDetails.lookupUrl = 'https://portal.vnpayinvoice.vn/';
+    if (isVnpayModalCheck) {
+      const isVcb = effectiveInvoice.nbmst === '0100112437' || Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
+      if (!lookupDetails.lookupUrl) {
+        lookupDetails.lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+      }
+      const isInvalidCode = (code?: string) => !code || 
+        code.toLowerCase() === 'vietcombank' || 
+        /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+        (code.includes('0102182292') && code.length > 20);
+
+      if (isInvalidCode(lookupDetails.lookupCode)) {
+        lookupDetails.lookupCode = '';
+      }
+      // VNPAY chỉ tra cứu theo Số bảo mật in trên hóa đơn, không dùng mã CQT cấp (mhdon)
     }
 
     safeItems = ensureInvoiceItems(effectiveInvoice);
@@ -588,9 +600,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   }
 
   // Template ID hiệu lực: Nếu người dùng chọn AUTO thì dùng kết quả dò tìm tự động
-  const effectiveTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
+  const resolvedTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
     ? (selectedTemplateId as InvoiceProviderId)
     : autoDetectedProvider;
+
+  // Hóa đơn VNPAY & Vietcombank: Không có mã tra cứu trong XML GDT,
+  // theo chỉ đạo của người dùng: Luôn sử dụng mẫu chuẩn Tổng cục Thuế (DEFAULT) để thông tin người bán và người mua chính xác 100%.
+  const effectiveTemplateId: InvoiceProviderId = (resolvedTemplateId === 'VNPAY')
+    ? 'DEFAULT'
+    : resolvedTemplateId;
 
   const currentProviderMeta: ProviderMeta = getProviderMeta(effectiveTemplateId);
 
@@ -636,10 +654,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const isVnpayInvoice = /vnpayinvoice/i.test(directLookupUrl) ||
     /vnpayinvoice/i.test(lookupDetails.lookupUrl || '') ||
+    /vietcombank\.com\.vn/i.test(directLookupUrl) ||
+    /vietcombank\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
     effectiveTemplateId === 'VNPAY' ||
     effectiveInvoice?.provider === 'VNPAY' ||
     effectiveInvoice?.msttcgp === '0102182292' ||
-    effectiveInvoice?.nbmst === '0100112437';
+    effectiveInvoice?.nbmst === '0100112437' ||
+    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
+
+  const isVietcombankInvoice = effectiveInvoice?.nbmst === '0100112437' ||
+    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
 
   if (!renderError) {
     try {
@@ -673,7 +697,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     );
   }
 
-  const handleDownloadPdfFile = async () => {
+  const handleDownloadPdfFile = async (targetTemplateId: InvoiceProviderId = 'DEFAULT') => {
     setIsExportingPdf(true);
     try {
       if (isVnptInvoice) {
@@ -754,7 +778,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         return;
       }
 
-      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, effectiveTemplateId);
+      // Xuất tệp PDF theo template được yêu cầu (Mặc định: 'DEFAULT' là mẫu chuẩn Tổng cục Thuế GDT)
+      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, targetTemplateId);
     } catch (err) {
       console.error('Lỗi khi xuất PDF:', err);
       alert(`Không thể tải PDF gốc từ nhà cung cấp: ${err instanceof Error ? err.message : String(err)}`);
@@ -1140,7 +1165,32 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </a>
                 )}
               </div>
-            ) : directLookupUrl && (
+            ) : isVietcombankInvoice ? (
+              <div className="inline-flex items-center gap-1.5">
+                <a
+                  href="https://einvoice.vietcombank.com.vn/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
+                  title="Mở cổng tra cứu hóa đơn điện tử Vietcombank (einvoice.vietcombank.com.vn)"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Cổng Vietcombank</span>
+                </a>
+                {directLookupUrl && !directLookupUrl.includes('vietcombank.com.vn') && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30 transition-all cursor-pointer shadow-xs"
+                    title={`Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Cổng VNPAY</span>
+                  </a>
+                )}
+              </div>
+            ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
               <a
                 href={directLookupUrl}
                 target="_blank"
@@ -1161,7 +1211,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isVnpayInvoice ? 'text-indigo-400' : 'text-cyan-400'}`} />
                 <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isVnpayInvoice ? 'Tra cứu VNPAY' : 'Tra cứu Cổng NCC'}</span>
               </a>
-            )}
+            ) : null}
 
             <button
               onClick={handlePrint}
@@ -1191,15 +1241,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </button>
 
             {!isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice && (
-              <button
-                onClick={handleDownloadPdfFile}
-                disabled={isExportingPdf}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
-                title={`Tải tệp PDF sắc nét theo mẫu ${currentProviderMeta.name}`}
-              >
-                <Download className="w-4 h-4" />
-                <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
-              </button>
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {effectiveTemplateId !== 'DEFAULT' && (
+                  <button
+                    onClick={() => handleDownloadPdfFile(effectiveTemplateId)}
+                    disabled={isExportingPdf}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/70 hover:bg-amber-900 border border-amber-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                    title={`Tải tệp PDF theo mẫu đặc thù ${currentProviderMeta.name}`}
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{isExportingPdf ? 'Đang tạo PDF...' : `Tải PDF mẫu ${currentProviderMeta.shortName}`}</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

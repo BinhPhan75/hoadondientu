@@ -3,6 +3,7 @@ import axios, { AxiosResponse } from 'axios';
 export interface VnpayLookupParams {
   lookupCode: string;
   taxCode: string;
+  cqtCode?: string;
   captchaToken?: string;
   invoiceNo?: string;
   invoiceSeries?: string;
@@ -41,6 +42,7 @@ export interface VnpayDownloadParams {
   stringId?: string;
   sellerTaxCode: string;
   lookupCode?: string;
+  cqtCode?: string;
   captchaToken?: string;
   invoiceNo?: string;
   invoiceSeries?: string;
@@ -100,17 +102,52 @@ export function buildVnpayPortalUrl(lookupCode?: string, taxCode?: string): stri
 }
 
 /**
+ * Kiểm tra xem mã có phải là mã không hợp lệ cho Cổng VNPAY (như mã CQT cấp mhdon, mã thông điệp T-VAN, v.v.)
+ */
+export function isInvalidVnpayLookupCode(code?: string): boolean {
+  if (!code) return true;
+  const trimmed = code.trim();
+  if (!trimmed) return true;
+  if (trimmed.toLowerCase() === 'vietcombank') return true;
+  // Mã CQT cấp: M2-26-IXTFA-14279040746, M1-24-..., C24...
+  if (/^M\d-\d{2}-/i.test(trimmed)) return true;
+  // Dãy mã chứa gạch nối hoặc ký tự định dạng CQT
+  if (trimmed.includes('-') && (trimmed.length > 15 || /^M/i.test(trimmed))) return true;
+  // Mã thông điệp T-VAN hoặc chuỗi định dạng T-VAN
+  if (/^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(trimmed)) return true;
+  // Chuỗi mã CQT 23 - 34 ký tự
+  if (/^[0-9A-Z]{23,34}$/i.test(trimmed)) return true;
+  if (trimmed.includes('0102182292') && trimmed.length > 15) return true;
+  return false;
+}
+
+/**
  * Tra cứu danh sách hóa đơn từ máy chủ VNPAY Invoice
  * Endpoint: GET https://portal.vnpayinvoice.vn/api/v6/invoices
  */
 export async function lookupVnpayInvoice(params: VnpayLookupParams): Promise<VnpayLookupResult> {
-  const lookupCode = (params.lookupCode || '').trim();
+  let lookupCode = (params.lookupCode || '').trim();
   const taxCode = (params.taxCode || '').trim();
 
-  if (!lookupCode || !taxCode) {
+  // Loại bỏ các mã không hợp lệ: tên bên bán Vietcombank, mã thông điệp T-VAN, mã CQT cấp (mhdon / MCCQT)
+  if (isInvalidVnpayLookupCode(lookupCode)) {
+    lookupCode = '';
+  }
+
+  // Cổng VNPAY yêu cầu Số bảo mật in trên hóa đơn (không dùng mã CQT cấp mhdon vì VNPAY không nhận diện mã CQT)
+  if (!lookupCode) {
+    const directUrl = buildVnpayPortalUrl('', taxCode);
     return {
       success: false,
-      error: 'Vui lòng cung cấp đầy đủ Mã tra cứu và Mã số thuế bên bán để tra cứu hóa đơn VNPAY.'
+      directUrl,
+      error: 'Hóa đơn VNPAY yêu cầu Số bảo mật in trên hóa đơn để tra cứu trên Cổng VNPAY. Bạn có thể mở trực tiếp Cổng VNPAY (đã điền sẵn MST người bán) để nhập mã, hoặc tra cứu trên Cổng HĐĐT Tổng cục Thuế.'
+    };
+  }
+
+  if (!taxCode) {
+    return {
+      success: false,
+      error: 'Vui lòng cung cấp Mã số thuế bên bán để tra cứu hóa đơn VNPAY.'
     };
   }
 
@@ -170,13 +207,20 @@ export async function lookupVnpayInvoice(params: VnpayLookupParams): Promise<Vnp
       };
     }
 
-    if (response.status === 400 && response.data?.code === 'PORTAL_101') {
+    if (response.status === 400) {
+      if (response.data?.code === 'PORTAL_101') {
+        return {
+          success: false,
+          errorCode: 'PORTAL_101',
+          requiresCaptcha: true,
+          directUrl,
+          error: 'Cổng VNPAY Invoice yêu cầu xác thực Google reCAPTCHA. Bạn có thể mở trực tiếp cổng tra cứu VNPAY (đã được tự động điền sẵn thông tin).'
+        };
+      }
       return {
         success: false,
-        errorCode: 'PORTAL_101',
-        requiresCaptcha: true,
         directUrl,
-        error: 'Cổng VNPAY Invoice yêu cầu xác thực Google reCAPTCHA. Bạn có thể mở trực tiếp cổng tra cứu VNPAY (đã được tự động điền sẵn thông tin).'
+        error: response.data?.message || 'Cổng VNPAY phản hồi: Mã tra cứu (Số bảo mật) hoặc MST không chính xác. Vui lòng kiểm tra Số bảo mật trên hóa đơn.'
       };
     }
 
@@ -207,11 +251,16 @@ export async function downloadOriginalVnpayPdf(params: VnpayDownloadParams): Pro
     throw new Error('Mã số thuế bên bán (sellerTaxCode) là bắt buộc khi tải hóa đơn VNPAY.');
   }
 
-  // Nếu chưa có stringId nhưng có mã tra cứu, thử tra cứu để lấy stringId
-  if (!stringId && params.lookupCode) {
+  // Nếu chưa có stringId nhưng có mã tra cứu hợp lệ, thử tra cứu để lấy stringId
+  const candidateLookupCode = !isInvalidVnpayLookupCode(params.lookupCode)
+    ? params.lookupCode!.trim()
+    : '';
+
+  if (!stringId && candidateLookupCode) {
     const lookupRes = await lookupVnpayInvoice({
-      lookupCode: params.lookupCode,
+      lookupCode: candidateLookupCode,
       taxCode: sellerTaxCode,
+      cqtCode: params.cqtCode,
       captchaToken: params.captchaToken
     });
 
@@ -291,10 +340,15 @@ export async function downloadOriginalVnpayXml(params: VnpayDownloadParams): Pro
     throw new Error('Mã số thuế bên bán là bắt buộc khi tải XML từ VNPAY.');
   }
 
-  if (!stringId && params.lookupCode) {
+  const candidateLookupCode = !isInvalidVnpayLookupCode(params.lookupCode)
+    ? params.lookupCode!.trim()
+    : '';
+
+  if (!stringId && candidateLookupCode) {
     const lookupRes = await lookupVnpayInvoice({
-      lookupCode: params.lookupCode,
+      lookupCode: candidateLookupCode,
       taxCode: sellerTaxCode,
+      cqtCode: params.cqtCode,
       captchaToken: params.captchaToken
     });
 

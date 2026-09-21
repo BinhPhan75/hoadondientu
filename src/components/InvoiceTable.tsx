@@ -416,9 +416,25 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                         {/* Tra cứu trực tiếp trên Cổng NCC */}
                         {(() => {
                           const pBadge = getInvoiceProviderBadge(inv);
+                          const isVnpayInv = pBadge.label === 'VNPAY' || 
+                            (inv.provider || '').toUpperCase().includes('VNPAY') || 
+                            inv.nbmst === '0102182292' || 
+                            inv.nbmst === '0100112437' ||
+                            Boolean(inv.nbten && /vietcombank/i.test(inv.nbten));
+
+                          const isInvalidVnpayCode = (code?: string) => !code || 
+                            code.toLowerCase() === 'vietcombank' || 
+                            /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+                            (code.includes('0102182292') && code.length > 20);
+
+                          const sanitizedLookupCode = isVnpayInv
+                            ? (!isInvalidVnpayCode(inv.lookupCode) ? inv.lookupCode : '')
+                            : ((inv.lookupCode && inv.lookupCode.toLowerCase() !== 'vietcombank') 
+                                ? inv.lookupCode 
+                                : (inv.mhdon && inv.mhdon.toLowerCase() !== 'vietcombank' ? inv.mhdon : ''));
                           const directUrl = buildDirectLookupUrl(
                             inv.lookupUrl,
-                            inv.lookupCode,
+                            sanitizedLookupCode,
                             inv.provider,
                             inv.nbmst
                           );
@@ -426,7 +442,8 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           const isViettel = pBadge.label === 'Viettel' || /sinvoice/i.test(directUrl);
                           const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
                           const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
-                          const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl);
+                          const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl) || /vietcombank\.com\.vn/i.test(directUrl);
+                          const isVcb = inv.nbmst === '0100112437' || /vietcombank/i.test(inv.nbten || '');
                           return (
                             <a
                               href={directUrl}
@@ -446,15 +463,17 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
-                                ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${inv.lookupCode || ''})` 
+                                ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${sanitizedLookupCode || ''})` 
                                 : isViettel
-                                ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${inv.lookupCode || ''})`
+                                ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${sanitizedLookupCode || ''})`
                                 : isVnpt
-                                ? `Tra cứu VNPT Invoice (Mã: ${inv.lookupCode || ''})`
+                                ? `Tra cứu VNPT Invoice (Mã: ${sanitizedLookupCode || ''})`
                                 : isEasyInvoice
-                                ? `Tra cứu Softdreams EasyInvoice (Mã: ${inv.lookupCode || ''})`
+                                ? `Tra cứu Softdreams EasyInvoice (Mã: ${sanitizedLookupCode || ''})`
                                 : isVnpay
-                                ? `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${inv.lookupCode || ''})`
+                                ? (isVcb 
+                                    ? `Tra cứu hóa đơn Vietcombank / VNPAY (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Mã: ${sanitizedLookupCode}` : ''})`
+                                    : `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${sanitizedLookupCode || ''})`)
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

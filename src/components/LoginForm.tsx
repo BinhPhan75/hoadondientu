@@ -1,29 +1,19 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Clock, Database, RefreshCw } from 'lucide-react';
+import { Shield, KeyRound, Building2, Eye, EyeOff, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 
 interface LoginFormProps {
   onSuccess?: () => void;
 }
 
 export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
-  const { login, dbStatus, refreshDbStatus } = useAuth();
+  const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [refreshingDb, setRefreshingDb] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isExpiredError, setIsExpiredError] = useState<boolean>(false);
-
-  const handleRefreshDb = async () => {
-    setRefreshingDb(true);
-    try {
-      await refreshDbStatus();
-    } finally {
-      setRefreshingDb(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -179,35 +169,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
               <span className="font-semibold text-slate-300">Bảo mật đa tầng:</span> Thông tin đăng nhập Cổng Tổng cục Thuế (Mật khẩu Thuế) được lưu trữ riêng tại trình duyệt máy tính cá nhân của Quý khách.
             </div>
           </div>
-        </div>
-
-        {/* Database Connection Status Diagnostic */}
-        <div className="mt-3 flex items-center justify-between px-2 text-xs">
-          <div className="flex items-center gap-2">
-            <Database className={`w-3.5 h-3.5 ${dbStatus?.connected ? 'text-emerald-400' : 'text-amber-400'}`} />
-            <span className="text-slate-400">
-              Neon DB:{' '}
-              {dbStatus ? (
-                dbStatus.connected ? (
-                  <span className="text-emerald-400 font-medium">Đã kết nối ({dbStatus.type === 'neon_postgres' ? 'Neon Postgres' : 'Local Storage'})</span>
-                ) : (
-                  <span className="text-amber-400 font-medium">{dbStatus.message || 'Chưa kết nối'}</span>
-                )
-              ) : (
-                <span className="text-slate-500">Đang kiểm tra kết nối...</span>
-              )}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRefreshDb}
-            disabled={refreshingDb}
-            title="Kiểm tra lại kết nối Neon DB"
-            className="flex items-center gap-1 text-slate-400 hover:text-slate-200 transition-colors p-1"
-          >
-            <RefreshCw className={`w-3 h-3 ${refreshingDb ? 'animate-spin' : ''}`} />
-            <span>Thử lại</span>
-          </button>
         </div>
 
         {/* Footer info */}

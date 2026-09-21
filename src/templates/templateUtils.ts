@@ -198,12 +198,21 @@ export function buildDirectLookupUrl(
     sellerTaxCode === '0102182292' ||
     /vnpayinvoice/i.test(url);
   if (isVnpay) {
+    const isVcb = sellerTaxCode === '0100112437';
+    const isInvalid = !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+    const validCode = !isInvalid ? code.trim() : '';
     const baseVnpayUrl = 'https://portal.vnpayinvoice.vn';
     const params = new URLSearchParams();
-    if (code) params.set('lookupCode', code);
+    if (validCode) params.set('lookupCode', validCode);
     if (sellerTaxCode) params.set('taxCode', sellerTaxCode);
     const qs = params.toString();
-    return qs ? `${baseVnpayUrl}/?${qs}` : `${baseVnpayUrl}/`;
+    if (isVcb && !validCode) {
+      return 'https://einvoice.vietcombank.com.vn/';
+    }
+    return qs ? `${baseVnpayUrl}/?${qs}` : (isVcb ? 'https://einvoice.vietcombank.com.vn/' : `${baseVnpayUrl}/`);
   }
 
   // 4c. FPT Electronic Invoice

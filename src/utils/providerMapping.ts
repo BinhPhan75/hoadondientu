@@ -130,12 +130,19 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     rawLookupUrl.includes('vnpayinvoice') ||
     nbten.includes('VIETCOMBANK')
   ) {
+    const isVcb = nbmst === '0100112437' || nbten.includes('VIETCOMBANK');
+    const isInvalid = !rawLookupCode || 
+      rawLookupCode.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(rawLookupCode.trim()) ||
+      (rawLookupCode.includes('0102182292') && rawLookupCode.length > 20) ||
+      rawLookupCode === inv.mhdon;
+    const validLookupCode = !isInvalid ? rawLookupCode.trim() : '';
     return {
       mst: '0102182292',
       name: 'Công ty Cổ phần giải pháp thanh toán Việt Nam',
       fullDisplay: '0102182292 - Công ty Cổ phần giải pháp thanh toán Việt Nam',
-      portalUrl: rawLookupUrl || 'https://portal.vnpayinvoice.vn/',
-      lookupCode: rawLookupCode || 'Vietcombank',
+      portalUrl: rawLookupUrl || (isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/'),
+      lookupCode: validLookupCode,
       shortBrand: 'VNPAY'
     };
   }
@@ -320,12 +327,24 @@ export function buildDirectLookupUrl(
 
   // VNPAY: thêm tham số lookupCode & taxCode để tự động điền form
   if (info.shortBrand === 'VNPAY') {
+    const isVcb = sellerTaxCode === '0100112437';
+    const isInvalid = !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+    const validCode = !isInvalid ? code.trim() : '';
+
     const params = new URLSearchParams();
-    if (code && code !== 'Vietcombank') params.set('lookupCode', code);
+    if (validCode) params.set('lookupCode', validCode);
     const taxCode = sellerTaxCode || (info.mst !== '0102182292' ? info.mst : '');
     if (taxCode) params.set('taxCode', taxCode);
     const qs = params.toString();
-    return qs ? `https://portal.vnpayinvoice.vn/?${qs}` : 'https://portal.vnpayinvoice.vn/';
+    
+    // Nếu là Vietcombank và không có mã tra cứu thì mở cổng Vietcombank
+    if (isVcb && !validCode) {
+      return 'https://einvoice.vietcombank.com.vn/';
+    }
+    return qs ? `https://portal.vnpayinvoice.vn/?${qs}` : (isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/');
   }
 
   return info.portalUrl;
@@ -655,7 +674,6 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
     tentcgp.includes('THANH TOÁN VIỆT NAM') ||
     tentcgp.includes('THANH TOAN VIET NAM') ||
     rawLookupUrl.includes('vnpayinvoice') ||
-    lookupCode.includes('0102182292') ||
     nbmst === '0102182292' ||
     nbmst === '0100112437' || // Vietcombank
     nbten.includes('VIETCOMBANK') ||
