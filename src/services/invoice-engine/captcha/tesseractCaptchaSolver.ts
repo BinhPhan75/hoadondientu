@@ -1,6 +1,13 @@
 import { createWorker, Worker } from 'tesseract.js';
 import zlib from 'zlib';
 
+const isServerless = Boolean(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT ||
+  process.env.NETLIFY
+);
+
 let tesseractWorker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
 
@@ -27,17 +34,23 @@ async function getWorker(whitelist?: string): Promise<Worker> {
   }
 
   workerInitializing = (async () => {
-    const w = await createWorker('eng');
-    await w.setParameters({
-      tessedit_char_whitelist: whitelist || '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-      tessedit_pageseg_mode: '7' as any,
-    });
-    tesseractWorker = w;
-    return w;
+    try {
+      const cachePath = isServerless ? '/tmp' : '.';
+      const w = await createWorker('eng', 1, {
+        cachePath,
+      });
+      await w.setParameters({
+        tessedit_char_whitelist: whitelist || '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+        tessedit_pageseg_mode: '7' as any,
+      });
+      tesseractWorker = w;
+      return w;
+    } finally {
+      workerInitializing = null;
+    }
   })();
 
   const w = await workerInitializing;
-  workerInitializing = null;
   return w;
 }
 
@@ -167,51 +180,63 @@ export interface TesseractSolveOptions {
   expectedLength?: number;
   preprocessEasyInvoice?: boolean;
   whitelist?: string;
+  timeoutMs?: number;
 }
 
 /**
  * Giải Captcha cục bộ bằng Tesseract.js (không cần gọi API ngoài, không bị giới hạn quota hay HTTP 429)
+ * Có cơ chế giới hạn thời gian (timeoutMs) để ngăn chặn rủi ro treo tiến trình trên môi trường Serverless/Vercel.
  */
 export async function solveCaptchaWithTesseract(
   imageInput: Buffer | string | Uint8Array,
   options?: TesseractSolveOptions
 ): Promise<{ code: string; confidence: number }> {
-  let buf: Buffer;
-  if (typeof imageInput === 'string') {
-    const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, '');
-    buf = Buffer.from(cleanB64, 'base64');
-  } else {
-    buf = Buffer.from(imageInput);
-  }
+  const timeoutMs = options?.timeoutMs || 2500;
 
-  const digitsOnly = options?.digitsOnly !== false;
-  const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz');
-
-  let processBuf = buf;
-
-  // Nếu là Captcha EasyInvoice hoặc ảnh PNG, áp dụng tiền xử lý tăng độ tương phản
-  if (options?.preprocessEasyInvoice || (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47)) {
-    const decoded = decodePngRgba(buf);
-    if (decoded) {
-      const binarized = createBinarizedBmp(decoded, 3, 25, 145);
-      processBuf = binarized;
+  const recognitionPromise = (async () => {
+    let buf: Buffer;
+    if (typeof imageInput === 'string') {
+      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, '');
+      buf = Buffer.from(cleanB64, 'base64');
+    } else {
+      buf = Buffer.from(imageInput);
     }
-  }
 
-  const worker = await getWorker(whitelist);
-  const result = await worker.recognize(processBuf);
-  let text = result.data.text || '';
+    const digitsOnly = options?.digitsOnly !== false;
+    const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz');
 
-  if (digitsOnly) {
-    text = text.replace(/[^0-9]/g, '');
-  } else {
-    text = text.replace(/[^a-zA-Z0-9]/g, '');
-  }
+    let processBuf = buf;
 
-  return {
-    code: text,
-    confidence: result.data.confidence || 0,
-  };
+    // Nếu là Captcha EasyInvoice hoặc ảnh PNG, áp dụng tiền xử lý tăng độ tương phản
+    if (options?.preprocessEasyInvoice || (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47)) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
+        processBuf = binarized;
+      }
+    }
+
+    const worker = await getWorker(whitelist);
+    const result = await worker.recognize(processBuf);
+    let text = result.data.text || '';
+
+    if (digitsOnly) {
+      text = text.replace(/[^0-9]/g, '');
+    } else {
+      text = text.replace(/[^a-zA-Z0-9]/g, '');
+    }
+
+    return {
+      code: text,
+      confidence: result.data.confidence || 0,
+    };
+  })();
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Tesseract timeout vượt quá ${timeoutMs}ms`)), timeoutMs)
+  );
+
+  return Promise.race([recognitionPromise, timeoutPromise]);
 }
 
 export async function terminateTesseract(): Promise<void> {

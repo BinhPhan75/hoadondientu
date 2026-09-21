@@ -3,6 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export const VNPT_CAPTCHA_PROMPT =
   'This is a 4-digit captcha image with a noisy gray background. Please ignore the background noise and strike-through lines, and focus only on identifying the 4 main numbers. Output ONLY the 4 digits, nothing else.';
 
+export const EASYINVOICE_CAPTCHA_PROMPT =
+  'This is a 4-digit EasyInvoice captcha image. Identify and extract the 4 digits clearly visible in the image. Ignore any gradient shading, noise, or background artifacts. Output ONLY the 4 digits, nothing else.';
+
 export const CAPTCHA_PROMPT = VNPT_CAPTCHA_PROMPT;
 
 const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];

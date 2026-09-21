@@ -100,6 +100,7 @@ export interface GDTInvoice {
   signerName?: string;
   signedDate?: string;
   caProvider?: string; // VNPT, Viettel, MISA, BKAV, FPT...
+  certificate?: string; // Base64 X.509 Certificate
   buyerSignerName?: string;
   buyerSignedDate?: string;
   cqtSignature?: {
