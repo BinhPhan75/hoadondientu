@@ -26,6 +26,7 @@ export type DetectedInvoiceProvider =
   | 'LCS'
   | '4SI' 
   | 'EASYINVOICE' 
+  | 'MINVOICE'
   | 'BKAV' 
   | 'THAISON'
   | 'CYBERBILL'
@@ -176,6 +177,16 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
+  // 1.9 minvoice.vn / minvoice.com.vn -> 'MINVOICE'
+  if (/minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice/i.test(xmlString)) {
+    return {
+      provider: 'MINVOICE',
+      priority: 1,
+      matchedPattern: 'minvoice.vn',
+      sourceDescription: 'Phát hiện Domain tra cứu M-Invoice (minvoice.vn / tracuuhoadon.minvoice.com.vn)'
+    };
+  }
+
   // =========================================================================
   // ƯU TIÊN 1.5: Thẻ <MSTTCGP> & <TenTCGP> (Mã số thuế & Tên Tổ chức giải pháp)
   // Chuẩn pháp lý Quyết định 1450/QĐ-TCT và 1510/QĐ-TCT của Tổng cục Thuế
@@ -183,6 +194,14 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   const msttcgpMatch = xmlString.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
   if (msttcgpMatch && msttcgpMatch[1]) {
     const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    if (msttcgp === '0106026495') {
+      return {
+        provider: 'MINVOICE',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0106026495',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH Hóa đơn điện tử M-Invoice qua thẻ <MSTTCGP> (0106026495)'
+      };
+    }
     if (msttcgp === '0101243150') {
       return {
         provider: 'MISA',
@@ -309,6 +328,9 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     }
     if (tentcgp.includes('CYBERLOTUS') || tentcgp.includes('CYBERBILL')) {
       return { provider: 'CYBERBILL', priority: 1.5, matchedPattern: 'TenTCGP: CYBERBILL', sourceDescription: 'Tổ chức giải pháp: CyberBill' };
+    }
+    if (tentcgp.includes('M-INVOICE') || tentcgp.includes('MINVOICE')) {
+      return { provider: 'MINVOICE', priority: 1.5, matchedPattern: 'TenTCGP: MINVOICE', sourceDescription: 'Tổ chức giải pháp: Công ty TNHH Hóa đơn điện tử M-Invoice' };
     }
   }
 

@@ -565,6 +565,85 @@ export function isFptSource(source: any): boolean {
 }
 
 /**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp M-Invoice (minvoice.vn) hay không.
+ */
+export function isMinvoiceSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0106026495' ||
+    tentcgp.includes('M-INVOICE') ||
+    tentcgp.includes('MINVOICE') ||
+    provider === 'MINVOICE' ||
+    provider === 'M-INVOICE' ||
+    lookupUrl.includes('minvoice.vn') ||
+    lookupUrl.includes('minvoice.com.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp Bkav eHoadon hay không.
+ */
+export function isBkavSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0101360697' ||
+    tentcgp.includes('BKAV') ||
+    provider === 'BKAV' ||
+    lookupUrl.includes('bkav.com') ||
+    lookupUrl.includes('ehoadon.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp Thái Sơn (einvoice.vn) hay không.
+ */
+export function isThaiSonSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0101300842' ||
+    tentcgp.includes('THÁI SƠN') ||
+    tentcgp.includes('THAISON') ||
+    provider === 'THAISON' ||
+    lookupUrl.includes('einvoice.vn') ||
+    lookupUrl.includes('thaison.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp CyberLotus CyberBill hay không.
+ */
+export function isCyberBillSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0107871301' ||
+    tentcgp.includes('CYBERLOTUS') ||
+    tentcgp.includes('CYBERBILL') ||
+    provider === 'CYBERBILL' ||
+    lookupUrl.includes('cyberbill.vn')
+  );
+}
+
+/**
  * Kiểm tra xem hóa đơn/payload có thuộc giải pháp MISA meInvoice (Tân Thanh Danh, Tài Trâm Anh, Xuân Vinh...) hay không.
  */
 export function isMisaSource(source: any): boolean {
@@ -654,6 +733,58 @@ export function getLookupCodeFromPayload(source: any): string {
     return '';
   }
 
+  // Đối với hóa đơn M-Invoice (minvoice.vn): Mã tra cứu chính là "Số bảo mật"
+  if (isMinvoiceSource(source)) {
+    const minvoiceCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'SoBaoMat', 'Số bảo mật', 'soBaoMat', 'sobaomat',
+        'CheckCode', 'checkCode', 'Checkcode',
+        'MaSoBaoMat', 'Mã số bảo mật', 'MaBaoMat', 'Mã bảo mật',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Fkey', 'FKey'
+      ]) ||
+      getPayloadValue(source, [
+        'soBaoMat', 'sobaomat', 'SoBaoMat', 'checkCode', 'CheckCode',
+        'maSoBaoMat', 'maBaoMat', 'mabaomat', 'MaBaoMat',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(minvoiceCode)) {
+      return minvoiceCode;
+    }
+  }
+
+  // Đối với hóa đơn Bkav eHoadon
+  if (isBkavSource(source)) {
+    const bkavCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'maNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Fkey', 'FKey'
+      ]) ||
+      getPayloadValue(source, [
+        'maNhanHDon', 'manhanhdon', 'MaNhanHDon', 'maNhanHoaDon',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(bkavCode)) {
+      return bkavCode;
+    }
+  }
+
+  // Đối với hóa đơn Thái Sơn (einvoice.vn)
+  if (isThaiSonSource(source)) {
+    const thaiSonCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu'
+      ]) ||
+      getPayloadValue(source, [
+        'maNhanHDon', 'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(thaiSonCode)) {
+      return thaiSonCode;
+    }
+  }
+
   const values = [
     misaTransactionId,
     getPayloadValue(source, ['lookupCode', 'LookupCode']),
@@ -717,6 +848,22 @@ export function getLookupUrlFromPayload(source: any): string {
 
   if (isMisaSource(source)) {
     return 'https://www.meinvoice.vn/tra-cuu';
+  }
+
+  if (isMinvoiceSource(source)) {
+    return 'https://tracuuhoadon.minvoice.com.vn';
+  }
+
+  if (isBkavSource(source)) {
+    return 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  if (isThaiSonSource(source)) {
+    return 'https://einvoice.vn/tra-cuu';
+  }
+
+  if (isCyberBillSource(source)) {
+    return 'https://cyberbill.vn/tra-cuu';
   }
 
   const structured = getFromStructuredArrays(source, ['PortalLink', 'LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu']);
@@ -987,6 +1134,42 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   // 6g. Viettel vInvoice / S-Invoice
   if (isViettelXml || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|0100109106/i.test(rawXml)) {
     if (!lookupUrl) lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+  }
+
+  // 6h. M-Invoice (minvoice.vn)
+  const isMinvoice = /minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice|0106026495/i.test(rawXml) ||
+    /M-INVOICE|MINVOICE/i.test(rawXml);
+  if (isMinvoice) {
+    if (!lookupUrl) lookupUrl = 'https://tracuuhoadon.minvoice.com.vn';
+    if (!lookupCode) {
+      const sobaomat = extractTagValue(rawXml, 'SoBaoMat', '') ||
+        extractTagValue(rawXml, 'sobaomat', '') ||
+        extractTagValue(rawXml, 'CheckCode', '') ||
+        extractTagValue(rawXml, 'checkCode', '') ||
+        extractTagValue(rawXml, 'MaBaoMat', '') ||
+        extractTagValue(rawXml, 'mabaomat', '');
+      if (sobaomat && isLookupCodeCandidate(sobaomat)) {
+        lookupCode = sobaomat;
+      }
+    }
+  }
+
+  // 6i. Bkav eHoadon
+  const isBkav = /bkav|ehoadon\.vn|ehoadon\.bkav|0101360697/i.test(rawXml);
+  if (isBkav) {
+    if (!lookupUrl) lookupUrl = 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  // 6j. Thái Sơn E-Invoice
+  const isThaiSon = /einvoice\.vn|thaison\.vn|0101300842/i.test(rawXml);
+  if (isThaiSon) {
+    if (!lookupUrl) lookupUrl = 'https://einvoice.vn/tra-cuu';
+  }
+
+  // 6k. CyberLotus CyberBill
+  const isCyberBill = /cyberbill\.vn|cyberlotus|0107871301/i.test(rawXml);
+  if (isCyberBill) {
+    if (!lookupUrl) lookupUrl = 'https://cyberbill.vn/tra-cuu';
   }
 
   return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : '', lookupUrl };

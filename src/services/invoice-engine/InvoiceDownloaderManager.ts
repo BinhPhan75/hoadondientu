@@ -20,6 +20,7 @@ import { FourSiDriver } from './drivers/FourSiDriver';
 import { LcsDriver } from './drivers/LcsDriver';
 import { VnptDriver } from './drivers/VnptDriver';
 import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
+import { MinvoiceDriver } from './drivers/MinvoiceDriver';
 import { BkavDriver } from './drivers/BkavDriver';
 import { ThaiSonDriver } from './drivers/ThaiSonDriver';
 import { CyberBillDriver } from './drivers/CyberBillDriver';
@@ -45,6 +46,7 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new LcsDriver());
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
+    this.registerDriver(new MinvoiceDriver());
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());

@@ -442,8 +442,12 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           const isViettel = pBadge.label === 'Viettel' || /sinvoice/i.test(directUrl);
                           const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
                           const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
+                          const isMinvoice = pBadge.label === 'M-Invoice' || /minvoice/i.test(directUrl) || inv.msttcgp === '0106026495' || (inv.provider || '').toUpperCase().includes('MINVOICE');
                           const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl) || /vietcombank\.com\.vn/i.test(directUrl);
                           const is4Si = pBadge.label === '4Si' || /4si|lcssoft|dochoadon/i.test(directUrl) || inv.msttcgp === '0315744883' || inv.msttcgp === '0302999571' || (inv.provider || '').toUpperCase().includes('4SI');
+                          const isBkav = pBadge.label === 'Bkav' || /bkav|ehoadon/i.test(directUrl);
+                          const isThaiSon = pBadge.label === 'Thái Sơn' || /einvoice\.vn|thaison/i.test(directUrl);
+                          const isCyberBill = pBadge.label === 'CyberBill' || /cyberbill/i.test(directUrl);
                           const isVcb = inv.nbmst === '0100112437' || /vietcombank/i.test(inv.nbten || '');
                           return (
                             <a
@@ -459,10 +463,18 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   ? 'text-sky-600 hover:text-sky-800 hover:bg-sky-50'
                                   : isEasyInvoice
                                   ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                                  : isMinvoice
+                                  ? 'text-teal-600 hover:text-teal-800 hover:bg-teal-50'
                                   : isVnpay
                                   ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50'
                                   : is4Si
                                   ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                                  : isBkav
+                                  ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
+                                  : isThaiSon
+                                  ? 'text-rose-600 hover:text-rose-800 hover:bg-rose-50'
+                                  : isCyberBill
+                                  ? 'text-cyan-600 hover:text-cyan-800 hover:bg-cyan-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
@@ -473,12 +485,20 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                 ? `Tra cứu VNPT Invoice (Mã: ${sanitizedLookupCode || ''})`
                                 : isEasyInvoice
                                 ? `Tra cứu Softdreams EasyInvoice (Mã: ${sanitizedLookupCode || ''})`
+                                : isMinvoice
+                                ? `Tra cứu & tải hóa đơn gốc M-Invoice (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Số bảo mật: ${sanitizedLookupCode}` : ''})`
                                 : isVnpay
                                 ? (isVcb 
                                     ? `Tra cứu hóa đơn Vietcombank / VNPAY (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Mã: ${sanitizedLookupCode}` : ''})`
                                     : `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${sanitizedLookupCode || ''})`)
                                 : is4Si
                                 ? 'Đọc hóa đơn XML 4Si (LCS Soft - dochoadon.lcssoft.com.vn)'
+                                : isBkav
+                                ? `Tra cứu Bkav eHoadon (Mã: ${sanitizedLookupCode || ''})`
+                                : isThaiSon
+                                ? `Tra cứu Thái Sơn E-Invoice (Mã: ${sanitizedLookupCode || ''})`
+                                : isCyberBill
+                                ? `Tra cứu CyberLotus CyberBill (Mã: ${sanitizedLookupCode || ''})`
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />

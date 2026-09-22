@@ -76,6 +76,12 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
     name: 'Công ty Cổ phần CyberLotus',
     defaultPortalUrl: 'https://cyberbill.vn',
     shortBrand: 'CyberBill'
+  },
+  // 12. M-Invoice
+  '0106026495': {
+    name: 'Công ty TNHH Hóa đơn điện tử M-Invoice',
+    defaultPortalUrl: 'https://tracuuhoadon.minvoice.com.vn',
+    shortBrand: 'M-Invoice'
   }
 };
 
@@ -272,7 +278,25 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     };
   }
 
-  // 10. Check known registry by msttcgp
+  // 10. M-Invoice (minvoice.vn / minvoice.com.vn)
+  if (
+    msttcgp === '0106026495' ||
+    provider === 'MINVOICE' ||
+    tentcgp.includes('M-INVOICE') ||
+    tentcgp.includes('MINVOICE') ||
+    rawLookupUrl.includes('minvoice')
+  ) {
+    return {
+      mst: '0106026495',
+      name: 'Công ty TNHH Hóa đơn điện tử M-Invoice',
+      fullDisplay: '0106026495 - Công ty TNHH Hóa đơn điện tử M-Invoice',
+      portalUrl: rawLookupUrl || 'https://tracuuhoadon.minvoice.com.vn',
+      lookupCode: rawLookupCode || '',
+      shortBrand: 'M-Invoice'
+    };
+  }
+
+  // 11. Check known registry by msttcgp
   if (msttcgp && KNOWN_SOLUTION_PROVIDERS[msttcgp]) {
     const known = KNOWN_SOLUTION_PROVIDERS[msttcgp];
     return {
@@ -372,6 +396,35 @@ export function buildDirectLookupUrl(
       return portalUrl;
     }
     return 'https://dochoadon.lcssoft.com.vn/';
+  }
+
+  // M-Invoice: Cổng tra cứu tracuuhoadon.minvoice.com.vn kèm masothue & sobaomat
+  if (info.shortBrand === 'M-Invoice' || provider === 'MINVOICE') {
+    const params = new URLSearchParams();
+    const taxCode = sellerTaxCode || (info.mst !== '0106026495' ? info.mst : '');
+    if (taxCode) params.set('taxCode', taxCode);
+    if (code) params.set('checkCode', code);
+    const qs = params.toString();
+    return qs ? `https://tracuuhoadon.minvoice.com.vn/?${qs}` : 'https://tracuuhoadon.minvoice.com.vn';
+  }
+
+  // Bkav eHoadon
+  if (info.shortBrand === 'Bkav' || provider === 'BKAV') {
+    return code ? `https://ehoadon.bkav.com/tra-cuu?maNhanHDon=${encodeURIComponent(code)}` : 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  // Thái Sơn E-Invoice
+  if (info.shortBrand === 'Thái Sơn' || provider === 'THAISON') {
+    return code ? `https://einvoice.vn/tra-cuu/?manhanhoadon=${encodeURIComponent(code)}` : 'https://einvoice.vn/tra-cuu';
+  }
+
+  // CyberLotus CyberBill
+  if (info.shortBrand === 'CyberBill' || provider === 'CYBERBILL') {
+    const params = new URLSearchParams();
+    if (code) params.set('code', code);
+    if (sellerTaxCode) params.set('taxCode', sellerTaxCode);
+    const qs = params.toString();
+    return qs ? `https://cyberbill.vn/tra-cuu?${qs}` : 'https://cyberbill.vn/tra-cuu';
   }
 
   return info.portalUrl;
@@ -500,6 +553,15 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
           color: '#0e7490',
           badgeClass: 'text-cyan-700 bg-cyan-50 border-cyan-200',
           title: 'Hóa đơn phát hành qua giải pháp CyberLotus CyberBill',
+          isDefault: false
+        };
+      }
+      if (xmlProvider === 'MINVOICE') {
+        return {
+          label: 'M-Invoice',
+          color: '#0d9488',
+          badgeClass: 'text-teal-700 bg-teal-50 border-teal-200',
+          title: 'Hóa đơn phát hành qua giải pháp M-Invoice (minvoice.vn) - Tra cứu bằng Số bảo mật',
           isDefault: false
         };
       }
@@ -795,7 +857,26 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
     };
   }
 
-  // 12. Tra cứu từ từ điển nhà cung cấp giải pháp đã lưu
+  // 12. M-Invoice
+  if (
+    msttcgp === '0106026495' ||
+    provider === 'MINVOICE' ||
+    tentcgp.includes('M-INVOICE') ||
+    tentcgp.includes('MINVOICE') ||
+    rawLookupUrl.includes('minvoice') ||
+    rawXml.includes('minvoice') ||
+    rawXml.includes('0106026495')
+  ) {
+    return {
+      label: 'M-Invoice',
+      color: '#0d9488',
+      badgeClass: 'text-teal-700 bg-teal-50 border-teal-200',
+      title: 'Hóa đơn phát hành qua giải pháp M-Invoice (minvoice.vn) - Tra cứu bằng Số bảo mật',
+      isDefault: false
+    };
+  }
+
+  // 13. Tra cứu từ từ điển nhà cung cấp giải pháp đã lưu
   if (msttcgp && KNOWN_SOLUTION_PROVIDERS[msttcgp]) {
     const known = KNOWN_SOLUTION_PROVIDERS[msttcgp];
     const brandName = known.shortBrand === 'MISA' ? 'Misa' : known.shortBrand;

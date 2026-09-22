@@ -14,6 +14,8 @@ import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/servic
 import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
 import { lookupVnpayInvoice, downloadOriginalVnpayPdf, downloadOriginalVnpayXml, buildVnpayPortalUrl } from './src/services/vnpayInvoiceService';
 import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFourSiInvoice } from './src/services/fourSiInvoiceService';
+import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceService';
+import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -2055,6 +2057,209 @@ app.all('/api/foursi/download-pdf', async (req, res) => {
   } catch (error: any) {
     console.error('[FourSi] Lỗi tải PDF qua LCS Soft:', error.message);
     res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+
+// 23. M-Invoice: Tải trực tiếp file PDF gốc từ cổng M-Invoice (tracuuhoadon.minvoice.com.vn)
+app.all('/api/minvoice/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.checkCode ||
+      req.body?.lookupCode || req.body?.sobaomat || req.body?.checkCode || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode / masothue) không được để trống' });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Số bảo mật (lookupCode / sobaomat) không được để trống' });
+    }
+
+    const minvoiceUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+      sellerTaxCode
+    )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const resp = await fetch(minvoiceUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/pdf, application/octet-stream, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://tracuuhoadon.minvoice.com.vn/',
+        'Origin': 'https://tracuuhoadon.minvoice.com.vn'
+      },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (!resp.ok) {
+      throw new Error(`Cổng M-Invoice phản hồi lỗi HTTP ${resp.status}: ${resp.statusText}`);
+    }
+
+    const arrayBuf = await resp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+
+    if (buffer.length < 500 || !buffer.subarray(0, 10).toString('latin1').includes('%PDF')) {
+      throw new Error('Dữ liệu trả về từ cổng M-Invoice không phải file PDF hợp lệ');
+    }
+
+    const cleanShd = invoiceNo.padStart(7, '0');
+    const filename = `HoaDon_MInvoice_${sellerTaxCode}_${cleanShd}_${lookupCode}.pdf`;
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename,
+        pdfBase64: buffer.toString('base64'),
+        sourceUrl: minvoiceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (error: any) {
+    console.error('[M-Invoice] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 24. CyberBill: Tải trực tiếp file PDF gốc từ cổng CyberBill (bill1app.xcyber.vn)
+app.all('/api/cyberbill/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.maSoBiMat || req.query.checkCode ||
+      req.body?.lookupCode || req.body?.sobaomat || req.body?.maSoBiMat || req.body?.checkCode || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã số bí mật (lookupCode / maSoBiMat) không được để trống' });
+    }
+
+    const result = await downloadOriginalCyberbillPdf({
+      sellerTaxCode,
+      lookupCode,
+      invoiceNo,
+      invoiceSeries
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        htmlContent: result.htmlContent
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[CyberBill] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 25. Thái Sơn: Tải trực tiếp file PDF gốc từ cổng Thái Sơn (einvoice.vn)
+app.all('/api/thaison/download-pdf', async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.sobaomat || req.query.code ||
+      req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.sobaomat || req.body?.code || ''
+    ).trim();
+
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã nhận hóa đơn Thái Sơn (lookupCode / MaNhanHoaDon) không được để trống' });
+    }
+
+    const result = await downloadOriginalThaiSonPdf({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || undefined,
+      invoiceNo,
+      invoiceSeries
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[Thái Sơn] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 26. Thái Sơn: Tải trực tiếp file XML gốc từ cổng Thái Sơn
+app.all('/api/thaison/download-xml', async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.code ||
+      req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.code || ''
+    ).trim();
+
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã nhận hóa đơn Thái Sơn (lookupCode) không được để trống' });
+    }
+
+    const result = await downloadOriginalThaiSonXml({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || undefined
+    });
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error: any) {
+    console.error('[Thái Sơn] Lỗi tải XML gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
