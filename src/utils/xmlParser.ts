@@ -705,9 +705,10 @@ export function getLookupCodeFromPayload(source: any): string {
     const secretCode = cleanLookupValue(
       getFromStructuredArrays(source, [
         'Mã số bí mật', 'Ma so bi mat', 'ReservationCode', 'reservationCode',
-        'matracuu', 'MaTraCuu', 'Mã tra cứu', 'MaSoBiMat', 'SecretCode', 'secretCode'
+        'matracuu', 'MaTraCuu', 'Mã tra cứu', 'MaSoBiMat', 'SecretCode', 'secretCode',
+        'Mã bí mật', 'Ma bi mat', 'MABIMAT', 'MASOBIMAT', 'RESERVATIONCODE', 'sbbm', 'mabm'
       ]) ||
-      getPayloadValue(source, ['lookupCode', 'secretCode', 'reservationCode', 'mabaomat', 'sobaomat'])
+      getPayloadValue(source, ['lookupCode', 'secretCode', 'reservationCode', 'mabaomat', 'sobaomat', 'maBiMat', 'maSoBiMat', 'reservation_code'])
     );
     return isLookupCodeCandidate(secretCode) ? secretCode : '';
   }
@@ -979,8 +980,10 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
 
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
   const codeTags = [
+    'ReservationCode', 'reservationCode', 'RESERVATIONCODE', 'Reservationcode',
+    'MaSoBiMat', 'maSoBiMat', 'MaBiMat', 'mabaomat', 'MBiMat', 'MSBM',
     'SoBaoMat', 'sobaomat', 'SOBAOMAT',
-    'MaSoBaoMat', 'maSoBaoMat', 'MaBaoMat', 'mabaomat',
+    'MaSoBaoMat',
     'MaNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
     'MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey',
     'LookupCode', 'InvoiceLookupCode', 'TransactionID',
@@ -988,9 +991,9 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   ];
   let lookupCode = tagValue(codeTags);
 
-  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:" hoặc "Mã nhận hóa đơn:" hoặc "Số bảo mật:"
+  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:" hoặc "Mã nhận hóa đơn:" hoặc "Số bảo mật:" hoặc "Mã số bí mật:"
   if (!lookupCode) {
-    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don|Số\s+bảo\s+mật|So\s+bao\s+mat|Mã\s+số\s+bảo\s+mật|Mã\s+bảo\s+mật)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don|Số\s+bảo\s+mật|So\s+bao\s+mat|Mã\s+số\s+bảo\s+mật|Mã\s+bảo\s+mật|Mã\s+số\s+bí\s+mật|Ma\s+so\s+bi\s+mat|Mã\s+bí\s+mật|Ma\s+bi\s+mat|ReservationCode|reservationCode)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
   }
 
@@ -1000,11 +1003,20 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   if (isViettelXml) {
     const secretBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
     const secretBlock = secretBlocks.find(block => {
-      const label = normalizeLookupLabel(extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong'));
+      const label = normalizeLookupLabel(extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name'));
       return label === 'ma so bi mat' || label.includes('bi mat') || label.includes('secret') || label.includes('reservation');
     });
     if (secretBlock) {
-      lookupCode = cleanLookupValue(extractTagValue(secretBlock, 'DLieu') || extractTagValue(secretBlock, 'Data') || '');
+      const extractedVal = cleanLookupValue(
+        extractTagValue(secretBlock, 'DLieu') ||
+        extractTagValue(secretBlock, 'Data') ||
+        extractTagValue(secretBlock, 'DuLieu') ||
+        extractTagValue(secretBlock, 'Value') ||
+        extractTagValue(secretBlock, 'GiaTri') || ''
+      );
+      if (extractedVal && isLookupCodeCandidate(extractedVal)) {
+        lookupCode = extractedVal;
+      }
     }
   }
 

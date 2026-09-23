@@ -62,7 +62,7 @@ export async function exportInvoiceToPdfFile(
       tempContainer.style.background = '#ffffff';
       tempContainer.innerHTML = htmlString;
       document.body.appendChild(tempContainer);
-      targetElement = tempContainer.querySelector('.main-page, .invoice-container, .misa-invoice-page, .sinvoice-paper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card, .print-page') as HTMLElement || tempContainer;
+      targetElement = tempContainer.querySelector('.main-page, .invoice-container, .misa-invoice-page, .sinvoice-paper, .viettel-wrapper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card, .vnpay-page, .print-page') as HTMLElement || tempContainer;
     }
 
     // High resolution canvas options for crisp text & borders

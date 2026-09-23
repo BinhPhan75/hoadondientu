@@ -11,7 +11,8 @@ import {
   FileSpreadsheet,
   FolderArchive,
   ExternalLink,
-  Search
+  Search,
+  Download
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
@@ -505,6 +506,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                             </a>
                           );
                         })()}
+
+                        <button
+                          onClick={() => onDownloadPdf(inv)}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          title="Tải nhanh tệp PDF A4 chuẩn mẫu"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
 
                         <button
                           onClick={() => onDownloadXml(inv)}
