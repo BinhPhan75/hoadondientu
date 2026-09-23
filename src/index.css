@@ -1,11 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f3f4f6;
-  --sidebar: #111827;
-  --accent: #ef4444;
-  --text-main: #1f2937;
-  --border: #d1d5db;
+  --bg: #f8fafc;
+  --sidebar: #0f172a;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-dark: #334155;
   --font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
 }
@@ -17,12 +20,13 @@ body {
   font-family: var(--font-sans);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Status Indicators */
+/* Status Indicators (Soft & Clean, No harsh neon glow) */
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   display: inline-block;
   margin-right: 6px;
@@ -30,132 +34,152 @@ body {
 
 .status-active {
   background: #10b981;
-  box-shadow: 0 0 8px #10b981;
 }
 
 .status-warning {
   background: #f59e0b;
-  box-shadow: 0 0 8px #f59e0b;
 }
 
 .status-error {
   background: #ef4444;
-  box-shadow: 0 0 8px #ef4444;
 }
 
-/* High Density Sidebar & Form Controls */
+/* Modern Enterprise Sidebar & Dark Form Controls */
 .text-input-dark {
   width: 100%;
-  background: #374151;
-  border: 1px solid #4b5563;
-  padding: 0.5rem 0.65rem;
-  color: #ffffff;
-  border-radius: 4px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  padding: 0.5rem 0.75rem;
+  color: #f8fafc;
+  border-radius: 6px;
   font-size: 13px;
   box-sizing: border-box;
-  font-family: var(--font-mono);
-  transition: border-color 0.15s ease;
+  font-family: var(--font-sans);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.text-input-dark::placeholder {
+  color: #64748b;
 }
 
 .text-input-dark:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+  background: #0f172a;
 }
 
 .btn-primary-accent {
-  background: var(--accent);
-  color: white;
+  background: #2563eb;
+  color: #ffffff;
   border: none;
   padding: 0.65rem 1rem;
-  border-radius: 4px;
-  font-weight: 700;
+  border-radius: 6px;
+  font-weight: 600;
   font-size: 13px;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.01em;
   cursor: pointer;
   width: 100%;
-  transition: background-color 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .btn-primary-accent:hover {
-  background: #dc2626;
+  background: #1d4ed8;
+}
+
+.btn-primary-accent:active {
+  background: #1e40af;
+  transform: translateY(0.5px);
 }
 
 .btn-primary-accent:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
-/* High Density Tags */
+/* Soft Modern Badges & Tags */
 .tag {
-  padding: 2px 8px;
-  border-radius: 12px;
+  padding: 2px 7px;
+  border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  line-height: 1.3;
 }
 
 .tag-success {
-  background: #dcfce7;
-  color: #166534;
-  border: 1px solid #bbf7d0;
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
 }
 
 .tag-pending {
-  background: #fef3c7;
-  color: #92400e;
+  background: #fffbeb;
+  color: #b45309;
   border: 1px solid #fde68a;
 }
 
 .tag-error {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #fef2f2;
+  color: #b91c1c;
   border: 1px solid #fecaca;
 }
 
 .tag-info {
-  background: #e0f2fe;
-  color: #075985;
+  background: #f0f9ff;
+  color: #0369a1;
   border: 1px solid #bae6fd;
 }
 
-/* High Density Table styling */
+/* Modern Enterprise Table styling */
 .data-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   background: #ffffff;
-  border: 1px solid var(--border);
   font-size: 12.5px;
 }
 
 .data-table th {
   text-align: left;
-  background: #f3f4f6;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #f1f5f9;
   text-transform: uppercase;
   font-size: 11px;
-  letter-spacing: 0.05em;
-  color: #6b7280;
-  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.data-table th:last-child {
+  border-right: none;
 }
 
 .data-table td {
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid #f3f4f6;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid #f1f5f9;
+  border-right: 1px solid #f8fafc;
+  color: #1e293b;
 }
 
-/* High Density Console / Terminal */
+.data-table td:last-child {
+  border-right: none;
+}
+
+/* Soft Enterprise Console / Terminal */
 .console-dock {
-  background: #000000;
-  color: #10b981;
+  background: #020617;
+  color: #cbd5e1;
   font-family: var(--font-mono);
   padding: 0.85rem 1.25rem;
   font-size: 12px;
-  border-top: 3px solid #374151;
+  border-top: 1px solid #1e293b;
 }
 
 /* Custom Scrollbars */
@@ -165,7 +189,7 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #f8fafc;
 }
 
 ::-webkit-scrollbar-thumb {

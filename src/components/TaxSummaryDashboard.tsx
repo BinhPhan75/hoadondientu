@@ -18,48 +18,48 @@ export const TaxSummaryDashboard: React.FC<TaxSummaryDashboardProps> = ({ invoic
   };
 
   return (
-    <div className="bg-white border-b border-[#d1d5db] px-4 sm:px-6 py-2">
+    <div className="bg-slate-50/60 border-b border-slate-200 px-4 sm:px-6 py-2 shadow-2xs">
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1.5 text-xs">
         {/* Metric 1: Tổng HĐ Mua Vào */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-gray-500 font-medium">Tổng HĐ Mua Vào:</span>
-          <span className="font-mono font-bold text-gray-900 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 font-medium">Tổng HĐ mua vào:</span>
+          <span className="font-mono font-semibold text-slate-900 text-sm">
             {totalCount.toLocaleString()}
           </span>
-          <span className="text-gray-500 font-normal">HĐ</span>
+          <span className="text-slate-500 font-normal">HĐ</span>
           {withCqtCodeCount > 0 && (
-            <span className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+            <span className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/80">
               {withCqtCodeCount} có mã CQT
             </span>
           )}
         </div>
 
-        <span className="text-gray-300 hidden lg:inline">|</span>
+        <span className="text-slate-200 hidden lg:inline">|</span>
 
         {/* Metric 2: Tiền Hàng Chưa Thuế */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-gray-500 font-medium">Tiền Hàng Chưa Thuế:</span>
-          <span className="font-mono font-bold text-blue-700 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 font-medium">Tiền hàng chưa thuế:</span>
+          <span className="font-mono font-semibold text-blue-700 text-sm">
             {formatVND(totalBeforeTax)}
           </span>
         </div>
 
-        <span className="text-gray-300 hidden lg:inline">|</span>
+        <span className="text-slate-200 hidden lg:inline">|</span>
 
         {/* Metric 3: Thuế GTGT Đầu Vào */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-gray-500 font-medium">Thuế GTGT Đầu Vào:</span>
-          <span className="font-mono font-bold text-amber-700 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 font-medium">Thuế GTGT đầu vào:</span>
+          <span className="font-mono font-semibold text-amber-700 text-sm">
             {formatVND(totalTax)}
           </span>
         </div>
 
-        <span className="text-gray-300 hidden lg:inline">|</span>
+        <span className="text-slate-200 hidden lg:inline">|</span>
 
         {/* Metric 4: Tổng Thanh Toán */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-gray-500 font-medium">Tổng Thanh Toán:</span>
-          <span className="font-mono font-black text-[#166534] text-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 font-medium">Tổng thanh toán:</span>
+          <span className="font-mono font-bold text-emerald-700 text-sm">
             {formatVND(totalPayment)}
           </span>
         </div>

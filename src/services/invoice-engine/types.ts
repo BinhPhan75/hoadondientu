@@ -35,7 +35,7 @@ export interface DownloadResult {
   filename: string; // Tên file đề xuất
   isFallback: boolean; // True nếu chạy qua GenericFallbackDriver
   sourceUrl?: string; // URL tải thực tế
-  captchaSolved?: string; // Mã Captcha đã giải (nếu có)
+  captchaSolved?: string | boolean; // Mã Captcha đã giải (nếu có)
   executionLogs: string[]; // Nhật ký từng bước thực thi
   error?: string; // Thông báo lỗi nếu có
 }

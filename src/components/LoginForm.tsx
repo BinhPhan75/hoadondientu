@@ -57,37 +57,35 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
       <div className="w-full max-w-md relative z-10">
         {/* Header Branding */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-emerald-400 p-0.5 shadow-lg shadow-cyan-500/20 mb-3">
-            <div className="w-full h-full bg-slate-900 rounded-[14px] flex items-center justify-center">
-              <Shield className="w-7 h-7 text-cyan-400" />
-            </div>
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600/15 border border-blue-500/30 text-blue-400 mb-3 shadow-xs">
+            <Building2 className="w-6 h-6 text-blue-400" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white uppercase">
-            Tool Tra Cứu Hóa Đơn Mua Vào
+          <h1 className="text-xl font-bold tracking-tight text-white">
+            Tra Cứu Hóa Đơn Mua Vào
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Đăng nhập hệ thống bằng tài khoản được cấp
+          <p className="text-xs text-slate-400 mt-1">
+            Đăng nhập hệ thống bằng tài khoản được cấp quyền
           </p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-slate-800/90 backdrop-blur-md border border-slate-700/80 rounded-2xl p-6 sm:p-8 shadow-2xl">
+        <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700/80 rounded-2xl p-6 sm:p-7 shadow-2xl">
           {/* Error Banner */}
           {errorMessage && (
             <div
-              className={`mb-5 p-4 rounded-xl border flex items-start gap-3 text-sm animate-in fade-in duration-200 ${
+              className={`mb-5 p-3.5 rounded-xl border flex items-start gap-3 text-xs animate-in fade-in duration-200 ${
                 isExpiredError
                   ? 'bg-amber-950/50 border-amber-500/50 text-amber-200'
                   : 'bg-rose-950/50 border-rose-500/50 text-rose-200'
               }`}
             >
               {isExpiredError ? (
-                <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <Clock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               ) : (
-                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               )}
               <div className="flex-1">
-                <div className="font-semibold">{isExpiredError ? 'Tài khoản hết hạn' : 'Đăng nhập thất bại'}</div>
+                <div className="font-semibold">{isExpiredError ? 'Tài khoản hết hạn' : 'Đăng nhập không thành công'}</div>
                 <div className="mt-0.5 leading-relaxed">{errorMessage}</div>
               </div>
             </div>
@@ -96,7 +94,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Username / Tax Code Field */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">
                 Mã số thuế (Tên đăng nhập)
               </label>
               <div className="relative">
@@ -110,14 +108,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                   placeholder="Ví dụ: 0315897123"
                   autoComplete="username"
                   autoFocus
-                  className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm font-medium transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 text-xs font-mono font-medium transition-all"
                 />
               </div>
             </div>
 
             {/* Password Field */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">
                 Mật khẩu truy cập
               </label>
               <div className="relative">
@@ -130,7 +128,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Nhập mật khẩu do Quản trị cấp"
                   autoComplete="current-password"
-                  className="w-full pl-10 pr-11 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-sm font-medium transition-all"
+                  className="w-full pl-10 pr-11 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 text-xs font-medium transition-all"
                 />
                 <button
                   type="button"
@@ -146,11 +144,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-sm rounded-xl shadow-lg shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full mt-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Đang xác thực tài khoản...</span>
                 </>
               ) : (

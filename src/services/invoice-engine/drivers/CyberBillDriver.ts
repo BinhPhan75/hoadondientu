@@ -89,7 +89,7 @@ export class CyberBillDriver extends BaseInvoiceProviderDriver {
           provider: this.providerCode,
           driverName: this.name,
           isFallback: false,
-          captchaSolved: true,
+          captchaSolved: 'auto',
           sourceUrl: result.sourceUrl,
           executionLogs: logs
         };

@@ -337,7 +337,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                   name="folderStructure"
                   checked={folderStructure === 'flat'}
                   onChange={() => setFolderStructure('flat')}
-                  className="text-[#ef4444]"
+                  className="text-blue-600"
                 />
                 <span>Gộp chung 1 thư mục</span>
               </label>
@@ -346,13 +346,13 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
 
           {/* Naming Pattern */}
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider">
+            <label className="block text-xs font-medium text-slate-700">
               3. Quy tắc đặt tên tệp:
             </label>
             <select
               value={namingPattern}
               onChange={(e) => setNamingPattern(e.target.value as any)}
-              className="w-full px-2.5 py-1.5 text-xs bg-gray-50 border border-[#d1d5db] rounded focus:bg-white focus:border-[#ef4444] font-mono text-gray-800"
+              className="w-full h-9 px-3 text-xs bg-white border border-slate-200 hover:border-slate-300 rounded-lg focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 text-slate-800 transition-colors"
             >
               <option value="standard">HD_[KýHiệu]_[SốHĐ]_[MST].xml (Chuẩn Tổng cục Thuế)</option>
               <option value="readable">HD_[SốHĐ]_[TênBênBán].xml (Dễ đọc cho kế toán)</option>
@@ -362,12 +362,12 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
 
           {/* Progress Bar (when packaging) */}
           {isPackaging && (
-            <div className="p-3 bg-[#111827] text-white rounded space-y-1.5 animate-in fade-in duration-150">
-              <div className="flex justify-between text-[11px] font-mono">
-                <span className="text-gray-300">{statusText}</span>
-                <span className="font-bold text-emerald-400">{progress}%</span>
+            <div className="p-3 bg-slate-900 text-white rounded-lg space-y-1.5 animate-in fade-in duration-150 border border-slate-800">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-300">{statusText}</span>
+                <span className="font-semibold text-emerald-400 tabular-nums">{progress}%</span>
               </div>
-              <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden">
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="bg-emerald-500 h-full rounded-full transition-all duration-200"
                   style={{ width: `${progress}%` }}
@@ -377,12 +377,12 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
           )}
 
           {/* Modal Footer Buttons */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#d1d5db]">
+          <div className="pt-4 flex items-center justify-end gap-2 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
               disabled={isPackaging}
-              className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors disabled:opacity-50"
+              className="h-9 px-4 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 rounded-lg border border-slate-200 transition-colors disabled:opacity-50 shadow-xs"
             >
               Đóng
             </button>
@@ -391,10 +391,10 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
               type="button"
               onClick={handleStartBatchDownload}
               disabled={isPackaging || invoices.length === 0}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+              className="h-9 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Tải Gói ZIP ({invoices.length} HĐ)</span>
+              <span>Tải gói ZIP ({invoices.length} HĐ)</span>
             </button>
           </div>
         </div>

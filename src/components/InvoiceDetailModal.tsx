@@ -970,49 +970,47 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-[#1e293b] rounded-xl max-w-6xl w-full shadow-2xl border border-gray-700 overflow-hidden max-h-[96vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-slate-900 rounded-xl max-w-6xl w-full shadow-2xl border border-slate-800 overflow-hidden max-h-[96vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Top Bar */}
-        <div className="bg-[#0f172a] text-white px-4 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-gray-800">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs ${
-              isRed ? 'bg-red-500/20 border border-red-500/30 text-red-400' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
-            }`}>
+        <div className="bg-slate-950 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs bg-blue-500/15 border border-blue-500/25 text-blue-400">
               <FileText className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-xs sm:text-sm font-mono uppercase tracking-wider text-white truncate">
-                  {effectiveInvoice.thdon || 'HÓA ĐƠN ĐIỆN TỬ'}: {effectiveInvoice.khhdon} - SỐ {effectiveInvoice.shdon}
+                <h3 className="font-semibold text-xs sm:text-sm text-slate-100 truncate">
+                  {effectiveInvoice.thdon || 'Hóa đơn điện tử'}: {effectiveInvoice.khhdon} - Số {effectiveInvoice.shdon}
                 </h3>
                 {effectiveInvoice.loaiHdon === 'purchase' ? (
-                  <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 text-[10px] font-bold border border-blue-700">
+                  <span className="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-300 text-[10px] font-semibold border border-blue-500/25">
                     MUA VÀO
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 text-[10px] font-bold border border-emerald-700">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold border border-emerald-500/25">
                     BÁN RA
                   </span>
                 )}
                 {effectiveInvoice.hsgcma && (
-                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[10px] font-mono font-semibold border border-emerald-800 flex items-center gap-1">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 text-[10px] font-mono font-medium border border-emerald-800/80 flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
                     ĐÃ CẤP MÃ CQT
                   </span>
                 )}
                 {/* Provider Indicator Pill */}
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold border border-amber-500/40 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 text-[10px] font-medium border border-amber-500/30 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
                   NCC: {currentProviderMeta.shortName}
                 </span>
                 {is4SiInvoice && (
-                  <span className="px-2 py-0.5 rounded bg-purple-900/60 text-purple-300 text-[10px] font-mono font-semibold border border-purple-700 flex items-center gap-1" title="Hóa đơn 4Si của Công ty L.C.S (lcssoft.com.vn) - Hỗ trợ đọc qua dochoadon.lcssoft.com.vn">
+                  <span className="px-2 py-0.5 rounded-md bg-purple-900/40 text-purple-300 text-[10px] font-mono font-medium border border-purple-700/50 flex items-center gap-1" title="Hóa đơn 4Si của Công ty L.C.S (lcssoft.com.vn) - Hỗ trợ đọc qua dochoadon.lcssoft.com.vn">
                     <span>LCS Soft / 4Si</span>
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">
-                Bên bán: <span className="text-gray-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-amber-300 font-bold">{effectiveInvoice.nbmst}</span>)
+              <p className="text-xs text-slate-400 truncate mt-0.5">
+                Bên bán: <span className="text-slate-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-slate-200 font-mono font-semibold">{effectiveInvoice.nbmst}</span>)
               </p>
             </div>
           </div>
@@ -1021,22 +1019,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {/* Prev / Next buttons */}
             {allInvoices.length > 1 && (
-              <div className="flex items-center bg-gray-900 rounded-lg border border-gray-700 p-0.5 text-xs text-gray-300">
+              <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5 text-xs text-slate-300">
                 <button
                   onClick={handlePrev}
                   disabled={!hasPrev}
-                  className="p-1 hover:text-white hover:bg-gray-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                  className="p-1 hover:text-white hover:bg-slate-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                   title="Hóa đơn trước"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-2 text-[11px] font-mono text-gray-400">
+                <span className="px-2 text-[11px] font-mono text-slate-400">
                   {currentIndex + 1}/{allInvoices.length}
                 </span>
                 <button
                   onClick={handleNext}
                   disabled={!hasNext}
-                  className="p-1 hover:text-white hover:bg-gray-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                  className="p-1 hover:text-white hover:bg-slate-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                   title="Hóa đơn tiếp theo"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -1047,7 +1045,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             {/* Close button */}
             <button
               onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors cursor-pointer"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               title="Đóng cửa sổ"
             >
               <X className="w-5 h-5" />
@@ -1170,8 +1168,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         </div>
 
         {/* Footer Actions Bar */}
-        <div className="bg-[#0f172a] border-t border-gray-800 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="text-[11px] text-gray-400 font-mono flex items-center gap-2">
+        <div className="bg-slate-950 border-t border-slate-800 px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>HĐĐT Chuẩn Tổng cục Thuế (NĐ 123/2020/NĐ-CP & TT 78/2021/TT-BTC)</span>
           </div>
@@ -1183,7 +1181,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleViewOriginalEasyInvoice}
                   disabled={isDownloadingEasyInvoice}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title={`Tra cứu mã FKey và hiển thị bản thể hiện gốc EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
                 >
                   {isDownloadingEasyInvoice ? (
@@ -1198,10 +1196,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     href={directLookupUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
                     title="Mở cổng tra cứu EasyInvoice (Đã dán sẵn mã FKey)"
                   >
-                    <ExternalLink className="w-3 h-3 text-gray-400" />
+                    <ExternalLink className="w-3 h-3 text-slate-400" />
                     <span>Mở Cổng</span>
                   </a>
                 )}
@@ -1212,7 +1210,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleViewOriginalVnpt}
                   disabled={isLoadingVnptOriginal}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalVnptHtml
                       ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
                       : 'text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600'
@@ -1231,7 +1229,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setOriginalVnptHtml(null)}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
                     title="Chuyển về xem mẫu thể hiện nội bộ"
                   >
                     <span>Mẫu nội bộ</span>
@@ -1242,7 +1240,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleDownloadVnptPdf}
                   disabled={isDownloadingVnptPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ cổng VNPT (mục Tải file)"
                 >
                   {isDownloadingVnptPdf ? (
@@ -1272,17 +1270,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleViewOriginalViettel}
                   disabled={isLoadingViettelOriginal}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalViettelPdfUrl
-                      ? 'text-red-200 bg-red-900 border-red-400 ring-1 ring-red-400/40'
-                      : 'text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600'
+                      ? 'text-rose-200 bg-rose-950 border-rose-500 ring-1 ring-rose-500/40'
+                      : 'text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700'
                   }`}
                   title={`Tải và xem trực tiếp bản PDF gốc ký số từ Viettel (Mã bí mật: ${lookupDetails.lookupCode || ''})`}
                 >
                   {isLoadingViettelOriginal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
                   ) : (
-                    <Eye className="w-3.5 h-3.5 text-red-400" />
+                    <Eye className="w-3.5 h-3.5 text-rose-400" />
                   )}
                   <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : originalViettelPdfUrl ? 'Đang xem PDF gốc Viettel' : 'Xem PDF gốc Viettel'}</span>
                 </button>
@@ -1294,7 +1292,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       if (originalViettelPdfUrl) window.URL.revokeObjectURL(originalViettelPdfUrl);
                       setOriginalViettelPdfUrl(null);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
                     title="Chuyển về xem mẫu thể hiện nội bộ"
                   >
                     <span>Mẫu nội bộ</span>
@@ -1305,13 +1303,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleDownloadViettelPdf}
                   disabled={isDownloadingViettelPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600 hover:border-red-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 hover:border-rose-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
                 >
                   {isDownloadingViettelPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
                   ) : (
-                    <Download className="w-3.5 h-3.5 text-red-400" />
+                    <Download className="w-3.5 h-3.5 text-rose-400" />
                   )}
                   <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
                 </button>
@@ -1320,7 +1318,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleDownloadViettelZip}
                   disabled={isDownloadingViettelZip}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-md border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-lg border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
                   title="Tải tệp ZIP gốc (chứa XML và chữ ký) từ Viettel"
                 >
                   {isDownloadingViettelZip ? (
@@ -1336,10 +1334,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     href={directLookupUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
                     title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
                   >
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3 h-3 text-slate-400" />
                     <span>Mở Cổng</span>
                   </a>
                 )}
@@ -1412,10 +1410,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
             <button
               onClick={() => onDownloadXml(effectiveInvoice)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition-colors cursor-pointer"
               title="Tải tệp XML gốc để kê khai thuế hoặc lưu trữ"
             >
-              <FileCode2 className="w-3.5 h-3.5 text-[#ef4444]" />
+              <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
               <span>Tải XML Gốc</span>
             </button>
 
@@ -1426,7 +1424,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleViewFourSiPdf}
                   disabled={isLoadingFourSiOriginal}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalFourSiPdfUrl
                       ? 'text-amber-200 bg-amber-900 border-amber-400 ring-1 ring-amber-400/40'
                       : 'text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600'
@@ -1455,7 +1453,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       if (originalFourSiPdfUrl) window.URL.revokeObjectURL(originalFourSiPdfUrl);
                       setOriginalFourSiPdfUrl(null);
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 rounded-md border border-emerald-700 transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 rounded-lg border border-emerald-700 transition-colors cursor-pointer"
                     title="Chuyển về xem mẫu chuẩn Tổng cục Thuế (GDT)"
                   >
                     <span>Mẫu chuẩn GDT</span>
@@ -1467,7 +1465,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   type="button"
                   onClick={handleDownloadFourSiPdf}
                   disabled={isDownloadingFourSiPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600 hover:border-amber-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600 hover:border-amber-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải tệp PDF bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc)"
                 >
                   {isDownloadingFourSiPdf ? (
@@ -1482,10 +1480,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <button
                   onClick={() => handleDownloadPdfFile('DEFAULT')}
                   disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                   title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-3.5 h-3.5" />
                   <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
                 </button>
               </div>
@@ -1495,7 +1493,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <button
                     onClick={() => handleDownloadPdfFile(effectiveTemplateId)}
                     disabled={isExportingPdf}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-950/70 hover:bg-amber-900 border border-amber-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/70 hover:bg-amber-900 border border-amber-600 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                     title={`Tải tệp PDF theo mẫu đặc thù ${currentProviderMeta.name}`}
                   >
                     <Download className="w-3.5 h-3.5 text-amber-400" />
@@ -1506,10 +1504,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <button
                   onClick={() => handleDownloadPdfFile('DEFAULT')}
                   disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                   title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
                 >
-                  <Download className="w-4 h-4" />
+                  <Download className="w-3.5 h-3.5" />
                   <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
                 </button>
               </div>
