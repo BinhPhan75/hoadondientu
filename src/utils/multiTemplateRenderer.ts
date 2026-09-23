@@ -108,10 +108,14 @@ export function detectInvoiceProvider(
 
   // Kiểm tra nhà cung cấp theo MST hoặc tên người bán:
   // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (MST: 0402307168) sử dụng Viettel S-Invoice
+  const cleanNbmst = (invoice?.nbmst || '').replace(/\D/g, '');
+  const cleanRawStr = (raw || '').replace(/\s+/g, '');
   if (
-    invoice?.nbmst === '0402307168' ||
+    cleanNbmst === '0402307168' ||
     (invoice?.nbten && /SUNTALENT/i.test(invoice.nbten)) ||
-    (raw && (/0402307168/i.test(raw) || /SUNTALENT/i.test(raw)))
+    cleanRawStr.includes('0402307168') ||
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(raw || '') ||
+    (raw && /SUNTALENT/i.test(raw))
   ) {
     return 'VIETTEL';
   }
@@ -126,7 +130,7 @@ export function detectInvoiceProvider(
     if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return 'MISA';
     }
-    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom|viettel-invoice/i.test(raw)) {
+    if (/sinvoice|vinvoice|viettel\.vn|vietteltelecom|viettel-invoice|0100109106/i.test(raw)) {
       return 'VIETTEL';
     }
     if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
@@ -355,10 +359,10 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         id: 'VIETTEL',
         name: 'Viettel S-Invoice',
         shortName: 'Viettel',
-        domain: 'sinvoice.vn',
+        domain: 'vinvoice.viettel.vn',
         badge: '🔴 Viettel S-Invoice',
         color: '#dc2626',
-        portalUrl: 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html',
+        portalUrl: 'https://vinvoice.viettel.vn/utilities/invoice-search',
         description: 'Giải pháp HĐĐT S-Invoice Tập đoàn Công nghiệp - Viễn thông Quân đội (MST 0100109106)'
       };
     case 'VNPT':
@@ -1766,7 +1770,7 @@ export function renderViettelTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://vinvoice.viettel.vn/utilities/invoice-search';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'VIETTEL', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';

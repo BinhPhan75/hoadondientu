@@ -243,7 +243,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (xml) {
     if (xml.includes('0318657735') || xml.includes('bảo duy') || xml.includes('bao duy')) return 'BAO_DUY';
     if (xml.includes('0315018466') || xml.includes('4si.vn') || xml.includes('l.c.s') || xml.includes('pnj')) return 'DEFAULT'; // 4SI / PNJ -> Dùng mẫu GDT
-    if (xml.includes('0402307168') || xml.includes('suntalent')) return 'VIETTEL';
+    if (xml.includes('0402307168') || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/.test(xml) || xml.includes('suntalent')) return 'VIETTEL';
     if (xml.includes('0312105174') || xml.includes('tài trâm anh') || xml.includes('tai tram anh')) return 'TAI_TRAM_ANH';
     if (xml.includes('0400557356') || xml.includes('xuân vinh') || xml.includes('xuan vinh')) return 'XUAN_VINH';
     if (xml.includes('0318391940') || xml.includes('kim loan tuấn') || xml.includes('kim loan tuan')) return 'KIM_LOAN_TUAN';
@@ -255,6 +255,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 3b. Check invoice provider string
   const p = (invoice.provider || '').toUpperCase();
+  if (p === 'VIETTEL') return 'VIETTEL';
   if (p.includes('VNPAY')) return 'DEFAULT';
 
   // 4. Mặc định: Tất cả các hóa đơn chưa nhận diện, viễn thông, điện lực, phí ngân hàng... đều dùng mẫu Tổng cục Thuế (DEFAULT)

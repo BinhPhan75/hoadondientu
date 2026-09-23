@@ -64,6 +64,21 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   }
 
   // =========================================================================
+  // ƯU TIÊN 0.5: Nhận diện đối tác cấu hình riêng
+  // =========================================================================
+  if (
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlString) ||
+    /SUNTALENT/i.test(xmlString)
+  ) {
+    return {
+      provider: 'VIETTEL',
+      priority: 1.5,
+      matchedPattern: 'SUNTALENT (MST: 0402307168) -> Viettel S-Invoice',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống Viettel S-Invoice / vInvoice (SUNTALENT)'
+    };
+  }
+
+  // =========================================================================
   // ƯU TIÊN 1: Regex quét Domain URL Tra cứu trong toàn bộ XML
   // =========================================================================
 

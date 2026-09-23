@@ -199,10 +199,12 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     msttcgp === '0100109106' ||
     provider === 'VIETTEL' ||
     nbmst === '0402307168' ||
+    nbmst.replace(/\D/g, '') === '0402307168' ||
     nbten.includes('SUNTALENT') ||
     tentcgp.includes('VIETTEL') ||
     rawLookupUrl.includes('viettel') ||
     rawLookupUrl.includes('sinvoice') ||
+    rawLookupUrl.includes('vinvoice') ||
     rawLookupUrl.includes('viettel-invoice')
   ) {
     return {
@@ -586,6 +588,7 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
     lookupCode.includes('0100109106') ||
     nbmst === '0100109106' ||
     nbmst === '0402307168' || // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT
+    nbmst.replace(/\D/g, '') === '0402307168' ||
     nbten.includes('SUNTALENT') ||
     Boolean(inv.secretCode) ||
     rawXml.includes('viettel') ||
@@ -594,6 +597,7 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
     rawXml.includes('viettel-invoice') ||
     rawXml.includes('0100109106') ||
     rawXml.includes('0402307168') ||
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(rawXml) ||
     rawXml.includes('suntalent')
   ) {
     return {

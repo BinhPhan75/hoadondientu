@@ -11,6 +11,7 @@ import { renderNghiaSonTemplate } from './NghiaSonTemplate';
 import { renderFourSiTemplate } from './FourSiTemplate';
 import { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
 import { renderVnpayTemplate } from './VnpayTemplate';
+import { renderViettelTemplate } from './ViettelTemplate';
 import { renderDefaultTemplate } from './DefaultTemplate';
 
 export * from './types';
@@ -26,6 +27,7 @@ export { renderNghiaSonTemplate } from './NghiaSonTemplate';
 export { renderFourSiTemplate } from './FourSiTemplate';
 export { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
 export { renderVnpayTemplate } from './VnpayTemplate';
+export { renderViettelTemplate } from './ViettelTemplate';
 export { renderDefaultTemplate } from './DefaultTemplate';
 
 /**
@@ -71,6 +73,9 @@ export function renderPartnerInvoiceHtml(
 
     case 'VNPAY':
       return renderVnpayTemplate(invoice, rawXml, options);
+
+    case 'VIETTEL':
+      return renderViettelTemplate(invoice, rawXml, options);
 
     case 'DEFAULT':
     default:
