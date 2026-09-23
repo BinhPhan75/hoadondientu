@@ -482,18 +482,28 @@ export function isViettelSource(source: any): boolean {
   if (!source) return false;
   if (hasPayloadMarker(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP'], ['0100109106'])) return true;
   if (hasPayloadMarker(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT'], ['tvan_viettel'])) return true;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'mst', 'sellerTaxCode']) || '').replace(/[^0-9]/g, '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'sellerName']) || '').toUpperCase();
   const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '').replace(/[^0-9]/g, '');
   const tentvandnknt = String(getPayloadValue(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT']) || '').toLowerCase();
   const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toLowerCase();
   const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
   const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
 
-  return msttcgp === '0100109106' ||
+  return (
+    nbmst === '0100109106' ||
+    nbmst === '0402307168' || // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
+    nbten.includes('SUNTALENT') ||
+    nbten.includes('VIETTEL') ||
+    msttcgp === '0100109106' ||
     tentvandnknt === 'tvan_viettel' ||
     tentvandnknt === 'tvan viettel' ||
     tentcgp.includes('viettel') ||
     provider === 'VIETTEL' ||
-    lookupUrl.includes('sinvoice.viettel.vn');
+    lookupUrl.includes('sinvoice.viettel.vn') ||
+    lookupUrl.includes('viettel-invoice.vn') ||
+    lookupUrl.includes('vinvoice.viettel.vn')
+  );
 }
 
 /**
@@ -692,7 +702,13 @@ export function getLookupCodeFromPayload(source: any): string {
   // Viettel: "Mã số bí mật" trong ttkhac[] là mã tra cứu duy nhất.
   // Không fallback sang mhdon hoặc mã nội bộ nếu trường này không tồn tại.
   if (isViettel) {
-    const secretCode = cleanLookupValue(getFromStructuredArrays(source, ['Mã số bí mật']));
+    const secretCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'Mã số bí mật', 'Ma so bi mat', 'ReservationCode', 'reservationCode',
+        'matracuu', 'MaTraCuu', 'Mã tra cứu', 'MaSoBiMat', 'SecretCode', 'secretCode'
+      ]) ||
+      getPayloadValue(source, ['lookupCode', 'secretCode', 'reservationCode', 'mabaomat', 'sobaomat'])
+    );
     return isLookupCodeCandidate(secretCode) ? secretCode : '';
   }
 
@@ -979,7 +995,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   // Viettel S-Invoice / vInvoice: chỉ dùng dlieu của TTKhac/TTin có TTruong "Mã số bí mật" hoặc ReservationCode
-  const isViettelXml = /0100109106|tvan[_\s-]*viettel|sinvoice|vinvoice|viettel/i.test(rawXml) ||
+  const isViettelXml = /0100109106|0402307168|suntalent|tvan[_\s-]*viettel|sinvoice|vinvoice|viettel|viettel-invoice/i.test(rawXml) ||
     /Mã số bí mật|Ma so bi mat|ReservationCode|MaBiMat/i.test(rawXml);
   if (isViettelXml) {
     const secretBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
@@ -1132,7 +1148,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   // 6g. Viettel vInvoice / S-Invoice
-  if (isViettelXml || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|0100109106/i.test(rawXml)) {
+  if (isViettelXml || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|0100109106|0402307168|suntalent/i.test(rawXml)) {
     if (!lookupUrl) lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
   }
 
@@ -1978,9 +1994,9 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   }
 
   // 8. Provider & Lookup Details (Nhà cung cấp giải pháp & Mã tra cứu)
-  const provider = detectProvider(xmlSource);
-  const msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
-  const tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
+  let provider = detectProvider(xmlSource);
+  let msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
+  let tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
 
   let { lookupCode, lookupUrl } = extractLookupDetailsFromXml(xmlSource);
 
@@ -2051,11 +2067,16 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   // Đối với Viettel vInvoice / S-Invoice
   const isViettel = provider === 'VIETTEL' ||
     msttcgp === '0100109106' ||
+    nbmst === '0402307168' ||
+    /SUNTALENT/i.test(nbten) ||
     tentcgp.toUpperCase().includes('VIETTEL') ||
-    /sinvoice|vinvoice|0100109106/i.test(xmlSource);
+    /sinvoice|vinvoice|viettel-invoice|0100109106|0402307168|suntalent/i.test(xmlSource);
 
   if (isViettel) {
     if (!lookupUrl) lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+    if (!msttcgp) msttcgp = '0100109106';
+    if (!tentcgp) tentcgp = 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)';
+    if (!provider) provider = 'VIETTEL';
   }
 
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;

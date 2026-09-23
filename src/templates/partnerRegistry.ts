@@ -217,6 +217,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '0318443500') return 'TKJ';
   if (nbmst === '4000344946') return 'NGHIA_SON';
   if (nbmst === '0317978711') return 'TAN_THANH_DANH';
+  if (nbmst === '0402307168') return 'VIETTEL'; // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
   if (nbmst === '0102182292' || nbmst === '0100112437') return 'DEFAULT'; // VNPAY & Vietcombank -> Dùng mẫu chuẩn GDT
 
   // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp)
@@ -229,6 +230,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   // 2. Check Seller Names
   if (nbten.includes('baoduy')) return 'BAO_DUY';
   if (nbten.includes('pnj') || (nbten.includes('chetac') && nbten.includes('trangsuc'))) return 'DEFAULT'; // PNJ -> Dùng mẫu GDT
+  if (nbten.includes('suntalent')) return 'VIETTEL';
   if (nbten.includes('taitramanh') || nbten.includes('tramanh')) return 'TAI_TRAM_ANH';
   if (nbten.includes('xuanvinh')) return 'XUAN_VINH';
   if (nbten.includes('kimloantuan')) return 'KIM_LOAN_TUAN';
@@ -241,6 +243,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (xml) {
     if (xml.includes('0318657735') || xml.includes('bảo duy') || xml.includes('bao duy')) return 'BAO_DUY';
     if (xml.includes('0315018466') || xml.includes('4si.vn') || xml.includes('l.c.s') || xml.includes('pnj')) return 'DEFAULT'; // 4SI / PNJ -> Dùng mẫu GDT
+    if (xml.includes('0402307168') || xml.includes('suntalent')) return 'VIETTEL';
     if (xml.includes('0312105174') || xml.includes('tài trâm anh') || xml.includes('tai tram anh')) return 'TAI_TRAM_ANH';
     if (xml.includes('0400557356') || xml.includes('xuân vinh') || xml.includes('xuan vinh')) return 'XUAN_VINH';
     if (xml.includes('0318391940') || xml.includes('kim loan tuấn') || xml.includes('kim loan tuan')) return 'KIM_LOAN_TUAN';

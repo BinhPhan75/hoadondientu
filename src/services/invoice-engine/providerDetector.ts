@@ -374,13 +374,15 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   // ƯU TIÊN 1.9: Nhận diện Viettel S-Invoice / vInvoice qua "Mã số bí mật" hoặc email Viettel
   // =========================================================================
   if (
+    /0402307168/i.test(xmlString) ||
+    /SUNTALENT/i.test(xmlString) ||
     /Mã số bí mật|Ma so bi mat|ReservationCode/i.test(xmlString) ||
-    /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-ca|@viettel|@viettrel/i.test(xmlString)
+    /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|viettel-ca|@viettel|@viettrel/i.test(xmlString)
   ) {
     return {
       provider: 'VIETTEL',
       priority: 1.8,
-      matchedPattern: 'Viettel vInvoice / S-Invoice (Mã số bí mật / ReservationCode)',
+      matchedPattern: 'Viettel vInvoice / S-Invoice (SUNTALENT / Mã số bí mật / ReservationCode)',
       sourceDescription: 'Hóa đơn phát hành qua hệ thống Viettel vInvoice / S-Invoice'
     };
   }

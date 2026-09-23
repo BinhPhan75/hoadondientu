@@ -106,6 +106,16 @@ export function detectInvoiceProvider(
     }
   }
 
+  // Kiểm tra nhà cung cấp theo MST hoặc tên người bán:
+  // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (MST: 0402307168) sử dụng Viettel S-Invoice
+  if (
+    invoice?.nbmst === '0402307168' ||
+    (invoice?.nbten && /SUNTALENT/i.test(invoice.nbten)) ||
+    (raw && (/0402307168/i.test(raw) || /SUNTALENT/i.test(raw)))
+  ) {
+    return 'VIETTEL';
+  }
+
   // --------------------------------------------------------------------------
   // BƯỚC 1: Quét toàn bộ XML để tìm domain trong link tra cứu hoặc nội dung
   // --------------------------------------------------------------------------
@@ -116,7 +126,7 @@ export function detectInvoiceProvider(
     if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return 'MISA';
     }
-    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom/i.test(raw)) {
+    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom|viettel-invoice/i.test(raw)) {
       return 'VIETTEL';
     }
     if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
@@ -175,6 +185,7 @@ export function detectInvoiceProvider(
     }
 
     const msttcgp = (invoice.msttcgp || '').trim();
+    if (invoice.nbmst === '0402307168' || (invoice.nbten && /SUNTALENT/i.test(invoice.nbten))) return 'VIETTEL';
     if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY -> Dùng mẫu GDT
     if (msttcgp === '0100684378') return 'VNPT';
     if (msttcgp === '0101243150') return 'MISA';

@@ -113,7 +113,7 @@ export function generateGDTInvoiceXml(invoice: GDTInvoice): string {
         let msttcgp = invoice.msttcgp;
         if (!msttcgp) {
           if (invoice.provider === 'MISA') msttcgp = '0101243150';
-          else if (invoice.provider === 'VIETTEL') msttcgp = '0100109106';
+          else if (invoice.provider === 'VIETTEL' || invoice.nbmst === '0402307168' || (invoice.nbten && /SUNTALENT/i.test(invoice.nbten))) msttcgp = '0100109106';
           else if (invoice.provider === 'VNPT') msttcgp = '0100684378';
           else if (invoice.provider === '4SI') msttcgp = '0315744883';
           else if (invoice.provider === 'EASYINVOICE') msttcgp = '0105987432';
@@ -199,7 +199,27 @@ ${taxSummaryXml}
           <X509Data>
             <X509SubjectName>CN=${escapeXml(invoice.signerName || invoice.nbten)}, OID.0.9.2342.19200300.100.1.1=MST:${invoice.nbmst}, C=VN</X509SubjectName>
             <X509Certificate>${invoice.certificate && !invoice.certificate.includes('...') ? invoice.certificate : 'MIIBmTCCAQKgAwIBAgIUQW5kcm9pZFZpZXRuYW1URFMwDQYJKoZIhvcNAQELBQAwDTELMAkGA1UEAxMDTENTMB4XDTI0MDEwMTAwMDAwMFoXDTI3MDEwMTAwMDAwMFowDTELMAkGA1UEAxMDTENTMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3jT+P/sVq1Rfx3Aup5E75G66hCq6D7r2E5Z6C7qYyZg3Q3o5J+4yM2n3K/9X+rA2d/8v4M2a3B1q0C5w+7g1x5B8='}</X509Certificate>
-            <X509IssuerName>C=VN, O=${invoice.caProvider || 'MISA-CA'}, CN=${invoice.caProvider || 'MISA'} Timestamping CA</X509IssuerName>
+            <X509IssuerName>C=VN, O=${escapeXml(
+              invoice.caProvider && invoice.caProvider !== 'Tổng cục Thuế CQT'
+                ? invoice.caProvider
+                : (invoice.provider === 'VIETTEL' || invoice.nbmst === '0402307168' || (invoice.nbten && /SUNTALENT/i.test(invoice.nbten)))
+                  ? 'VIETTEL-CA'
+                  : invoice.provider === 'VNPT'
+                    ? 'VNPT-CA'
+                    : invoice.provider === 'MISA'
+                      ? 'MISA-CA'
+                      : 'Tổng cục Thuế CQT'
+            )}, CN=${escapeXml(
+              invoice.caProvider && invoice.caProvider !== 'Tổng cục Thuế CQT'
+                ? invoice.caProvider
+                : (invoice.provider === 'VIETTEL' || invoice.nbmst === '0402307168' || (invoice.nbten && /SUNTALENT/i.test(invoice.nbten)))
+                  ? 'VIETTEL'
+                  : invoice.provider === 'VNPT'
+                    ? 'VNPT'
+                    : invoice.provider === 'MISA'
+                      ? 'MISA'
+                      : 'CQT Timestamping CA'
+            )}</X509IssuerName>
           </X509Data>
         </KeyInfo>
         <Object>

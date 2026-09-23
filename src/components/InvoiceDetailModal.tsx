@@ -664,6 +664,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       // Không gán mã CQT làm mã tra cứu cho 4SI, để trống nếu chưa có
     }
 
+    // Đối với hóa đơn Viettel S-Invoice / vInvoice (SUNTALENT: 0402307168...):
+    const isViettelModalCheck =
+      effectiveInvoice.provider === 'VIETTEL' ||
+      effectiveInvoice.msttcgp === '0100109106' ||
+      effectiveInvoice.nbmst === '0402307168' ||
+      (effectiveInvoice.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
+      autoDetectedProvider === 'VIETTEL';
+
+    if (isViettelModalCheck) {
+      if (!lookupDetails.lookupUrl) {
+        lookupDetails.lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+      }
+    }
+
     const isVnpayModalCheck =
       effectiveInvoice.provider === 'VNPAY' ||
       effectiveInvoice.msttcgp === '0102182292' ||
@@ -728,11 +742,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveInvoice?.msttcgp === '0100684378' ||
     effectiveInvoice?.nbmst === '4000344946';
 
-  const isViettelInvoice = /vinvoice|sinvoice/i.test(directLookupUrl) || 
-    /vinvoice|sinvoice/i.test(lookupDetails.lookupUrl || '') ||
+  const isViettelInvoice = /vinvoice|sinvoice|viettel-invoice/i.test(directLookupUrl) || 
+    /vinvoice|sinvoice|viettel-invoice/i.test(lookupDetails.lookupUrl || '') ||
     effectiveTemplateId === 'VIETTEL' || 
     effectiveInvoice?.provider === 'VIETTEL' ||
     effectiveInvoice?.msttcgp === '0100109106' ||
+    effectiveInvoice?.nbmst === '0402307168' ||
+    Boolean(effectiveInvoice?.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
     Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('VIETTEL')) ||
     (Boolean(lookupDetails.lookupCode) && (lookupDetails.lookupUrl?.includes('viettel') || effectiveInvoice?.nbmst === '049163008476'));
 

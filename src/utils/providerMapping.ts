@@ -194,13 +194,16 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     };
   }
 
-  // 5. Viettel (MST TCGP: 0100109106)
+  // 5. Viettel (MST TCGP: 0100109106, SUNTALENT: 0402307168)
   if (
     msttcgp === '0100109106' ||
     provider === 'VIETTEL' ||
+    nbmst === '0402307168' ||
+    nbten.includes('SUNTALENT') ||
     tentcgp.includes('VIETTEL') ||
     rawLookupUrl.includes('viettel') ||
-    rawLookupUrl.includes('sinvoice')
+    rawLookupUrl.includes('sinvoice') ||
+    rawLookupUrl.includes('viettel-invoice')
   ) {
     return {
       mst: '0100109106',
@@ -579,13 +582,19 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
     rawLookupUrl.includes('viettel') ||
     rawLookupUrl.includes('sinvoice') ||
     rawLookupUrl.includes('vinvoice') ||
+    rawLookupUrl.includes('viettel-invoice') ||
     lookupCode.includes('0100109106') ||
     nbmst === '0100109106' ||
+    nbmst === '0402307168' || // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT
+    nbten.includes('SUNTALENT') ||
     Boolean(inv.secretCode) ||
     rawXml.includes('viettel') ||
     rawXml.includes('sinvoice') ||
     rawXml.includes('vinvoice') ||
-    rawXml.includes('0100109106')
+    rawXml.includes('viettel-invoice') ||
+    rawXml.includes('0100109106') ||
+    rawXml.includes('0402307168') ||
+    rawXml.includes('suntalent')
   ) {
     return {
       label: 'Viettel',
