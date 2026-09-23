@@ -15,11 +15,8 @@ import {
   Loader2,
   Eye,
   AlertTriangle,
-  CheckCircle2,
-  FileDown,
-  Key
+  CheckCircle2
 } from 'lucide-react';
-import { useNotification } from '../context/NotificationContext';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { 
@@ -60,7 +57,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   token,
   cookieHeader
 }) => {
-  const { toast } = useNotification();
   const [currentInvoice, setCurrentInvoice] = useState<GDTInvoice | null>(invoice);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -68,15 +64,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // về SAU KHI người dùng đã đóng modal hoặc chuyển sang xem hóa đơn khác -
   // tránh việc áp dữ liệu cũ/không khớp vào state và làm crash giao diện.
   const openInvoiceIdRef = useRef<string | null>(invoice?.id ?? null);
-
-  const [secretCodeModal, setSecretCodeModal] = useState<{
-    isOpen: boolean;
-    providerName: string;
-    title: string;
-    message: string;
-    actionType: 'download_pdf' | 'view_pdf' | 'download_zip';
-  } | null>(null);
-  const [manualSecretCode, setManualSecretCode] = useState('');
 
   useEffect(() => {
     setCurrentInvoice(invoice);
@@ -166,28 +153,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const handleExportA4Pdf = async (targetTemplateId?: InvoiceProviderId) => {
-    if (!effectiveInvoice) return;
-    setIsExportingPdf(true);
-    try {
-      const templateToUse = (targetTemplateId && targetTemplateId !== 'DEFAULT')
-        ? targetTemplateId
-        : (effectiveTemplateId || 'DEFAULT');
-      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, templateToUse);
-      toast.success('Đã tải thành công tệp PDF A4 sắc nét của hóa đơn!', 'Tải Hóa Đơn');
-    } catch (err: any) {
-      console.error('Lỗi khi xuất PDF:', err);
-      toast.error(`Không thể xuất tệp PDF: ${err.message || String(err)}`, 'Lỗi Xuất PDF');
-    } finally {
-      setIsExportingPdf(false);
-    }
-  };
-
   const handleViewOriginalVnpt = async () => {
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
     if (!lookupCode) {
-      toast.warning('Hóa đơn VNPT không có mã tra cứu để tra cứu bản gốc. Bản thể hiện chi tiết chuẩn đã được hiển thị bên dưới.', 'Chưa Có Mã Tra Cứu');
+      alert('Hóa đơn VNPT không có mã tra cứu để tra cứu bản gốc.');
       return;
     }
     setIsLoadingVnptOriginal(true);
@@ -208,10 +178,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setOriginalVnptHtml(data.htmlContent);
       if (data.checkCode) setVnptCheckCode(data.checkCode);
       if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
-      toast.success('Đã tải bản thể hiện gốc từ cổng VNPT!', 'Xem Bản Gốc');
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi xem VNPT gốc:', err);
-      toast.error(`Không thể hiển thị bản gốc VNPT: ${err.message}`, 'Lỗi Tải');
+      alert(`Không thể hiển thị bản gốc VNPT: ${err.message}`);
     } finally {
       setIsLoadingVnptOriginal(false);
     }
@@ -221,8 +190,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
     if (!lookupCode) {
-      toast.info('Hóa đơn VNPT chưa có mã tra cứu. Đang tải bản PDF A4 chuẩn mẫu...', 'Tải PDF');
-      await handleExportA4Pdf(effectiveTemplateId);
+      alert('Hóa đơn VNPT không có mã tra cứu để tải PDF gốc.');
       return;
     }
     setIsDownloadingVnptPdf(true);
@@ -267,34 +235,30 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       link.click();
       document.body.removeChild(link);
       setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
-      toast.success('Đã tải thành công file PDF gốc từ cổng VNPT!', 'Tải Hóa Đơn');
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải PDF gốc VNPT:', err);
-      toast.warning(`Không thể tải trực tiếp file PDF từ cổng VNPT (${err.message}). Đang tự động xuất file PDF A4 sắc nét...`, 'Chuyển Đổi Xuất PDF');
-      await handleExportA4Pdf(effectiveTemplateId);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp file PDF từ cổng VNPT (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét từ bản thể hiện ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
     } finally {
       setIsDownloadingVnptPdf(false);
     }
   };
 
-  const handleDownloadViettelPdf = async (customCode?: string) => {
+  const handleDownloadViettelPdf = async () => {
     if (!effectiveInvoice) return;
-    const reservationCode = (customCode || lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
-    const supplierTaxCode = (effectiveInvoice.nbmst || '').trim();
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
 
-    if (!supplierTaxCode) {
-      toast.error('Hóa đơn không có Mã số thuế bên bán.', 'Thiếu Dữ Liệu');
-      return;
-    }
-
-    if (!reservationCode) {
-      setSecretCodeModal({
-        isOpen: true,
-        providerName: 'Viettel S-Invoice',
-        title: 'Tải PDF gốc từ Viettel S-Invoice',
-        message: 'Hóa đơn đồng bộ từ Tổng cục Thuế chưa có sẵn Mã số bí mật Viettel. Bạn có thể nhập mã bí mật (do bên bán gửi qua email) để tải từ Viettel, hoặc tải ngay bản PDF A4 chuẩn mẫu.',
-        actionType: 'download_pdf'
-      });
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật để tải PDF gốc.');
       return;
     }
 
@@ -337,34 +301,30 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       link.click();
       document.body.removeChild(link);
       setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
-      toast.success('Đã tải thành công file PDF gốc từ máy chủ Viettel!', 'Tải Hóa Đơn');
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải PDF Viettel:', err);
-      toast.warning(`Không thể tải PDF từ cổng Viettel (${err.message}). Đang tự động xuất file PDF A4 sắc nét theo mẫu...`, 'Chuyển Đổi Xuất PDF');
-      await handleExportA4Pdf(effectiveTemplateId);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp PDF từ cổng Viettel (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét theo mẫu ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
     } finally {
       setIsDownloadingViettelPdf(false);
     }
   };
 
-  const handleViewOriginalViettel = async (customCode?: string) => {
+  const handleViewOriginalViettel = async () => {
     if (!effectiveInvoice) return;
-    const reservationCode = (customCode || lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
-    const supplierTaxCode = (effectiveInvoice.nbmst || '').trim();
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
 
-    if (!supplierTaxCode) {
-      toast.error('Hóa đơn không có Mã số thuế bên bán.', 'Thiếu Dữ Liệu');
-      return;
-    }
-
-    if (!reservationCode) {
-      setSecretCodeModal({
-        isOpen: true,
-        providerName: 'Viettel S-Invoice',
-        title: 'Xem PDF gốc từ Viettel S-Invoice',
-        message: 'Hóa đơn Viettel cần có Mã số bí mật để mở bản PDF lưu trữ trên máy chủ Viettel. Nếu có mã bí mật (do bên bán gửi qua email), vui lòng nhập mã bên dưới:',
-        actionType: 'view_pdf'
-      });
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
       return;
     }
 
@@ -401,33 +361,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         window.URL.revokeObjectURL(originalViettelPdfUrl);
       }
       setOriginalViettelPdfUrl(blobUrl);
-      toast.success('Đã tải và hiển thị bản PDF gốc từ Viettel!', 'Xem Bản Gốc');
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi xem PDF Viettel:', err);
-      toast.error(`Không thể hiển thị bản gốc Viettel: ${err.message}`, 'Lỗi Tải');
+      alert(`Không thể hiển thị bản gốc Viettel: ${err.message}`);
     } finally {
       setIsLoadingViettelOriginal(false);
     }
   };
 
-  const handleDownloadViettelZip = async (customCode?: string) => {
+  const handleDownloadViettelZip = async () => {
     if (!effectiveInvoice) return;
-    const reservationCode = (customCode || lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
-    const supplierTaxCode = (effectiveInvoice.nbmst || '').trim();
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
 
-    if (!supplierTaxCode) {
-      toast.error('Hóa đơn không có Mã số thuế bên bán.', 'Thiếu Dữ Liệu');
-      return;
-    }
-
-    if (!reservationCode) {
-      setSecretCodeModal({
-        isOpen: true,
-        providerName: 'Viettel S-Invoice',
-        title: 'Tải tệp ZIP gốc từ Viettel',
-        message: 'Cần có Mã số bí mật để tải tệp ZIP lưu trữ từ máy chủ Viettel. Nếu bạn không có mã bí mật, bạn có thể tải tệp XML gốc đã ký số từ Tổng cục Thuế.',
-        actionType: 'download_zip'
-      });
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
       return;
     }
 
@@ -464,11 +412,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       link.click();
       document.body.removeChild(link);
       setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
-      toast.success('Đã tải thành công tệp ZIP từ Viettel!', 'Tải ZIP');
     } catch (err: any) {
-      console.error('[InvoiceDetailModal] Lỗi tải ZIP Viettel:', err);
-      toast.info('Không thể tải tệp ZIP từ máy chủ Viettel. Đang tải tệp XML gốc...', 'Tải XML Gốc');
-      onDownloadXml(effectiveInvoice);
+      alert(`Không thể tải ZIP Viettel: ${err.message}`);
     } finally {
       setIsDownloadingViettelZip(false);
     }
@@ -561,7 +506,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
     if (!lookupCode) {
-      toast.warning('Hóa đơn này không có mã tra cứu (FKey) để tra cứu bản gốc.', 'Chưa Có Mã Tra Cứu');
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tra cứu bản gốc.');
       return;
     }
 
@@ -596,10 +541,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
       setOriginalEasyInvoiceHtml(data.htmlContent);
       setEasyInvoiceDownloadStatus('Đã tải bản thể hiện gốc.');
-      toast.success('Đã tải bản thể hiện gốc từ EasyInvoice!', 'Xem Bản Gốc');
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi xem EasyInvoice gốc:', err);
-      toast.error(`Không thể hiển thị bản gốc EasyInvoice: ${err.message}`, 'Lỗi Tải');
+      alert(`Không thể hiển thị bản gốc EasyInvoice: ${err.message}`);
       setEasyInvoiceDownloadStatus(null);
     } finally {
       setIsDownloadingEasyInvoice(false);
@@ -878,7 +822,94 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   }
 
   const handleDownloadPdfFile = async (targetTemplateId: InvoiceProviderId = 'DEFAULT') => {
-    await handleExportA4Pdf(targetTemplateId);
+    setIsExportingPdf(true);
+    try {
+      if (isVnptInvoice) {
+        await handleDownloadVnptPdf();
+        return;
+      }
+
+      if (isViettelInvoice) {
+        await handleDownloadViettelPdf();
+        return;
+      }
+
+      if (isEasyInvoice || isMisaInvoice) {
+        const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+        if (!lookupCode) {
+          throw new Error(`Không tìm thấy mã tra cứu ${isMisaInvoice ? 'MISA' : 'EasyInvoice'} của hóa đơn.`);
+        }
+
+        let filename = `HD_${effectiveInvoice.khhdon}_${String(effectiveInvoice.shdon).padStart(7, '0')}_${effectiveInvoice.nbmst}.pdf`;
+        let contentType = 'application/pdf';
+        let pdfBase64 = '';
+
+        if (isEasyInvoice) {
+          const response = await fetch('/api/easyinvoice/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              lookupCode: lookupCode.trim(),
+              sellerTaxCode: effectiveInvoice.nbmst,
+              lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+              khhdon: effectiveInvoice.khhdon,
+              shdon: effectiveInvoice.shdon
+            })
+          });
+          const data = await response.json();
+          if (!response.ok || !data.success || !data.pdfBase64) {
+            throw new Error(data.error || 'Nhà cung cấp không trả về file PDF gốc EasyInvoice.');
+          }
+          filename = data.filename || filename;
+          contentType = data.contentType || contentType;
+          pdfBase64 = data.pdfBase64;
+        } else {
+          const response = await fetch('/api/invoice-downloader/download?format=binary', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              xml: effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice),
+              overrideProvider: 'MISA',
+              forceFallback: false
+            })
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Nhà cung cấp không trả về file PDF gốc MISA.');
+          }
+          const pdfBlob = await response.blob();
+          const blobUrl = URL.createObjectURL(pdfBlob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+          return;
+        }
+
+        const byteCharacters = atob(pdfBase64);
+        const byteArray = Uint8Array.from(byteCharacters, char => char.charCodeAt(0));
+        const blobUrl = URL.createObjectURL(new Blob([byteArray], { type: contentType }));
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+        return;
+      }
+
+      // Xuất tệp PDF theo template được yêu cầu (Mặc định: 'DEFAULT' là mẫu chuẩn Tổng cục Thuế GDT)
+      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, targetTemplateId);
+    } catch (err) {
+      console.error('Lỗi khi xuất PDF:', err);
+      alert(`Không thể tải PDF gốc từ nhà cung cấp: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   const handleDownloadHtmlFile = async () => {
@@ -896,7 +927,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
     if (!lookupCode) {
-      toast.warning('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.', 'Chưa Có Mã Tra Cứu');
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
       return;
     }
 
@@ -941,13 +972,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 
       setEasyInvoiceDownloadStatus('Đã tải thành công!');
-      toast.success('Đã tải thành công hóa đơn từ EasyInvoice!', 'Tải Hóa Đơn');
       setTimeout(() => setEasyInvoiceDownloadStatus(null), 3000);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải EasyInvoice:', err);
-      toast.warning(`Không thể tự động tải từ Cổng EasyInvoice (${err.message}). Đang chuyển sang tạo PDF chuẩn mẫu...`, 'Chuyển Đổi Xuất PDF');
+      alert(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message}\nBạn có thể nhấn nút "Mở Cổng" để tra cứu trực tiếp.`);
       setEasyInvoiceDownloadStatus(null);
-      await handleExportA4Pdf(effectiveTemplateId);
     } finally {
       setIsDownloadingEasyInvoice(false);
     }
@@ -1223,22 +1252,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </button>
                 )}
 
-                {/* 1-Click Primary: Tải trực tiếp PDF A4 theo mẫu VNPT */}
-                <button
-                  type="button"
-                  onClick={() => handleExportA4Pdf(effectiveTemplateId)}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg text-white bg-blue-600 hover:bg-blue-500 border border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title="Tải ngay tệp PDF A4 sắc nét theo mẫu VNPT Invoice chuẩn Tổng cục Thuế (1-Click)"
-                >
-                  {isExportingPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-white" />
-                  )}
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF (A4 VNPT)'}</span>
-                </button>
-
                 <button
                   type="button"
                   onClick={handleDownloadVnptPdf}
@@ -1249,20 +1262,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   {isDownloadingVnptPdf ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
                   ) : (
-                    <FileDown className="w-3.5 h-3.5 text-blue-400" />
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
                   )}
                   <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                  title="Tải PDF theo mẫu chuẩn Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3 h-3 text-blue-400" />
-                  <span>Mẫu GDT</span>
                 </button>
 
                 {directLookupUrl && (
@@ -1280,25 +1282,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* 1-Click Primary: Tải trực tiếp PDF A4 theo mẫu Viettel S-Invoice */}
                 <button
                   type="button"
-                  onClick={() => handleExportA4Pdf(effectiveTemplateId)}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-lg text-white bg-red-600 hover:bg-red-500 border border-red-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title="Tải ngay tệp PDF A4 sắc nét theo mẫu Viettel S-Invoice chuẩn Tổng cục Thuế (1-Click)"
-                >
-                  {isExportingPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-white" />
-                  )}
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF (A4 Viettel)'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleViewOriginalViettel()}
+                  onClick={handleViewOriginalViettel}
                   disabled={isLoadingViettelOriginal}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalViettelPdfUrl
@@ -1331,7 +1317,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadViettelPdf()}
+                  onClick={handleDownloadViettelPdf}
                   disabled={isDownloadingViettelPdf}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 hover:border-rose-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
@@ -1339,14 +1325,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   {isDownloadingViettelPdf ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
                   ) : (
-                    <FileDown className="w-3.5 h-3.5 text-rose-400" />
+                    <Download className="w-3.5 h-3.5 text-rose-400" />
                   )}
                   <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleDownloadViettelZip()}
+                  onClick={handleDownloadViettelZip}
                   disabled={isDownloadingViettelZip}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-lg border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
                   title="Tải tệp ZIP gốc (chứa XML và chữ ký) từ Viettel"
@@ -1359,24 +1345,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Tải ZIP</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                  title="Tải PDF theo mẫu chuẩn Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3 h-3 text-blue-400" />
-                  <span>Mẫu GDT</span>
-                </button>
-
                 {directLookupUrl && (
                   <a
                     href={directLookupUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                    title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (sinvoice.vn)"
+                    title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
                   >
                     <ExternalLink className="w-3 h-3 text-slate-400" />
                     <span>Mở Cổng</span>
@@ -1556,102 +1531,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Secret Code Input Modal / Prompt for Viettel & Other Providers */}
-      {secretCodeModal && secretCodeModal.isOpen && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full p-5 space-y-4 text-white">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 rounded-lg bg-rose-500/15 border border-rose-500/25 text-rose-400">
-                  <Key className="w-4 h-4" />
-                </div>
-                <h4 className="font-semibold text-sm text-slate-100">{secretCodeModal.title}</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSecretCodeModal(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {secretCodeModal.message}
-            </p>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300 flex items-center justify-between">
-                <span>Mã số bí mật (Mã tra cứu):</span>
-                <span className="text-[11px] text-slate-400">In trên email/hóa đơn gốc</span>
-              </label>
-              <input
-                type="text"
-                value={manualSecretCode}
-                onChange={(e) => setManualSecretCode(e.target.value)}
-                placeholder="Ví dụ: 20240322-123456 hoặc mã ký tự"
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && manualSecretCode.trim()) {
-                    const code = manualSecretCode.trim();
-                    const action = secretCodeModal.actionType;
-                    setSecretCodeModal(null);
-                    setManualSecretCode('');
-                    if (action === 'download_pdf') handleDownloadViettelPdf(code);
-                    else if (action === 'view_pdf') handleViewOriginalViettel(code);
-                    else if (action === 'download_zip') handleDownloadViettelZip(code);
-                  }
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-2 gap-2 flex-wrap sm:flex-nowrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setSecretCodeModal(null);
-                  handleExportA4Pdf(effectiveTemplateId);
-                }}
-                className="px-3 py-1.5 text-xs font-medium text-blue-300 hover:text-white bg-blue-950/70 hover:bg-blue-900 border border-blue-800 rounded-lg transition-colors cursor-pointer"
-                title="Tải ngay bản PDF A4 sắc nét theo mẫu mà không cần nhập mã"
-              >
-                Tải bản PDF A4 chuẩn mẫu
-              </button>
-
-              <div className="flex items-center gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setSecretCodeModal(null)}
-                  className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const code = manualSecretCode.trim();
-                    if (!code) {
-                      toast.warning('Vui lòng nhập mã số bí mật hoặc chọn "Tải bản PDF A4 chuẩn mẫu"');
-                      return;
-                    }
-                    const action = secretCodeModal.actionType;
-                    setSecretCodeModal(null);
-                    setManualSecretCode('');
-                    if (action === 'download_pdf') handleDownloadViettelPdf(code);
-                    else if (action === 'view_pdf') handleViewOriginalViettel(code);
-                    else if (action === 'download_zip') handleDownloadViettelZip(code);
-                  }}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition-colors shadow-xs cursor-pointer"
-                >
-                  Xác nhận
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
