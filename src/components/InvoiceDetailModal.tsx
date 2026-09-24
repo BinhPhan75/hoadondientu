@@ -893,7 +893,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setTimeout(() => setEasyInvoiceDownloadStatus(null), 3000);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải EasyInvoice:', err);
-      alert(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message}\nBạn có thể nhấn nút "Mở Cổng" để tra cứu trực tiếp.`);
+      alert(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message}\nBạn có thể nhấn nút "Tra link gốc" để tra cứu trực tiếp.`);
       setEasyInvoiceDownloadStatus(null);
     } finally {
       setIsDownloadingEasyInvoice(false);
@@ -1134,7 +1134,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     title="Mở cổng tra cứu EasyInvoice (Đã dán sẵn mã FKey)"
                   >
                     <ExternalLink className="w-3 h-3 text-slate-400" />
-                    <span>Mở Cổng</span>
+                    <span>Tra link gốc</span>
                   </a>
                 )}
               </div>
@@ -1194,7 +1194,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     title="Mở cổng tra cứu trực tiếp của VNPT trên tab mới"
                   >
                     <ExternalLink className="w-3 h-3" />
-                    <span>Mở Cổng</span>
+                    <span>Tra link gốc</span>
                   </a>
                 )}
               </div>
@@ -1285,7 +1285,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
                   >
                     <ExternalLink className="w-3 h-3 text-slate-400" />
-                    <span>Mở Cổng</span>
+                    <span>Tra link gốc</span>
                   </a>
                 )}
               </div>
@@ -1296,7 +1296,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
-                  title="Mở cổng tra cứu hóa đơn điện tử Vietcombank (einvoice.vietcombank.com.vn)"
+                  title="Mở tra cứu hóa đơn điện tử Vietcombank (einvoice.vietcombank.com.vn)"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Cổng Vietcombank</span>
