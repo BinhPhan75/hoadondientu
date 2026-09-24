@@ -155,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={onOpenAdminUsers}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100/70 border border-indigo-200 rounded-lg transition-all cursor-pointer shadow-2xs"
-                  title="Mở bảng Quản trị Người dùng & Quản lý Neon DB"
+                  title="Mở bảng Quản trị Người dùng"
                 >
                   <Users className="w-3.5 h-3.5 text-indigo-600" />
                   <span className="hidden sm:inline">Quản lý User</span>

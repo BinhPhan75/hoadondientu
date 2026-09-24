@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
@@ -20,6 +21,8 @@ import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from
 import {
   initDatabase,
   getDatabaseStatus,
+  getMaskedDatabaseUrl,
+  saveNeonDatabaseUrl,
   findUserByUsername,
   getAllUsers,
   createUser,
@@ -29,7 +32,24 @@ import {
 } from './src/db/neonDb';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+
+function resolvePort(): number {
+  const portIdx = process.argv.indexOf('--port');
+  if (portIdx !== -1 && process.argv[portIdx + 1]) {
+    const p = parseInt(process.argv[portIdx + 1], 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const p = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const p = parseInt(process.env.PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  return 3000;
+}
+const PORT = resolvePort();
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -1238,7 +1258,10 @@ app.get('/api/gdt/status', (req, res) => {
 // 6. Run Python Selenium Crawler
 app.post('/api/gdt/run-selenium', (req, res) => {
   const { taxCode, password, invoiceType, fromDate, toDate, headless } = req.body;
-  const mst = taxCode || currentSession?.taxCode || '0316892345';
+  const mst = (taxCode || currentSession?.taxCode || '').trim();
+  if (!mst) {
+    return res.status(400).json({ success: false, message: 'Vui lòng cung cấp Mã số thuế hợp lệ.' });
+  }
   const pwd = password || '';
 
   seleniumLogs = [];
@@ -2493,17 +2516,26 @@ app.post('/api/auth/login', async (req, res) => {
     if (!dbInit.success) {
       return res.status(200).json({
         success: false,
-        message: dbInit.message || 'Hệ thống chưa kết nối tới Neon Database. Vui lòng cấu hình DATABASE_URL hoặc POSTGRES_URL trên Vercel.'
+        message: dbInit.message || 'Không thể kết nối đến cơ sở dữ liệu. Vui lòng kiểm tra lại cấu hình DATABASE_URL.'
       });
     }
 
-    const user = await findUserByUsername(username);
+    let user;
+    try {
+      user = await findUserByUsername(username);
+    } catch (dbErr: any) {
+      return res.status(200).json({
+        success: false,
+        message: 'Lỗi truy vấn cơ sở dữ liệu. Vui lòng thử lại sau.'
+      });
+    }
+
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập (Mã số thuế) hoặc mật khẩu không đúng.' });
+      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
     }
 
     if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: 'Mật khẩu không chính xác.' });
+      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
     }
 
     if (!user.is_active) {
@@ -2655,11 +2687,43 @@ app.get('/api/admin/db-status', async (req, res) => {
         success: true,
         connected: true,
         type: 'remote_webapp',
-        message: 'Xác thực Neon được thực hiện bởi webapp.'
+        message: 'Xác thực tài khoản được thực hiện bởi webapp.',
+        maskedUrl: ''
       });
     }
     const status = await getDatabaseStatus();
-    res.json({ success: true, ...status });
+    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 9. Lấy cấu hình và trạng thái Neon (Dành cho hộp thoại thiết lập kết nối)
+app.get('/api/neon/config', async (req, res) => {
+  try {
+    const status = await getDatabaseStatus();
+    res.json({
+      success: true,
+      ...status,
+      maskedUrl: getMaskedDatabaseUrl()
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 10. Kiểm tra và lưu chuỗi kết nối Neon mới
+app.post('/api/neon/test-and-save', async (req, res) => {
+  try {
+    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
+    if (!databaseUrl || typeof databaseUrl !== 'string') {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp chuỗi kết nối DATABASE_URL hợp lệ.' });
+    }
+    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
+      username: initialAdminUsername,
+      password: initialAdminPassword
+    });
+    return res.json(result);
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2687,18 +2751,7 @@ app.use('/api', (err: any, req: express.Request, res: express.Response, next: ex
 
 // Start Express Server with Vite integration
 async function startServer() {
-  // 1. Mở cổng lắng nghe 3000 NGAY LẬP TỨC để Nginx/Cloud Run không bao giờ trả về 502/Warmup
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    // Khởi tạo Database Neon bất đồng bộ trong nền
-    initDatabase().then(dbInitResult => {
-      console.log(`[Database Init] ${dbInitResult.message}`);
-    }).catch(dbErr => {
-      console.warn('[Database Init] Warning:', dbErr.message);
-    });
-  });
-
-  // 2. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
+  // 1. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
   if (process.env.NODE_ENV !== 'production') {
     try {
       const { createServer: createViteServer } = await import('vite');
@@ -2710,7 +2763,29 @@ async function startServer() {
         appType: 'spa',
       });
       app.use(vite.middlewares);
-      console.log('[Vite] Vite middleware attached.');
+
+      // SPA HTML fallback
+      app.use('*', async (req, res, next) => {
+        if (req.method !== 'GET' || req.originalUrl.startsWith('/api')) {
+          return next();
+        }
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const indexPath = path.resolve(process.cwd(), 'index.html');
+          if (fs.existsSync(indexPath)) {
+            let template = fs.readFileSync(indexPath, 'utf-8');
+            template = await vite.transformIndexHtml(req.originalUrl, template);
+            return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+          }
+        } catch (e: any) {
+          vite.ssrFixStacktrace(e);
+          return next(e);
+        }
+        next();
+      });
+
+      console.log('[Vite] Vite middleware and SPA fallback attached.');
     } catch (viteErr: any) {
       console.error('[Vite Init Error]:', viteErr.message);
     }
@@ -2725,6 +2800,19 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // 2. Mở cổng lắng nghe PORT sau khi middleware đã sẵn sàng
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    // Khởi tạo Database Neon bất đồng bộ trong nền
+    initDatabase().then(dbInitResult => {
+      if (dbInitResult.success) {
+        console.log(`[Database Init] ✓ ${dbInitResult.message}`);
+      }
+    }).catch(() => {
+      // Silent catch
+    });
+  });
 }
 
 export default app;

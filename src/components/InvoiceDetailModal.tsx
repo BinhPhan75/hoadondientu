@@ -7,7 +7,6 @@ import {
   ShieldCheck, 
   ChevronLeft, 
   ChevronRight, 
-  Code2, 
   Sparkles, 
   RefreshCw, 
   ExternalLink,
@@ -22,8 +21,7 @@ import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { 
   generateInvoiceQrCode, 
   exportInvoiceToPdfFile, 
-  openInvoicePrintWindow, 
-  downloadStandaloneHtmlFile 
+  openInvoicePrintWindow
 } from '../utils/pdfExporter';
 import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
 import { 
@@ -41,7 +39,7 @@ interface InvoiceDetailModalProps {
   allInvoices?: GDTInvoice[];
   onSelectInvoice?: (invoice: GDTInvoice) => void;
   onClose: () => void;
-  onDownloadXml: (invoice: GDTInvoice) => void;
+  onDownloadXml?: (invoice: GDTInvoice) => void;
   onUpdateInvoice?: (invoice: GDTInvoice) => void;
   token?: string;
   cookieHeader?: string;
@@ -52,7 +50,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   allInvoices = [],
   onSelectInvoice,
   onClose,
-  onDownloadXml,
+  onDownloadXml: _onDownloadXml,
   onUpdateInvoice,
   token,
   cookieHeader
@@ -836,10 +834,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const handleDownloadHtmlFile = async () => {
-    await downloadStandaloneHtmlFile(effectiveInvoice, theme, effectiveTemplateId);
-  };
-
   const handlePrint = () => {
     openInvoicePrintWindow(effectiveInvoice, theme, effectiveTemplateId);
   };
@@ -1206,19 +1200,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* 1. Nút Tải PDF A4 Viettel (Màu đỏ Viettel nổi bật như giao diện cũ lúc 10:33 AM) */}
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPdfFile('VIETTEL')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Tải tệp PDF A4 sắc nét theo mẫu Viettel S-Invoice"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF (A4 Viettel)'}</span>
-                </button>
-
-                {/* 2. Nút Xem PDF gốc Viettel */}
+                {/* 1. Nút Xem PDF gốc Viettel */}
                 <button
                   type="button"
                   onClick={handleViewOriginalViettel}
@@ -1362,24 +1344,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             >
               <Printer className="w-3.5 h-3.5 text-amber-400" />
               <span>In HĐ (Ctrl+P)</span>
-            </button>
-
-            <button
-              onClick={handleDownloadHtmlFile}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 rounded-md border border-emerald-700 transition-colors cursor-pointer"
-              title="Tải tệp HTML độc lập về máy tính"
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>Tải File HTML (.html)</span>
-            </button>
-
-            <button
-              onClick={() => onDownloadXml(effectiveInvoice)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition-colors cursor-pointer"
-              title="Tải tệp XML gốc để kê khai thuế hoặc lưu trữ"
-            >
-              <FileCode2 className="w-3.5 h-3.5 text-blue-400" />
-              <span>Tải XML Gốc</span>
             </button>
 
             {is4SiInvoice ? (

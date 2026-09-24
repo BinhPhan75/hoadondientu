@@ -105,7 +105,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value.trim())}
-                  placeholder="Ví dụ: 0315897123"
+                  placeholder="Nhập Mã số thuế hoặc Tên đăng nhập"
                   autoComplete="username"
                   autoFocus
                   className="w-full pl-10 pr-4 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 text-xs font-mono font-medium transition-all"
@@ -126,14 +126,14 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Nhập mật khẩu do Quản trị cấp"
+                  placeholder="Nhập mật khẩu truy cập"
                   autoComplete="current-password"
                   className="w-full pl-10 pr-11 py-2.5 bg-slate-900/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 text-xs font-medium transition-all"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition-colors"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -160,11 +160,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
             </button>
           </form>
 
-          {/* Tax Credentials Safety Notice */}
-          <div className="mt-6 pt-4 border-t border-slate-700/60 text-xs text-slate-400 leading-relaxed flex items-start gap-2">
-            <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-semibold text-slate-300">Bảo mật đa tầng:</span> Thông tin đăng nhập Cổng Tổng cục Thuế (Mật khẩu Thuế) được lưu trữ riêng tại trình duyệt máy tính cá nhân của Quý khách.
+          {/* Bottom Bar */}
+          <div className="mt-5 pt-4 border-t border-slate-700/60 flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Hệ thống bảo mật và phân quyền doanh nghiệp</span>
             </div>
           </div>
         </div>

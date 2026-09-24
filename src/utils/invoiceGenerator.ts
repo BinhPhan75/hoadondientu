@@ -174,8 +174,8 @@ const BUYERS = [
  */
 export function generateMatchingInvoicesForPeriod(options: SyncOptions): GDTInvoice[] {
   const { taxCode, taxpayerName, address, fromDate, toDate, invoiceType } = options;
-  const userMst = (taxCode || '0316892345').trim();
-  const userName = taxpayerName || (userMst === '0316892345' ? 'CÔNG TY TNHH CÔNG NGHỆ VÀ TRUYỀN THÔNG ĐÔNG NAM Á' : `DOANH NGHIỆP NỘP THUẾ (MST: ${userMst})`);
+  const userMst = (taxCode || '').trim();
+  const userName = taxpayerName || (userMst ? `DOANH NGHIỆP NỘP THUẾ (MST: ${userMst})` : 'DOANH NGHIỆP NỘP THUẾ');
   const userAddress = address || 'Số 142 Võ Văn Tần, Phường Võ Thị Sáu, Quận 3, TP Hồ Chí Minh';
 
   const results: GDTInvoice[] = [];

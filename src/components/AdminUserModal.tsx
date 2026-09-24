@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import {
-  Users, UserPlus, Database, Search, Copy, Check, RefreshCw, X,
+  Users, UserPlus, Search, Copy, Check, RefreshCw, X,
   Shield, Calendar, Clock, AlertTriangle, CheckCircle2, Lock,
   Building2, Trash2, KeyRound, Sparkles, Send, ExternalLink, Power
 } from 'lucide-react';
@@ -26,7 +26,7 @@ const DURATION_OPTIONS = [
 ];
 
 export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose }) => {
-  const { token, dbStatus, refreshDbStatus } = useAuth();
+  const { token } = useAuth();
   const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -74,7 +74,6 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
   useEffect(() => {
     if (isOpen) {
       fetchUsers();
-      refreshDbStatus();
     }
   }, [isOpen]);
 
@@ -139,7 +138,6 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
       setNewNotes('');
       setIsCreating(false);
       fetchUsers();
-      refreshDbStatus();
     } catch (err: any) {
       setFormError(err.message || 'Lỗi khi gửi yêu cầu lên máy chủ');
     }
@@ -206,7 +204,6 @@ export const AdminUserModal: React.FC<AdminUserModalProps> = ({ isOpen, onClose 
       if (res.ok) {
         toast.success(`Đã xóa tài khoản MST: ${user.username} thành công.`);
         fetchUsers();
-        refreshDbStatus();
       } else {
         const d = await res.json();
         showAlert({
@@ -298,24 +295,9 @@ Thông tin tài khoản đăng nhập Tool Tra Cứu Hóa Đơn Mua Vào:
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Database status indicator */}
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-xs">
-              <Database className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-slate-400">Database:</span>
-              {dbStatus?.connected ? (
-                <span className="text-emerald-400 font-semibold inline-flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" /> Neon PostgreSQL
-                </span>
-              ) : (
-                <span className="text-cyan-300 font-semibold inline-flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400" /> Local Store
-                </span>
-              )}
-            </div>
-
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -772,30 +754,6 @@ Thông tin tài khoản đăng nhập Tool Tra Cứu Hóa Đơn Mua Vào:
             </div>
           </div>
 
-          {/* NEON DATABASE CONFIGURATION INFO */}
-          <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-400">
-            <div className="flex items-start gap-2.5">
-              <Database className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-              <div>
-                <span className="font-semibold text-white">Kết nối Neon Database (PostgreSQL):</span>
-                <p className="mt-0.5 text-slate-400">
-                  {dbStatus?.connected ? (
-                    <span>Hệ thống đang kết nối trực tiếp đến cụm máy chủ Neon Serverless Postgres. Mọi tài khoản và gói cước được đồng bộ vĩnh viễn trên đám mây.</span>
-                  ) : (
-                    <span>Dữ liệu đang được bảo lưu tại Local Store. Khi bạn thêm biến <code className="text-cyan-300">DATABASE_URL</code> trong Settings / môi trường, hệ thống sẽ tự động chuyển sang lưu trữ trên Neon PostgreSQL.</span>
-                  )}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={refreshDbStatus}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs shrink-0 flex items-center gap-1"
-            >
-              <RefreshCw className="w-3 h-3" />
-              <span>Kiểm tra kết nối</span>
-            </button>
-          </div>
-
         </div>
 
         {/* MODAL FOOTER */}
@@ -805,13 +763,15 @@ Thông tin tài khoản đăng nhập Tool Tra Cứu Hóa Đơn Mua Vào:
           </div>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors"
+            className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors cursor-pointer"
           >
             Đóng
           </button>
         </div>
 
       </div>
+
+
     </div>
   );
 };

@@ -186,7 +186,7 @@ export default function App() {
       id: 'init-2',
       timestamp: new Date().toLocaleTimeString('vi-VN'),
       level: 'step',
-      message: `Đã nạp hồ sơ MST: ${account.taxCode || '0316892345'} - Tự động nhận diện chứng thư số CQT.`
+      message: account.taxCode ? `Đã nạp hồ sơ MST: ${account.taxCode} - Tự động nhận diện chứng thư số CQT.` : 'Hệ thống sẵn sàng tra cứu hóa đơn điện tử Cổng Tổng Cục Thuế.'
     }
   ]);
 
