@@ -141,22 +141,21 @@ export function buildDirectLookupUrl(
   }
 
   // 2. VNPT Invoice
-  // Mở cổng tra cứu trực tiếp theo MST của VNPT
+  // Cổng tra cứu tự động điền sẵn mã tra cứu và hỗ trợ giải Captcha / Xem / Tải đầy đủ
   const isVnpt = provider.includes('VNPT') ||
     provider.includes('NGHIA_SON') ||
     /vnpt-invoice\.com\.vn/i.test(url);
 
   if (isVnpt) {
-    let vnptUrl = url;
     const cleanTaxCode = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
-    if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
-      vnptUrl = `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
+    const cleanCode = (code || '').trim();
+    if (cleanCode || cleanTaxCode) {
+      const params = new URLSearchParams();
+      if (cleanTaxCode) params.set('mst', cleanTaxCode);
+      if (cleanCode) params.set('code', cleanCode);
+      return `/api/vnpt/portal?${params.toString()}`;
     }
-    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
-    if (!/\/HomeNoLogin\/SearchByFkey$/i.test(cleanUrl)) {
-      return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
-    }
-    return cleanUrl;
+    return `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn/HomeNoLogin/SearchByFkey`;
   }
 
   // 3. Softdreams EasyInvoice
@@ -280,3 +279,17 @@ export function getPrintControlsHtml(title: string): string {
     </div>
   </div>`;
 }
+
+export function getRawVnptPortalUrl(sellerTaxCode?: string, url?: string): string {
+  let vnptUrl = url || '';
+  const cleanTaxCode = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
+  if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
+    vnptUrl = `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
+  }
+  const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
+  if (!/\/HomeNoLogin\/SearchByFkey$/i.test(cleanUrl)) {
+    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
+  }
+  return cleanUrl;
+}
+
