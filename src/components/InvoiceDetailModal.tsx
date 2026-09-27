@@ -626,7 +626,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         }
       }
       if (!lookupDetails.lookupUrl) {
-        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${effectiveInvoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+        const cleanTaxCode = (effectiveInvoice.nbmst || '').trim().replace(/[^0-9\-]/g, '');
+        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
       }
     }
 
@@ -1190,8 +1191,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     href={directLookupUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => {
+                      const codeToCopy = lookupDetails.lookupCode || effectiveInvoice?.mhdon;
+                      if (codeToCopy) {
+                        try {
+                          navigator.clipboard?.writeText(codeToCopy);
+                        } catch {}
+                      }
+                    }}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
-                    title="Mở cổng tra cứu trực tiếp của VNPT trên tab mới"
+                    title={`Mở cổng tra cứu VNPT theo MST ${effectiveInvoice?.nbmst || ''} (Tự động gán mã tra cứu: ${lookupDetails.lookupCode || ''})`}
                   >
                     <ExternalLink className="w-3 h-3" />
                     <span>Tra link gốc</span>

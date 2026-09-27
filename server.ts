@@ -6,6 +6,8 @@ import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { ProxyAgent } from 'undici';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
@@ -1721,6 +1723,304 @@ app.all('/api/vnpt/download-pdf', async (req, res) => {
   } catch (error: any) {
     console.error('[VNPT] Lỗi tải PDF gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 18.1. VNPT Invoice: Cổng tra cứu trực tiếp theo MST và tự động điền mã tra cứu (Fkey)
+interface VnptPortalSession {
+  portal: string;
+  cookies: string;
+  token: string;
+  lookupCode: string;
+  cleanMst: string;
+  expiresAt: number;
+}
+
+const vnptPortalSessions = new Map<string, VnptPortalSession>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of vnptPortalSessions.entries()) {
+    if (session.expiresAt < now) {
+      vnptPortalSessions.delete(key);
+    }
+  }
+}, 10 * 60 * 1000);
+
+app.get('/api/vnpt/portal', async (req, res) => {
+  try {
+    const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || '').trim();
+    const code = String(req.query.code || req.query.fkey || req.query.lookupCode || '').trim();
+    const rawPortal = String(req.query.portal || req.query.portalUrl || '').trim();
+
+    // Giữ nguyên dấu gạch nối đối với mã số thuế có chi nhánh (VD: 1801660803-001)
+    const cleanMst = rawMst.replace(/[^0-9\-]/g, '');
+
+    let portal = rawPortal.replace(/\/+$/, '');
+    if (!portal || !/vnpt-invoice/i.test(portal)) {
+      portal = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : 'https://1801660803-001-tt78.vnpt-invoice.com.vn';
+    }
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+    };
+
+    console.log(`[VNPT Portal] Tải giao diện tra cứu: ${portal} (MST: ${cleanMst}, Mã tra cứu: ${code})...`);
+
+    // 1. Tải trang tìm kiếm gốc từ cổng VNPT
+    const pageRes = await axios.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
+      headers,
+      timeout: 20000,
+      validateStatus: s => s >= 200 && s < 400
+    });
+
+    const cookies = (pageRes.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+    const $ = cheerio.load(pageRes.data);
+    const token = $('input[name="__RequestVerificationToken"]').attr('value') || '';
+
+    // 2. Tải ảnh Captcha trong cùng phiên làm việc
+    let captchaBase64 = '';
+    let allCookies = cookies;
+    try {
+      const captchaRes = await axios.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
+        headers: { ...headers, Cookie: cookies, Referer: `${portal}/HomeNoLogin/SearchByFkey/` },
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+      const captchaCookies = (captchaRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+      allCookies = [...cookies.split('; '), ...captchaCookies]
+        .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+        .join('; ');
+      captchaBase64 = `data:image/png;base64,${Buffer.from(captchaRes.data).toString('base64')}`;
+    } catch (e: any) {
+      console.warn('[VNPT Portal] Lỗi tải ảnh Captcha trực tiếp:', e.message);
+    }
+
+    // 3. Lưu phiên tra cứu
+    const sessionId = crypto.randomUUID();
+    vnptPortalSessions.set(sessionId, {
+      portal,
+      cookies: allCookies,
+      token,
+      lookupCode: code,
+      cleanMst,
+      expiresAt: Date.now() + 15 * 60 * 1000
+    });
+
+    // 4. Nhúng base href để toàn bộ tài nguyên (CSS, JS, hình ảnh) nạp trực tiếp từ cổng VNPT
+    $('head').prepend(`<base href="${portal}/">`);
+
+    // 5. Tự động gán mã tra cứu vào ô tìm kiếm (id="strFkey" name="strFkey")
+    if (code) {
+      $('#strFkey').attr('value', code);
+    }
+
+    // 6. Gán ảnh Captcha đồng bộ phiên
+    if (captchaBase64) {
+      $('img[src*="/Captcha/Show"], img#imgCaptcha, img.captcha_img').attr('src', captchaBase64);
+    }
+
+    // 7. Định tuyến form action về server xử lý
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${proto}://${host}`;
+    $('form[action*="/HomeNoLogin/SearchByFkey"]').attr('action', `${baseUrl}/api/vnpt/portal-submit?sessionId=${sessionId}`);
+
+    // 8. Thêm thanh thông báo hướng dẫn nổi bật ở đầu trang
+    $('body').prepend(`
+      <div id="vnpt-autofill-banner" style="background: linear-gradient(135deg, #005baa, #003e7e); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 2px 10px rgba(0,0,0,0.25);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; flex-shrink: 0;">✓</span>
+          <span>
+            <strong>Cổng tra cứu VNPT Invoice (${cleanMst || 'MST'}):</strong> Hệ thống đã tự động gán mã tra cứu: <strong style="color: #fef08a; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; font-family: monospace; letter-spacing: 0.5px;">${code || 'Chưa có mã'}</strong> vào ô tra cứu. Quý khách chỉ cần nhập <strong>Mã xác thực (Captcha)</strong> và nhấn <strong>Tìm kiếm</strong>.
+          </span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+          <a href="${portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #93c5fd; text-decoration: underline; font-size: 12px; background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 4px;">
+            Mở link gốc trực tiếp tại Cổng VNPT &rarr;
+          </a>
+        </div>
+      </div>
+    `);
+
+    // 9. Script tự động focus vào ô Captcha và cho phép nhấp vào hình để đổi mã xác thực
+    $('body').append(`
+      <script>
+        $(document).ready(function() {
+          var targetCode = ${JSON.stringify(code)};
+          if (targetCode) {
+            $('#strFkey').val(targetCode);
+          }
+          setTimeout(function() {
+            $('#captch').focus();
+          }, 250);
+
+          $('img.captcha_img, img[src*="data:image"], img[src*="/Captcha/Show"]').css('cursor', 'pointer').attr('title', 'Nhấn vào hình để đổi ảnh xác thực khác').on('click', function() {
+            var imgEl = this;
+            fetch('${baseUrl}/api/vnpt/captcha?sessionId=${sessionId}&t=' + Date.now())
+              .then(function(res) { return res.blob(); })
+              .then(function(blob) {
+                imgEl.src = URL.createObjectURL(blob);
+                $('#captch').val('').focus();
+              })
+              .catch(function() {
+                window.location.reload();
+              });
+          });
+        });
+      </script>
+    `);
+
+    res.type('html').send($.html());
+  } catch (error: any) {
+    console.error('[VNPT Portal] Lỗi mở cổng tra cứu:', error.message);
+    const cleanMst = String(req.query.mst || '').replace(/[^0-9\-]/g, '');
+    const fallbackUrl = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn/HomeNoLogin/SearchByFkey` : 'https://1801660803-001-tt78.vnpt-invoice.com.vn/HomeNoLogin/SearchByFkey';
+    res.redirect(fallbackUrl);
+  }
+});
+
+// Endpoint làm mới Captcha trong cùng session
+app.get('/api/vnpt/captcha', async (req, res) => {
+  try {
+    const sessionId = String(req.query.sessionId || '').trim();
+    const session = vnptPortalSessions.get(sessionId);
+    if (!session) {
+      return res.status(404).send('Session expired');
+    }
+    const captchaRes = await axios.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        Cookie: session.cookies,
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`
+      },
+      responseType: 'arraybuffer',
+      timeout: 10000
+    });
+    const captchaCookies = (captchaRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+    session.cookies = [...session.cookies.split('; '), ...captchaCookies]
+      .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+      .join('; ');
+    res.setHeader('Content-Type', 'image/png');
+    res.send(Buffer.from(captchaRes.data));
+  } catch (e: any) {
+    res.status(500).send('Error refreshing captcha');
+  }
+});
+
+// Xử lý gửi form tra cứu VNPT với Captcha người dùng đã nhập
+app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), async (req, res) => {
+  const sessionId = String(req.query.sessionId || '').trim();
+  const session = vnptPortalSessions.get(sessionId);
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  const baseUrl = `${proto}://${host}`;
+
+  if (!session) {
+    const mst = String(req.body.mst || '');
+    const code = String(req.body.strFkey || '');
+    return res.redirect(`/api/vnpt/portal?mst=${encodeURIComponent(mst)}&code=${encodeURIComponent(code)}`);
+  }
+
+  try {
+    const strFkey = String(req.body.strFkey || session.lookupCode || '').trim();
+    const captch = String(req.body.captch || '').trim();
+    const token = String(req.body.__RequestVerificationToken || session.token || '').trim();
+
+    console.log(`[VNPT Portal Submit] Gửi tìm kiếm: portal=${session.portal}, strFkey="${strFkey}", captcha="${captch}"...`);
+
+    const form = new URLSearchParams({
+      __RequestVerificationToken: token,
+      strFkey: strFkey,
+      captch: captch,
+      submit: ''
+    });
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    const postRes = await axios.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+      headers,
+      responseType: 'text',
+      validateStatus: s => s >= 200 && s < 400
+    });
+
+    const html = String(postRes.data || '');
+    const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
+
+    const $ = cheerio.load(html);
+    $('head').prepend(`<base href="${session.portal}/">`);
+
+    if (isCaptchaError) {
+      // Captcha sai -> nạp ảnh Captcha mới cho phiên
+      try {
+        const freshCaptcha = await axios.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Cookie: session.cookies, Referer: `${session.portal}/HomeNoLogin/SearchByFkey/` },
+          responseType: 'arraybuffer',
+          timeout: 10000
+        });
+        const captchaCookies = (freshCaptcha.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+        session.cookies = [...session.cookies.split('; '), ...captchaCookies]
+          .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+          .join('; ');
+        const freshBase64 = `data:image/png;base64,${Buffer.from(freshCaptcha.data).toString('base64')}`;
+        $('img[src*="/Captcha/Show"], img#imgCaptcha, img.captcha_img').attr('src', freshBase64);
+      } catch (err: any) {
+        console.warn('[VNPT Portal Submit] Lỗi làm mới captcha:', err.message);
+      }
+
+      $('#strFkey').attr('value', strFkey);
+      $('form[action*="/HomeNoLogin/SearchByFkey"]').attr('action', `${baseUrl}/api/vnpt/portal-submit?sessionId=${sessionId}`);
+
+      $('body').prepend(`
+        <div style="background: #dc2626; color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+          <span>⚠️ <strong>Mã xác thực không chính xác.</strong> Đã làm mới ảnh mã xác thực. Vui lòng nhìn hình và nhập lại (Mã tra cứu <strong>${strFkey}</strong> vẫn được giữ nguyên).</span>
+          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #fecaca; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
+        </div>
+      `);
+
+      $('body').append(`
+        <script>
+          $(document).ready(function() {
+            $('#strFkey').val(${JSON.stringify(strFkey)});
+            $('#captch').val('').focus();
+            $('img.captcha_img, img[src*="data:image"], img[src*="/Captcha/Show"]').css('cursor', 'pointer').on('click', function() {
+              var imgEl = this;
+              fetch('${baseUrl}/api/vnpt/captcha?sessionId=${sessionId}&t=' + Date.now())
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                  imgEl.src = URL.createObjectURL(blob);
+                  $('#captch').val('').focus();
+                });
+            });
+          });
+        </script>
+      `);
+
+      return res.type('html').send($.html());
+    }
+
+    // Tra cứu thành công: hiển thị bảng kết quả
+    $('body').prepend(`
+      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">✓</span>
+          <span><strong>Tra cứu VNPT thành công:</strong> Đã tìm thấy kết quả hóa đơn cho mã tra cứu <strong>${strFkey}</strong>. Quý khách có thể xem và tải hóa đơn bên dưới.</span>
+        </div>
+        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #a7f3d0; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
+      </div>
+    `);
+
+    res.type('html').send($.html());
+  } catch (error: any) {
+    console.error('[VNPT Portal Submit] Lỗi xử lý form:', error.message);
+    res.redirect(`${session.portal}/HomeNoLogin/SearchByFkey`);
   }
 });
 

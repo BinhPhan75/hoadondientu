@@ -141,18 +141,19 @@ export function buildDirectLookupUrl(
   }
 
   // 2. VNPT Invoice
-  // Điền mã nhận hóa đơn vào ô name="strFkey"
+  // Mở cổng tra cứu trực tiếp theo MST và tự động gán mã tra cứu vào ô name="strFkey"
   const isVnpt = provider.includes('VNPT') ||
     provider.includes('NGHIA_SON') ||
     /vnpt-invoice\.com\.vn/i.test(url);
 
   if (isVnpt) {
     let vnptUrl = url;
+    const cleanTaxCode = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
     if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
-      vnptUrl = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+      vnptUrl = `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
     }
     const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
-    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
+    return `/api/vnpt/portal?mst=${encodeURIComponent(cleanTaxCode)}&code=${encodeURIComponent(code)}&portal=${encodeURIComponent(cleanUrl)}`;
   }
 
   // 3. Softdreams EasyInvoice
