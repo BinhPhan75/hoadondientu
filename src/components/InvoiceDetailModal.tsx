@@ -100,6 +100,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isDownloadingFourSiPdf, setIsDownloadingFourSiPdf] = useState(false);
   const [fourSiNotice, setFourSiNotice] = useState<string | null>(null);
   const [fourSiError, setFourSiError] = useState<string | null>(null);
+  const [vnptCopiedNotice, setVnptCopiedNotice] = useState<{ code: string; url: string } | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -1197,12 +1198,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         try {
                           navigator.clipboard?.writeText(codeToCopy);
                         } catch {}
+                        setVnptCopiedNotice({ code: codeToCopy, url: directLookupUrl });
                       }
                     }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-md border border-gray-700 transition-colors cursor-pointer"
-                    title={`Mở cổng tra cứu VNPT theo MST ${effectiveInvoice?.nbmst || ''} (Tự động gán mã tra cứu: ${lookupDetails.lookupCode || ''})`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-sky-300 bg-sky-950/70 hover:bg-sky-900 border-sky-700 hover:border-sky-600 transition-all cursor-pointer shadow-xs"
+                    title={`Mở Cổng tra cứu gốc của VNPT theo MST ${effectiveInvoice?.nbmst || ''} trên tab mới (Đã tự động sao chép mã tra cứu)`}
                   >
-                    <ExternalLink className="w-3 h-3" />
+                    <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
                     <span>Tra link gốc</span>
                   </a>
                 )}
@@ -1453,6 +1455,56 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Thông báo nổi bật khi bấm Tra link gốc VNPT */}
+      {vnptCopiedNotice && (
+        <div className="fixed bottom-6 right-6 z-[999999] max-w-md bg-slate-900/95 border border-sky-500/70 text-white p-4 rounded-xl shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-sky-500/20 text-sky-400 rounded-lg text-base">📋</span>
+              <h4 className="font-semibold text-sm text-sky-300">Đã mở Cổng VNPT & Sao chép mã tra cứu</h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVnptCopiedNotice(null)}
+              className="text-gray-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-slate-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="mt-2.5 text-xs text-gray-300 space-y-1.5">
+            <div>
+              Mã tra cứu VNPT:{' '}
+              <span className="font-mono font-bold text-amber-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 select-all">
+                {vnptCopiedNotice.code}
+              </span>
+            </div>
+            <p className="text-gray-300 leading-relaxed">
+              👉 Tab Cổng gốc VNPT đã mở. Bạn chỉ cần nhấp chuột vào ô <strong className="text-white">"Nhập mã tra cứu hóa đơn"</strong> rồi nhấn phím <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-600 text-amber-200 font-mono">Ctrl + V</kbd> (hoặc Dán) và nhập mã xác thực Captcha là tra cứu được hóa đơn ngay!
+            </p>
+          </div>
+          <div className="mt-3 flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard?.writeText(vnptCopiedNotice.code);
+                alert('Đã sao chép lại mã tra cứu: ' + vnptCopiedNotice.code);
+              }}
+              className="text-sky-400 hover:text-sky-300 font-medium inline-flex items-center gap-1 cursor-pointer"
+            >
+              <span>📋 Sao chép lại mã</span>
+            </button>
+            <a
+              href={vnptCopiedNotice.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-400 hover:text-white underline"
+            >
+              Mở lại tab Cổng VNPT &rarr;
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1737,6 +1737,38 @@ interface VnptPortalSession {
 }
 
 const vnptPortalSessions = new Map<string, VnptPortalSession>();
+let latestVnptSessionId = '';
+
+function parseRequestCookies(cookieHeader: string | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!cookieHeader) return result;
+  cookieHeader.split(';').forEach(item => {
+    const parts = item.split('=');
+    const name = parts[0]?.trim();
+    if (name) {
+      result[name] = parts.slice(1).join('=').trim();
+    }
+  });
+  return result;
+}
+
+function getVnptSession(req: express.Request): VnptPortalSession | undefined {
+  const cookies = parseRequestCookies(req.headers.cookie);
+  const sessionId = String(req.query.sessionId || req.body?.sessionId || cookies['vnpt_portal_session_id'] || '').trim();
+  if (sessionId && vnptPortalSessions.has(sessionId)) {
+    return vnptPortalSessions.get(sessionId);
+  }
+  if (latestVnptSessionId && vnptPortalSessions.has(latestVnptSessionId)) {
+    const s = vnptPortalSessions.get(latestVnptSessionId);
+    if (s && s.expiresAt > Date.now()) return s;
+  }
+  for (const session of vnptPortalSessions.values()) {
+    if (session.expiresAt > Date.now()) {
+      return session;
+    }
+  }
+  return undefined;
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -1747,6 +1779,136 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
+// Proxy cho AJAX xem hóa đơn VNPT (ajxPreview)
+app.all(['/HomeNoLogin/ajxPreview', '/HomeNoLogin/ajxPreview/'], express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).json({ error: 'Phiên làm việc VNPT đã hết hạn. Vui lòng mở lại trang tra cứu.' });
+    }
+    const checkCode = String(req.body.checkCode || req.query.checkCode || '');
+    const fkey = String(req.body.fkey || req.query.fkey || session.lookupCode || '');
+    const nameCus = String(req.body.nameCus || req.query.nameCus || '');
+
+    const params = new URLSearchParams({
+      checkCode,
+      fkey,
+      nameCus
+    });
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    console.log(`[VNPT Proxy ajxPreview] Tải bản thể hiện: portal=${session.portal}, fkey="${fkey}"...`);
+    const previewRes = await axios.post(`${session.portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
+      headers,
+      timeout: 25000
+    });
+
+    res.json(previewRes.data);
+  } catch (err: any) {
+    console.error('[VNPT Proxy ajxPreview] Lỗi:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Proxy cho tải file PDF hóa đơn VNPT
+app.all(['/HomeNoLogin/downloadPDF', '/HomeNoLogin/downloadPDF/'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send('Phiên tra cứu VNPT đã hết hạn. Vui lòng tra cứu lại.');
+    }
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || '');
+    const fkey = String(req.query.fkey || req.body?.fkey || session.lookupCode || '');
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || '');
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    const targetUrl = `${session.portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    console.log(`[VNPT Proxy downloadPDF] Tải PDF từ: ${targetUrl}...`);
+
+    const pdfRes = await axios.get(targetUrl, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="HoaDon_VNPT_${fkey || 'DT'}.pdf"`);
+    res.send(Buffer.from(pdfRes.data));
+  } catch (err: any) {
+    console.error('[VNPT Proxy downloadPDF] Lỗi:', err.message);
+    res.status(500).send('Lỗi khi tải file PDF từ Cổng VNPT: ' + err.message);
+  }
+});
+
+// Proxy cho tải file Zip hóa đơn VNPT
+app.all(['/HomeNoLogin/downloadZip', '/HomeNoLogin/downloadZip/'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send('Phiên tra cứu VNPT đã hết hạn.');
+    }
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || '');
+    const fkey = String(req.query.fkey || req.body?.fkey || session.lookupCode || '');
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || '');
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    const targetUrl = `${session.portal}/HomeNoLogin/downloadZip?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    const zipRes = await axios.get(targetUrl, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="HoaDon_VNPT_${fkey || 'DT'}.zip"`);
+    res.send(Buffer.from(zipRes.data));
+  } catch (err: any) {
+    console.error('[VNPT Proxy downloadZip] Lỗi:', err.message);
+    res.status(500).send('Lỗi khi tải file Zip: ' + err.message);
+  }
+});
+
+// Proxy cho tải đính kèm / bảng kê VNPT
+app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send('Phiên làm việc đã hết hạn.');
+    }
+    const targetUrl = `${session.portal}${req.originalUrl}`;
+    const fileRes = await axios.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+        Cookie: session.cookies
+      },
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+    res.setHeader('Content-Type', String(fileRes.headers['content-type'] || 'application/octet-stream'));
+    res.send(Buffer.from(fileRes.data));
+  } catch (err: any) {
+    res.status(500).send(err.message);
+  }
+});
+
+// Mở giao diện cổng tra cứu VNPT với mã tra cứu điền sẵn
 app.get('/api/vnpt/portal', async (req, res) => {
   try {
     const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || '').trim();
@@ -1807,6 +1969,8 @@ app.get('/api/vnpt/portal', async (req, res) => {
       cleanMst,
       expiresAt: Date.now() + 15 * 60 * 1000
     });
+    latestVnptSessionId = sessionId;
+    res.setHeader('Set-Cookie', `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
 
     // 4. Nhúng base href để toàn bộ tài nguyên (CSS, JS, hình ảnh) nạp trực tiếp từ cổng VNPT
     $('head').prepend(`<base href="${portal}/">`);
@@ -1829,16 +1993,16 @@ app.get('/api/vnpt/portal', async (req, res) => {
 
     // 8. Thêm thanh thông báo hướng dẫn nổi bật ở đầu trang
     $('body').prepend(`
-      <div id="vnpt-autofill-banner" style="background: linear-gradient(135deg, #005baa, #003e7e); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 2px 10px rgba(0,0,0,0.25);">
+      <div id="vnpt-autofill-banner" style="background: linear-gradient(135deg, #005baa, #003e7e); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 2px 10px rgba(0,0,0,0.25);">
         <div style="display: flex; align-items: center; gap: 10px;">
           <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold; flex-shrink: 0;">✓</span>
           <span>
-            <strong>Cổng tra cứu VNPT Invoice (${cleanMst || 'MST'}):</strong> Hệ thống đã tự động gán mã tra cứu: <strong style="color: #fef08a; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; font-family: monospace; letter-spacing: 0.5px;">${code || 'Chưa có mã'}</strong> vào ô tra cứu. Quý khách chỉ cần nhập <strong>Mã xác thực (Captcha)</strong> và nhấn <strong>Tìm kiếm</strong>.
+            <strong>Cổng tra cứu VNPT (${cleanMst || 'MST'}):</strong> Đã tự động điền mã tra cứu: <strong style="color: #fef08a; background: rgba(0,0,0,0.25); padding: 2px 6px; border-radius: 4px; font-family: monospace;">${code || 'Chưa có mã'}</strong>. Quý khách chỉ cần nhập <strong>Mã xác thực</strong> và bấm <strong>Tìm kiếm</strong> để xem hoặc tải hóa đơn.
           </span>
         </div>
-        <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
-          <a href="${portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #93c5fd; text-decoration: underline; font-size: 12px; background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 4px;">
-            Mở link gốc trực tiếp tại Cổng VNPT &rarr;
+        <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+          <a href="${portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${code}'); alert('Đã sao chép mã tra cứu ${code} vào bộ nhớ tạm! Khi mở Cổng VNPT, bạn chỉ cần nhấn Ctrl+V vào ô tra cứu.');" style="color: #ffffff; text-decoration: none; font-size: 12px; background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(255,255,255,0.3); display: inline-flex; align-items: center; gap: 4px;">
+            <span>Mở cổng gốc VNPT (Tự copy mã)</span> &rarr;
           </a>
         </div>
       </div>
@@ -1884,8 +2048,7 @@ app.get('/api/vnpt/portal', async (req, res) => {
 // Endpoint làm mới Captcha trong cùng session
 app.get('/api/vnpt/captcha', async (req, res) => {
   try {
-    const sessionId = String(req.query.sessionId || '').trim();
-    const session = vnptPortalSessions.get(sessionId);
+    const session = getVnptSession(req);
     if (!session) {
       return res.status(404).send('Session expired');
     }
@@ -1912,7 +2075,7 @@ app.get('/api/vnpt/captcha', async (req, res) => {
 // Xử lý gửi form tra cứu VNPT với Captcha người dùng đã nhập
 app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), async (req, res) => {
   const sessionId = String(req.query.sessionId || '').trim();
-  const session = vnptPortalSessions.get(sessionId);
+  const session = getVnptSession(req);
 
   const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
   const host = req.headers['x-forwarded-host'] || req.get('host');
@@ -1951,6 +2114,16 @@ app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), asyn
       validateStatus: s => s >= 200 && s < 400
     });
 
+    // Cập nhật cookies phiên sau khi submit
+    const postCookies = (postRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+    if (postCookies.length > 0) {
+      session.cookies = [...session.cookies.split('; '), ...postCookies]
+        .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+        .join('; ');
+    }
+
+    res.setHeader('Set-Cookie', `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
+
     const html = String(postRes.data || '');
     const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
 
@@ -1981,7 +2154,7 @@ app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), asyn
       $('body').prepend(`
         <div style="background: #dc2626; color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
           <span>⚠️ <strong>Mã xác thực không chính xác.</strong> Đã làm mới ảnh mã xác thực. Vui lòng nhìn hình và nhập lại (Mã tra cứu <strong>${strFkey}</strong> vẫn được giữ nguyên).</span>
-          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #fecaca; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
+          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}');" style="color: #fecaca; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
         </div>
       `);
 
@@ -2006,21 +2179,191 @@ app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), asyn
       return res.type('html').send($.html());
     }
 
-    // Tra cứu thành công: hiển thị bảng kết quả
+    // Tra cứu thành công: Sửa toàn bộ link trong bảng để không bao giờ bị chuyển hướng về # hoặc trang chủ
+    $('a[onclick*="ajxCall4Portal"]').each((_, a) => {
+      $(a).attr('href', 'javascript:void(0)');
+      $(a).attr('style', 'color: #005baa; font-size: 16px; cursor: pointer; text-decoration: none; padding: 4px;');
+      $(a).attr('title', 'Xem chi tiết hóa đơn điện tử');
+    });
+
+    $('a[href*="/HomeNoLogin/downloadPDF"]').each((_, a) => {
+      const origHref = $(a).attr('href') || '';
+      $(a).attr('href', origHref);
+      $(a).attr('target', '_blank');
+      $(a).attr('download', `HoaDon_VNPT_${strFkey}.pdf`);
+      $(a).attr('style', 'color: #16a34a; font-size: 16px; cursor: pointer; padding: 4px;');
+      $(a).attr('title', 'Tải file PDF hóa đơn gốc');
+    });
+
+    $('a[onclick*="_hanleDownloadAttachment"]').each((_, a) => {
+      $(a).attr('href', 'javascript:void(0)');
+      $(a).attr('style', 'color: #0284c7; font-size: 16px; cursor: pointer; padding: 4px;');
+      $(a).attr('title', 'Tải bảng kê / tệp đính kèm');
+    });
+
+    // Thêm thanh thông báo tra cứu thành công
     $('body').prepend(`
-      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 2px 10px rgba(0,0,0,0.25);">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="background: #10b981; color: white; border-radius: 50%; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold;">✓</span>
-          <span><strong>Tra cứu VNPT thành công:</strong> Đã tìm thấy kết quả hóa đơn cho mã tra cứu <strong>${strFkey}</strong>. Quý khách có thể xem và tải hóa đơn bên dưới.</span>
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold;">✓</span>
+          <span><strong>Tra cứu VNPT thành công:</strong> Đã tìm thấy kết quả hóa đơn cho mã tra cứu <strong>${strFkey}</strong>. Quý khách có thể bấm biểu tượng 👁️ để <strong>Xem</strong> hoặc 📥 để <strong>Tải file PDF</strong> trực tiếp.</span>
         </div>
-        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" style="color: #a7f3d0; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
+        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}'); alert('Đã sao chép mã tra cứu ${strFkey} vào bộ nhớ tạm! Khi mở Cổng VNPT, bạn chỉ cần nhấn Ctrl+V vào ô tra cứu.');" style="color: #ffffff; text-decoration: none; font-size: 12px; background: rgba(255,255,255,0.2); padding: 5px 12px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(255,255,255,0.3); display: inline-flex; align-items: center; gap: 4px;">
+          <span>Mở cổng gốc VNPT (Tự copy mã)</span> &rarr;
+        </a>
       </div>
+    `);
+
+    // Nhúng Modal Popup xem hóa đơn chuyên nghiệp
+    $('body').append(`
+      <!-- Modal Backdrop -->
+      <div id="vnpt-modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999998; backdrop-filter:blur(2px);" onclick="closeVnptModal()"></div>
+
+      <!-- Loading Spinner -->
+      <div id="vnpt-modal-loading" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#0f172a; color:#f8fafc; padding:18px 28px; border-radius:10px; z-index:9999999; box-shadow:0 20px 40px rgba(0,0,0,0.4); font-family:sans-serif; font-size:14px; align-items:center; gap:12px;">
+        <span style="display:inline-block; width:22px; height:22px; border:3px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:vnpt-spin 0.8s linear infinite;"></span>
+        <span>Đang tải nội dung hóa đơn gốc từ Cổng VNPT...</span>
+      </div>
+
+      <!-- Invoice Viewer Modal -->
+      <div id="ViewInvoice" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#ffffff; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.5); padding:24px; width:920px; max-width:96vw; max-height:92vh; overflow-y:auto; z-index:9999999; border:1px solid #cbd5e1; font-family:Arial,sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">📄</span>
+            <strong style="color:#005baa; font-size:16px;">Chi Tiết Hóa Đơn Điện Tử - VNPT Invoice</strong>
+          </div>
+          <button type="button" onclick="closeVnptModal()" style="border:none; background:#f1f5f9; border-radius:6px; cursor:pointer; font-size:18px; font-weight:bold; width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:#475569;" title="Đóng">✕</button>
+        </div>
+        <div id="bt" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;"></div>
+        <div id="container" style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:16px; overflow:auto;"></div>
+      </div>
+
+      <style>
+        @keyframes vnpt-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        #ViewInvoice table { width: 100% !important; border-collapse: collapse; }
+      </style>
+
+      <script>
+        // Override hàm xem hóa đơn của VNPT
+        window.ajxCall4Portal = function(checkCode, downloadZipTitle, downloadTitle, convert, print, Sign, checkLang, SignSmartCA, callback, fkey, nameCus) {
+          fkey = fkey || ${JSON.stringify(strFkey)};
+          nameCus = nameCus || '';
+          
+          $('#vnpt-modal-loading').css('display', 'flex');
+          $('#vnpt-modal-backdrop').show();
+          $('#ViewInvoice').hide();
+
+          $.ajax({
+            type: 'POST',
+            url: '/HomeNoLogin/ajxPreview/',
+            data: { checkCode: checkCode, fkey: fkey, nameCus: nameCus },
+            success: function(data) {
+              $('#vnpt-modal-loading').hide();
+              if (!data || !data.str) {
+                alert('Không tải được nội dung hóa đơn từ Cổng VNPT. Vui lòng thử lại.');
+                $('#vnpt-modal-backdrop').hide();
+                return;
+              }
+              $('#container').html(data.str);
+
+              var btnHtml = '';
+              btnHtml += '<button type="button" onclick="window.printInvoiceDirect()" style="background:#005baa; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><i class="icon-print"></i> In Hóa Đơn</button>';
+              btnHtml += '<a href="/HomeNoLogin/downloadPDF?checkCode=' + encodeURIComponent(checkCode) + '&fkey=' + encodeURIComponent(fkey) + '" target="_blank" download style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><i class="icon-download"></i> Tải PDF Hóa Đơn</a>';
+              btnHtml += '<a href="/HomeNoLogin/downloadZip?checkCode=' + encodeURIComponent(checkCode) + '&fkey=' + encodeURIComponent(fkey) + '" download style="background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><i class="icon-folder-close"></i> Tải File Zip</a>';
+              btnHtml += '<button type="button" onclick="closeVnptModal()" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; margin-left:auto;">✕ Đóng</button>';
+
+              $('#bt').html(btnHtml);
+              $('#ViewInvoice').show();
+            },
+            error: function(xhr, status, err) {
+              $('#vnpt-modal-loading').hide();
+              $('#vnpt-modal-backdrop').hide();
+              alert('Lỗi khi tải hóa đơn từ Cổng VNPT: ' + (err || status));
+            }
+          });
+          return false;
+        };
+
+        window.printInvoiceDirect = function() {
+          var printContent = document.getElementById('container').innerHTML;
+          var win = window.open('', '_blank', 'width=950,height=750');
+          win.document.write('<!DOCTYPE html><html><head><title>Hóa đơn VNPT - ${strFkey}</title>');
+          win.document.write('<style>@page{size:A4;margin:8mm;}body{margin:0;padding:12px;font-family:Arial,sans-serif;}table{width:100% !important;border-collapse:collapse;}</style>');
+          win.document.write('</head><body>');
+          win.document.write(printContent);
+          win.document.write('</body></html>');
+          win.document.close();
+          win.focus();
+          setTimeout(function() { win.print(); win.close(); }, 600);
+        };
+
+        window.closeVnptModal = function() {
+          $('#ViewInvoice').hide();
+          $('#vnpt-modal-loading').hide();
+          $('#vnpt-modal-backdrop').hide();
+        };
+
+        $(document).ready(function() {
+          // Ngăn mọi thẻ a có href="#" chuyển hướng trang
+          $('a[href="#"]').on('click', function(e) {
+            e.preventDefault();
+            return false;
+          });
+        });
+      </script>
     `);
 
     res.type('html').send($.html());
   } catch (error: any) {
     console.error('[VNPT Portal Submit] Lỗi xử lý form:', error.message);
     res.redirect(`${session.portal}/HomeNoLogin/SearchByFkey`);
+  }
+});
+
+// Proxy cho các action VNPT ajxPreview / downloadPDF / downloadZip nếu có request gửi trực tiếp tới /HomeNoLogin
+app.post(['/HomeNoLogin/ajxPreview', '/HomeNoLogin/ajxPreview/'], express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || 'https://1801660803-001-tt78.vnpt-invoice.com.vn';
+    const form = new URLSearchParams(req.body || {}).toString();
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session?.cookies || ''
+    };
+    const response = await axios.post(`${portal}/HomeNoLogin/ajxPreview/`, form, { headers, timeout: 25000 });
+    res.json(response.data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get(['/HomeNoLogin/downloadPDF', '/HomeNoLogin/downloadPDF/'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || 'https://1801660803-001-tt78.vnpt-invoice.com.vn';
+    const checkCode = String(req.query.checkCode || '');
+    const fkey = String(req.query.fkey || session?.lookupCode || '');
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session?.cookies || ''
+    };
+    const response = await axios.get(`${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}`, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 25000
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="HoaDon_VNPT_${fkey || 'DT'}.pdf"`);
+    res.send(Buffer.from(response.data));
+  } catch (err: any) {
+    res.status(500).send('Lỗi tải PDF: ' + err.message);
   }
 });
 

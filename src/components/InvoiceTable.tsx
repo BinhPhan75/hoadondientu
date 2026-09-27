@@ -330,12 +330,21 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (inv.lookupCode && (inv.provider === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '') || inv.msttcgp === '0100684378')) {
+                                      try {
+                                        navigator.clipboard?.writeText(inv.lookupCode);
+                                      } catch {}
+                                    }
+                                  }}
                                   className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
                                   title={isMisa
                                     ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
                                     : isViettel
                                     ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
+                                    : pBadge.label === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '')
+                                    ? `Mã tra cứu VNPT: ${inv.lookupCode} (Tự động sao chép mã vào bộ nhớ tạm khi mở Cổng VNPT)`
                                     : `Mã tra cứu: ${inv.lookupCode}`}
                                 >
                                   <span>{inv.lookupCode}</span>
@@ -455,6 +464,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                               href={is4Si && !directUrl.includes('inv.4si.vn') ? 'https://dochoadon.lcssoft.com.vn/' : directUrl}
                               target="_blank"
                               rel="noopener noreferrer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (sanitizedLookupCode && isVnpt) {
+                                  try {
+                                    navigator.clipboard?.writeText(sanitizedLookupCode);
+                                  } catch {}
+                                }
+                              }}
                               className={`p-1 rounded transition-colors cursor-pointer ${
                                 isMisa 
                                   ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-50' 

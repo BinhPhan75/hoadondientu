@@ -141,7 +141,7 @@ export function buildDirectLookupUrl(
   }
 
   // 2. VNPT Invoice
-  // Mở cổng tra cứu trực tiếp theo MST và tự động gán mã tra cứu vào ô name="strFkey"
+  // Mở cổng tra cứu trực tiếp theo MST của VNPT
   const isVnpt = provider.includes('VNPT') ||
     provider.includes('NGHIA_SON') ||
     /vnpt-invoice\.com\.vn/i.test(url);
@@ -152,8 +152,11 @@ export function buildDirectLookupUrl(
     if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
       vnptUrl = `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
     }
-    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
-    return `/api/vnpt/portal?mst=${encodeURIComponent(cleanTaxCode)}&code=${encodeURIComponent(code)}&portal=${encodeURIComponent(cleanUrl)}`;
+    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
+    if (!/\/HomeNoLogin\/SearchByFkey$/i.test(cleanUrl)) {
+      return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
+    }
+    return cleanUrl;
   }
 
   // 3. Softdreams EasyInvoice
