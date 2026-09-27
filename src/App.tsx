@@ -38,22 +38,24 @@ export default function App() {
   // Account Configuration State (from localStorage or default)
   const [account, setAccount] = useState<GDTAccountConfig>(() => {
     const saved = localStorage.getItem('gdt_account_config');
+    let parsed: any = null;
     if (saved) {
       try {
-        return JSON.parse(saved);
+        parsed = JSON.parse(saved);
       } catch (e) {
         // Fallback
       }
     }
+    const hasActiveSession = Boolean(sessionStorage.getItem('gdt_session_tokens'));
     return {
-      taxCode: '',
-      password: '',
-      taxpayerName: 'Chưa đăng nhập CQT',
-      address: '',
-      rememberMe: true,
-      autoSaveSession: true,
-      useHeadlessBrowser: true,
-      isRealGDT: false
+      taxCode: parsed?.taxCode || '',
+      password: parsed?.password || '',
+      taxpayerName: parsed?.taxpayerName || 'Chưa đăng nhập CQT',
+      address: parsed?.address || '',
+      rememberMe: parsed?.rememberMe ?? true,
+      autoSaveSession: parsed?.autoSaveSession ?? true,
+      useHeadlessBrowser: parsed?.useHeadlessBrowser ?? true,
+      isRealGDT: hasActiveSession ? Boolean(parsed?.isRealGDT) : false
     };
   });
 
@@ -91,19 +93,11 @@ export default function App() {
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('gdt_sidebar_collapsed') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Khi khách hàng mở webapp, bắt buộc menu bên trái phải mở ra để nhập thông tin đăng nhập cổng thuế
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
   const collapseLeftMenu = () => {
     setIsSidebarCollapsed(true);
-    try {
-      localStorage.setItem('gdt_sidebar_collapsed', 'true');
-    } catch {}
     setIsMobileSidebarOpen(false);
   };
 
@@ -111,13 +105,7 @@ export default function App() {
     if (window.innerWidth < 1024) {
       setIsMobileSidebarOpen(prev => !prev);
     } else {
-      setIsSidebarCollapsed(prev => {
-        const next = !prev;
-        try {
-          localStorage.setItem('gdt_sidebar_collapsed', String(next));
-        } catch {}
-        return next;
-      });
+      setIsSidebarCollapsed(prev => !prev);
     }
   };
 
@@ -206,7 +194,13 @@ export default function App() {
     setHasSearched(false);
     try {
       localStorage.removeItem('gdt_saved_invoices');
+      localStorage.removeItem('gdt_sidebar_collapsed');
     } catch {}
+    // Bắt buộc mở menu bên trái khi khách hàng mở webapp để nhập thông tin đăng nhập
+    setIsSidebarCollapsed(false);
+    if (window.innerWidth < 1024 && !account.isRealGDT) {
+      setIsMobileSidebarOpen(true);
+    }
   }, []);
 
   // Tự động tắt thông báo "hoàn tất đồng bộ toàn kỳ" sau khi tải đủ hóa đơn về
@@ -1153,7 +1147,11 @@ export default function App() {
       setHasSearched(false);
       try {
         localStorage.removeItem('gdt_saved_invoices');
+        sessionStorage.removeItem('gdt_session_tokens');
+        localStorage.removeItem('gdt_sidebar_collapsed');
       } catch {}
+      // Mở lại menu bên trái để người dùng đăng nhập tài khoản khác
+      setIsSidebarCollapsed(false);
       setIsConfigModalOpen(true);
     }
   };
@@ -1228,6 +1226,7 @@ export default function App() {
                 setIsConfigModalOpen(true);
                 setIsMobileSidebarOpen(false);
               }}
+              onCollapseSidebar={collapseLeftMenu}
               onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
             />
           </div>
