@@ -2502,7 +2502,7 @@ export function renderVnptTemplate(
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
       <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
-      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>

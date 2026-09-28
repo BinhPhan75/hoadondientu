@@ -31,7 +31,7 @@ import {
   InvoiceProviderId, 
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
-import { buildDirectLookupUrl } from '../templates/templateUtils';
+import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 
 interface InvoiceDetailModalProps {
@@ -100,7 +100,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isDownloadingFourSiPdf, setIsDownloadingFourSiPdf] = useState(false);
   const [fourSiNotice, setFourSiNotice] = useState<string | null>(null);
   const [fourSiError, setFourSiError] = useState<string | null>(null);
-  const [vnptCopiedNotice, setVnptCopiedNotice] = useState<{ code: string; url: string } | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -583,6 +582,38 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       });
     }
   }, [effectiveInvoice]);
+
+  // Tự động nạp sẵn dữ liệu hóa đơn gốc VNPT trong nền (HTML + PDF) để khi người dùng bấm Xem hoặc Tải PDF thì có ngay lập tức
+  useEffect(() => {
+    if (!effectiveInvoice) return;
+    const isVnpt =
+      effectiveInvoice.provider === 'VNPT' ||
+      effectiveInvoice.msttcgp === '0100684378' ||
+      effectiveInvoice.nbmst === '4000344946' ||
+      /vnpt/i.test(effectiveInvoice.lookupUrl || '');
+
+    const code = effectiveInvoice.mhdon || effectiveInvoice.lookupCode;
+    if (isVnpt && code && !originalVnptHtml) {
+      const cleanCode = code.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
+      fetch('/api/vnpt/view-original', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: cleanCode,
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: effectiveInvoice.lookupUrl
+        })
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.success) {
+            if (data.checkCode) setVnptCheckCode(data.checkCode);
+            if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [effectiveInvoice?.id, effectiveInvoice?.shdon, effectiveInvoice?.mhdon, effectiveInvoice?.lookupCode]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -1142,6 +1173,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isVnptInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* 1. Nút Xem hóa đơn gốc VNPT trong ứng dụng (tự động nạp bản thể hiện từ VNPT) */}
                 <button
                   type="button"
                   onClick={handleViewOriginalVnpt}
@@ -1151,16 +1183,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
                       : 'text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600'
                   }`}
-                  title={`Tự động nhập mã tra cứu, giải Captcha và mở xem hóa đơn gốc ở mục Thao tác VNPT (${lookupDetails.lookupCode || ''})`}
+                  title={`Tự động nhập mã tra cứu, giải Captcha và hiển thị bản thể hiện gốc VNPT (${lookupDetails.lookupCode || ''})`}
                 >
                   {isLoadingVnptOriginal ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Eye className="w-3.5 h-3.5" />
                   )}
-                  <span>{isLoadingVnptOriginal ? 'Đang mở HĐ gốc...' : originalVnptHtml ? 'Đang xem bản gốc VNPT' : 'Xem hóa đơn gốc VNPT'}</span>
+                  <span>{isLoadingVnptOriginal ? 'Đang nạp HĐ gốc...' : originalVnptHtml ? 'Đang xem bản gốc VNPT' : 'Xem hóa đơn gốc VNPT'}</span>
                 </button>
 
+                {/* 2. Nút chuyển về xem mẫu nội bộ nếu đang xem bản thể hiện VNPT */}
                 {originalVnptHtml && (
                   <button
                     type="button"
@@ -1172,6 +1205,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </button>
                 )}
 
+                {/* 3. Nút tải file PDF gốc VNPT */}
                 <button
                   type="button"
                   onClick={handleDownloadVnptPdf}
@@ -1187,27 +1221,30 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
                 </button>
 
-                {directLookupUrl && (
-                  <a
-                    href={directLookupUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={() => {
-                      const codeToCopy = lookupDetails.lookupCode || effectiveInvoice?.mhdon;
-                      if (codeToCopy) {
-                        try {
-                          navigator.clipboard?.writeText(codeToCopy);
-                        } catch {}
-                        setVnptCopiedNotice({ code: codeToCopy, url: directLookupUrl });
-                      }
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-sky-300 bg-sky-950/70 hover:bg-sky-900 border-sky-700 hover:border-sky-600 transition-all cursor-pointer shadow-xs"
-                    title={`Mở Cổng tra cứu gốc của VNPT theo MST ${effectiveInvoice?.nbmst || ''} trên tab mới (Đã tự động sao chép mã tra cứu)`}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Tra link gốc</span>
-                  </a>
-                )}
+                {/* 4. Nút mở trực tiếp Cổng tra cứu VNPT và tự gán mã vào ô tra cứu */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const code = lookupDetails.lookupCode || effectiveInvoice?.mhdon || '';
+                    openVnptDirectPortal(effectiveInvoice?.nbmst, code, lookupDetails.lookupUrl);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-sky-300 bg-sky-950/70 hover:bg-sky-900 border-sky-700 hover:border-sky-600 transition-all cursor-pointer shadow-xs"
+                  title={`Mở trực tiếp Cổng tra cứu VNPT (${effectiveInvoice?.nbmst || ''}) trên tab mới và tự gán mã tra cứu vào ô tìm kiếm (chỉ cần gõ Captcha)`}
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Tra link gốc</span>
+                </button>
+
+                {/* 5. Tải PDF theo mẫu chuẩn GDT */}
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF mẫu GDT'}</span>
+                </button>
               </div>
             ) : isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
@@ -1455,56 +1492,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Thông báo nổi bật khi bấm Tra link gốc VNPT */}
-      {vnptCopiedNotice && (
-        <div className="fixed bottom-6 right-6 z-[999999] max-w-md bg-slate-900/95 border border-sky-500/70 text-white p-4 rounded-xl shadow-2xl backdrop-blur-md animate-in fade-in slide-in-from-bottom-5">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-sky-500/20 text-sky-400 rounded-lg text-base">📋</span>
-              <h4 className="font-semibold text-sm text-sky-300">Đã mở Cổng VNPT & Sao chép mã tra cứu</h4>
-            </div>
-            <button
-              type="button"
-              onClick={() => setVnptCopiedNotice(null)}
-              className="text-gray-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-slate-800 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="mt-2.5 text-xs text-gray-300 space-y-1.5">
-            <div>
-              Mã tra cứu VNPT:{' '}
-              <span className="font-mono font-bold text-amber-300 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 select-all">
-                {vnptCopiedNotice.code}
-              </span>
-            </div>
-            <p className="text-gray-300 leading-relaxed">
-              👉 Tab Cổng gốc VNPT đã mở. Bạn chỉ cần nhấp chuột vào ô <strong className="text-white">"Nhập mã tra cứu hóa đơn"</strong> rồi nhấn phím <kbd className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-600 text-amber-200 font-mono">Ctrl + V</kbd> (hoặc Dán) và nhập mã xác thực Captcha là tra cứu được hóa đơn ngay!
-            </p>
-          </div>
-          <div className="mt-3 flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(vnptCopiedNotice.code);
-                alert('Đã sao chép lại mã tra cứu: ' + vnptCopiedNotice.code);
-              }}
-              className="text-sky-400 hover:text-sky-300 font-medium inline-flex items-center gap-1 cursor-pointer"
-            >
-              <span>📋 Sao chép lại mã</span>
-            </button>
-            <a
-              href={vnptCopiedNotice.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-gray-400 hover:text-white underline"
-            >
-              Mở lại tab Cổng VNPT &rarr;
-            </a>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

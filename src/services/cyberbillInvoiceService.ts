@@ -50,7 +50,7 @@ async function solveCyberBillCaptcha(imageDataUri: string, customApiKey?: string
       const mimeType = match ? match[1] : 'image/jpeg';
       const base64Data = match ? match[2] : imageDataUri;
 
-      const candidateModels = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
       for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({

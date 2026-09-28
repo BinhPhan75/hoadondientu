@@ -20,8 +20,10 @@ export interface AuthSession {
 
 export interface DbStatus {
   connected: boolean;
-  type: 'neon_postgres' | 'local_file';
+  type: 'neon_postgres' | 'local_file' | 'in_memory_mock' | 'remote_webapp';
   message: string;
   totalUsers: number;
   databaseUrlConfigured: boolean;
+  connectionSource?: string;
+  maskedUrl?: string;
 }

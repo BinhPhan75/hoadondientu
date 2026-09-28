@@ -8,7 +8,7 @@ export const EASYINVOICE_CAPTCHA_PROMPT =
 
 export const CAPTCHA_PROMPT = VNPT_CAPTCHA_PROMPT;
 
-const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-flash-latest'];
+const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
 
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -48,7 +48,8 @@ export async function solveCaptchaWithGemini(
         model: modelName,
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 20,
+          maxOutputTokens: 8,
+          topK: 1,
         },
       });
 

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
-import { buildDirectLookupUrl } from '../templates/templateUtils';
+import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { getInvoiceProviderBadge } from '../utils/providerMapping';
 
 interface InvoiceTableProps {
@@ -332,10 +332,10 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                   rel="noopener noreferrer"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    if (inv.lookupCode && (inv.provider === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '') || inv.msttcgp === '0100684378')) {
-                                      try {
-                                        navigator.clipboard?.writeText(inv.lookupCode);
-                                      } catch {}
+                                    const isVnptItem = inv.provider === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '') || inv.msttcgp === '0100684378';
+                                    if (isVnptItem) {
+                                      e.preventDefault();
+                                      openVnptDirectPortal(inv.nbmst, inv.lookupCode, inv.lookupUrl);
                                     }
                                   }}
                                   className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
@@ -344,7 +344,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                                     : isViettel
                                     ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
                                     : pBadge.label === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '')
-                                    ? `Mã tra cứu VNPT: ${inv.lookupCode} (Tự động sao chép mã vào bộ nhớ tạm khi mở Cổng VNPT)`
+                                    ? `Mã tra cứu VNPT: ${inv.lookupCode} (Tự động gán vào ô tìm kiếm Cổng VNPT, chỉ cần nhập Captcha)`
                                     : `Mã tra cứu: ${inv.lookupCode}`}
                                 >
                                   <span>{inv.lookupCode}</span>
@@ -466,10 +466,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                               rel="noopener noreferrer"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (sanitizedLookupCode && isVnpt) {
-                                  try {
-                                    navigator.clipboard?.writeText(sanitizedLookupCode);
-                                  } catch {}
+                                if (isVnpt) {
+                                  e.preventDefault();
+                                  openVnptDirectPortal(inv.nbmst, sanitizedLookupCode, inv.lookupUrl);
                                 }
                               }}
                               className={`p-1 rounded transition-colors cursor-pointer ${
