@@ -252,21 +252,7 @@ function initInMemoryStore(): void {
     created_at: now.toISOString(),
     expires_at: adminExpiry.toISOString(),
     is_active: true,
-    notes: 'Tài khoản Quản trị Demo (In-Memory Mock)'
-  });
-
-  // Demo user with sample enterprise tax code
-  inMemoryUsers.set('0100109106', {
-    id: 2,
-    username: '0100109106',
-    password: '123',
-    full_name: 'DOANH NGHIỆP THỬ NGHIỆM (MST: 0100109106)',
-    role: 'user',
-    duration_months: 12,
-    created_at: now.toISOString(),
-    expires_at: userExpiry.toISOString(),
-    is_active: true,
-    notes: 'Tài khoản Tra cứu Doanh nghiệp Mẫu'
+    notes: 'Tài khoản Quản trị viên (Chế độ dự phòng khi chưa kết nối Neon)'
   });
 
   isMemoryInitialized = true;

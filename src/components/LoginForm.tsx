@@ -140,38 +140,6 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onSuccess }) => {
               </div>
             </div>
 
-            {/* Quick Demo Login Helpers */}
-            <div className="pt-2">
-              <div className="text-[11px] text-slate-400 font-medium mb-1.5 flex items-center justify-between">
-                <span>Tài khoản thử nghiệm nhanh:</span>
-                <span className="text-emerald-400 text-[10px]">Sẵn sàng</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUsername('admin');
-                    setPassword('admin');
-                  }}
-                  className="py-1.5 px-2 bg-slate-700/60 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white text-[11px] font-medium transition-all text-left flex flex-col cursor-pointer"
-                >
-                  <span className="font-semibold text-blue-400">Quản trị viên</span>
-                  <span className="text-[10px] text-slate-400 font-mono">admin / admin</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUsername('0100109106');
-                    setPassword('123');
-                  }}
-                  className="py-1.5 px-2 bg-slate-700/60 hover:bg-slate-700 border border-slate-600 rounded-lg text-slate-300 hover:text-white text-[11px] font-medium transition-all text-left flex flex-col cursor-pointer"
-                >
-                  <span className="font-semibold text-emerald-400">Doanh nghiệp Mẫu</span>
-                  <span className="text-[10px] text-slate-400 font-mono">0100109106 / 123</span>
-                </button>
-              </div>
-            </div>
-
             {/* Submit Button */}
             <button
               type="submit"

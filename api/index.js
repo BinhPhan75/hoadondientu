@@ -1,11 +1,13 @@
 // server.ts
-import "dotenv/config";
+import dotenv2 from "dotenv";
 import express from "express";
 import path2 from "path";
 import crypto2 from "crypto";
 import { spawn } from "child_process";
 import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
+import axios10 from "axios";
+import * as cheerio4 from "cheerio";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -21,6 +23,14 @@ function detectProviderWithDetails(xmlString) {
       priority: 0,
       matchedPattern: "",
       sourceDescription: "D\u1EEF li\u1EC7u XML r\u1ED7ng ho\u1EB7c kh\xF4ng h\u1EE3p l\u1EC7"
+    };
+  }
+  if (/0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlString) || /SUNTALENT/i.test(xmlString)) {
+    return {
+      provider: "VIETTEL",
+      priority: 1.5,
+      matchedPattern: "SUNTALENT (MST: 0402307168) -> Viettel S-Invoice",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng Viettel S-Invoice / vInvoice (SUNTALENT)"
     };
   }
   if (/meinvoice\.vn|tracuu\.meinvoice|misa\.vn/i.test(xmlString)) {
@@ -2104,7 +2114,8 @@ function parseGDTInvoiceXml(xmlString, filename) {
   if (isFpt) {
     if (!lookupUrl) lookupUrl = "https://hoadon.ftg.vn/";
   }
-  const isViettel = provider === "VIETTEL" || msttcgp === "0100109106" || nbmst === "0402307168" || /SUNTALENT/i.test(nbten) || tentcgp.toUpperCase().includes("VIETTEL") || /sinvoice|vinvoice|viettel-invoice|0100109106|0402307168|suntalent/i.test(xmlSource);
+  const cleanNbmst = (nbmst || "").replace(/\D/g, "");
+  const isViettel = provider === "VIETTEL" || msttcgp === "0100109106" || cleanNbmst === "0402307168" || /SUNTALENT/i.test(nbten) || tentcgp.toUpperCase().includes("VIETTEL") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlSource) || /sinvoice|vinvoice|viettel-invoice|0100109106|0402307168|suntalent/i.test(xmlSource);
   if (isViettel) {
     if (!lookupUrl) lookupUrl = "https://vinvoice.viettel.vn/utilities/invoice-search";
     if (!msttcgp) msttcgp = "0100109106";
@@ -2202,7 +2213,7 @@ function detectPartnerTemplate(invoice, rawXml) {
   if (xml) {
     if (xml.includes("0318657735") || xml.includes("b\u1EA3o duy") || xml.includes("bao duy")) return "BAO_DUY";
     if (xml.includes("0315018466") || xml.includes("4si.vn") || xml.includes("l.c.s") || xml.includes("pnj")) return "DEFAULT";
-    if (xml.includes("0402307168") || xml.includes("suntalent")) return "VIETTEL";
+    if (xml.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/.test(xml) || xml.includes("suntalent")) return "VIETTEL";
     if (xml.includes("0312105174") || xml.includes("t\xE0i tr\xE2m anh") || xml.includes("tai tram anh")) return "TAI_TRAM_ANH";
     if (xml.includes("0400557356") || xml.includes("xu\xE2n vinh") || xml.includes("xuan vinh")) return "XUAN_VINH";
     if (xml.includes("0318391940") || xml.includes("kim loan tu\u1EA5n") || xml.includes("kim loan tuan")) return "KIM_LOAN_TUAN";
@@ -2212,6 +2223,7 @@ function detectPartnerTemplate(invoice, rawXml) {
     if (xml.includes("vnpayinvoice") || xml.includes("0102182292") || xml.includes("vietcombank")) return "DEFAULT";
   }
   const p = (invoice.provider || "").toUpperCase();
+  if (p === "VIETTEL") return "VIETTEL";
   if (p.includes("VNPAY")) return "DEFAULT";
   return "DEFAULT";
 }
@@ -2276,12 +2288,12 @@ function buildDirectLookupUrl(portalUrl, lookupCode, providerOrTemplateId, selle
   }
   const isVnpt = provider.includes("VNPT") || provider.includes("NGHIA_SON") || /vnpt-invoice\.com\.vn/i.test(url);
   if (isVnpt) {
-    let vnptUrl = url;
-    if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
-      vnptUrl = `https://${sellerTaxCode || "4000344946"}-tt78.vnpt-invoice.com.vn`;
+    const cleanTaxCode = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
+    let targetDomain = (url || "").trim().split("?")[0].replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+    if (!targetDomain || !/vnpt-invoice/i.test(targetDomain)) {
+      targetDomain = cleanTaxCode ? `https://${cleanTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
     }
-    const cleanUrl = vnptUrl.split("?")[0].replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
-    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
+    return `${targetDomain}/HomeNoLogin/SearchByFkey`;
   }
   const isEasyInvoice = provider.includes("EASY") || provider.includes("SOFTDREAMS") || provider.includes("BAO_DUY") || provider.includes("KIM_LOAN") || provider.includes("TKJ") || /easyinvoice/i.test(url);
   if (isEasyInvoice) {
@@ -5640,7 +5652,7 @@ function renderNghiaSonTemplate(invoice, rawXml, options) {
     <!-- FOOTER -->
     <div class="footer-area">
       <div style="font-style:italic;color:#64748b;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      <div style="margin-top:2px;">Tra c\u1EE9u h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
+      <div style="margin-top:2px;">Tra c\u1EE9u h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
     </div>
   </div>
 </body>
@@ -6679,7 +6691,9 @@ function detectInvoiceProvider(xmlString, invoice) {
       return partnerId;
     }
   }
-  if (invoice?.nbmst === "0402307168" || invoice?.nbten && /SUNTALENT/i.test(invoice.nbten) || raw && (/0402307168/i.test(raw) || /SUNTALENT/i.test(raw))) {
+  const cleanNbmst = (invoice?.nbmst || "").replace(/\D/g, "");
+  const cleanRawStr = (raw || "").replace(/\s+/g, "");
+  if (cleanNbmst === "0402307168" || invoice?.nbten && /SUNTALENT/i.test(invoice.nbten) || cleanRawStr.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(raw || "") || raw && /SUNTALENT/i.test(raw)) {
     return "VIETTEL";
   }
   if (raw && typeof raw === "string") {
@@ -6689,7 +6703,7 @@ function detectInvoiceProvider(xmlString, invoice) {
     if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return "MISA";
     }
-    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom|viettel-invoice/i.test(raw)) {
+    if (/sinvoice|vinvoice|viettel\.vn|vietteltelecom|viettel-invoice|0100109106/i.test(raw)) {
       return "VIETTEL";
     }
     if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
@@ -6820,7 +6834,7 @@ function renderInvoiceHtml(invoiceData, providerId, rawXmlInput, options) {
       html = renderMisaTemplate(invoice, rawXml, options);
       break;
     case "VIETTEL":
-      html = renderViettelTemplate(invoice, rawXml, options);
+      html = renderViettelTemplate2(invoice, rawXml, options);
       break;
     case "EASYINVOICE":
       html = renderEasyInvoiceTemplate(invoice, rawXml, options);
@@ -7594,11 +7608,11 @@ function renderEasyInvoiceTemplate(invoice, rawXml, options) {
 </body>
 </html>`;
 }
-function renderViettelTemplate(invoice, rawXml, options) {
+function renderViettelTemplate2(invoice, rawXml, options) {
   const { day, month, year } = extractDateParts2(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
   const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || "https://www.sinvoice.vn/p/tra-cuu-hoa-don.html";
+  const pUrl = lookupUrl || invoice.lookupUrl || "https://vinvoice.viettel.vn/utilities/invoice-search";
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VIETTEL", invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || "0024A998811234F9004B2C89";
@@ -8307,7 +8321,7 @@ function renderVnptTemplate(invoice, rawXml, options) {
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao nh\u1EADn h\xF3a \u0111\u01A1n)</div>
       <div>Kh\u1EDFi t\u1EA1o t\u1EEB H\u1EC7 th\u1ED1ng H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED <b>VNPT Invoice</b> - T\u1EADp \u0111o\xE0n B\u01B0u ch\xEDnh Vi\u1EC5n th\xF4ng Vi\u1EC7t Nam</div>
-      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml2(mUrl)}</a> &nbsp;&nbsp; M\xE3 tra c\u1EE9u: <b style="color: #005baa;">${escapeHtml2(mCode)}</b></div>
+      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml2(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml2(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color: #005baa; font-weight: bold;">${escapeHtml2(mUrl)}</a> &nbsp;&nbsp; M\xE3 tra c\u1EE9u: <b style="color: #005baa;">${escapeHtml2(mCode)}</b></div>
     </div>
   </div>
 </body>
@@ -8676,16 +8690,16 @@ var OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 </xsl:stylesheet>`;
 
 // src/services/invoice-engine/captcha/geminiCaptchaSolver.ts
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 var VNPT_CAPTCHA_PROMPT = "This is a 4-digit captcha image with a noisy gray background. Please ignore the background noise and strike-through lines, and focus only on identifying the 4 main numbers. Output ONLY the 4 digits, nothing else.";
 var EASYINVOICE_CAPTCHA_PROMPT = "This is a 4-digit EasyInvoice captcha image. Identify and extract the 4 digits clearly visible in the image. Ignore any gradient shading, noise, or background artifacts. Output ONLY the 4 digits, nothing else.";
-var CANDIDATE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-flash-latest"];
+var CANDIDATE_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-latest"];
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5u h\xECnh.");
   }
-  return new GoogleGenerativeAI(apiKey);
+  return new GoogleGenAI({ apiKey });
 }
 function toImagePart(image) {
   if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
@@ -8701,22 +8715,27 @@ function toImagePart(image) {
 async function solveCaptchaWithGemini(base64Image, customPrompt) {
   const promptToUse = customPrompt || VNPT_CAPTCHA_PROMPT;
   const image = toImagePart(base64Image);
-  const genAI = getGenAI();
+  const ai = getGenAI();
   let lastError = null;
   for (const modelName of CANDIDATE_MODELS) {
     try {
-      const model = genAI.getGenerativeModel({
+      const response = await ai.models.generateContent({
         model: modelName,
-        generationConfig: {
+        contents: [
+          {
+            inlineData: {
+              data: image.data,
+              mimeType: image.mimeType
+            }
+          },
+          promptToUse
+        ],
+        config: {
           temperature: 0,
-          maxOutputTokens: 20
+          maxOutputTokens: 8
         }
       });
-      const result = await model.generateContent([
-        { inlineData: image },
-        promptToUse
-      ]);
-      const rawText = result.response.text();
+      const rawText = response.text || "";
       const digits = rawText.replace(/\D/g, "");
       if (digits.length === 4) {
         return digits;
@@ -10371,7 +10390,7 @@ import axios6 from "axios";
 import * as cheerio2 from "cheerio";
 import JSZip2 from "jszip";
 import https2 from "https";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
 
 // src/services/invoice-engine/captcha/tesseractCaptchaSolver.ts
 import { createWorker } from "tesseract.js";
@@ -11675,14 +11694,14 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/thaiSonInvoiceService.ts
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
 var THAISON_PORTAL_URL = "https://einvoice.vn/tra-cuu";
 var aiClient = null;
 function getGenAI2(customApiKey) {
   const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!aiClient || customApiKey) {
-    aiClient = new GoogleGenAI2({ apiKey });
+    aiClient = new GoogleGenAI3({ apiKey });
   }
   return aiClient;
 }
@@ -11691,7 +11710,7 @@ async function solveThaiSonCaptcha(imageBuffer, customApiKey) {
   const base64Data = imageBuffer.toString("base64");
   if (ai) {
     try {
-      const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-flash-latest"];
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
       for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({
@@ -11937,7 +11956,7 @@ var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/cyberbillInvoiceService.ts
-import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI4 } from "@google/genai";
 var CYBERBILL_PORTAL_URL = "https://cyberbill.vn/tra-cuu";
 var CYBERBILL_API_BASE = "https://bill1app.xcyber.vn/api/services/hddt/TraCuuHoaDon";
 var aiClient2 = null;
@@ -11945,7 +11964,7 @@ function getGenAI3(customApiKey) {
   const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!aiClient2 || customApiKey) {
-    aiClient2 = new GoogleGenAI3({ apiKey });
+    aiClient2 = new GoogleGenAI4({ apiKey });
   }
   return aiClient2;
 }
@@ -11956,7 +11975,7 @@ async function solveCyberBillCaptcha(imageDataUri, customApiKey) {
       const match = imageDataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
       const mimeType = match ? match[1] : "image/jpeg";
       const base64Data = match ? match[2] : imageDataUri;
-      const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-flash-latest"];
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
       for (const modelName of candidateModels) {
         try {
           const response = await ai.models.generateContent({
@@ -12407,104 +12426,162 @@ var invoiceManager = InvoiceDownloaderManager.getInstance();
 
 // src/services/vnptInvoiceService.ts
 import axios9 from "axios";
+import https3 from "https";
 import * as cheerio3 from "cheerio";
+var vnptHttpsAgent = new https3.Agent({
+  keepAlive: true,
+  maxSockets: 30,
+  keepAliveMsecs: 3e4
+});
+var vnptClient = axios9.create({
+  httpsAgent: vnptHttpsAgent,
+  timeout: 25e3
+});
+var vnptInvoiceCache = /* @__PURE__ */ new Map();
+var inFlightLookups = /* @__PURE__ */ new Map();
+function getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl) {
+  const cleanMst = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
+  const cleanCode = (lookupCode || "").trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  let portalBase = (portalUrl || "").trim().replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+  if (!portalBase) {
+    portalBase = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  return `${portalBase}|${cleanCode}`;
+}
+function getCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  const entry = vnptInvoiceCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > 2 * 60 * 60 * 1e3) {
+    vnptInvoiceCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+function setCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl, entry) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  vnptInvoiceCache.set(key, entry);
+}
 async function lookupOriginalVnptInvoice(params) {
-  const lookupCode = params.lookupCode.trim();
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
   if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u VNPT kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng");
   const portal = (params.lookupUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn")).replace(/\/+$/, "");
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-  };
-  const maxAttempts = 3;
-  let lastError = "";
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      console.log(`[VNPT] Tra c\u1EE9u l\u1EA7n ${attempt}/${maxAttempts} (M\xE3 tra c\u1EE9u: ${lookupCode}, C\u1ED5ng: ${portal})...`);
-      const page = await axios9.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
-        headers,
-        timeout: 2e4,
-        validateStatus: (status) => status >= 200 && status < 400
-      });
-      const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
-      const $ = cheerio3.load(page.data);
-      const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
-      const captcha = await axios9.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
-        headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
-        responseType: "arraybuffer",
-        timeout: 15e3
-      });
-      const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
-      const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
-      const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data), {
-        prompt: VNPT_CAPTCHA_PROMPT
-      })).code;
-      console.log(`[VNPT] L\u1EA7n ${attempt}: Gi\u1EA3i Captcha th\xE0nh c\xF4ng = "${captchaCode}"`);
-      const form = new URLSearchParams({
-        __RequestVerificationToken: token,
-        strFkey: lookupCode,
-        captch: captchaCode,
-        submit: ""
-      });
-      const result = await axios9.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
-        headers: {
-          ...headers,
-          "Content-Type": "application/x-www-form-urlencoded",
-          Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
-          Cookie: sessionCookie
-        },
-        maxRedirects: 5,
-        timeout: 3e4,
-        responseType: "text",
-        validateStatus: (status) => status >= 200 && status < 400
-      });
-      const html = String(result.data || "");
-      const isCaptchaError = /captcha|mã xác thực không đúng|sai mã xác thực|không chính xác/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html);
-      if (isCaptchaError) {
-        lastError = "VNPT b\xE1o sai m\xE3 x\xE1c th\u1EF1c Captcha.";
-        console.warn(`[VNPT] L\u1EA7n ${attempt} th\u1EA5t b\u1EA1i: ${lastError} \u0110ang th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh Captcha m\u1EDBi...`);
-        continue;
-      }
-      const postCookies = (result.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
-      const finalCookies = [...sessionCookie.split("; ").filter(Boolean), ...postCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
-      const $search = cheerio3.load(html);
-      let checkCode = "";
-      const onclickAttr = $search('a[onclick*="ajxCall4Portal"]').attr("onclick") || "";
-      const matchOnclick = onclickAttr.match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
-      if (matchOnclick) {
-        checkCode = matchOnclick[1];
-      }
-      if (!checkCode) {
-        const downloadHref = $search('a[href*="downloadPDF"]').attr("href") || "";
-        const matchHref = downloadHref.match(/checkCode=([^&"']+)/);
-        if (matchHref) {
-          checkCode = decodeURIComponent(matchHref[1]);
+  const cacheKey = getVnptCacheKey(params.sellerTaxCode, lookupCode, portal);
+  if (!params.forceRefresh) {
+    const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (cached && cached.htmlContent) {
+      console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 t\u1EEB Cache t\u1EE9c th\xEC cho m\xE3: ${lookupCode}`);
+      return {
+        success: true,
+        htmlContent: cached.htmlContent,
+        checkCode: cached.checkCode,
+        pdfDownloadUrl: `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(cached.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`,
+        portalUrl: portal,
+        isCached: true,
+        invoiceInfo: cached.invoiceInfo
+      };
+    }
+  }
+  if (inFlightLookups.has(cacheKey)) {
+    console.log(`[VNPT Speed] T\xE1i s\u1EED d\u1EE5ng ti\u1EBFn tr\xECnh tra c\u1EE9u \u0111ang ch\u1EA1y cho m\xE3: ${lookupCode}`);
+    return inFlightLookups.get(cacheKey);
+  }
+  const lookupPromise = (async () => {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    };
+    const maxAttempts = 2;
+    let lastError = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const t0 = Date.now();
+        console.log(`[VNPT] B\u1EAFt \u0111\u1EA7u tra c\u1EE9u t\u1ED1i \u01B0u l\u1EA7n ${attempt}/${maxAttempts} (M\xE3: ${lookupCode}, C\u1ED5ng: ${portal})...`);
+        const page = await vnptClient.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
+          headers,
+          timeout: 1e4,
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
+        const $ = cheerio3.load(page.data);
+        const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
+        const captcha = await vnptClient.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
+          responseType: "arraybuffer",
+          timeout: 1e4
+        });
+        const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const tAiStart = Date.now();
+        const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data), {
+          prompt: VNPT_CAPTCHA_PROMPT
+        })).code;
+        console.log(`[VNPT Speed] Gi\u1EA3i Captcha trong ${Date.now() - tAiStart}ms: "${captchaCode}"`);
+        const form = new URLSearchParams({
+          __RequestVerificationToken: token,
+          strFkey: lookupCode,
+          captch: captchaCode,
+          submit: ""
+        });
+        const result = await vnptClient.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+          headers: {
+            ...headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+            Cookie: sessionCookie
+          },
+          maxRedirects: 5,
+          timeout: 2e4,
+          responseType: "text",
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const html = String(result.data || "");
+        const isCaptchaError = /captcha|mã xác thực không đúng|sai mã xác thực|không chính xác/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html);
+        if (isCaptchaError) {
+          lastError = "VNPT b\xE1o sai m\xE3 x\xE1c th\u1EF1c Captcha.";
+          console.warn(`[VNPT] L\u1EA7n ${attempt} sai Captcha, \u0111ang th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh m\u1EDBi...`);
+          continue;
         }
-      }
-      let invoiceInfo = void 0;
-      const firstRow = $search("table tr").filter((_, tr) => $search(tr).find("td").length >= 5).first();
-      if (firstRow.length > 0) {
-        const tds = firstRow.find("td");
-        invoiceInfo = {
-          name: $search(tds[1]).text().trim(),
-          template: $search(tds[2]).text().trim(),
-          series: $search(tds[3]).text().trim(),
-          number: $search(tds[4]).text().trim(),
-          totalAmount: $search(tds[5]).text().trim(),
-          issueDate: $search(tds[6]).text().trim(),
-          status: $search(tds[7]).text().trim(),
-          cqtStatus: $search(tds[8]).text().trim()
-        };
-      }
-      if (checkCode) {
-        console.log(`[VNPT] L\u1EA5y \u0111\u01B0\u1EE3c checkCode = "${checkCode}". \u0110ang g\u1ECDi /HomeNoLogin/ajxPreview/ \u0111\u1EC3 t\u1EA3i b\u1EA3n th\u1EC3 hi\u1EC7n g\u1ED1c...`);
-        try {
+        const postCookies = (result.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const finalCookies = [...sessionCookie.split("; ").filter(Boolean), ...postCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const $search = cheerio3.load(html);
+        let checkCode = "";
+        const onclickAttr = $search('a[onclick*="ajxCall4Portal"]').attr("onclick") || "";
+        const matchOnclick = onclickAttr.match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (matchOnclick) {
+          checkCode = matchOnclick[1];
+        }
+        if (!checkCode) {
+          const downloadHref = $search('a[href*="downloadPDF"]').attr("href") || "";
+          const matchHref = downloadHref.match(/checkCode=([^&"']+)/);
+          if (matchHref) {
+            checkCode = decodeURIComponent(matchHref[1]);
+          }
+        }
+        let invoiceInfo = void 0;
+        const firstRow = $search("table tr").filter((_, tr) => $search(tr).find("td").length >= 5).first();
+        if (firstRow.length > 0) {
+          const tds = firstRow.find("td");
+          invoiceInfo = {
+            name: $search(tds[1]).text().trim(),
+            template: $search(tds[2]).text().trim(),
+            series: $search(tds[3]).text().trim(),
+            number: $search(tds[4]).text().trim(),
+            totalAmount: $search(tds[5]).text().trim(),
+            issueDate: $search(tds[6]).text().trim(),
+            status: $search(tds[7]).text().trim(),
+            cqtStatus: $search(tds[8]).text().trim()
+          };
+        }
+        let fullInvoiceHtml = "";
+        let prefetchedPdfBuffer = void 0;
+        if (checkCode) {
           const previewPayload = new URLSearchParams({
             checkCode,
             fkey: lookupCode,
             nameCus: ""
           });
-          const previewRes = await axios9.post(`${portal}/HomeNoLogin/ajxPreview/`, previewPayload.toString(), {
+          const previewPromise = vnptClient.post(`${portal}/HomeNoLogin/ajxPreview/`, previewPayload.toString(), {
             headers: {
               ...headers,
               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -12512,10 +12589,21 @@ async function lookupOriginalVnptInvoice(params) {
               Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
               Cookie: finalCookies
             },
-            timeout: 3e4
+            timeout: 2e4
           });
-          if (previewRes.data && previewRes.data.str && previewRes.data.str.length > 500) {
-            let fullInvoiceHtml = String(previewRes.data.str);
+          const pdfDownloadUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+          const pdfPromise = vnptClient.get(pdfDownloadUrl, {
+            headers: {
+              ...headers,
+              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+              Cookie: finalCookies
+            },
+            responseType: "arraybuffer",
+            timeout: 2e4
+          });
+          const [previewRes, pdfRes] = await Promise.allSettled([previewPromise, pdfPromise]);
+          if (previewRes.status === "fulfilled" && previewRes.value.data?.str) {
+            fullInvoiceHtml = String(previewRes.value.data.str);
             if (!/<base /i.test(fullInvoiceHtml)) {
               if (/<head([^>]*)>/i.test(fullInvoiceHtml)) {
                 fullInvoiceHtml = fullInvoiceHtml.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
@@ -12524,105 +12612,126 @@ async function lookupOriginalVnptInvoice(params) {
 ` + fullInvoiceHtml;
               }
             }
-            console.log(`[VNPT] T\u1EA3i b\u1EA3n th\u1EC3 hi\u1EC7n g\u1ED1c h\xF3a \u0111\u01A1n th\xE0nh c\xF4ng! \u0110\u1ED9 d\xE0i HTML: ${fullInvoiceHtml.length}`);
-            return {
-              success: true,
-              htmlContent: fullInvoiceHtml,
-              checkCode,
-              pdfDownloadUrl: `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`,
-              portalUrl: portal,
-              invoiceInfo
-            };
           }
-        } catch (previewErr) {
-          console.warn("[VNPT] L\u1ED7i khi g\u1ECDi ajxPreview:", previewErr.message);
+          if (pdfRes.status === "fulfilled" && pdfRes.value.data) {
+            const buf = Buffer.from(pdfRes.value.data);
+            if (buf.length > 1e3 && buf.slice(0, 5).toString().startsWith("%PDF")) {
+              prefetchedPdfBuffer = buf;
+              console.log(`[VNPT Speed] \u0110\xE3 n\u1EA1p s\u1EB5n file PDF g\u1ED1c (${buf.length} bytes) v\xE0o cache song song v\u1EDBi HTML!`);
+            }
+          }
         }
+        if (!fullInvoiceHtml) {
+          fullInvoiceHtml = html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
+        }
+        const cacheEntry = {
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || "",
+          portalUrl: portal,
+          pdfBuffer: prefetchedPdfBuffer,
+          cookies: finalCookies,
+          invoiceInfo,
+          cachedAt: Date.now()
+        };
+        setCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal, cacheEntry);
+        console.log(`[VNPT Speed] Ho\xE0n t\u1EA5t tra c\u1EE9u t\u1ED5ng c\u1ED9ng trong ${Date.now() - t0}ms!`);
+        return {
+          success: true,
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || void 0,
+          pdfDownloadUrl: checkCode ? `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}` : void 0,
+          portalUrl: portal,
+          isCached: false,
+          invoiceInfo
+        };
+      } catch (err) {
+        lastError = err.message || String(err);
+        console.warn(`[VNPT] L\u1ED7i tra c\u1EE9u l\u1EA7n ${attempt}:`, lastError);
       }
-      if (!html || !/invoice|hóa đơn|hoadon/i.test(html) && html.length < 500) {
-        lastError = "C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n ho\u1EB7c m\xE3 tra c\u1EE9u kh\xF4ng t\u1ED3n t\u1EA1i.";
-        console.warn(`[VNPT] L\u1EA7n ${attempt} kh\xF4ng c\xF3 n\u1ED9i dung H\u0110: ${lastError}`);
-        continue;
-      }
-      return {
-        success: true,
-        htmlContent: html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`),
-        checkCode: checkCode || void 0,
-        pdfDownloadUrl: checkCode ? `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}` : void 0,
-        portalUrl: portal,
-        invoiceInfo
-      };
-    } catch (err) {
-      lastError = err.message || String(err);
-      console.warn(`[VNPT] L\u1ED7i tra c\u1EE9u l\u1EA7n ${attempt}:`, lastError);
     }
+    throw new Error(`Tra c\u1EE9u h\xF3a \u0111\u01A1n g\u1ED1c VNPT th\u1EA5t b\u1EA1i: ${lastError || "VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n."}`);
+  })();
+  inFlightLookups.set(cacheKey, lookupPromise);
+  try {
+    return await lookupPromise;
+  } finally {
+    inFlightLookups.delete(cacheKey);
   }
-  throw new Error(`Tra c\u1EE9u h\xF3a \u0111\u01A1n g\u1ED1c VNPT th\u1EA5t b\u1EA1i: ${lastError || "VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n."}`);
 }
 async function downloadOriginalVnptPdf(params) {
   let portal = params.portalUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn");
   portal = portal.replace(/\/+$/, "");
-  let checkCode = params.checkCode && params.checkCode !== "undefined" && params.checkCode !== "null" ? params.checkCode.trim() : void 0;
-  const lookupCode = params.lookupCode.trim();
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  const cleanShd = params.invoiceNumber ? String(params.invoiceNumber).padStart(7, "0") : lookupCode.slice(0, 16);
+  const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+  if (cached?.pdfBuffer && cached.pdfBuffer.length > 1e3) {
+    console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 PDF g\u1ED1c t\u1EEB b\u1ED9 nh\u1EDB \u0111\u1EC7m (0ms delay)!`);
+    return {
+      data: cached.pdfBuffer,
+      filename: `HoaDon_VNPT_${cleanShd}.pdf`,
+      contentType: "application/pdf"
+    };
+  }
   const headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
     Referer: `${portal}/HomeNoLogin/SearchByFkey/`
   };
   let validPdfBuffer = null;
-  if (checkCode) {
+  const checkCode = params.checkCode && params.checkCode !== "undefined" && params.checkCode !== "null" ? params.checkCode.trim() : cached?.checkCode;
+  const cookies = cached?.cookies || "";
+  if (checkCode && cookies) {
     const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-    console.log(`[VNPT] \u0110ang th\u1EED t\u1EA3i file PDF g\u1ED1c b\u1EB1ng checkCode c\xF3 s\u1EB5n: ${pdfUrl}`);
+    console.log(`[VNPT Speed] T\u1EA3i PDF tr\u1EF1c ti\u1EBFp b\u1EB1ng checkCode v\xE0 cookies c\xF3 s\u1EB5n: ${pdfUrl}`);
     try {
-      const res = await axios9.get(pdfUrl, {
-        headers,
+      const res = await vnptClient.get(pdfUrl, {
+        headers: { ...headers, Cookie: cookies },
         responseType: "arraybuffer",
-        timeout: 25e3,
+        timeout: 15e3,
         validateStatus: (s) => s === 200
       });
       if (res.data && res.data.byteLength > 1e3) {
         const tempBuf = Buffer.from(res.data);
         if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
           validPdfBuffer = tempBuf;
-          console.log(`[VNPT] T\u1EA3i th\xE0nh c\xF4ng PDF g\u1ED1c b\u1EB1ng checkCode c\xF3 s\u1EB5n (${validPdfBuffer.length} bytes)`);
-        } else {
-          console.warn(`[VNPT] D\u1EEF li\u1EC7u t\u1EA3i v\u1EC1 t\u1EEB checkCode c\xF3 s\u1EB5n kh\xF4ng ph\u1EA3i \u0111\u1ECBnh d\u1EA1ng PDF (b\u1EAFt \u0111\u1EA7u b\u1EB1ng: "${tempBuf.slice(0, 20).toString()}"). S\u1EBD tra c\u1EE9u l\u1EA1i.`);
+          if (cached) cached.pdfBuffer = tempBuf;
+          console.log(`[VNPT Speed] T\u1EA3i nhanh PDF th\xE0nh c\xF4ng (${validPdfBuffer.length} bytes)!`);
         }
-      } else {
-        console.warn(`[VNPT] checkCode c\xF3 s\u1EB5n tr\u1EA3 v\u1EC1 file r\u1ED7ng (${res.data ? res.data.byteLength : 0} bytes). S\u1EBD tra c\u1EE9u l\u1EA1i v\u1EDBi Captcha m\u1EDBi.`);
       }
     } catch (err) {
-      console.warn(`[VNPT] Kh\xF4ng th\u1EC3 t\u1EA3i b\u1EB1ng checkCode c\xF3 s\u1EB5n: ${err.message}. \u0110ang chu\u1EA9n b\u1ECB tra c\u1EE9u l\u1EA1i.`);
+      console.warn(`[VNPT] Kh\xF4ng th\u1EC3 t\u1EA3i b\u1EB1ng cookies c\xF3 s\u1EB5n: ${err.message}.`);
     }
   }
   if (!validPdfBuffer) {
-    console.log(`[VNPT] \u0110ang th\u1EF1c hi\u1EC7n tra c\u1EE9u t\u1EF1 \u0111\u1ED9ng tr\xEAn c\u1ED5ng ${portal} (M\xE3 tra c\u1EE9u: ${lookupCode}) \u0111\u1EC3 l\u1EA5y checkCode m\u1EDBi...`);
+    console.log(`[VNPT Speed] Ch\u01B0a c\xF3 PDF trong cache, k\xEDch ho\u1EA1t tra c\u1EE9u nhanh \u0111\u1EC3 l\u1EA5y PDF...`);
     const lookupRes = await lookupOriginalVnptInvoice({
       lookupCode,
       sellerTaxCode: params.sellerTaxCode,
       lookupUrl: portal
     });
-    if (!lookupRes.checkCode) {
-      throw new Error("Kh\xF4ng th\u1EC3 t\xECm th\u1EA5y m\xE3 ki\u1EC3m tra h\xF3a \u0111\u01A1n (checkCode) tr\xEAn c\u1ED5ng VNPT sau khi gi\u1EA3i Captcha.");
-    }
-    const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-    console.log(`[VNPT] \u0110ang t\u1EA3i file PDF g\u1ED1c b\u1EB1ng checkCode m\u1EDBi: ${freshPdfUrl}`);
-    const res = await axios9.get(freshPdfUrl, {
-      headers,
-      responseType: "arraybuffer",
-      timeout: 3e4,
-      validateStatus: (s) => s === 200
-    });
-    if (res.data && res.data.byteLength > 1e3) {
-      const tempBuf = Buffer.from(res.data);
-      if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
-        validPdfBuffer = tempBuf;
-        console.log(`[VNPT] T\u1EA3i th\xE0nh c\xF4ng PDF g\u1ED1c b\u1EB1ng checkCode m\u1EDBi (${validPdfBuffer.length} bytes)`);
+    const refreshedCache = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (refreshedCache?.pdfBuffer && refreshedCache.pdfBuffer.length > 1e3) {
+      validPdfBuffer = refreshedCache.pdfBuffer;
+    } else if (lookupRes.checkCode) {
+      const finalCookies = refreshedCache?.cookies || "";
+      const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+      const res = await vnptClient.get(freshPdfUrl, {
+        headers: { ...headers, Cookie: finalCookies },
+        responseType: "arraybuffer",
+        timeout: 2e4,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1e3) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
+          validPdfBuffer = tempBuf;
+          if (refreshedCache) refreshedCache.pdfBuffer = tempBuf;
+        }
       }
     }
   }
   if (!validPdfBuffer || validPdfBuffer.length === 0 || !validPdfBuffer.slice(0, 5).toString().startsWith("%PDF")) {
-    throw new Error("C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7 cho h\xF3a \u0111\u01A1n n\xE0y (t\u1EC7p b\u1ECB r\u1ED7ng ho\u1EB7c l\u1ED7i ph\xE2n quy\u1EC1n).");
+    throw new Error("C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7 cho h\xF3a \u0111\u01A1n n\xE0y.");
   }
-  const cleanShd = params.invoiceNumber ? String(params.invoiceNumber).padStart(7, "0") : lookupCode.slice(0, 16);
   return {
     data: validPdfBuffer,
     filename: `HoaDon_VNPT_${cleanShd}.pdf`,
@@ -12895,30 +13004,63 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
 }
 
 // src/db/neonDb.ts
-import "dotenv/config";
-import { Pool } from "pg";
+import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
-var DATA_DIR = path.join(process.cwd(), "data");
-var LOCAL_USERS_FILE = path.join(DATA_DIR, "web_users.json");
+import { Pool } from "pg";
+dotenv.config({ override: true });
+var CONFIG_FILE = path.join(process.cwd(), "neon_config.json");
 var pool = null;
+var currentPoolUrl = null;
 var isPostgresConnected = false;
 var isTableInitialized = false;
+var lastPostgresError = null;
+function cleanDatabaseUrl(rawUrl) {
+  if (!rawUrl) return "";
+  let url = rawUrl.trim().replace(/^["']|["']$/g, "").trim();
+  url = url.replace(/([?&])channel_binding=[^&]*(&|$)/gi, (_m, p1, p2) => p2 ? p1 : "");
+  return url;
+}
+function getStoredDatabaseUrl() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
+      const data = JSON.parse(raw);
+      if (data && typeof data.databaseUrl === "string" && data.databaseUrl.trim()) {
+        return cleanDatabaseUrl(data.databaseUrl);
+      }
+    }
+  } catch {
+  }
+  return "";
+}
 function getDatabaseConfig() {
+  try {
+    dotenv.config({ override: true });
+  } catch {
+  }
+  const storedUrl = getStoredDatabaseUrl();
+  if (storedUrl) {
+    return {
+      source: "CONFIG_FILE",
+      url: storedUrl
+    };
+  }
   const candidates = [
     ["POSTGRES_URL", process.env.POSTGRES_URL],
     ["DATABASE_URL", process.env.DATABASE_URL],
-    ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL],
     ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
     ["POSTGRES_URL_NON_POOLING", process.env.POSTGRES_URL_NON_POOLING],
-    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED]
+    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED],
+    ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL]
   ];
   const selected = candidates.find(([, value2]) => value2 && value2.trim());
-  let url = (selected?.[1] || "").trim().replace(/^["']|["']$/g, "").trim();
+  let url = cleanDatabaseUrl(selected?.[1] || "");
   if (!url && process.env.POSTGRES_HOST && process.env.POSTGRES_USER) {
     const user = encodeURIComponent(process.env.POSTGRES_USER || "");
     const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || "");
     const host = process.env.POSTGRES_HOST;
-    const db = process.env.POSTGRES_DATABASE || "neondb";
+    const db = process.env.POSTGRES_DATABASE || "postgres";
     url = `postgresql://${user}:${pass}@${host}/${db}?sslmode=require`;
     return {
       source: "POSTGRES_HOST_CONFIG",
@@ -12926,12 +13068,23 @@ function getDatabaseConfig() {
     };
   }
   return {
-    source: selected?.[0] || "",
+    source: selected ? selected[0] : "NONE",
     url
   };
 }
 function getDatabaseUrl() {
   return getDatabaseConfig().url;
+}
+function getMaskedDatabaseUrl() {
+  const url = getDatabaseUrl();
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    const pass = u.password ? "***" : "";
+    return `${u.protocol}//${u.username}:${pass}@${u.host}${u.pathname}`;
+  } catch {
+    return url.replace(/:([^:@]+)@/, ":***@");
+  }
 }
 function safeDatabaseError(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -12942,6 +13095,15 @@ function getPostgresPool() {
   if (!databaseUrl) {
     return null;
   }
+  if (pool && currentPoolUrl !== databaseUrl) {
+    try {
+      pool.end();
+    } catch {
+    }
+    pool = null;
+    isPostgresConnected = false;
+    isTableInitialized = false;
+  }
   if (!pool) {
     try {
       const isLocalhost = databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
@@ -12949,20 +13111,33 @@ function getPostgresPool() {
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
         max: process.env.VERCEL ? 3 : 10,
-        connectionTimeoutMillis: 15e3,
-        idleTimeoutMillis: 2e4
+        connectionTimeoutMillis: 5e3,
+        idleTimeoutMillis: 15e3
       });
+      currentPoolUrl = databaseUrl;
       pool.on("error", (err) => {
-        console.warn("[Neon PostgreSQL] Pool background error:", err.message);
         isPostgresConnected = false;
-        pool = null;
+        lastPostgresError = safeDatabaseError(err);
       });
     } catch (err) {
-      console.error("[Neon PostgreSQL] Kh\u1EDFi t\u1EA1o pool th\u1EA5t b\u1EA1i:", err.message);
+      lastPostgresError = safeDatabaseError(err);
       return null;
     }
   }
   return pool;
+}
+async function resetPostgresPool() {
+  if (pool) {
+    try {
+      await pool.end();
+    } catch {
+    }
+    pool = null;
+  }
+  currentPoolUrl = null;
+  isPostgresConnected = false;
+  isTableInitialized = false;
+  lastPostgresError = null;
 }
 function calculateExpiryDate(startDate, durationMonths) {
   const expiry = new Date(startDate);
@@ -12991,144 +13166,265 @@ function enrichUserWithStatus(user) {
     status
   };
 }
+var inMemoryUsers = /* @__PURE__ */ new Map();
+var isMemoryInitialized = false;
+function initInMemoryStore() {
+  if (isMemoryInitialized) return;
+  const now = /* @__PURE__ */ new Date();
+  const adminExpiry = calculateExpiryDate(now, 120);
+  const userExpiry = calculateExpiryDate(now, 12);
+  const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim() || "admin";
+  const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim() || "admin";
+  const initialAdminName = (process.env.ADMIN_INITIAL_FULLNAME || "").trim() || "Qu\u1EA3n tr\u1ECB vi\xEAn Demo";
+  inMemoryUsers.set(initialAdminUser.toLowerCase(), {
+    id: 1,
+    username: initialAdminUser,
+    password: initialAdminPass,
+    full_name: initialAdminName,
+    role: "admin",
+    duration_months: 120,
+    created_at: now.toISOString(),
+    expires_at: adminExpiry.toISOString(),
+    is_active: true,
+    notes: "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB Demo (In-Memory Mock)"
+  });
+  inMemoryUsers.set("0100109106", {
+    id: 2,
+    username: "0100109106",
+    password: "123",
+    full_name: "DOANH NGHI\u1EC6P TH\u1EEC NGHI\u1EC6M (MST: 0100109106)",
+    role: "user",
+    duration_months: 12,
+    created_at: now.toISOString(),
+    expires_at: userExpiry.toISOString(),
+    is_active: true,
+    notes: "T\xE0i kho\u1EA3n Tra c\u1EE9u Doanh nghi\u1EC7p M\u1EABu"
+  });
+  isMemoryInitialized = true;
+}
 async function initDatabase() {
+  initInMemoryStore();
   const databaseConfig = getDatabaseConfig();
   const databaseUrl = databaseConfig.url;
   if (!databaseUrl) {
     isPostgresConnected = false;
+    lastPostgresError = null;
     return {
-      success: false,
-      type: "local_file",
-      message: "Ch\u01B0a c\u1EA5u h\xECnh connection string Neon tr\xEAn Vercel (POSTGRES_URL, DATABASE_URL ho\u1EB7c NEON_DATABASE_URL)."
+      success: true,
+      type: "in_memory_mock",
+      message: "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock). \u0110\u1EC3 l\u01B0u tr\u1EEF v\u0129nh vi\u1EC5n, b\u1EA1n c\xF3 th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL."
     };
   }
   const p = getPostgresPool();
-  if (p) {
-    try {
-      if (!isTableInitialized) {
-        let tableExists = false;
-        try {
-          await p.query("SELECT 1 FROM web_users LIMIT 1;");
-          tableExists = true;
-        } catch {
-          tableExists = false;
-        }
-        if (!tableExists) {
-          await p.query(`
-            CREATE TABLE IF NOT EXISTS web_users (
-              id SERIAL PRIMARY KEY,
-              username VARCHAR(50) UNIQUE NOT NULL,
-              password VARCHAR(255) NOT NULL,
-              full_name VARCHAR(255),
-              role VARCHAR(20) DEFAULT 'user',
-              duration_months INTEGER DEFAULT 1,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-              is_active BOOLEAN DEFAULT TRUE,
-              notes TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-          `);
-          console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 kh\u1EDFi t\u1EA1o b\u1EA3ng web_users tr\xEAn Neon.");
-        }
+  if (!p) {
+    isPostgresConnected = false;
+    return {
+      success: true,
+      type: "in_memory_mock",
+      message: `C\u01A1 s\u1EDF d\u1EEF li\u1EC7u t\u1EA1m th\u1EDDi ch\u01B0a k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c (${lastPostgresError || "L\u1ED7i kh\xF4ng x\xE1c \u0111\u1ECBnh"}), chuy\u1EC3n sang ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m.`
+    };
+  }
+  try {
+    await p.query("SELECT 1;");
+    if (!isTableInitialized) {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS web_users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(50) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255),
+          role VARCHAR(20) DEFAULT 'user',
+          duration_months INTEGER DEFAULT 1,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+      `);
+      const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim();
+      const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim();
+      if (initialAdminUser && initialAdminPass) {
         try {
           const countRes = await p.query("SELECT COUNT(*) as count FROM web_users;");
           const count = parseInt(countRes.rows[0]?.count || "0", 10);
           if (count === 0) {
-            const defaultAdminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
+            const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
             await p.query(`
               INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
               ON CONFLICT (username) DO NOTHING;
             `, [
-              "admin",
-              process.env.ADMIN_DEFAULT_PASSWORD || "Admin@123",
-              "Qu\u1EA3n tr\u1ECB vi\xEAn h\u1EC7 th\u1ED1ng",
+              initialAdminUser,
+              initialAdminPass,
+              process.env.ADMIN_INITIAL_FULLNAME || "Qu\u1EA3n tr\u1ECB vi\xEAn",
               "admin",
               120,
               (/* @__PURE__ */ new Date()).toISOString(),
-              defaultAdminExpiry.toISOString(),
+              adminExpiry.toISOString(),
               true,
-              "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn kh\u1EDFi t\u1EA1o t\u1EF1 \u0111\u1ED9ng t\u1EEB Neon DB"
+              "T\xE0i kho\u1EA3n kh\u1EDFi t\u1EA1o t\u1EEB c\u1EA5u h\xECnh ban \u0111\u1EA7u"
             ]);
-            console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 t\u1EA1o t\xE0i kho\u1EA3n Admin m\u1EB7c \u0111\u1ECBnh (admin / Admin@123)");
           }
-        } catch (seedErr) {
-          console.warn("[Neon PostgreSQL] Ki\u1EC3m tra admin seed:", seedErr);
+        } catch {
         }
-        isTableInitialized = true;
       }
-      isPostgresConnected = true;
-      return {
-        success: true,
-        type: "neon_postgres",
-        message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi Neon PostgreSQL (${databaseConfig.source}).`
-      };
-    } catch (err) {
-      const safeErr = safeDatabaseError(err);
-      console.warn("[Neon PostgreSQL] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i t\u1EDBi Neon:", safeErr);
-      isPostgresConnected = false;
-      return {
-        success: false,
-        type: "local_file",
-        message: `L\u1ED7i k\u1EBFt n\u1ED1i Neon PostgreSQL (${databaseConfig.source}): ${safeErr}`
-      };
+      isTableInitialized = true;
     }
+    isPostgresConnected = true;
+    lastPostgresError = null;
+    return {
+      success: true,
+      type: "neon_postgres",
+      message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi c\u01A1 s\u1EDF d\u1EEF li\u1EC7u.`
+    };
+  } catch (err) {
+    const safeErr = safeDatabaseError(err);
+    lastPostgresError = safeErr;
+    isPostgresConnected = false;
+    console.warn(`[Database Init] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL: ${safeErr} - Ho\u1EA1t \u0111\u1ED9ng b\u1EB1ng In-Memory Mock`);
+    return {
+      success: true,
+      type: "in_memory_mock",
+      message: `\u0110ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock) do PostgreSQL ch\u01B0a s\u1EB5n s\xE0ng: ${safeErr}`
+    };
   }
-  return {
-    success: false,
-    type: "local_file",
-    message: `Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o pool PostgreSQL (${databaseConfig.source}). Vui l\xF2ng ki\u1EC3m tra connection string.`
-  };
 }
 async function getDatabaseStatus() {
-  const p = getPostgresPool();
+  initInMemoryStore();
   const databaseConfig = getDatabaseConfig();
   const dbConfigured = Boolean(databaseConfig.url);
-  if (p) {
-    try {
-      await p.query("SELECT 1;");
-      const res = await p.query("SELECT COUNT(*) as count FROM web_users;");
-      const totalUsers = parseInt(res.rows[0]?.count || "0", 10);
-      return {
-        connected: true,
-        type: "neon_postgres",
-        message: "Neon PostgreSQL \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1ED5n \u0111\u1ECBnh",
-        totalUsers,
-        databaseUrlConfigured: true,
-        connectionSource: databaseConfig.source
-      };
-    } catch (err) {
-      const message = safeDatabaseError(err);
-      console.warn("[DB Status] Error checking Postgres:", message);
-      return {
-        connected: false,
-        type: "neon_postgres",
-        message: `Neon PostgreSQL l\u1ED7i (${message})`,
-        totalUsers: 0,
-        databaseUrlConfigured: true,
-        connectionSource: databaseConfig.source
-      };
+  if (dbConfigured) {
+    const p = getPostgresPool();
+    if (p) {
+      try {
+        await p.query("SELECT 1;");
+        const res = await p.query("SELECT COUNT(*) as count FROM web_users;");
+        const totalUsers = parseInt(res.rows[0]?.count || "0", 10);
+        isPostgresConnected = true;
+        lastPostgresError = null;
+        return {
+          connected: true,
+          type: "neon_postgres",
+          message: "C\u01A1 s\u1EDF d\u1EEF li\u1EC7u PostgreSQL \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1ED5n \u0111\u1ECBnh",
+          totalUsers,
+          databaseUrlConfigured: true,
+          connectionSource: databaseConfig.source,
+          maskedUrl: getMaskedDatabaseUrl()
+        };
+      } catch (err) {
+        lastPostgresError = safeDatabaseError(err);
+        isPostgresConnected = false;
+      }
     }
   }
   return {
-    connected: false,
-    type: "neon_postgres",
-    message: dbConfigured ? "Kh\xF4ng th\u1EC3 truy v\u1EA5n Neon PostgreSQL. Kh\xF4ng s\u1EED d\u1EE5ng d\u1EEF li\u1EC7u local." : "Ch\u01B0a c\u1EA5u h\xECnh connection string cho Neon",
-    totalUsers: 0,
+    connected: true,
+    type: "in_memory_mock",
+    message: dbConfigured ? `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL (${lastPostgresError || "L\u1ED7i m\u1EA1ng"}), h\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi In-Memory Mock.` : "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-Memory Mock).",
+    totalUsers: inMemoryUsers.size,
     databaseUrlConfigured: dbConfigured,
-    connectionSource: databaseConfig.source
+    connectionSource: dbConfigured ? databaseConfig.source : "IN_MEMORY",
+    maskedUrl: getMaskedDatabaseUrl()
   };
 }
-async function findUserByUsername(username) {
-  const cleanUsername = (username || "").trim().toLowerCase();
-  if (!cleanUsername) return null;
-  const dbConfigured = Boolean(getDatabaseUrl());
-  if (!dbConfigured) {
-    return null;
+async function saveNeonDatabaseUrl(rawUrl, initialAdmin) {
+  const cleaned = cleanDatabaseUrl(rawUrl);
+  if (!cleaned) {
+    return { success: false, message: "Chu\u1ED7i k\u1EBFt n\u1ED1i kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng." };
   }
+  const testPool = new Pool({
+    connectionString: cleaned,
+    ssl: cleaned.includes("localhost") ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 7e3
+  });
+  try {
+    await testPool.query("SELECT 1;");
+  } catch (err) {
+    try {
+      await testPool.end();
+    } catch {
+    }
+    const safeErr = safeDatabaseError(err);
+    let friendly = safeErr;
+    if (safeErr.includes("password authentication failed")) {
+      friendly = "M\u1EADt kh\u1EA9u x\xE1c th\u1EF1c c\u01A1 s\u1EDF d\u1EEF li\u1EC7u kh\xF4ng ch\xEDnh x\xE1c.";
+    }
+    return {
+      success: false,
+      message: `K\u1EBFt n\u1ED1i c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\u1EA5t b\u1EA1i: ${friendly}`
+    };
+  }
+  try {
+    await testPool.query(`
+      CREATE TABLE IF NOT EXISTS web_users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255),
+        role VARCHAR(20) DEFAULT 'user',
+        duration_months INTEGER DEFAULT 1,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+    `);
+    if (initialAdmin?.username && initialAdmin?.password) {
+      const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
+      await testPool.query(`
+        INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
+        VALUES ($1, $2, $3, 'admin', 120, $4, $5, true, $6)
+        ON CONFLICT (username) DO NOTHING;
+      `, [
+        initialAdmin.username.trim(),
+        initialAdmin.password.trim(),
+        initialAdmin.fullName || "Qu\u1EA3n tr\u1ECB vi\xEAn",
+        (/* @__PURE__ */ new Date()).toISOString(),
+        adminExpiry.toISOString(),
+        "Kh\u1EDFi t\u1EA1o qua c\u1EA5u h\xECnh"
+      ]);
+    }
+  } catch {
+  } finally {
+    try {
+      await testPool.end();
+    } catch {
+    }
+  }
+  try {
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(
+        {
+          databaseUrl: cleaned,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+    await resetPostgresPool();
+    await initDatabase();
+    return {
+      success: true,
+      connected: true,
+      message: "\u0110\xE3 k\u1EBFt n\u1ED1i v\xE0 l\u01B0u c\u1EA5u h\xECnh c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\xE0nh c\xF4ng!"
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: `Kh\xF4ng th\u1EC3 l\u01B0u c\u1EA5u h\xECnh: ${err.message}`
+    };
+  }
+}
+async function findUserByUsername(username) {
+  const cleanUsername = (username || "").trim();
+  if (!cleanUsername) return null;
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const res = await p.query(
         "SELECT * FROM web_users WHERE LOWER(username) = LOWER($1) LIMIT 1;",
@@ -13137,27 +13433,35 @@ async function findUserByUsername(username) {
       if (res.rows.length > 0) {
         return enrichUserWithStatus(res.rows[0]);
       }
+      return null;
     } catch (err) {
-      console.warn("[findUserByUsername] PostgreSQL error:", err.message);
+      console.warn(`[findUserByUsername] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
     }
+  }
+  initInMemoryStore();
+  const lower = cleanUsername.toLowerCase();
+  const memoryUser = inMemoryUsers.get(lower);
+  if (memoryUser) {
+    return enrichUserWithStatus(memoryUser);
+  }
+  if (lower === "admin") {
+    const adminUser = Array.from(inMemoryUsers.values()).find((u) => u.role === "admin");
+    if (adminUser) return enrichUserWithStatus(adminUser);
   }
   return null;
 }
 async function getAllUsers() {
-  const dbConfigured = Boolean(getDatabaseUrl());
-  if (!dbConfigured) {
-    return [];
-  }
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const res = await p.query("SELECT * FROM web_users ORDER BY id DESC;");
       return res.rows.map(enrichUserWithStatus);
     } catch (err) {
-      console.warn("[getAllUsers] PostgreSQL error:", err.message);
+      console.warn(`[getAllUsers] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
     }
   }
-  return [];
+  initInMemoryStore();
+  return Array.from(inMemoryUsers.values()).sort((a, b) => Number(b.id) - Number(a.id)).map(enrichUserWithStatus);
 }
 async function createUser(params) {
   const cleanUsername = (params.username || "").trim();
@@ -13173,11 +13477,11 @@ async function createUser(params) {
   const expiresAt = calculateExpiryDate(now, durationMonths);
   const role = params.role || "user";
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const checkRes = await p.query("SELECT id FROM web_users WHERE LOWER(username) = LOWER($1);", [cleanUsername]);
       if (checkRes.rows.length > 0) {
-        return { success: false, error: `M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i tr\xEAn h\u1EC7 th\u1ED1ng.` };
+        return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
       }
       const insertRes = await p.query(`
         INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
@@ -13196,27 +13500,45 @@ async function createUser(params) {
       const newUser = enrichUserWithStatus(insertRes.rows[0]);
       return { success: true, user: newUser };
     } catch (err) {
-      console.error("[createUser] PostgreSQL insert error:", err.message);
-      return { success: false, error: err.message };
+      console.warn(`[createUser] PostgreSQL insert failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 t\u1EA1o ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const lower = cleanUsername.toLowerCase();
+  if (inMemoryUsers.has(lower)) {
+    return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
+  }
+  const newId = inMemoryUsers.size + 1;
+  const record = {
+    id: newId,
+    username: cleanUsername,
+    password: cleanPassword,
+    full_name: params.fullName || "",
+    role,
+    duration_months: durationMonths,
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    is_active: true,
+    notes: params.notes || ""
+  };
+  inMemoryUsers.set(lower, record);
+  return { success: true, user: enrichUserWithStatus(record) };
 }
 async function updateUser(id, params) {
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const curRes = await p.query("SELECT * FROM web_users WHERE id = $1;", [id]);
       if (curRes.rows.length === 0) {
-        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng c\u1EA7n c\u1EADp nh\u1EADt." };
+        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
       }
       const current = curRes.rows[0];
-      let expiresAt = new Date(current.expires_at);
+      let expiresAt2 = new Date(current.expires_at);
       if (params.extendMonths) {
-        const baseDate = expiresAt.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt;
-        expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
+        const baseDate = expiresAt2.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt2;
+        expiresAt2 = calculateExpiryDate(baseDate, params.extendMonths);
       } else if (params.newExpiresAt) {
-        expiresAt = new Date(params.newExpiresAt);
+        expiresAt2 = new Date(params.newExpiresAt);
       }
       const password = params.password !== void 0 && params.password.trim() !== "" ? params.password.trim() : current.password;
       const fullName = params.fullName !== void 0 ? params.fullName : current.full_name;
@@ -13227,18 +13549,43 @@ async function updateUser(id, params) {
         SET password = $1, full_name = $2, expires_at = $3, is_active = $4, notes = $5
         WHERE id = $6
         RETURNING *;
-      `, [password, fullName, expiresAt.toISOString(), isActive, notes, id]);
+      `, [password, fullName, expiresAt2.toISOString(), isActive, notes, id]);
       return { success: true, user: enrichUserWithStatus(updateRes.rows[0]) };
     } catch (err) {
-      console.error("[updateUser] PostgreSQL update error:", err.message);
-      return { success: false, error: err.message };
+      console.warn(`[updateUser] PostgreSQL update failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 c\u1EADp nh\u1EADt ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
+  if (!existing) {
+    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
+  }
+  let expiresAt = new Date(existing.expires_at);
+  if (params.extendMonths) {
+    const baseDate = expiresAt.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt;
+    expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
+  } else if (params.newExpiresAt) {
+    expiresAt = new Date(params.newExpiresAt);
+  }
+  if (params.password !== void 0 && params.password.trim() !== "") {
+    existing.password = params.password.trim();
+  }
+  if (params.fullName !== void 0) {
+    existing.full_name = params.fullName;
+  }
+  if (params.isActive !== void 0) {
+    existing.is_active = params.isActive;
+  }
+  if (params.notes !== void 0) {
+    existing.notes = params.notes;
+  }
+  existing.expires_at = expiresAt.toISOString();
+  inMemoryUsers.set(existing.username.toLowerCase(), existing);
+  return { success: true, user: enrichUserWithStatus(existing) };
 }
 async function deleteUser(id) {
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const curRes = await p.query("SELECT role, username FROM web_users WHERE id = $1;", [id]);
       if (curRes.rows.length === 0) {
@@ -13250,16 +13597,42 @@ async function deleteUser(id) {
       await p.query("DELETE FROM web_users WHERE id = $1;", [id]);
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      console.warn(`[deleteUser] PostgreSQL delete failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 x\xF3a ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
+  if (!existing) {
+    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng" };
+  }
+  if (existing.role === "admin" || existing.username.toLowerCase() === "admin") {
+    return { success: false, error: "Kh\xF4ng th\u1EC3 x\xF3a t\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn Master." };
+  }
+  inMemoryUsers.delete(existing.username.toLowerCase());
+  return { success: true };
 }
 
 // server.ts
-import { GoogleGenAI as GoogleGenAI4 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI5 } from "@google/genai";
+dotenv2.config({ override: true });
 var app = express();
-var PORT = Number(process.env.PORT) || 3e3;
+function resolvePort() {
+  const portIdx = process.argv.indexOf("--port");
+  if (portIdx !== -1 && process.argv[portIdx + 1]) {
+    const p = parseInt(process.argv[portIdx + 1], 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const p = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.PORT && process.env.PORT !== "8080") {
+    const p = parseInt(process.env.PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  return 3e3;
+}
+var PORT = resolvePort();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
@@ -13454,7 +13827,7 @@ function getGeminiClient(customKey) {
   const apiKey = customKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!geminiAiClient || customKey) {
-    const client = new GoogleGenAI4({
+    const client = new GoogleGenAI5({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
@@ -14232,7 +14605,10 @@ app.get("/api/gdt/status", (req, res) => {
 });
 app.post("/api/gdt/run-selenium", (req, res) => {
   const { taxCode, password, invoiceType, fromDate, toDate, headless } = req.body;
-  const mst = taxCode || currentSession?.taxCode || "0316892345";
+  const mst = (taxCode || currentSession?.taxCode || "").trim();
+  if (!mst) {
+    return res.status(400).json({ success: false, message: "Vui l\xF2ng cung c\u1EA5p M\xE3 s\u1ED1 thu\u1EBF h\u1EE3p l\u1EC7." });
+  }
   const pwd = password || "";
   seleniumLogs = [];
   const addLog = (level, message, stepName, progress) => {
@@ -14306,7 +14682,7 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
     const zip = new JSZip4();
-    const fs = await import("fs");
+    const fs2 = await import("fs");
     const pythonDir = path2.join(process.cwd(), "python");
     const files = [
       "gdt_selenium_crawler.py",
@@ -14319,8 +14695,8 @@ app.get("/api/gdt/download-python-package", async (req, res) => {
     ];
     for (const file of files) {
       const fullPath = path2.join(pythonDir, file);
-      if (fs.existsSync(fullPath)) {
-        const content = fs.readFileSync(fullPath, "utf-8");
+      if (fs2.existsSync(fullPath)) {
+        const content = fs2.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
@@ -14432,8 +14808,8 @@ echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
 python3 gdt_selenium_crawler.py --type purchase
 `;
-    if (fs.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
-      zip.file("run_windows.bat", fs.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
+    if (fs2.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs2.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
     } else {
       zip.file("run_windows.bat", runBat);
     }
@@ -14643,6 +15019,521 @@ app.all("/api/vnpt/download-pdf", async (req, res) => {
   } catch (error) {
     console.error("[VNPT] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+var vnptPortalSessions = /* @__PURE__ */ new Map();
+var latestVnptSessionId = "";
+function parseRequestCookies(cookieHeader) {
+  const result = {};
+  if (!cookieHeader) return result;
+  cookieHeader.split(";").forEach((item) => {
+    const parts = item.split("=");
+    const name = parts[0]?.trim();
+    if (name) {
+      result[name] = parts.slice(1).join("=").trim();
+    }
+  });
+  return result;
+}
+function getVnptSession(req) {
+  const cookies = parseRequestCookies(req.headers.cookie);
+  const sessionId = String(req.query.sessionId || req.body?.sessionId || cookies["vnpt_portal_session_id"] || "").trim();
+  if (sessionId && vnptPortalSessions.has(sessionId)) {
+    return vnptPortalSessions.get(sessionId);
+  }
+  if (latestVnptSessionId && vnptPortalSessions.has(latestVnptSessionId)) {
+    const s = vnptPortalSessions.get(latestVnptSessionId);
+    if (s && s.expiresAt > Date.now()) return s;
+  }
+  for (const session of vnptPortalSessions.values()) {
+    if (session.expiresAt > Date.now()) {
+      return session;
+    }
+  }
+  return void 0;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of vnptPortalSessions.entries()) {
+    if (session.expiresAt < now) {
+      vnptPortalSessions.delete(key);
+    }
+  }
+}, 10 * 60 * 1e3);
+app.all(["/api/vnpt/ajxPreview", "/api/vnpt/ajx-preview", "/HomeNoLogin/ajxPreview", "/HomeNoLogin/ajxPreview/"], express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.body.portalUrl || req.query.portalUrl || (req.body.sellerTaxCode ? `https://${req.body.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.body.checkCode || req.query.checkCode || "");
+    const fkey = String(req.body.fkey || req.body.lookupCode || req.query.fkey || req.query.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.body.nameCus || req.query.nameCus || "");
+    const params = new URLSearchParams({
+      checkCode,
+      fkey,
+      nameCus
+    });
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    console.log(`[VNPT Proxy ajxPreview] T\u1EA3i b\u1EA3n th\u1EC3 hi\u1EC7n: portal=${portal}, fkey="${fkey}", checkCode="${checkCode}"...`);
+    const previewRes = await axios10.post(`${portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
+      headers,
+      timeout: 25e3
+    });
+    res.json(previewRes.data);
+  } catch (err) {
+    console.error("[VNPT Proxy ajxPreview] L\u1ED7i:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+app.all(["/api/vnpt/downloadPDF", "/HomeNoLogin/downloadPDF", "/HomeNoLogin/downloadPDF/"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || "");
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || "");
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    const targetUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    console.log(`[VNPT Proxy downloadPDF] T\u1EA3i PDF t\u1EEB: ${targetUrl}...`);
+    const pdfRes = await axios10.get(targetUrl, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="HoaDon_VNPT_${fkey || "DT"}.pdf"`);
+    res.send(Buffer.from(pdfRes.data));
+  } catch (err) {
+    console.error("[VNPT Proxy downloadPDF] L\u1ED7i:", err.message);
+    res.status(500).send("L\u1ED7i khi t\u1EA3i file PDF t\u1EEB C\u1ED5ng VNPT: " + err.message);
+  }
+});
+app.all(["/api/vnpt/downloadZip", "/api/vnpt/download-zip", "/HomeNoLogin/downloadZip", "/HomeNoLogin/downloadZip/"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || "");
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || "");
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    const targetUrl = `${portal}/HomeNoLogin/downloadZip?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    const zipRes = await axios10.get(targetUrl, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="HoaDon_VNPT_${fkey || "DT"}.zip"`);
+    res.send(Buffer.from(zipRes.data));
+  } catch (err) {
+    console.error("[VNPT Proxy downloadZip] L\u1ED7i:", err.message);
+    res.status(500).send("L\u1ED7i khi t\u1EA3i file Zip: " + err.message);
+  }
+});
+app.all(["/Record/DownloadMultiFiles", "/HomeNoLogin/DownloadMultiFiles"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send("Phi\xEAn l\xE0m vi\u1EC7c \u0111\xE3 h\u1EBFt h\u1EA1n.");
+    }
+    const targetUrl = `${session.portal}${req.originalUrl}`;
+    const fileRes = await axios10.get(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+        Cookie: session.cookies
+      },
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", String(fileRes.headers["content-type"] || "application/octet-stream"));
+    res.send(Buffer.from(fileRes.data));
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+app.all("/api/vnpt/portal", (req, res) => {
+  const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || req.body?.mst || req.body?.sellerTaxCode || "").trim();
+  const code = String(req.query.code || req.query.fkey || req.query.lookupCode || req.body?.code || req.body?.fkey || "").trim();
+  const rawPortal = String(req.query.portal || req.query.portalUrl || req.body?.portal || req.body?.portalUrl || "").trim();
+  const cleanMst = rawMst.replace(/[^0-9\-]/g, "");
+  let portal = rawPortal.replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+  if (!portal || !/vnpt-invoice/i.test(portal)) {
+    portal = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  const actionUrl = `${portal}/HomeNoLogin/SearchByFkey`;
+  const safeCode = code.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  res.type("html").send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>\u0110ang m\u1EDF C\u1ED5ng tra c\u1EE9u VNPT...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc;">
+  <div style="text-align: center; color: #475569;">
+    <p style="font-size: 15px; font-weight: 500;">\u0110ang m\u1EDF C\u1ED5ng tra c\u1EE9u VNPT...</p>
+    <form id="vnptForm" method="POST" action="${actionUrl}">
+      <input type="hidden" name="strFkey" value="${safeCode}" />
+      <noscript>
+        <button type="submit" style="background: #0284c7; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+          B\u1EA5m v\xE0o \u0111\xE2y \u0111\u1EC3 ti\u1EBFp t\u1EE5c m\u1EDF C\u1ED5ng VNPT
+        </button>
+      </noscript>
+    </form>
+  </div>
+  <script>
+    document.getElementById('vnptForm').submit();
+  </script>
+</body>
+</html>`);
+});
+app.get("/api/vnpt/captcha", async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send("Session expired");
+    }
+    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Cookie: session.cookies,
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`
+      },
+      responseType: "arraybuffer",
+      timeout: 1e4
+    });
+    const captchaCookies = (captchaRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    res.setHeader("Content-Type", "image/png");
+    res.send(Buffer.from(captchaRes.data));
+  } catch (e) {
+    res.status(500).send("Error refreshing captcha");
+  }
+});
+app.get("/api/vnpt/auto-solve-captcha", async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Phi\xEAn tra c\u1EE9u \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng t\u1EA3i l\u1EA1i trang." });
+    }
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 15e3
+    });
+    const captchaCookies = (captchaRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaRes.data), {
+      prompt: VNPT_CAPTCHA_PROMPT
+    });
+    res.json({
+      success: true,
+      code: captchaResult.code,
+      base64: `data:image/png;base64,${Buffer.from(captchaRes.data).toString("base64")}`
+    });
+  } catch (err) {
+    console.error("[VNPT Auto Solve Captcha] L\u1ED7i:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+app.post("/api/vnpt/portal-submit", express.urlencoded({ extended: true }), async (req, res) => {
+  const sessionId = String(req.query.sessionId || "").trim();
+  const session = getVnptSession(req);
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.get("host");
+  const baseUrl = `${proto}://${host}`;
+  if (!session) {
+    const mst = String(req.body.mst || "");
+    const code = String(req.body.strFkey || "");
+    return res.redirect(`/api/vnpt/portal?mst=${encodeURIComponent(mst)}&code=${encodeURIComponent(code)}`);
+  }
+  try {
+    const strFkey = String(req.body.strFkey || session.lookupCode || "").trim();
+    const captch = String(req.body.captch || "").trim();
+    const token = String(req.body.__RequestVerificationToken || session.token || "").trim();
+    console.log(`[VNPT Portal Submit] G\u1EEDi t\xECm ki\u1EBFm: portal=${session.portal}, strFkey="${strFkey}", captcha="${captch}"...`);
+    const form = new URLSearchParams({
+      __RequestVerificationToken: token,
+      strFkey,
+      captch,
+      submit: ""
+    });
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+    const postRes = await axios10.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+      headers,
+      responseType: "text",
+      validateStatus: (s) => s >= 200 && s < 400
+    });
+    const postCookies = (postRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    if (postCookies.length > 0) {
+      session.cookies = [...session.cookies.split("; "), ...postCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    }
+    res.setHeader("Set-Cookie", `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
+    const html = String(postRes.data || "");
+    const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
+    const $ = cheerio4.load(html);
+    $("head").prepend(`<base href="${session.portal}/">`);
+    if (isCaptchaError) {
+      try {
+        const freshCaptcha = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Cookie: session.cookies, Referer: `${session.portal}/HomeNoLogin/SearchByFkey/` },
+          responseType: "arraybuffer",
+          timeout: 1e4
+        });
+        const captchaCookies = (freshCaptcha.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+        session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+        const freshBase64 = `data:image/png;base64,${Buffer.from(freshCaptcha.data).toString("base64")}`;
+        $('img[src*="/Captcha/Show"], img#imgCaptcha, img.captcha_img').attr("src", freshBase64);
+      } catch (err) {
+        console.warn("[VNPT Portal Submit] L\u1ED7i l\xE0m m\u1EDBi captcha:", err.message);
+      }
+      $("#strFkey").attr("value", strFkey);
+      $('form[action*="/HomeNoLogin/SearchByFkey"]').attr("action", `${baseUrl}/api/vnpt/portal-submit?sessionId=${sessionId}`);
+      $("body").prepend(`
+        <div style="background: #dc2626; color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+          <span>\u26A0\uFE0F <strong>M\xE3 x\xE1c th\u1EF1c kh\xF4ng ch\xEDnh x\xE1c.</strong> \u0110\xE3 l\xE0m m\u1EDBi \u1EA3nh m\xE3 x\xE1c th\u1EF1c. Vui l\xF2ng nh\xECn h\xECnh v\xE0 nh\u1EADp l\u1EA1i (M\xE3 tra c\u1EE9u <strong>${strFkey}</strong> v\u1EABn \u0111\u01B0\u1EE3c gi\u1EEF nguy\xEAn).</span>
+          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}');" style="color: #fecaca; text-decoration: underline; font-size: 12px;">M\u1EDF link g\u1ED1c tr\u1EF1c ti\u1EBFp t\u1EA1i C\u1ED5ng VNPT &rarr;</a>
+        </div>
+      `);
+      $("body").append(`
+        <script>
+          $(document).ready(function() {
+            $('#strFkey').val(${JSON.stringify(strFkey)});
+            $('#captch').val('').focus();
+            $('img.captcha_img, img[src*="data:image"], img[src*="/Captcha/Show"]').css('cursor', 'pointer').on('click', function() {
+              var imgEl = this;
+              fetch('${baseUrl}/api/vnpt/captcha?sessionId=${sessionId}&t=' + Date.now())
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                  imgEl.src = URL.createObjectURL(blob);
+                  $('#captch').val('').focus();
+                });
+            });
+          });
+        </script>
+      `);
+      return res.type("html").send($.html());
+    }
+    $("head").append(`
+      <style>
+        body { background: #f8fafc !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; }
+        #banner-vnptinvoice, #body, #bodyMain { height: auto !important; min-height: auto !important; overflow: visible !important; }
+        .box__form, .box-searchInv {
+          max-width: 1180px !important;
+          margin: 25px auto !important;
+          padding: 24px !important;
+          background: #ffffff !important;
+          border-radius: 14px !important;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.06) !important;
+          border: 1px solid #e2e8f0 !important;
+        }
+        .table {
+          width: 100% !important;
+          border-collapse: separate !important;
+          border-spacing: 0 !important;
+          border: 1px solid #cbd5e1 !important;
+          border-radius: 10px !important;
+          overflow: hidden !important;
+          background: #fff !important;
+          margin-top: 15px !important;
+        }
+        .table th {
+          background: #f1f5f9 !important;
+          color: #1e293b !important;
+          font-weight: 700 !important;
+          font-size: 13px !important;
+          padding: 12px 10px !important;
+          border-bottom: 2px solid #cbd5e1 !important;
+          text-align: center !important;
+        }
+        .table td {
+          padding: 12px 10px !important;
+          border-bottom: 1px solid #e2e8f0 !important;
+          vertical-align: middle !important;
+          font-size: 13px !important;
+          color: #334155 !important;
+        }
+        .table tr:hover td { background: #f8fafc !important; }
+        .table tr:last-child td { border-bottom: none !important; }
+      </style>
+    `);
+    $("table tr").each((_, tr) => {
+      const $tr = $(tr);
+      const viewLink = $tr.find('a[onclick*="ajxCall4Portal"]');
+      const dlLink = $tr.find('a[href*="downloadPDF"]');
+      let rowCheckCode = "";
+      if (viewLink.length > 0) {
+        const m = (viewLink.attr("onclick") || "").match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (m) rowCheckCode = m[1];
+      }
+      if (!rowCheckCode && dlLink.length > 0) {
+        const m = (dlLink.attr("href") || "").match(/checkCode=([^&"']+)/);
+        if (m) rowCheckCode = decodeURIComponent(m[1]);
+      }
+      if (rowCheckCode) {
+        const targetTd = viewLink.closest("td").length > 0 ? viewLink.closest("td") : dlLink.closest("td");
+        if (targetTd.length > 0) {
+          targetTd.html(`
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center;">
+              <button type="button" onclick="openVnptInvoice('${rowCheckCode}', '${strFkey}')" style="background:#0284c7; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(2,132,199,0.3); transition:all 0.15s;" title="Xem chi ti\u1EBFt h\xF3a \u0111\u01A1n g\u1ED1c">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span>Xem</span>
+              </button>
+              <a href="${baseUrl}/api/vnpt/download-pdf?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download="HoaDon_VNPT_${strFkey}.pdf" style="background:#16a34a; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(22,163,74,0.3); transition:all 0.15s;" title="T\u1EA3i file PDF h\xF3a \u0111\u01A1n g\u1ED1c \u0111\xE3 k\xFD s\u1ED1">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>T\u1EA3i PDF</span>
+              </a>
+              <a href="${baseUrl}/api/vnpt/download-zip?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download="HoaDon_VNPT_${strFkey}.zip" style="background:#475569; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(71,85,105,0.3); transition:all 0.15s;" title="T\u1EA3i file ZIP g\u1ED3m XML ch\u1EEF k\xFD s\u1ED1 v\xE0 PDF">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                <span>ZIP</span>
+              </a>
+            </div>
+          `);
+        }
+      }
+    });
+    $("body").prepend(`
+      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 12px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 3px 12px rgba(0,0,0,0.25);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold;">\u2713</span>
+          <span><strong>Tra c\u1EE9u VNPT th\xE0nh c\xF4ng:</strong> \u0110\xE3 t\xECm th\u1EA5y k\u1EBFt qu\u1EA3 h\xF3a \u0111\u01A1n cho m\xE3 tra c\u1EE9u <strong>${strFkey}</strong>. Qu\xFD kh\xE1ch c\xF3 th\u1EC3 b\u1EA5m <strong>Xem</strong> ho\u1EB7c <strong>T\u1EA3i file PDF</strong> tr\u1EF1c ti\u1EBFp.</span>
+        </div>
+        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}'); alert('\u0110\xE3 sao ch\xE9p m\xE3 tra c\u1EE9u ${strFkey} v\xE0o b\u1ED9 nh\u1EDB t\u1EA1m! Khi m\u1EDF C\u1ED5ng VNPT, b\u1EA1n ch\u1EC9 c\u1EA7n nh\u1EA5n Ctrl+V v\xE0o \xF4 tra c\u1EE9u.');" style="color: #ffffff; text-decoration: none; font-size: 12px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(255,255,255,0.3); display: inline-flex; align-items: center; gap: 4px;">
+          <span>M\u1EDF web g\u1ED1c vnpt-invoice.com.vn</span> &rarr;
+        </a>
+      </div>
+    `);
+    $("body").append(`
+      <!-- Modal Backdrop -->
+      <div id="vnpt-modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999998; backdrop-filter:blur(2px);" onclick="closeVnptModal()"></div>
+
+      <!-- Loading Spinner -->
+      <div id="vnpt-modal-loading" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#0f172a; color:#f8fafc; padding:18px 28px; border-radius:10px; z-index:9999999; box-shadow:0 20px 40px rgba(0,0,0,0.4); font-family:sans-serif; font-size:14px; align-items:center; gap:12px;">
+        <span style="display:inline-block; width:22px; height:22px; border:3px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:vnpt-spin 0.8s linear infinite;"></span>
+        <span>\u0110ang t\u1EA3i n\u1ED9i dung h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB C\u1ED5ng VNPT...</span>
+      </div>
+
+      <!-- Invoice Viewer Modal -->
+      <div id="ViewInvoice" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#ffffff; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.5); padding:24px; width:940px; max-width:96vw; max-height:92vh; overflow-y:auto; z-index:9999999; border:1px solid #cbd5e1; font-family:Arial,sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">\u{1F4C4}</span>
+            <strong style="color:#005baa; font-size:16px;">Chi Ti\u1EBFt H\xF3a \u0110\u01A1n \u0110i\u1EC7n T\u1EED - VNPT Invoice</strong>
+          </div>
+          <button type="button" onclick="closeVnptModal()" style="border:none; background:#f1f5f9; border-radius:6px; cursor:pointer; font-size:18px; font-weight:bold; width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:#475569;" title="\u0110\xF3ng">\u2715</button>
+        </div>
+        <div id="bt" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;"></div>
+        <div id="container" style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:16px; overflow:auto;"></div>
+      </div>
+
+      <style>
+        @keyframes vnpt-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        #ViewInvoice table { width: 100% !important; border-collapse: collapse; }
+      </style>
+
+      <script>
+        // H\xE0m m\u1EDF xem h\xF3a \u0111\u01A1n tr\u1EF1c ti\u1EBFp
+        window.openVnptInvoice = function(checkCode, fkey) {
+          fkey = fkey || ${JSON.stringify(strFkey)};
+          $('#vnpt-modal-loading').css('display', 'flex');
+          $('#vnpt-modal-backdrop').show();
+          $('#ViewInvoice').hide();
+
+          $.ajax({
+            type: 'POST',
+            url: '${baseUrl}/api/vnpt/ajxPreview',
+            data: { checkCode: checkCode, fkey: fkey, sessionId: ${JSON.stringify(sessionId)} },
+            success: function(data) {
+              $('#vnpt-modal-loading').hide();
+              if (!data || !data.str) {
+                alert('Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c n\u1ED9i dung h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng VNPT. Vui l\xF2ng th\u1EED l\u1EA1i.');
+                $('#vnpt-modal-backdrop').hide();
+                return;
+              }
+              $('#container').html(data.str);
+
+              var btnHtml = '';
+              btnHtml += '<button type="button" onclick="window.printInvoiceDirect()" style="background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> In H\xF3a \u0110\u01A1n</button>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-pdf?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> T\u1EA3i PDF H\xF3a \u0110\u01A1n</a>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-zip?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download style="background:#475569; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg> T\u1EA3i File Zip</a>';
+              btnHtml += '<button type="button" onclick="closeVnptModal()" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; margin-left:auto;">\u2715 \u0110\xF3ng</button>';
+
+              $('#bt').html(btnHtml);
+              $('#ViewInvoice').show();
+            },
+            error: function(xhr, status, err) {
+              $('#vnpt-modal-loading').hide();
+              $('#vnpt-modal-backdrop').hide();
+              alert('L\u1ED7i khi t\u1EA3i h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng VNPT: ' + (err || status));
+            }
+          });
+          return false;
+        };
+
+        window.ajxCall4Portal = window.openVnptInvoice;
+
+        window.printInvoiceDirect = function() {
+          var printContent = document.getElementById('container').innerHTML;
+          var win = window.open('', '_blank', 'width=950,height=750');
+          win.document.write('<!DOCTYPE html><html><head><title>H\xF3a \u0111\u01A1n VNPT - ${strFkey}</title>');
+          win.document.write('<style>@page{size:A4;margin:8mm;}body{margin:0;padding:12px;font-family:Arial,sans-serif;}table{width:100% !important;border-collapse:collapse;}</style>');
+          win.document.write('</head><body>');
+          win.document.write(printContent);
+          win.document.write('</body></html>');
+          win.document.close();
+          win.focus();
+          setTimeout(function() { win.print(); win.close(); }, 600);
+        };
+
+        window.closeVnptModal = function() {
+          $('#ViewInvoice').hide();
+          $('#vnpt-modal-loading').hide();
+          $('#vnpt-modal-backdrop').hide();
+        };
+
+        $(document).ready(function() {
+          // Ng\u0103n m\u1ECDi th\u1EBB a c\xF3 href="#", "/" ho\u1EB7c r\u1ED7ng chuy\u1EC3n h\u01B0\u1EDBng trang ngo\xE0i \xFD mu\u1ED1n
+          $('a[href="#"], a[href="/"], a[href=""]').on('click', function(e) {
+            e.preventDefault();
+            return false;
+          });
+        });
+      </script>
+    `);
+    res.type("html").send($.html());
+  } catch (error) {
+    console.error("[VNPT Portal Submit] L\u1ED7i x\u1EED l\xFD form:", error.message);
+    res.redirect(`${session.portal}/HomeNoLogin/SearchByFkey`);
   }
 });
 app.all("/api/viettel/download-pdf", async (req, res) => {
@@ -15268,15 +16159,23 @@ app.post("/api/auth/login", async (req, res) => {
     if (!dbInit.success) {
       return res.status(200).json({
         success: false,
-        message: dbInit.message || "H\u1EC7 th\u1ED1ng ch\u01B0a k\u1EBFt n\u1ED1i t\u1EDBi Neon Database. Vui l\xF2ng c\u1EA5u h\xECnh DATABASE_URL ho\u1EB7c POSTGRES_URL tr\xEAn Vercel."
+        message: dbInit.message || "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng ki\u1EC3m tra l\u1EA1i c\u1EA5u h\xECnh DATABASE_URL."
       });
     }
-    const user = await findUserByUsername(username);
+    let user;
+    try {
+      user = await findUserByUsername(username);
+    } catch (dbErr) {
+      return res.status(200).json({
+        success: false,
+        message: "L\u1ED7i truy v\u1EA5n c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng th\u1EED l\u1EA1i sau."
+      });
+    }
     if (!user) {
-      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp (M\xE3 s\u1ED1 thu\u1EBF) ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng \u0111\xFAng." });
+      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
     }
     if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: "M\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
+      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
     }
     if (!user.is_active) {
       return res.status(403).json({ success: false, message: "T\xE0i kho\u1EA3n n\xE0y \u0111ang b\u1ECB t\u1EA1m kh\xF3a. Vui l\xF2ng li\xEAn h\u1EC7 qu\u1EA3n tr\u1ECB vi\xEAn." });
@@ -15406,11 +16305,39 @@ app.get("/api/admin/db-status", async (req, res) => {
         success: true,
         connected: true,
         type: "remote_webapp",
-        message: "X\xE1c th\u1EF1c Neon \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp."
+        message: "X\xE1c th\u1EF1c t\xE0i kho\u1EA3n \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp.",
+        maskedUrl: ""
       });
     }
     const status = await getDatabaseStatus();
-    res.json({ success: true, ...status });
+    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.get("/api/neon/config", async (req, res) => {
+  try {
+    const status = await getDatabaseStatus();
+    res.json({
+      success: true,
+      ...status,
+      maskedUrl: getMaskedDatabaseUrl()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/neon/test-and-save", async (req, res) => {
+  try {
+    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
+    if (!databaseUrl || typeof databaseUrl !== "string") {
+      return res.status(400).json({ success: false, message: "Vui l\xF2ng cung c\u1EA5p chu\u1ED7i k\u1EBFt n\u1ED1i DATABASE_URL h\u1EE3p l\u1EC7." });
+    }
+    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
+      username: initialAdminUsername,
+      password: initialAdminPassword
+    });
+    return res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -15432,14 +16359,6 @@ app.use("/api", (err, req, res, next) => {
   });
 });
 async function startServer() {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    initDatabase().then((dbInitResult) => {
-      console.log(`[Database Init] ${dbInitResult.message}`);
-    }).catch((dbErr) => {
-      console.warn("[Database Init] Warning:", dbErr.message);
-    });
-  });
   if (process.env.NODE_ENV !== "production") {
     try {
       const { createServer: createViteServer } = await import("vite");
@@ -15451,7 +16370,26 @@ async function startServer() {
         appType: "spa"
       });
       app.use(vite.middlewares);
-      console.log("[Vite] Vite middleware attached.");
+      app.use("*", async (req, res, next) => {
+        if (req.method !== "GET" || req.originalUrl.startsWith("/api")) {
+          return next();
+        }
+        try {
+          const fs2 = await import("fs");
+          const path3 = await import("path");
+          const indexPath = path3.resolve(process.cwd(), "index.html");
+          if (fs2.existsSync(indexPath)) {
+            let template = fs2.readFileSync(indexPath, "utf-8");
+            template = await vite.transformIndexHtml(req.originalUrl, template);
+            return res.status(200).set({ "Content-Type": "text/html" }).end(template);
+          }
+        } catch (e) {
+          vite.ssrFixStacktrace(e);
+          return next(e);
+        }
+        next();
+      });
+      console.log("[Vite] Vite middleware and SPA fallback attached.");
     } catch (viteErr) {
       console.error("[Vite Init Error]:", viteErr.message);
     }
@@ -15462,6 +16400,15 @@ async function startServer() {
       res.sendFile(path2.join(distPath, "index.html"));
     });
   }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    initDatabase().then((dbInitResult) => {
+      if (dbInitResult.success) {
+        console.log(`[Database Init] \u2713 ${dbInitResult.message}`);
+      }
+    }).catch(() => {
+    });
+  });
 }
 var server_default = app;
 if (!process.env.VERCEL) {

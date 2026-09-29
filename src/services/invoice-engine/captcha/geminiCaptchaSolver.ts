@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 export const VNPT_CAPTCHA_PROMPT =
   'This is a 4-digit captcha image with a noisy gray background. Please ignore the background noise and strike-through lines, and focus only on identifying the 4 main numbers. Output ONLY the 4 digits, nothing else.';
@@ -15,7 +15,7 @@ function getGenAI() {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY chưa được cấu hình.');
   }
-  return new GoogleGenerativeAI(apiKey);
+  return new GoogleGenAI({ apiKey });
 }
 
 function toImagePart(image: Buffer | Uint8Array | string): { data: string; mimeType: string } {
@@ -38,26 +38,30 @@ export async function solveCaptchaWithGemini(
 ): Promise<string> {
   const promptToUse = customPrompt || VNPT_CAPTCHA_PROMPT;
   const image = toImagePart(base64Image);
-  const genAI = getGenAI();
+  const ai = getGenAI();
 
   let lastError: any = null;
 
   for (const modelName of CANDIDATE_MODELS) {
     try {
-      const model = genAI.getGenerativeModel({
+      const response = await ai.models.generateContent({
         model: modelName,
-        generationConfig: {
+        contents: [
+          {
+            inlineData: {
+              data: image.data,
+              mimeType: image.mimeType,
+            },
+          },
+          promptToUse,
+        ],
+        config: {
           temperature: 0,
           maxOutputTokens: 8,
-          topK: 1,
         },
       });
 
-      const result = await model.generateContent([
-        { inlineData: image },
-        promptToUse,
-      ]);
-      const rawText = result.response.text();
+      const rawText = response.text || '';
       const digits = rawText.replace(/\D/g, '');
 
       if (digits.length === 4) {
