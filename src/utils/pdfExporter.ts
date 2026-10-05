@@ -54,13 +54,18 @@ export async function exportInvoiceToPdfFile(
         templateId: (templateId && templateId !== 'AUTO') ? templateId as any : undefined
       });
       
+      // Use DOMParser to safely parse HTML and strip any script elements before DOM insertion
+      const parser = new DOMParser();
+      const parsedDoc = parser.parseFromString(htmlString, 'text/html');
+      parsedDoc.querySelectorAll('script').forEach(s => s.remove());
+
       tempContainer = document.createElement('div');
       tempContainer.style.position = 'fixed';
       tempContainer.style.left = '-9999px';
       tempContainer.style.top = '0';
       tempContainer.style.width = '820px';
       tempContainer.style.background = '#ffffff';
-      tempContainer.innerHTML = htmlString;
+      tempContainer.innerHTML = parsedDoc.body.innerHTML;
       document.body.appendChild(tempContainer);
       targetElement = tempContainer.querySelector('.main-page, .invoice-container, .misa-invoice-page, .sinvoice-paper, .viettel-wrapper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card, .print-page') as HTMLElement || tempContainer;
     }
