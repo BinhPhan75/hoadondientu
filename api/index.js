@@ -13186,19 +13186,7 @@ function initInMemoryStore() {
     created_at: now.toISOString(),
     expires_at: adminExpiry.toISOString(),
     is_active: true,
-    notes: "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB Demo (In-Memory Mock)"
-  });
-  inMemoryUsers.set("0100109106", {
-    id: 2,
-    username: "0100109106",
-    password: "123",
-    full_name: "DOANH NGHI\u1EC6P TH\u1EEC NGHI\u1EC6M (MST: 0100109106)",
-    role: "user",
-    duration_months: 12,
-    created_at: now.toISOString(),
-    expires_at: userExpiry.toISOString(),
-    is_active: true,
-    notes: "T\xE0i kho\u1EA3n Tra c\u1EE9u Doanh nghi\u1EC7p M\u1EABu"
+    notes: "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn (Ch\u1EBF \u0111\u1ED9 d\u1EF1 ph\xF2ng khi ch\u01B0a k\u1EBFt n\u1ED1i Neon)"
   });
   isMemoryInitialized = true;
 }
@@ -14287,7 +14275,16 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
+  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+  const parsedSize = parseInt(String(size), 10);
+  const validSize = !isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500 ? parsedSize : 50;
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (fromDate && typeof fromDate === "string" && !dateRegex.test(fromDate.trim())) {
+    fromDate = void 0;
+  }
+  if (toDate && typeof toDate === "string" && !dateRegex.test(toDate.trim())) {
+    toDate = void 0;
+  }
   const authHeader = req.headers.authorization || bodyToken || currentSession?.token || "";
   const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
@@ -14330,7 +14327,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     const seenInChunk = /* @__PURE__ */ new Set();
     let hasNextPage = true;
     while (hasNextPage && page < 100) {
-      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
       if (currentState) {
         url += `&state=${encodeURIComponent(currentState)}`;
       } else if (page > 0) {
@@ -15975,9 +15972,17 @@ app.all("/api/thaison/download-xml", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+var runtimeAuthTokenSecret = null;
 function getAuthTokenSecret() {
-  const secret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED || "gdt_web_auth_token_default_secret_key_2026";
-  return secret;
+  const envSecret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED;
+  if (envSecret) {
+    return envSecret;
+  }
+  if (!runtimeAuthTokenSecret) {
+    runtimeAuthTokenSecret = crypto2.randomBytes(32).toString("hex");
+    console.warn("[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.");
+  }
+  return runtimeAuthTokenSecret;
 }
 function getWebAppAuthUrl(req) {
   if (process.env.VERCEL) {

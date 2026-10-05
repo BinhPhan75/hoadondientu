@@ -876,7 +876,20 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
+  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+
+  // Validate and sanitize numeric parameters
+  const parsedSize = parseInt(String(size), 10);
+  const validSize = (!isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500) ? parsedSize : 50;
+
+  // Validate date format YYYY-MM-DD
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (fromDate && typeof fromDate === 'string' && !dateRegex.test(fromDate.trim())) {
+    fromDate = undefined;
+  }
+  if (toDate && typeof toDate === 'string' && !dateRegex.test(toDate.trim())) {
+    toDate = undefined;
+  }
 
   const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
   const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
@@ -941,7 +954,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     let hasNextPage = true;
 
     while (hasNextPage && page < 100) {
-      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
       if (currentState) {
         url += `&state=${encodeURIComponent(currentState)}`;
       } else if (page > 0) {
@@ -2900,16 +2913,27 @@ interface WebSessionInfo {
   role: 'admin' | 'user';
   createdAt: number;
 }
+let runtimeAuthTokenSecret: string | null = null;
+
 function getAuthTokenSecret(): string {
-  const secret = process.env.AUTH_TOKEN_SECRET ||
+  const envSecret = process.env.AUTH_TOKEN_SECRET ||
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL ||
     process.env.NEON_DATABASE_URL ||
     process.env.POSTGRES_PRISMA_URL ||
     process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.DATABASE_URL_UNPOOLED ||
-    'gdt_web_auth_token_default_secret_key_2026';
-  return secret;
+    process.env.DATABASE_URL_UNPOOLED;
+
+  if (envSecret) {
+    return envSecret;
+  }
+
+  if (!runtimeAuthTokenSecret) {
+    runtimeAuthTokenSecret = crypto.randomBytes(32).toString('hex');
+    console.warn('[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.');
+  }
+
+  return runtimeAuthTokenSecret;
 }
 
 function getWebAppAuthUrl(req?: express.Request): string {
