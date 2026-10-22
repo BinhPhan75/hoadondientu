@@ -124,16 +124,6 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Batch Download ZIP */}
-          <button
-            onClick={onOpenBatchDownload}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs cursor-pointer"
-            title="Tải gói tệp XML & PDF hàng loạt"
-          >
-            <FolderArchive className="w-3.5 h-3.5" />
-            <span>
-              Tải ZIP {selectedInvoices.length > 0 ? `(${selectedInvoices.length})` : `(${totalInvoicesCount})`}
-            </span>
-          </button>
 
           {/* Account Settings GDT (Local) */}
           <button
