@@ -583,13 +583,6 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
               <span>Xuất Excel</span>
             </button>
 
-            <button
-              onClick={onBatchDownloadSelected}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
-            >
-              <FolderArchive className="w-3.5 h-3.5" />
-              <span>Tải ZIP</span>
-            </button>
           </div>
         </div>
       )}
