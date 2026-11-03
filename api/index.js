@@ -8972,6 +8972,60 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 12e3;
     const cleanLookupCode = (info.lookupCode || "").trim();
     const cleanMst = (info.sellerTaxCode || "").trim();
+    let lastError = "";
+    if (cleanLookupCode) {
+      try {
+        this.createLog("[MISA] Xin link PDF ch\xEDnh th\u1EE9c qua invoicepublished/linkview...", logs);
+        const linkResponse = await axios.post(
+          "https://www.meinvoice.vn/api/v3/invoicepublished/linkview",
+          JSON.stringify([cleanLookupCode]),
+          {
+            timeout: timeoutMs,
+            responseType: "json",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json, text/plain, */*",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+              Referer: "https://www.meinvoice.vn/tra-cuu"
+            }
+          }
+        );
+        const payload = linkResponse.data || {};
+        const linkValue = payload.Data || payload.data || payload.Url || payload.url;
+        const pdfUrl = Array.isArray(linkValue) ? linkValue[0] : linkValue;
+        if (typeof pdfUrl === "string" && /^https?:\/\//i.test(pdfUrl)) {
+          const pdfResponse = await axios.get(pdfUrl, {
+            timeout: timeoutMs,
+            responseType: "arraybuffer",
+            headers: {
+              Accept: "application/pdf,application/octet-stream,*/*",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+              Referer: "https://www.meinvoice.vn/tra-cuu"
+            }
+          });
+          const pdfBuffer = Buffer.from(pdfResponse.data);
+          if (pdfBuffer.length > 50 && pdfBuffer.toString("latin1", 0, 5).startsWith("%PDF")) {
+            this.createLog(`[MISA] T\u1EA3i th\xE0nh c\xF4ng PDF qua linkview (${(pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+            return {
+              success: true,
+              provider: this.providerCode,
+              driverName: this.name,
+              pdfBuffer,
+              pdfBase64: pdfBuffer.toString("base64"),
+              contentType: "application/pdf",
+              filename: this.buildPdfFilename(info),
+              isFallback: false,
+              sourceUrl: pdfUrl,
+              executionLogs: logs
+            };
+          }
+        }
+        this.createLog("[MISA] linkview kh\xF4ng tr\u1EA3 v\u1EC1 URL PDF h\u1EE3p l\u1EC7, ti\u1EBFp t\u1EE5c th\u1EED endpoint t\u01B0\u01A1ng th\xEDch.", logs);
+      } catch (err) {
+        lastError = err.message || String(err);
+        this.createLog(`[MISA] linkview ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c: ${lastError}`, logs);
+      }
+    }
     const candidateEndpoints = [
       {
         url: "https://www.meinvoice.vn/api/viewer/download-pdf",
@@ -9010,7 +9064,6 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
         method: "GET"
       }
     ];
-    let lastError = "";
     for (const endpoint of candidateEndpoints) {
       try {
         this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn MISA: ${endpoint.url.substring(0, 70)}...`, logs);

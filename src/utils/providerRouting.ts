@@ -43,5 +43,10 @@ export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | und
   if (providerText.includes('misa')) return 'MISA';
   if (providerText.includes('easy') || providerText.includes('softdreams')) return 'EASYINVOICE';
   if (providerText.includes('viettel')) return 'VIETTEL';
+  const rawXml = String((invoice as any).rawXml || '').toLowerCase();
+  if (rawXml.includes('meinvoice') || rawXml.includes('0101243150') || rawXml.includes('misa-ca')) return 'MISA';
+  if (rawXml.includes('minvoice') || rawXml.includes('0106026495')) return 'MINVOICE';
+  if (rawXml.includes('einvoice.vn') || rawXml.includes('0101300842')) return 'THAISON';
+  if (rawXml.includes('ehoadon.vn') || rawXml.includes('0101360697')) return 'BKAV';
   return undefined;
 }
