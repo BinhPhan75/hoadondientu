@@ -378,10 +378,10 @@ export default function App() {
     }
   };
 
-  const prefetchMisaOriginal = async (invoice: GDTInvoice) => {
-    const isMisa = invoice.provider === 'MISA' || invoice.msttcgp === '0101243150';
+  const prefetchOriginalPdf = async (invoice: GDTInvoice) => {
+    const hasProviderHint = Boolean(invoice.provider || invoice.msttcgp || invoice.lookupUrl);
     const code = invoice.lookupCode?.trim();
-    if (!isMisa || !code || !invoice.rawXml) return;
+    if (!hasProviderHint || !code || !invoice.rawXml) return;
     const cacheKey = getInvoiceOriginalCacheKey(invoice);
     if (originalPrefetchRef.current.has(cacheKey)) return;
     originalPrefetchRef.current.add(cacheKey);
@@ -392,9 +392,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           xml: invoice.rawXml,
-          overrideProvider: 'MISA',
           timeoutMs: 20000,
-          customInfo: { lookupCode: code, sellerTaxCode: invoice.nbmst, lookupUrl: 'https://www.meinvoice.vn/tra-cuu' }
+          customInfo: { lookupCode: code, sellerTaxCode: invoice.nbmst, lookupUrl: invoice.lookupUrl }
         })
       });
       if (!response.ok) return;
@@ -403,7 +402,7 @@ export default function App() {
         await writeCachedOriginalPdf(cacheKey, blob);
       }
     } catch (error) {
-      console.info('[Original invoice prefetch] Bỏ qua MISA:', error);
+      console.info('[Original invoice prefetch] Bỏ qua hóa đơn:', error);
     }
   };
 
@@ -457,7 +456,7 @@ export default function App() {
         const enriched = await executeGdtInvoiceDetail(invoice, token, cookie);
         if (enriched) {
           writeCachedInvoice(enriched);
-          void prefetchMisaOriginal(enriched);
+          void prefetchOriginalPdf(enriched);
           setInvoices(prev => {
             const index = prev.findIndex(item => item.id === enriched.id);
             if (index === -1) return prev;
@@ -490,6 +489,15 @@ export default function App() {
       currentInvoice: ''
     }));
   };
+
+  // Start original-PDF downloads as soon as detail/XML enrichment produces
+  // the provider code and real lookup key. The ref inside prefetchOriginalPdf
+  // keeps this effect idempotent across table updates.
+  useEffect(() => {
+    invoices.forEach(invoice => {
+      void prefetchOriginalPdf(invoice);
+    });
+  }, [invoices]);
 
   // Multi-Month Sequential Execution
   const runPosPhase = async (activeToken: string, activeCookie: string) => {

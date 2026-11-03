@@ -63,6 +63,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   useEffect(() => {
     setCurrentInvoice(invoice);
     setOriginalEasyInvoiceHtml(null);
+    if (originalProviderPdfUrl) {
+      window.URL.revokeObjectURL(originalProviderPdfUrl);
+      setOriginalProviderPdfUrl(null);
+    }
+    setOriginalMisaPdfUrl(null);
     setOriginalVnptHtml(null);
     setVnptCheckCode(null);
     setVnptPortalUrl(null);
@@ -83,6 +88,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
   const [originalMisaPdfUrl, setOriginalMisaPdfUrl] = useState<string | null>(null);
+  const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
   const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
   const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
   const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
@@ -553,8 +559,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     try {
       const cached = await readCachedOriginalPdf(cacheKey);
       if (cached) {
-        if (originalMisaPdfUrl) window.URL.revokeObjectURL(originalMisaPdfUrl);
-        setOriginalMisaPdfUrl(window.URL.createObjectURL(cached));
+        const cachedUrl = window.URL.createObjectURL(cached);
+        setOriginalProviderPdfUrl(cachedUrl);
+        if (isMisaInvoice) setOriginalMisaPdfUrl(cachedUrl);
         setEasyInvoiceDownloadStatus('Đã mở PDF gốc đã lưu trên máy này.');
         return;
       }
@@ -563,19 +570,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
 
     setIsDownloadingEasyInvoice(true);
-    setEasyInvoiceDownloadStatus('Đang tải PDF gốc từ MISA...');
+    setEasyInvoiceDownloadStatus('Đang tải PDF gốc từ nhà cung cấp...');
     try {
       const resp = await fetch('/api/invoice-downloader/download?format=binary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           xml: effectiveInvoice.rawXml,
-          overrideProvider: 'MISA',
           timeoutMs: 20000,
           customInfo: {
             lookupCode: lookupCode.trim(),
             sellerTaxCode: effectiveInvoice.nbmst,
-            lookupUrl: 'https://www.meinvoice.vn/tra-cuu'
+            lookupUrl: lookupDetails.lookupUrl || effectiveInvoice.lookupUrl
           }
         })
       });
@@ -585,15 +591,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
       const blob = await resp.blob();
       if (!blob.size || (blob.type && !blob.type.includes('pdf'))) {
-        throw new Error('MISA không trả về file PDF hợp lệ.');
+        throw new Error('Nhà cung cấp không trả về file PDF hợp lệ.');
       }
       await writeCachedOriginalPdf(cacheKey, blob);
-      if (originalMisaPdfUrl) window.URL.revokeObjectURL(originalMisaPdfUrl);
-      setOriginalMisaPdfUrl(window.URL.createObjectURL(blob));
-      setEasyInvoiceDownloadStatus('Đã tải bản PDF gốc MISA.');
+      const pdfUrl = window.URL.createObjectURL(blob);
+      if (originalProviderPdfUrl) window.URL.revokeObjectURL(originalProviderPdfUrl);
+      setOriginalProviderPdfUrl(pdfUrl);
+      if (isMisaInvoice) setOriginalMisaPdfUrl(pdfUrl);
+      setEasyInvoiceDownloadStatus('Đã tải bản PDF gốc từ nhà cung cấp.');
     } catch (err: any) {
-      console.error('[InvoiceDetailModal] Lỗi xem MISA gốc:', err);
-      alert(`Không thể hiển thị bản gốc MISA: ${err.message}`);
+      console.error('[InvoiceDetailModal] Lỗi xem bản gốc nhà cung cấp:', err);
+      alert(`Không thể hiển thị bản gốc nhà cung cấp: ${err.message}`);
       setEasyInvoiceDownloadStatus(null);
     } finally {
       setIsDownloadingEasyInvoice(false);
@@ -667,15 +675,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [effectiveInvoice?.id, effectiveInvoice?.shdon, effectiveInvoice?.mhdon, effectiveInvoice?.lookupCode]);
 
-  // MISA có thể lấy bản thể hiện trực tiếp qua FKey; tự tải ngay khi mở hóa đơn.
+  // Tự tải bản gốc cho mọi nhà cung cấp đã có driver và mã tra cứu.
   useEffect(() => {
-    if (!effectiveInvoice || originalEasyInvoiceHtml || originalMisaPdfUrl || isDownloadingEasyInvoice) return;
-    const isMisa = effectiveInvoice.provider === 'MISA' ||
-      effectiveInvoice.msttcgp === '0101243150' ||
-      /meinvoice|misa/i.test(effectiveInvoice.lookupUrl || '');
+    if (!effectiveInvoice || originalEasyInvoiceHtml || originalProviderPdfUrl || isDownloadingEasyInvoice) return;
+    const provider = String(effectiveInvoice.provider || '').toUpperCase();
+    const hasProviderDriver = Boolean(
+      (provider && provider !== 'DEFAULT' && provider !== 'UNKNOWN' && provider !== 'GENERIC') ||
+      effectiveInvoice.msttcgp ||
+      effectiveInvoice.lookupUrl
+    );
     const code = effectiveInvoice.lookupCode;
-    if (isMisa && code) void handleViewOriginalMisa();
-  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode]);
+    if (hasProviderDriver && code) void handleViewOriginalMisa();
+  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode, effectiveInvoice?.provider, effectiveInvoice?.msttcgp]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -1111,7 +1122,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {isMisaInvoice && isDownloadingEasyInvoice && !originalMisaPdfUrl && (
+            {isDownloadingEasyInvoice && !originalProviderPdfUrl && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-3 bg-emerald-950/80 border border-emerald-600/60 rounded-lg text-sm text-emerald-200 flex items-center gap-3 shadow-md">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
                 <span><strong>Hóa đơn gốc đang được tải về máy...</strong> Khung xem sẽ tự cập nhật khi tải xong.</span>
@@ -1161,10 +1172,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
-                  ) : originalMisaPdfUrl ? (
+                  ) : originalProviderPdfUrl ? (
                     <iframe
-                      src={originalMisaPdfUrl}
-                      title="Bản PDF gốc MISA meInvoice"
+                      src={originalProviderPdfUrl}
+                      title="Bản PDF gốc từ nhà cung cấp"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
                   ) : originalEasyInvoiceHtml || originalVnptHtml ? (
@@ -1210,8 +1221,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
                 ) : originalFourSiPdfUrl ? (
                   <>Bản thể hiện <span className="text-amber-400 font-bold">mẫu 4Si từ dochoadon.lcssoft.com.vn (bản thể hiện hiển thị, chưa phải bản gốc có CKS)</span> • </>
-                ) : originalMisaPdfUrl ? (
-                  <>Bản PDF <span className="text-emerald-400 font-bold">gốc từ MISA meInvoice</span> • </>
+                ) : originalProviderPdfUrl ? (
+                  <>Bản PDF <span className="text-emerald-400 font-bold">gốc từ nhà cung cấp</span> • </>
                 ) : (
                   <>Chưa tải bản gốc • </>
                 )}
