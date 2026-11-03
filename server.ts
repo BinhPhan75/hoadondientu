@@ -7,7 +7,6 @@ import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { ProxyAgent } from 'undici';
 import axios from 'axios';
-import * as XLSX from 'xlsx';
 import * as cheerio from 'cheerio';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
@@ -827,33 +826,6 @@ function splitDateRangeIntoMonthlyChunks(fromDateStr: string, toDateStr: string)
   return chunks.length > 0 ? chunks : [{ from: fromDateStr, to: toDateStr }];
 }
 
-function extractGdtPosExportRows(buffer: Buffer): any[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (!sheet) return [];
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
-  const headerIndex = rows.findIndex(row => String(row?.[0] ?? '').trim().toUpperCase() === 'STT');
-  if (headerIndex < 0) return [];
-  return rows.slice(headerIndex + 1)
-    .filter(row => Array.isArray(row) && row.some(value => String(value ?? '').trim() !== ''))
-    .map(row => ({
-      khmshdon: row[1] ?? '',
-      khhdon: row[2] ?? '',
-      shdon: row[3] ?? '',
-      tdlap: row[4] ?? '',
-      nbmst: row[5] ?? '',
-      nbten: row[6] ?? '',
-      nmmst: row[7] ?? '',
-      nmten: row[8] ?? '',
-      nmdchi: row[9] ?? '',
-      tgtcthue: row[11] ?? 0,
-      tgtthue: row[12] ?? 0,
-      tgtttbso: row[14] ?? 0,
-      tthai: row[15] ?? '',
-      ttxly: row[16] ?? ''
-    }));
-}
-
 function splitDateRangeIntoFixedChunks(fromDateStr: string, toDateStr: string, daysPerChunk: number): Array<{ from: string; to: string }> {
   const parse = (value: string) => {
     const [year, month, day] = value.split('-').map(Number);
@@ -1023,12 +995,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     let hasNextPage = true;
 
     while (hasNextPage && page < 100) {
-      const isPosExport = source === 'sco-query';
-      let url = isPosExport
-        ? `https://hoadondientu.gdt.gov.vn/api/sco-query/invoices/export-excel?sort=tdlap:desc&search=${searchParam}&type=${type}`
-        : `https://hoadondientu.gdt.gov.vn/api/query/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
+      const isPosQuery = source === 'sco-query';
+      let url = `https://hoadondientu.gdt.gov.vn/api/${isPosQuery ? 'sco-query' : 'query'}/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
       if (queryCaptcha) {
-        url += `&${new URLSearchParams({ captchaKey: queryCaptcha.key, captchaCode: queryCaptcha.code, captcha: queryCaptcha.code, ckey: queryCaptcha.key, cvalue: queryCaptcha.code }).toString()}`;
+        url += `&ckey=${encodeURIComponent(queryCaptcha.key)}&cvalue=${encodeURIComponent(queryCaptcha.code)}`;
       }
       if (currentState) {
         url += `&state=${encodeURIComponent(currentState)}`;
@@ -1048,11 +1018,8 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
               'Accept': 'application/json, text/plain, */*',
               'End-Point': '/tra-cuu/tra-cuu-hoa-don',
               'Action': source === 'sco-query'
-                ? (isPosExport
-                  ? (type === 'sold' ? 'Xu%E1%BA%A5t%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)' : 'Xu%E1%BA%A5t%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)')
-                  : (type === 'sold' ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)' : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)'))
+                ? (type === 'sold' ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)' : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)')
                 : '',
-              ...(queryCaptcha ? { 'Captcha-Key': queryCaptcha.key, 'Captcha-Code': queryCaptcha.code, 'X-Captcha-Key': queryCaptcha.key, 'X-Captcha-Code': queryCaptcha.code } : {}),
               ...((sanitizedCookie || queryCaptcha?.cookie) ? { 'Cookie': [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join('; ') } : {})
             }
           }, 1, 15000, vietnamProxy);
@@ -1096,22 +1063,6 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
             }
             if (source === 'sco-query' && queryCaptcha && resp.status === 400) return { error: 'CAPTCHA_INVALID' };
             break;
-          }
-
-          if (isPosExport) {
-            const rawBuffer = Buffer.from(await resp.arrayBuffer());
-            try {
-              data = { datas: extractGdtPosExportRows(rawBuffer) };
-              attemptSucceeded = true;
-              break;
-            } catch (parseError: any) {
-              console.warn(`[GDT POS Export Parse Error ${chunkFrom}..${chunkTo}]:`, parseError?.message || parseError);
-              if (attempt < maxRetries) {
-                await sleep(1000);
-                continue;
-              }
-              break;
-            }
           }
 
           const rawText = await resp.text();
@@ -1197,13 +1148,6 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       }
 
       console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo} (page ${page + 1}): fetched ${list.length} raw, ${newCount} new (total: ${accumulated.length}/${total || 'unknown'}, nextState: ${Boolean(nextState)})`);
-
-      // The POS export endpoint already returns the complete workbook for the
-      // requested 5-day window; it does not use the JSON page/state protocol.
-      if (isPosExport) {
-        hasNextPage = false;
-        break;
-      }
 
       // Termination checks:
       // 1. If 0 new unique invoices were added or empty list returned -> stop
