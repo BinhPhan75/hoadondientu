@@ -111,6 +111,31 @@ export function generateMonthChunks(fromDateStr: string, toDateStr: string): Mon
   });
 }
 
+/** Split a range into inclusive fixed-size windows for the GDT POS endpoint. */
+export function generateDayChunks(fromDateStr: string, toDateStr: string, daysPerChunk = 5): Array<{ from: string; to: string }> {
+  if (!fromDateStr || !toDateStr || !Number.isFinite(daysPerChunk) || daysPerChunk < 1) return [];
+  const parse = (value: string) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return year && month && day ? new Date(Date.UTC(year, month - 1, day)) : null;
+  };
+  const format = (date: Date) => `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+  const start = parse(fromDateStr);
+  const end = parse(toDateStr);
+  if (!start || !end || start > end) return [];
+
+  const chunks: Array<{ from: string; to: string }> = [];
+  const cursor = new Date(start.getTime());
+  while (cursor <= end) {
+    const chunkStart = new Date(cursor.getTime());
+    const chunkEnd = new Date(cursor.getTime());
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + daysPerChunk - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    chunks.push({ from: format(chunkStart), to: format(chunkEnd) });
+    cursor.setUTCDate(chunkEnd.getUTCDate() + 1);
+  }
+  return chunks;
+}
+
 /**
  * Check if the selected date range spans across more than 1 month or exceeds 31 days
  */

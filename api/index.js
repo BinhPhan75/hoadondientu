@@ -10598,24 +10598,76 @@ app.post("/api/gdt/login", async (req, res) => {
   }
 });
 function splitDateRangeIntoMonthlyChunks(fromDateStr, toDateStr) {
-  const start = new Date(fromDateStr);
-  const end = new Date(toDateStr);
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+  if (!fromDateStr || !toDateStr) return [{ from: fromDateStr, to: toDateStr }];
+  const startParts = fromDateStr.split("-").map(Number);
+  const endParts = toDateStr.split("-").map(Number);
+  if (startParts.length !== 3 || endParts.length !== 3 || startParts.some(isNaN) || endParts.some(isNaN)) {
     return [{ from: fromDateStr, to: toDateStr }];
   }
+  const [startY, startM, startD] = startParts;
+  const [endY, endM, endD] = endParts;
+  if (startY > endY || startY === endY && startM > endM || startY === endY && startM === endM && startD > endD) {
+    return [{ from: fromDateStr, to: toDateStr }];
+  }
+  const getDaysInMonth = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const pad = (n) => String(n).padStart(2, "0");
   const chunks = [];
-  let cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const finalEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  while (cur <= finalEnd) {
-    const endOfMonth = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
-    const chunkEnd = endOfMonth < finalEnd ? endOfMonth : finalEnd;
-    const pad = (n) => String(n).padStart(2, "0");
-    const fromStr = `${cur.getFullYear()}-${pad(cur.getMonth() + 1)}-${pad(cur.getDate())}`;
-    const toStr = `${chunkEnd.getFullYear()}-${pad(chunkEnd.getMonth() + 1)}-${pad(chunkEnd.getDate())}`;
-    chunks.push({ from: fromStr, to: toStr });
-    cur = new Date(chunkEnd.getFullYear(), chunkEnd.getMonth(), chunkEnd.getDate() + 1);
+  let curY = startY;
+  let curM = startM;
+  let curD = startD;
+  while (curY < endY || curY === endY && curM <= endM) {
+    const maxDays = getDaysInMonth(curY, curM);
+    const chunkStartD = curD;
+    let chunkEndD = maxDays;
+    if (curY === endY && curM === endM) {
+      chunkEndD = Math.min(maxDays, endD);
+    }
+    chunks.push({
+      from: `${curY}-${pad(curM)}-${pad(chunkStartD)}`,
+      to: `${curY}-${pad(curM)}-${pad(chunkEndD)}`
+    });
+    curD = 1;
+    curM++;
+    if (curM > 12) {
+      curM = 1;
+      curY++;
+    }
+  }
+  return chunks.length > 0 ? chunks : [{ from: fromDateStr, to: toDateStr }];
+}
+function splitDateRangeIntoFixedChunks(fromDateStr, toDateStr, daysPerChunk) {
+  const parse = (value2) => {
+    const [year, month, day] = value2.split("-").map(Number);
+    return year && month && day ? new Date(Date.UTC(year, month - 1, day)) : null;
+  };
+  const format = (date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  const start = parse(fromDateStr);
+  const end = parse(toDateStr);
+  if (!start || !end || start > end) return [];
+  const chunks = [];
+  const cursor = new Date(start.getTime());
+  while (cursor <= end) {
+    const chunkStart = new Date(cursor.getTime());
+    const chunkEnd = new Date(cursor.getTime());
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() + Math.max(1, daysPerChunk) - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    chunks.push({ from: format(chunkStart), to: format(chunkEnd) });
+    cursor.setUTCDate(chunkEnd.getUTCDate() + 1);
   }
   return chunks;
+}
+async function getCaptchaForGdtQuery(existingCookie, customProxy) {
+  const captchaResponse = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
+    headers: existingCookie ? { Cookie: existingCookie } : {}
+  }, 1, 8e3, customProxy);
+  if (!captchaResponse.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c Captcha (HTTP ${captchaResponse.status})`);
+  const captchaCookie = extractCookies(captchaResponse);
+  const data = await captchaResponse.json();
+  if (!data.key || !data.content) throw new Error("Captcha c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7");
+  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content));
+  const code = (solved.code || "").trim();
+  if (!code) throw new Error(solved.error || "Kh\xF4ng t\u1EF1 nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c Captcha cho h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n");
+  return { key: data.key, code, cookie: captchaCookie };
 }
 app.post("/api/gdt/invoice-detail", async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
@@ -10657,7 +10709,7 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
+  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
   const authHeader = req.headers.authorization || bodyToken || currentSession?.token || "";
   const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
@@ -10678,6 +10730,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   const rawFrom = fromDate || "2025-01-01";
   const rawTo = toDate || "2025-12-31";
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
+  const posDateChunks = splitDateRangeIntoFixedChunks(rawFrom, rawTo, 5);
   const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   const tokenHeader = rawToken ? `Bearer ${rawToken}` : "";
   const cleanCookies = (cookieHeader || "").split(";").map((c) => c.trim()).filter((c) => {
@@ -10689,131 +10742,210 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   }
   const sanitizedCookie = cleanCookies.join("; ");
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 1, page = 0, accumulated = []) => {
+  const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 2, queryCaptcha) => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
     const gdtTo = formatDateForGdt(chunkTo, true);
     const searchParam = `tdlap=ge=${gdtFrom};tdlap=le=${gdtTo}`;
     const apiBase = source === "sco-query" ? "sco-query" : "query";
-    const url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&page=${page}&search=${encodeURIComponent(searchParam)}`;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const resp = await fetchGDT(url, {
-          method: "GET",
-          headers: {
-            "Authorization": tokenHeader,
-            "Accept": "application/json, text/plain, */*",
-            "End-Point": "/tra-cuu/tra-cuu-hoa-don",
-            "Action": "",
-            ...sanitizedCookie ? { "Cookie": sanitizedCookie } : {}
-          }
-        }, 1, 15e3, vietnamProxy);
-        if (resp.status === 401) {
-          console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
-          if (source === "sco-query") {
-            return [];
-          }
-          return { error: "AUTH_EXPIRED" };
-        }
-        if (resp.status === 403) {
-          console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
-          if (source === "sco-query") {
-            return [];
-          }
-          return { error: "WAF_BLOCKED" };
-        }
-        if (resp.status === 429) {
-          console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
-          if (attempt < maxRetries) {
-            const backoffMs = (attempt + 1) * 1200;
-            await sleep(backoffMs);
-            continue;
-          } else {
-            console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
-            return [];
-          }
-        }
-        if (!resp.ok) {
-          const errText = await resp.text();
-          console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
-          return [];
-        }
-        const rawText = await resp.text();
-        let data = {};
-        try {
-          data = JSON.parse(rawText);
-        } catch {
-          console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
-          return [];
-        }
-        const list = extractGdtInvoiceList(data);
-        console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo}: Found ${list.length} invoices (total: ${data.total ?? list.length})`);
-        const normalizedPage = list.map((item) => ({
-          id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
-          khmshdon: item.khmshdon || item.khmhd || "1",
-          khhdon: item.khhdon || "",
-          shdon: String(item.shdon || item.shd || "").padStart(7, "0"),
-          tdlap: item.tdlap ? item.tdlap.replace(" ", "T") : (/* @__PURE__ */ new Date()).toISOString(),
-          nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ""),
-          nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || "Ng\u01B0\u1EDDi b\xE1n"),
-          nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ""),
-          nmmst: item.nmmst || "",
-          nmten: item.nmten || item.nmtnnt || item.nmtlhdon || "Ng\u01B0\u1EDDi mua",
-          nmdchi: item.nmdchi || "",
-          tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
-          tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
-          tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? Number(item.tgtcthue ?? item.thtien ?? 0) + Number(item.tgtthue ?? item.tthue ?? 0)),
-          tgtttbchu: item.tgtttbchu || "",
-          htttoan: item.htttoan || "TM/CK",
-          tthdon: Number(item.tthdon || 1),
-          tthdonLabel: item.tthdon === 1 ? "H\xF3a \u0111\u01A1n g\u1ED1c" : item.tthdon === 2 ? "H\xF3a \u0111\u01A1n thay th\u1EBF" : item.tthdon === 3 ? "H\xF3a \u0111\u01A1n \u0111i\u1EC1u ch\u1EC9nh" : "H\xF3a \u0111\u01A1n h\u1EE7y",
-          ttxly: Number(item.ttxly || 1),
-          ttxlyLabel: item.ttxly === 1 ? "CQT \u0111\xE3 c\u1EA5p m\xE3" : item.ttxly === 2 ? "CQT ch\u01B0a c\u1EA5p m\xE3" : "\u0110\xE3 ti\u1EBFp nh\u1EADn",
-          mhdon: item.mhdon || "",
-          hsgcma: Boolean(item.mhdon || item.hsgcma),
-          loaiHdon: type,
-          hasDigitalSignature: true,
-          signerName: item.nbten || item.nbtnnt || item.nbtlhdon || "Ng\u01B0\u1EDDi n\u1ED9p thu\u1EBF",
-          signedDate: item.tdlap,
-          caProvider: "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT",
-          msttcgp: item.msttcgp || item.mst_tcgp || "",
-          tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || "",
-          lookupCode: getLookupCodeFromPayload(item),
-          lookupUrl: getLookupUrlFromPayload(item),
-          items: getInvoiceItemListFromPayload(item).map((it, idx) => normalizeInvoiceItem(it, idx)),
-          sourceCompleteness: "summary",
-          // Hóa đơn khởi tạo từ máy tính tiền dùng endpoint /api/sco-query riêng
-          // của GDT; đánh dấu để các bước lấy chi tiết/xuất XML sau này gọi
-          // đúng endpoint (xem getInvoiceEndpoint trong utils/gdtDetail.ts).
-          isPos: source === "sco-query"
-        }));
-        const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? 0);
-        const firstPageId = normalizedPage[0]?.id;
-        const repeatedPage = Boolean(firstPageId && accumulated[0]?.id === firstPageId);
-        const hasNextPage = list.length >= Number(size) && page < 100 && !repeatedPage && (!total || accumulated.length + normalizedPage.length < total);
-        if (hasNextPage) {
-          await sleep(250);
-          return fetchChunkWithRetry(type, chunkFrom, chunkTo, source, maxRetries, page + 1, accumulated.concat(normalizedPage));
-        }
-        return accumulated.concat(normalizedPage);
-      } catch (err) {
-        console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
-        if (attempt < maxRetries) {
-          await sleep(1e3);
-          continue;
-        }
-        return [];
+    let page = 0;
+    let currentState = null;
+    let accumulated = [];
+    const seenInChunk = /* @__PURE__ */ new Set();
+    let hasNextPage = true;
+    while (hasNextPage && page < 100) {
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      if (queryCaptcha) {
+        const captchaParams = new URLSearchParams({
+          captchaKey: queryCaptcha.key,
+          captchaCode: queryCaptcha.code,
+          captcha: queryCaptcha.code,
+          ckey: queryCaptcha.key,
+          cvalue: queryCaptcha.code
+        });
+        url += `&${captchaParams.toString()}`;
       }
+      if (currentState) {
+        url += `&state=${encodeURIComponent(currentState)}`;
+      } else if (page > 0) {
+        url += `&page=${page}`;
+      }
+      let attemptSucceeded = false;
+      let data = null;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await fetchGDT(url, {
+            method: "GET",
+            headers: {
+              "Authorization": tokenHeader,
+              "Accept": "application/json, text/plain, */*",
+              "End-Point": "/tra-cuu/tra-cuu-hoa-don",
+              "Action": source === "sco-query" ? type === "sold" ? "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)" : "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)" : "",
+              ...queryCaptcha ? {
+                "Captcha-Key": queryCaptcha.key,
+                "Captcha-Code": queryCaptcha.code,
+                "X-Captcha-Key": queryCaptcha.key,
+                "X-Captcha-Code": queryCaptcha.code
+              } : {},
+              ...sanitizedCookie || queryCaptcha?.cookie ? { "Cookie": [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join("; ") } : {}
+            }
+          }, 1, 15e3, vietnamProxy);
+          if (resp.status === 401) {
+            console.warn(`[GDT Query ${source}/${type} 401 Unauthorized]: Token rejected by GDT.`);
+            if (source === "sco-query" && queryCaptcha) return { error: "CAPTCHA_INVALID" };
+            if (source === "sco-query") {
+              return accumulated;
+            }
+            return { error: "AUTH_EXPIRED" };
+          }
+          if (resp.status === 403) {
+            console.warn(`[GDT Query ${source}/${type} 403 Forbidden]: Request blocked by GDT WAF/Cloud IP restriction.`);
+            if (source === "sco-query" && queryCaptcha) return { error: "CAPTCHA_INVALID" };
+            if (source === "sco-query") {
+              return accumulated;
+            }
+            return { error: "WAF_BLOCKED" };
+          }
+          if (resp.status === 429) {
+            console.warn(`[GDT Query ${source}/${type} Rate Limit 429 for ${chunkFrom}..${chunkTo}]: Attempt ${attempt + 1}/${maxRetries + 1}. Pacing & backing off...`);
+            if (attempt < maxRetries) {
+              const backoffMs = (attempt + 1) * 1200;
+              await sleep(backoffMs);
+              continue;
+            } else {
+              console.warn(`[GDT Query ${source}/${type} Rate Limit]: Reached max retries for ${chunkFrom}..${chunkTo}`);
+              break;
+            }
+          }
+          if (!resp.ok) {
+            const errText = await resp.text();
+            console.warn(`[GDT Query ${source}/${type} HTTP ${resp.status} for ${chunkFrom}..${chunkTo}]:`, errText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1e3);
+              continue;
+            }
+            if (source === "sco-query" && queryCaptcha && resp.status === 400) return { error: "CAPTCHA_INVALID" };
+            break;
+          }
+          const rawText = await resp.text();
+          try {
+            data = JSON.parse(rawText);
+            attemptSucceeded = true;
+            break;
+          } catch {
+            console.warn(`[GDT Query ${source}/${type} Non-JSON]:`, rawText.substring(0, 200));
+            if (attempt < maxRetries) {
+              await sleep(1e3);
+              continue;
+            }
+            break;
+          }
+        } catch (err) {
+          console.warn(`[GDT Query ${source}/${type} Exception ${chunkFrom}..${chunkTo} (attempt ${attempt + 1})]:`, err.message);
+          if (attempt < maxRetries) {
+            await sleep(1e3);
+            continue;
+          }
+          break;
+        }
+      }
+      if (!attemptSucceeded || !data) {
+        console.warn(`[GDT Query ${source}/${type}] Could not retrieve page ${page} for ${chunkFrom}..${chunkTo}`);
+        break;
+      }
+      const list = extractGdtInvoiceList(data);
+      const total = Number(data.total ?? data.totalElements ?? data.totalCount ?? data.data?.total ?? 0);
+      const rawNextState = data.state ?? data.State ?? data.data?.state ?? data.data?.State;
+      const nextState = typeof rawNextState === "string" && rawNextState.trim().length > 0 ? rawNextState.trim() : null;
+      const normalizedPage = list.map((item) => ({
+        id: item.id || `GDT_${source === "sco-query" ? "POS_" : ""}${item.khhdon || ""}_${item.shdon || ""}_${item.nbmst || item.nmmst || ""}_${item.tdlap || ""}`,
+        khmshdon: item.khmshdon || item.khmhd || "1",
+        khhdon: item.khhdon || "",
+        shdon: String(item.shdon || item.shd || "").padStart(7, "0"),
+        tdlap: item.tdlap ? item.tdlap.replace(" ", "T") : (/* @__PURE__ */ new Date()).toISOString(),
+        nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ""),
+        nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || "Ng\u01B0\u1EDDi b\xE1n"),
+        nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ""),
+        nmmst: item.nmmst || "",
+        nmten: item.nmten || item.nmtnnt || item.nmtlhdon || "Ng\u01B0\u1EDDi mua",
+        nmdchi: item.nmdchi || "",
+        tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+        tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+        tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? Number(item.tgtcthue ?? item.thtien ?? 0) + Number(item.tgtthue ?? item.tthue ?? 0)),
+        tgtttbchu: item.tgtttbchu || "",
+        htttoan: item.htttoan || "TM/CK",
+        tthdon: Number(item.tthdon || 1),
+        tthdonLabel: item.tthdon === 1 ? "H\xF3a \u0111\u01A1n g\u1ED1c" : item.tthdon === 2 ? "H\xF3a \u0111\u01A1n thay th\u1EBF" : item.tthdon === 3 ? "H\xF3a \u0111\u01A1n \u0111i\u1EC1u ch\u1EC9nh" : "H\xF3a \u0111\u01A1n h\u1EE7y",
+        ttxly: Number(item.ttxly || 1),
+        ttxlyLabel: item.ttxly === 1 ? "CQT \u0111\xE3 c\u1EA5p m\xE3" : item.ttxly === 2 ? "CQT ch\u01B0a c\u1EA5p m\xE3" : "\u0110\xE3 ti\u1EBFp nh\u1EADn",
+        mhdon: item.mhdon || "",
+        hsgcma: Boolean(item.mhdon || item.hsgcma),
+        loaiHdon: type,
+        hasDigitalSignature: true,
+        signerName: item.nbten || item.nbtnnt || item.nbtlhdon || "Ng\u01B0\u1EDDi n\u1ED9p thu\u1EBF",
+        signedDate: item.tdlap,
+        caProvider: "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT",
+        msttcgp: item.msttcgp || item.mst_tcgp || "",
+        tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || "",
+        lookupCode: getLookupCodeFromPayload(item),
+        lookupUrl: getLookupUrlFromPayload(item),
+        items: getInvoiceItemListFromPayload(item).map((it, idx) => normalizeInvoiceItem(it, idx)),
+        sourceCompleteness: "summary",
+        isPos: source === "sco-query"
+      }));
+      let newCount = 0;
+      for (const inv of normalizedPage) {
+        const uniqueKey = `${inv.khhdon}_${inv.shdon}_${inv.nbmst}_${inv.isPos ? "pos" : "std"}`;
+        if (!seenInChunk.has(uniqueKey)) {
+          seenInChunk.add(uniqueKey);
+          accumulated.push(inv);
+          newCount++;
+        }
+      }
+      console.log(`[GDT Query ${source}/${type}] ${chunkFrom} -> ${chunkTo} (page ${page + 1}): fetched ${list.length} raw, ${newCount} new (total: ${accumulated.length}/${total || "unknown"}, nextState: ${Boolean(nextState)})`);
+      if (newCount === 0 || list.length === 0) {
+        hasNextPage = false;
+        break;
+      }
+      if (total > 0 && accumulated.length >= total) {
+        hasNextPage = false;
+        break;
+      }
+      if (nextState && nextState !== currentState) {
+        currentState = nextState;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+      if (list.length >= Number(size) && (!total || accumulated.length < total)) {
+        currentState = null;
+        page++;
+        hasNextPage = true;
+        await sleep(250);
+        continue;
+      }
+      hasNextPage = false;
     }
-    return [];
+    return accumulated;
   };
-  const fetchAllChunksForType = async (type, source = "query") => {
+  const fetchAllChunksForType = async (type, source = "query", chunks = dateChunks) => {
     let allInvoices = [];
-    for (let i = 0; i < dateChunks.length; i++) {
-      const chunk = dateChunks[i];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
       if (i > 0) {
         await sleep(250);
       }
-      const chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source);
+      let chunkResult = [];
+      for (let captchaAttempt = 0; captchaAttempt < (source === "sco-query" ? 3 : 1); captchaAttempt++) {
+        let queryCaptcha;
+        if (source === "sco-query") {
+          queryCaptcha = await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy);
+          console.info(`[GDT POS] \u0110\xE3 l\u1EA5y v\xE0 gi\u1EA3i Captcha cho k\u1EF3 ${chunk.from}..${chunk.to} (l\u1EA7n ${captchaAttempt + 1})`);
+        }
+        chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source, 2, queryCaptcha);
+        if (chunkResult?.error !== "CAPTCHA_INVALID") break;
+        await sleep(500);
+      }
       if (chunkResult?.error === "AUTH_EXPIRED") {
         return { error: "AUTH_EXPIRED" };
       }
@@ -10828,7 +10960,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   };
   try {
     let results = [];
-    const purchaseList = await fetchAllChunksForType("purchase", "query");
+    const purchaseList = posOnly ? [] : await fetchAllChunksForType("purchase", "query");
     if (purchaseList?.error === "AUTH_EXPIRED") {
       const isFresh = currentSession?.createdAt && Date.now() - currentSession.createdAt < 10 * 60 * 1e3;
       if (!isFresh) {
@@ -10854,8 +10986,18 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       results = results.concat(purchaseList);
     }
     try {
+      if (!includePos && !posOnly) {
+        return res.json({
+          success: true,
+          isRealGDT: true,
+          invoices: results,
+          count: results.length,
+          chunksQueried: dateChunks.length,
+          message: `\u0110\xE3 truy xu\u1EA5t ${results.length} h\xF3a \u0111\u01A1n th\u01B0\u1EDDng t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF.`
+        });
+      }
       await sleep(250);
-      const posPurchaseList = await fetchAllChunksForType("purchase", "sco-query");
+      const posPurchaseList = await fetchAllChunksForType("purchase", "sco-query", posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
       if (Array.isArray(posPurchaseList)) {
         results = results.concat(posPurchaseList);
       }
@@ -10902,7 +11044,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       isRealGDT: true,
       invoices: dedupedResults,
       count: dedupedResults.length,
-      chunksQueried: dateChunks.length,
+      chunksQueried: dateChunks.length + posDateChunks.length,
       message: includeDetails ? `\u0110\xE3 truy xu\u1EA5t ${dedupedResults.length} h\xF3a \u0111\u01A1n v\xE0 t\u1EA3i b\u1ED5 sung d\u1EEF li\u1EC7u chi ti\u1EBFt t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF (${dateChunks.length} k\u1EF3 con).` : `\u0110\xE3 truy xu\u1EA5t ${dedupedResults.length} h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF (${dateChunks.length} k\u1EF3 con).`
     });
   } catch (err) {

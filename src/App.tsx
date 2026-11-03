@@ -19,7 +19,7 @@ import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMont
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
-import { isMultiMonthRange, generateMonthChunks } from './utils/dateChunker';
+import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
@@ -425,6 +425,63 @@ export default function App() {
   };
 
   // Multi-Month Sequential Execution
+  const runPosPhase = async (activeToken: string, activeCookie: string) => {
+    const posChunks = generateDayChunks(filters.fromDate, filters.toDate, 5);
+    if (posChunks.length === 0) return { total: 0, failed: 0 };
+
+    setConsoleLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString('vi-VN'),
+      level: 'step',
+      message: `[HÓA ĐƠN MÁY TÍNH TIỀN] Chuyển sang tra cứu ${posChunks.length} đợt, mỗi đợt tối đa 5 ngày. Mỗi đợt sẽ lấy CAPTCHA mới.`
+    }]);
+
+    let total = 0;
+    let failed = 0;
+    for (let i = 0; i < posChunks.length; i++) {
+      if (isSyncCancelledRef.current) break;
+      const chunk = posChunks[i];
+      const queryRes = await executeGdtInvoiceQuery({
+        fromDate: chunk.from,
+        toDate: chunk.to,
+        invoiceType: 'purchase',
+        size: 50,
+        token: activeToken,
+        cookieHeader: activeCookie,
+        includePos: true,
+        posOnly: true
+      });
+
+      if (queryRes.success && Array.isArray(queryRes.invoices)) {
+        const posInvoices = queryRes.invoices;
+        total += posInvoices.length;
+        setInvoices(prev => {
+          const map = new Map<string, GDTInvoice>();
+          prev.forEach(item => map.set(item.id, item));
+          posInvoices.forEach(item => map.set(item.id, item));
+          return Array.from(map.values());
+        });
+        enqueueInvoicesForEnrichment(posInvoices, activeToken, activeCookie);
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'success',
+          message: `✓ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: nhận ${posInvoices.length} hóa đơn.`
+        }]);
+      } else {
+        failed++;
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'warning',
+          message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: ${queryRes.message || 'Không lấy được dữ liệu'}.`
+        }]);
+      }
+      if (i < posChunks.length - 1) await new Promise(r => setTimeout(r, 400));
+    }
+    return { total, failed };
+  };
+
   const runMultiMonthQuery = async (activeToken: string, activeCookie: string, mst: string) => {
     const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
     if (chunks.length === 0) return { success: false, error: 'Khoảng thời gian không hợp lệ' };
@@ -527,7 +584,9 @@ export default function App() {
           invoiceType: 'purchase',
           size: 50,
           token: activeToken,
-          cookieHeader: activeCookie
+          cookieHeader: activeCookie,
+          includePos: false,
+          posOnly: false
         });
 
         if (queryRes.success && Array.isArray(queryRes.invoices)) {
@@ -658,6 +717,21 @@ export default function App() {
       }
     }
 
+    // POS invoices use a separate GDT endpoint and a fresh CAPTCHA per 5-day window.
+    if (!isSyncCancelledRef.current && !hasEncounteredError) {
+      setSyncState(prev => ({ ...prev, currentMonthLabel: 'Hóa đơn máy tính tiền (5 ngày/lần)' }));
+      const posResult = await runPosPhase(activeToken, activeCookie);
+      runningTotalInvoices += posResult.total;
+      runningPurchases += posResult.total;
+      hasEncounteredError = hasEncounteredError || posResult.failed > 0;
+      setSyncState(prev => ({
+        ...prev,
+        totalInvoicesFound: runningTotalInvoices,
+        totalPurchaseFound: runningPurchases,
+        hasErrors: hasEncounteredError
+      }));
+    }
+
     setSyncState(prev => ({
       ...prev,
       isActive: false,
@@ -711,7 +785,9 @@ export default function App() {
         invoiceType: 'purchase',
         size: 50,
         token: activeToken,
-        cookieHeader: activeCookie
+        cookieHeader: activeCookie,
+        includePos: false,
+        posOnly: false
       });
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
@@ -968,7 +1044,9 @@ export default function App() {
         invoiceType: 'purchase',
         size: 50,
         token: activeToken,
-        cookieHeader: activeCookie
+        cookieHeader: activeCookie,
+        includePos: false,
+        posOnly: false
       });
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
@@ -979,6 +1057,13 @@ export default function App() {
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
         enqueueInvoicesForEnrichment(queryRes.invoices, activeToken, activeCookie);
+        const posResult = await runPosPhase(activeToken, activeCookie);
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'success',
+          message: `Đã hoàn tất pha hóa đơn máy tính tiền: nhận thêm ${posResult.total} hóa đơn (${posResult.failed} đợt lỗi).`
+        }]);
         const sourceNotice = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
         setConsoleLogs(prev => [
           ...prev,

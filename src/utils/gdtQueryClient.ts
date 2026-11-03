@@ -9,6 +9,8 @@ export interface QueryInvoicesOptions {
   size?: number;
   token: string;
   cookieHeader?: string;
+  includePos?: boolean;
+  posOnly?: boolean;
 }
 
 export interface QueryInvoicesResult {
@@ -299,7 +301,7 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
  *    uses the backend proxy only
  */
 export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
-  const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '' } = options;
+  const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '', includePos = true, posOnly = false } = options;
 
   let proxyError: string | null = null;
   let proxyStatus: number | null = null;
@@ -322,7 +324,9 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
         invoiceType,
         size,
         token,
-        cookieHeader
+        cookieHeader,
+        includePos,
+        posOnly
       }),
       signal: controller.signal
     });
