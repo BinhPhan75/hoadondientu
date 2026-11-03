@@ -22,6 +22,9 @@ export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | und
   if (msttcgp === '0105987432') return 'EASYINVOICE';
   if (msttcgp === '0315744883' || msttcgp === '0302999571') return '4SI';
 
+  const sellerTaxCode = String(invoice.nbmst || '').replace(/\D/g, '');
+  if (['0317978711', '0312105174', '0400557356', '0101243150'].includes(sellerTaxCode)) return 'MISA';
+
   const lookupUrl = String(invoice.lookupUrl || '').toLowerCase();
   if (lookupUrl.includes('vnpt')) return 'VNPT';
   if (lookupUrl.includes('easyinvoice') || lookupUrl.includes('softdreams')) return 'EASYINVOICE';

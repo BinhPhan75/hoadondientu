@@ -14984,7 +14984,14 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
     if (!xml) {
       return res.status(400).json({ error: "N\u1ED9i dung XML kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
-    const requestedProvider = String(overrideProvider || customInfo?.provider || "").trim().toUpperCase();
+    let requestedProvider = String(overrideProvider || customInfo?.provider || "").trim().toUpperCase();
+    if (!requestedProvider || requestedProvider === "UNKNOWN" || requestedProvider === "GENERIC") {
+      const upperXml = String(xml).toUpperCase();
+      const sellerTaxCode = String(customInfo?.sellerTaxCode || "").replace(/\D/g, "");
+      if (/MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) || ["0317978711", "0312105174", "0400557356", "0101243150"].includes(sellerTaxCode)) {
+        requestedProvider = "MISA";
+      }
+    }
     if (!forceFallback && requestedProvider === "VNPT" && customInfo?.lookupCode) {
       const vnpt = await downloadOriginalVnptPdf({
         lookupCode: String(customInfo.lookupCode).trim(),
@@ -15032,7 +15039,7 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
     const result = await invoiceManager.downloadInvoicePdf(xml, {
       forceFallback: Boolean(forceFallback),
       timeoutMs: timeoutMs ? Number(timeoutMs) : void 0,
-      overrideProvider,
+      overrideProvider: requestedProvider || overrideProvider,
       customInfo
     });
     if (!forceFallback && result.isFallback) {
