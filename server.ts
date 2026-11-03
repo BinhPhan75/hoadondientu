@@ -398,7 +398,7 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
       'gemini-flash-latest'
     ];
 
-    const svgSnippet = rawSvg.substring(0, 4000);
+    const svgBase64 = !isBitmap ? Buffer.from(rawSvg, 'utf-8').toString('base64') : '';
     const contentsPayload: any[] = isBitmap && bitmapBase64
       ? [
           {
@@ -413,12 +413,15 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
         ]
       : [
           {
-            text: `This is a Vietnamese GDT tax portal captcha SVG image (noise lines removed).
+            inlineData: {
+              mimeType: 'image/svg+xml',
+              data: svgBase64
+            }
+          },
+          {
+            text: `This is a Vietnamese GDT tax portal captcha image (noise lines removed).
 Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without spaces, markdown, or punctuation.
-SVG Source:
-\`\`\`xml
-${svgSnippet}
-\`\`\``
+Do not infer a code from metadata or source text; read the rendered image itself.`
           }
         ];
 
