@@ -21,6 +21,7 @@ import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './ut
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
+import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from './utils/invoiceOriginalCache';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
@@ -353,6 +354,7 @@ export default function App() {
 
   const enrichQueueRef = React.useRef<GDTInvoice[]>([]);
   const isEnrichingRef = React.useRef<boolean>(false);
+  const originalPrefetchRef = React.useRef<Set<string>>(new Set());
 
   const getInvoiceCacheKey = (invoice: GDTInvoice) =>
     `gdt_invoice_detail_${invoice.loaiHdon || 'purchase'}_${invoice.nbmst}_${invoice.khhdon}_${invoice.shdon}`;
@@ -373,6 +375,35 @@ export default function App() {
       localStorage.setItem(getInvoiceCacheKey(invoice), JSON.stringify(invoice));
     } catch (error) {
       console.warn('[Local invoice cache] Không lưu được dữ liệu chi tiết:', error);
+    }
+  };
+
+  const prefetchMisaOriginal = async (invoice: GDTInvoice) => {
+    const isMisa = invoice.provider === 'MISA' || invoice.msttcgp === '0101243150';
+    const code = invoice.lookupCode?.trim();
+    if (!isMisa || !code || !invoice.rawXml) return;
+    const cacheKey = getInvoiceOriginalCacheKey(invoice);
+    if (originalPrefetchRef.current.has(cacheKey)) return;
+    originalPrefetchRef.current.add(cacheKey);
+    try {
+      if (await readCachedOriginalPdf(cacheKey)) return;
+      const response = await fetch('/api/invoice-downloader/download?format=binary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml: invoice.rawXml,
+          overrideProvider: 'MISA',
+          timeoutMs: 20000,
+          customInfo: { lookupCode: code, sellerTaxCode: invoice.nbmst, lookupUrl: 'https://www.meinvoice.vn/tra-cuu' }
+        })
+      });
+      if (!response.ok) return;
+      const blob = await response.blob();
+      if (blob.size && (!blob.type || blob.type.includes('pdf'))) {
+        await writeCachedOriginalPdf(cacheKey, blob);
+      }
+    } catch (error) {
+      console.info('[Original invoice prefetch] Bỏ qua MISA:', error);
     }
   };
 
@@ -426,6 +457,7 @@ export default function App() {
         const enriched = await executeGdtInvoiceDetail(invoice, token, cookie);
         if (enriched) {
           writeCachedInvoice(enriched);
+          void prefetchMisaOriginal(enriched);
           setInvoices(prev => {
             const index = prev.findIndex(item => item.id === enriched.id);
             if (index === -1) return prev;

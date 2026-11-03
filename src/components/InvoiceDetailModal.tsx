@@ -28,6 +28,7 @@ import {
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
+import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -548,6 +549,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
 
+    const cacheKey = getInvoiceOriginalCacheKey(effectiveInvoice);
+    try {
+      const cached = await readCachedOriginalPdf(cacheKey);
+      if (cached) {
+        if (originalMisaPdfUrl) window.URL.revokeObjectURL(originalMisaPdfUrl);
+        setOriginalMisaPdfUrl(window.URL.createObjectURL(cached));
+        setEasyInvoiceDownloadStatus('Đã mở PDF gốc đã lưu trên máy này.');
+        return;
+      }
+    } catch (cacheError) {
+      console.warn('[InvoiceDetailModal] Không đọc được cache PDF MISA:', cacheError);
+    }
+
     setIsDownloadingEasyInvoice(true);
     setEasyInvoiceDownloadStatus('Đang tải PDF gốc từ MISA...');
     try {
@@ -573,6 +587,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (!blob.size || (blob.type && !blob.type.includes('pdf'))) {
         throw new Error('MISA không trả về file PDF hợp lệ.');
       }
+      await writeCachedOriginalPdf(cacheKey, blob);
       if (originalMisaPdfUrl) window.URL.revokeObjectURL(originalMisaPdfUrl);
       setOriginalMisaPdfUrl(window.URL.createObjectURL(blob));
       setEasyInvoiceDownloadStatus('Đã tải bản PDF gốc MISA.');
@@ -1093,6 +1108,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
+              </div>
+            )}
+
+            {isMisaInvoice && isDownloadingEasyInvoice && !originalMisaPdfUrl && (
+              <div className="w-full max-w-[820px] mb-3 px-4 py-3 bg-emerald-950/80 border border-emerald-600/60 rounded-lg text-sm text-emerald-200 flex items-center gap-3 shadow-md">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
+                <span><strong>Hóa đơn gốc đang được tải về máy...</strong> Khung xem sẽ tự cập nhật khi tải xong.</span>
               </div>
             )}
 

@@ -1705,6 +1705,16 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
       customInfo
     });
 
+    // Do not present the generic renderer as an original provider PDF.
+    if (!forceFallback && result.isFallback) {
+      return res.status(502).json({
+        success: false,
+        error: `Nhà cung cấp ${result.provider || overrideProvider || 'hóa đơn'} không trả về được PDF gốc.`,
+        provider: result.provider,
+        executionLogs: result.executionLogs
+      });
+    }
+
     if (req.query.format === 'binary') {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
