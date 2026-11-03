@@ -81,6 +81,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     : null;
 
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
+  const [originalMisaPdfUrl, setOriginalMisaPdfUrl] = useState<string | null>(null);
   const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
   const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
   const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
@@ -539,6 +540,51 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
+  const handleViewOriginalMisa = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode || !effectiveInvoice.rawXml) {
+      alert('Hóa đơn MISA chưa có FKey/TransactionID hoặc XML chi tiết để tải bản gốc.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang tải PDF gốc từ MISA...');
+    try {
+      const resp = await fetch('/api/invoice-downloader/download?format=binary', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          xml: effectiveInvoice.rawXml,
+          overrideProvider: 'MISA',
+          timeoutMs: 20000,
+          customInfo: {
+            lookupCode: lookupCode.trim(),
+            sellerTaxCode: effectiveInvoice.nbmst,
+            lookupUrl: 'https://www.meinvoice.vn/tra-cuu'
+          }
+        })
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || `Máy chủ MISA trả về HTTP ${resp.status}.`);
+      }
+      const blob = await resp.blob();
+      if (!blob.size || (blob.type && !blob.type.includes('pdf'))) {
+        throw new Error('MISA không trả về file PDF hợp lệ.');
+      }
+      if (originalMisaPdfUrl) window.URL.revokeObjectURL(originalMisaPdfUrl);
+      setOriginalMisaPdfUrl(window.URL.createObjectURL(blob));
+      setEasyInvoiceDownloadStatus('Đã tải bản PDF gốc MISA.');
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem MISA gốc:', err);
+      alert(`Không thể hiển thị bản gốc MISA: ${err.message}`);
+      setEasyInvoiceDownloadStatus(null);
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
+  };
+
   // Trigger automatic load immediately when an invoice without genuine items is opened
   useEffect(() => {
     if (invoice && (!hasGenuineItems(invoice.items) || invoice.sourceCompleteness !== 'detail')) {
@@ -608,13 +654,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   // MISA có thể lấy bản thể hiện trực tiếp qua FKey; tự tải ngay khi mở hóa đơn.
   useEffect(() => {
-    if (!effectiveInvoice || originalEasyInvoiceHtml || isDownloadingEasyInvoice) return;
+    if (!effectiveInvoice || originalEasyInvoiceHtml || originalMisaPdfUrl || isDownloadingEasyInvoice) return;
     const isMisa = effectiveInvoice.provider === 'MISA' ||
       effectiveInvoice.msttcgp === '0101243150' ||
       /meinvoice|misa/i.test(effectiveInvoice.lookupUrl || '');
-    const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
-    if (isMisa && code) void handleViewOriginalEasyInvoice();
-  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode, effectiveInvoice?.mhdon]);
+    const code = effectiveInvoice.lookupCode;
+    if (isMisa && code) void handleViewOriginalMisa();
+  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -630,7 +676,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   try {
     xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
-    autoDetectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
+    const detectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
+    // Never expose partner-specific template names. The provider badge is
+    // based only on the actual invoice solution provider, otherwise a seller
+    // can be mislabeled as a different partner template.
+    const standardProviders = new Set<InvoiceProviderId>([
+      'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', 'BKAV', '4SI', 'LCS_SOFT',
+      'VNPAY', 'FPT', 'MINVOICE', 'THAISON', 'CYBERBILL', 'DEFAULT'
+    ]);
+    autoDetectedProvider = standardProviders.has(detectedProvider)
+      ? detectedProvider
+      : 'DEFAULT';
     lookupDetails = extractLookupDetails(xmlContent);
 
     // Ưu tiên mã tra cứu và URL có sẵn từ invoice nếu chưa trích xuất được từ XML
@@ -1083,6 +1139,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
+                  ) : originalMisaPdfUrl ? (
+                    <iframe
+                      src={originalMisaPdfUrl}
+                      title="Bản PDF gốc MISA meInvoice"
+                      className="w-full h-[1200px] border-0 bg-white"
+                    />
                   ) : originalEasyInvoiceHtml || originalVnptHtml ? (
                     <iframe
                       ref={iframeRef}
@@ -1104,7 +1166,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         <div className="mt-5 overflow-x-auto border border-slate-300">
                           <table className="w-full text-left text-sm">
                             <thead className="bg-slate-100"><tr><th className="p-2">STT</th><th className="p-2">Tên hàng hóa, dịch vụ</th><th className="p-2">ĐVT</th><th className="p-2">SL</th><th className="p-2">Thành tiền</th></tr></thead>
-                            <tbody>{safeItems.map((item, index) => <tr key={`${index}-${item.name}`} className="border-t border-slate-200"><td className="p-2">{index + 1}</td><td className="p-2">{item.name || '---'}</td><td className="p-2">{item.unit || '---'}</td><td className="p-2">{item.quantity ?? '---'}</td><td className="p-2">{item.amount ?? '---'}</td></tr>)}</tbody>
+                            <tbody>{safeItems.map((item, index) => {
+                              const itemName = item.itemName || item.ten || (item as any).name || '';
+                              return <tr key={`${index}-${itemName}`} className="border-t border-slate-200"><td className="p-2">{index + 1}</td><td className="p-2">{itemName || '---'}</td><td className="p-2">{item.unit || item.dvt || '---'}</td><td className="p-2">{item.quantity ?? item.sluong ?? '---'}</td><td className="p-2">{item.amount ?? item.thtien ?? '---'}</td></tr>;
+                            })}</tbody>
                           </table>
                         </div>
                       </div>
@@ -1123,6 +1188,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
                 ) : originalFourSiPdfUrl ? (
                   <>Bản thể hiện <span className="text-amber-400 font-bold">mẫu 4Si từ dochoadon.lcssoft.com.vn (bản thể hiện hiển thị, chưa phải bản gốc có CKS)</span> • </>
+                ) : originalMisaPdfUrl ? (
+                  <>Bản PDF <span className="text-emerald-400 font-bold">gốc từ MISA meInvoice</span> • </>
                 ) : (
                   <>Chưa tải bản gốc • </>
                 )}
@@ -1141,7 +1208,26 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {isEasyInvoice ? (
+            {isMisaInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleViewOriginalMisa}
+                  disabled={isDownloadingEasyInvoice}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 disabled:opacity-60"
+                  title={`Tải PDF gốc MISA bằng FKey/TransactionID: ${lookupDetails.lookupCode || ''}`}
+                >
+                  {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tải...') : originalMisaPdfUrl ? 'Đang xem PDF gốc MISA' : 'Xem hóa đơn gốc MISA'}</span>
+                </button>
+                {directLookupUrl && (
+                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Tra link gốc</span>
+                  </a>
+                )}
+              </div>
+            ) : isEasyInvoice ? (
               <div className="inline-flex items-center gap-1.5">
                 <button
                   type="button"

@@ -15,7 +15,6 @@ import {
   Download
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
-import { detectPartnerTemplate, getPartnerMeta } from '../templates';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { getInvoiceProviderBadge } from '../utils/providerMapping';
 
