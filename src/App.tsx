@@ -18,7 +18,6 @@ import { FloatingSyncBadge } from './components/FloatingSyncBadge';
 import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMonthSyncState, MonthSyncChunk } from './types';
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
-import { exportInvoiceToPdfFile } from './utils/pdfExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
@@ -316,18 +315,8 @@ export default function App() {
     ]);
   };
 
-  // Download / Export PDF directly
-  const handleDownloadPdf = async (invoice: GDTInvoice) => {
-    try {
-      toast.info(`Đang chuẩn bị tệp PDF cho hóa đơn số ${invoice.shdon}...`, 'Tải Hóa Đơn');
-      await exportInvoiceToPdfFile(invoice);
-      toast.success(`Đã tải thành công file PDF hóa đơn số ${invoice.shdon}!`, 'Tải Thành Công');
-    } catch (err: any) {
-      console.error('Lỗi khi xuất PDF trực tiếp:', err);
-      // Fallback: open detail modal for manual selection
-      setSelectedInvoiceForDetail(invoice);
-    }
-  };
+  // Không dựng PDF nội bộ: mở chi tiết để người dùng xem/tải bản gốc từ cổng NCC.
+  const handleDownloadPdf = (invoice: GDTInvoice) => setSelectedInvoiceForDetail(invoice);
 
   // Export Excel
   const handleExportExcel = (targetInvoices?: GDTInvoice[]) => {

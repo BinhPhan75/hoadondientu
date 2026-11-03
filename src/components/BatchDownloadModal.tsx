@@ -17,7 +17,6 @@ import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
-import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
 import { useNotification } from '../context/NotificationContext';
 
 interface BatchDownloadModalProps {
@@ -32,7 +31,6 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
   onClose
 }) => {
   const [includeXml, setIncludeXml] = useState(true);
-  const [includePdfHtml, setIncludePdfHtml] = useState(true);
   const [includeExcel, setIncludeExcel] = useState(true);
   const [folderStructure, setFolderStructure] = useState<'flat' | 'by_month' | 'by_seller' | 'by_tax_rate'>('by_month');
   const [namingPattern, setNamingPattern] = useState<'standard' | 'readable' | 'date_mst'>('standard');
@@ -63,8 +61,8 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
 
   const handleStartBatchDownload = async () => {
     if (invoices.length === 0) return;
-    if (!includeXml && !includePdfHtml && !includeExcel) {
-      toast.warning('Vui lòng chọn ít nhất một định dạng tệp (XML, PDF/HTML hoặc Excel) cần tải về.', 'Chưa Chọn Định Dạng');
+    if (!includeXml && !includeExcel) {
+      toast.warning('Vui lòng chọn XML gốc hoặc bảng kê Excel cần tải về.', 'Chưa Chọn Định Dạng');
       return;
     }
 
@@ -114,11 +112,6 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
           zip.file(`${subFolder}${baseFileName}.xml`, xmlContent);
         }
 
-        // 2. Add Authentic Official E-Invoice HTML file
-        if (includePdfHtml) {
-          const htmlContent = generateOfficialInvoiceHtml(inv);
-          zip.file(`${subFolder}${baseFileName}.html`, htmlContent);
-        }
       }
 
       // 3. Add Excel Summary file
@@ -209,7 +202,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                 TẢI HÀNG LOẠT HÓA ĐƠN (.ZIP)
               </h3>
               <p className="text-[11px] text-gray-400">
-                Đóng gói tệp XML gốc QĐ 1450, bản in HTML và bảng kê Excel TT78
+                Đóng gói XML gốc QĐ 1450 và bảng kê Excel TT78
               </p>
             </div>
           </div>
@@ -253,7 +246,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
             <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider">
               1. Định dạng tệp đóng gói:
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <label className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-all ${
                 includeXml ? 'bg-red-50/60 border-red-300 text-red-950 font-bold' : 'bg-white border-[#d1d5db] text-gray-700'
               }`}>
@@ -264,18 +257,6 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
                   className="w-3.5 h-3.5 text-[#ef4444]"
                 />
                 <span className="text-[11px]">XML Gốc (QĐ 1450)</span>
-              </label>
-
-              <label className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-all ${
-                includePdfHtml ? 'bg-blue-50/60 border-blue-300 text-blue-950 font-bold' : 'bg-white border-[#d1d5db] text-gray-700'
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={includePdfHtml}
-                  onChange={(e) => setIncludePdfHtml(e.target.checked)}
-                  className="w-3.5 h-3.5 text-blue-600"
-                />
-                <span className="text-[11px]">Bản In HTML/PDF</span>
               </label>
 
               <label className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-all ${

@@ -18,12 +18,7 @@ import {
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
-import { 
-  generateInvoiceQrCode, 
-  exportInvoiceToPdfFile, 
-  openInvoicePrintWindow
-} from '../utils/pdfExporter';
-import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
+import { generateInvoiceQrCode } from '../utils/pdfExporter';
 import { 
   detectInvoiceProvider, 
   getProviderMeta, 
@@ -84,7 +79,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     ? (currentInvoice && currentInvoice.id === invoice.id ? currentInvoice : invoice)
     : null;
 
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
   const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
   const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
@@ -235,16 +229,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải PDF gốc VNPT:', err);
-      const wantFallback = window.confirm(
-        `Không thể tải trực tiếp file PDF từ cổng VNPT (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét từ bản thể hiện ngay bây giờ không?`
-      );
-      if (wantFallback) {
-        try {
-          await exportInvoiceToPdfFile(effectiveInvoice);
-        } catch (exportErr: any) {
-          alert(`Không thể xuất PDF: ${exportErr.message}`);
-        }
-      }
+      alert(`Không thể tải PDF gốc từ cổng VNPT: ${err.message}`);
     } finally {
       setIsDownloadingVnptPdf(false);
     }
@@ -301,16 +286,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
     } catch (err: any) {
       console.error('[InvoiceDetailModal] Lỗi tải PDF Viettel:', err);
-      const wantFallback = window.confirm(
-        `Không thể tải trực tiếp PDF từ cổng Viettel (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét theo mẫu ngay bây giờ không?`
-      );
-      if (wantFallback) {
-        try {
-          await exportInvoiceToPdfFile(effectiveInvoice);
-        } catch (exportErr: any) {
-          alert(`Không thể xuất PDF: ${exportErr.message}`);
-        }
-      }
+      alert(`Không thể tải PDF gốc từ cổng Viettel: ${err.message}`);
     } finally {
       setIsDownloadingViettelPdf(false);
     }
@@ -625,7 +601,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   let autoDetectedProvider: InvoiceProviderId = 'DEFAULT' as InvoiceProviderId;
   let lookupDetails: { lookupCode?: string; lookupUrl?: string } = {};
   let safeItems: ReturnType<typeof ensureInvoiceItems> = [];
-  let standaloneHtml = '';
   let renderError: string | null = null;
 
   try {
@@ -822,21 +797,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('4SI')) ||
     Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('LCS'));
 
-  if (!renderError) {
-    try {
-      // Tạo HTML chuẩn theo template của nhà cung cấp
-      standaloneHtml = generateOfficialInvoiceHtml(effectiveInvoice, {
-        theme,
-        qrCodeDataUrl: qrCodeUrl,
-        showPrintControls: false,
-        templateId: effectiveTemplateId
-      });
-    } catch (err: any) {
-      console.error('[InvoiceDetailModal] Lỗi khi tạo HTML hóa đơn:', err);
-      renderError = err?.message || 'Không thể tạo bản xem trước hóa đơn này.';
-    }
-  }
-
   if (renderError) {
     return (
       <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -853,23 +813,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       </div>
     );
   }
-
-  const handleDownloadPdfFile = async (targetTemplateId: InvoiceProviderId = 'DEFAULT') => {
-    setIsExportingPdf(true);
-    try {
-      // Xuất tệp PDF A4 sắc nét theo template được chỉ định (Mặc định: 'DEFAULT' là mẫu chuẩn Tổng cục Thuế GDT, hoặc 'VIETTEL', v.v.)
-      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, targetTemplateId);
-    } catch (err) {
-      console.error('Lỗi khi xuất PDF:', err);
-      alert(`Không thể xuất file PDF: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setIsExportingPdf(false);
-    }
-  };
-
-  const handlePrint = () => {
-    openInvoicePrintWindow(effectiveInvoice, theme, effectiveTemplateId);
-  };
 
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
@@ -1100,14 +1043,43 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
-                  ) : (
+                  ) : originalEasyInvoiceHtml || originalVnptHtml ? (
                     <iframe
                       ref={iframeRef}
-                      srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
+                      srcDoc={originalEasyInvoiceHtml || originalVnptHtml || ''}
                       title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
                       className="w-full h-[1200px] border-0 bg-white"
                       sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                     />
+                  ) : (
+                    <div className="min-h-[1160px] bg-white p-6 text-slate-800">
+                      <div className="mx-auto max-w-3xl border border-amber-300 bg-amber-50 p-5 text-sm">
+                        <h3 className="font-semibold text-amber-900">Chưa có bản thể hiện gốc</h3>
+                        <p className="mt-2 text-amber-800">
+                          Ứng dụng không dựng lại hóa đơn bằng template vì bố cục có thể khác bản gốc. Hãy mở cổng tra cứu nhà cung cấp để xem hoặc tải bản gốc.
+                        </p>
+                        {directLookupUrl && (
+                          <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 font-semibold text-cyan-700 underline">
+                            <ExternalLink className="h-4 w-4" /> Mở cổng tra cứu bản gốc
+                          </a>
+                        )}
+                      </div>
+                      <div className="mx-auto mt-6 max-w-3xl">
+                        <h3 className="mb-3 text-base font-semibold">Dữ liệu hóa đơn từ Cổng Thuế</h3>
+                        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                          <div>MST bên bán: <strong>{effectiveInvoice.nbmst || '---'}</strong></div>
+                          <div>Tên bên bán: <strong>{effectiveInvoice.nbten || '---'}</strong></div>
+                          <div>Ký hiệu: <strong>{effectiveInvoice.khhdon || '---'}</strong></div>
+                          <div>Số hóa đơn: <strong>{effectiveInvoice.shdon || '---'}</strong></div>
+                        </div>
+                        <div className="mt-5 overflow-x-auto border border-slate-300">
+                          <table className="w-full text-left text-sm">
+                            <thead className="bg-slate-100"><tr><th className="p-2">STT</th><th className="p-2">Tên hàng hóa, dịch vụ</th><th className="p-2">ĐVT</th><th className="p-2">SL</th><th className="p-2">Thành tiền</th></tr></thead>
+                            <tbody>{safeItems.map((item, index) => <tr key={`${index}-${item.name}`} className="border-t border-slate-200"><td className="p-2">{index + 1}</td><td className="p-2">{item.name || '---'}</td><td className="p-2">{item.unit || '---'}</td><td className="p-2">{item.quantity ?? '---'}</td><td className="p-2">{item.amount ?? '---'}</td></tr>)}</tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1122,10 +1094,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
                 ) : originalFourSiPdfUrl ? (
                   <>Bản thể hiện <span className="text-amber-400 font-bold">mẫu 4Si từ dochoadon.lcssoft.com.vn (bản thể hiện hiển thị, chưa phải bản gốc có CKS)</span> • </>
-                ) : is4SiInvoice ? (
-                  <>Bản thể hiện mẫu <span className="text-amber-400 font-bold">chuẩn Tổng cục Thuế (GDT)</span> • </>
                 ) : (
-                  <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
+                  <>Chưa tải bản gốc • </>
                 )}
                 Đã nạp <span className="text-white font-bold">{safeItems.length}</span> dòng hàng hóa • 
                 Ký hiệu: <span className="text-amber-400">{effectiveInvoice.khhdon}</span> • 
@@ -1235,16 +1205,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Tra link gốc</span>
                 </button>
 
-                {/* 5. Tải PDF theo mẫu chuẩn GDT */}
-                <button
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF mẫu GDT'}</span>
-                </button>
               </div>
             ) : isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
@@ -1312,18 +1272,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Tải ZIP</span>
                 </button>
 
-                {/* 5. Nút Mẫu GDT */}
-                <button
-                  type="button"
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Mẫu GDT</span>
-                </button>
-
                 {directLookupUrl && (
                   <a
                     href={directLookupUrl}
@@ -1385,110 +1333,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             ) : null}
 
-            <button
-              onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors cursor-pointer"
-              title="In trực tiếp ra máy in hoặc Lưu dưới dạng PDF chuẩn trình duyệt (Ctrl + P)"
-            >
-              <Printer className="w-3.5 h-3.5 text-amber-400" />
-              <span>In HĐ (Ctrl+P)</span>
-            </button>
-
-            {is4SiInvoice ? (
-              <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* Nút Xem bản thể hiện 4Si từ LCS Soft */}
-                <button
-                  type="button"
-                  onClick={handleViewFourSiPdf}
-                  disabled={isLoadingFourSiOriginal}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
-                    originalFourSiPdfUrl
-                      ? 'text-amber-200 bg-amber-900 border-amber-400 ring-1 ring-amber-400/40'
-                      : 'text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600'
-                  }`}
-                  title="Tạo và xem trực tiếp bản thể hiện mẫu 4Si qua cổng Đọc hóa đơn XML của LCS Soft (dochoadon.lcssoft.com.vn)"
-                >
-                  {isLoadingFourSiOriginal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                  <span>
-                    {isLoadingFourSiOriginal
-                      ? 'Đang nạp 4Si (LCS)...'
-                      : originalFourSiPdfUrl
-                      ? 'Đang xem bản thể hiện 4Si'
-                      : 'Xem bản thể hiện 4Si (LCS)'}
-                  </span>
-                </button>
-
-                {/* Nút Chuyển về mẫu GDT nếu đang xem bản thể hiện 4Si */}
-                {originalFourSiPdfUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (originalFourSiPdfUrl) window.URL.revokeObjectURL(originalFourSiPdfUrl);
-                      setOriginalFourSiPdfUrl(null);
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 rounded-lg border border-emerald-700 transition-colors cursor-pointer"
-                    title="Chuyển về xem mẫu chuẩn Tổng cục Thuế (GDT)"
-                  >
-                    <span>Mẫu chuẩn GDT</span>
-                  </button>
-                )}
-
-                {/* Nút Tải PDF qua LCS Soft */}
-                <button
-                  type="button"
-                  onClick={handleDownloadFourSiPdf}
-                  disabled={isDownloadingFourSiPdf}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600 hover:border-amber-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title="Tải tệp PDF bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc)"
-                >
-                  {isDownloadingFourSiPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                  <span>{isDownloadingFourSiPdf ? 'Đang tải...' : 'Tải PDF qua LCS Soft (Bản thể hiện)'}</span>
-                </button>
-
-                {/* Nút tải PDF theo mẫu GDT chuẩn luôn luôn có mặt bên cạnh */}
-                <button
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
-                </button>
-              </div>
-            ) : !isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice ? (
-              <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {effectiveTemplateId !== 'DEFAULT' && (
-                  <button
-                    onClick={() => handleDownloadPdfFile(effectiveTemplateId)}
-                    disabled={isExportingPdf}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/70 hover:bg-amber-900 border border-amber-600 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                    title={`Tải tệp PDF theo mẫu đặc thù ${currentProviderMeta.name}`}
-                  >
-                    <Download className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{isExportingPdf ? 'Đang tạo PDF...' : `Tải PDF mẫu ${currentProviderMeta.shortName}`}</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={() => handleDownloadPdfFile('DEFAULT')}
-                  disabled={isExportingPdf}
-                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
-                </button>
-              </div>
-            ) : null}
+            {/* Không sinh bản thể hiện từ template nội bộ. Chỉ hiển thị bản gốc ở phía trên. */}
           </div>
         </div>
       </div>
