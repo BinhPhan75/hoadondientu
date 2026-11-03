@@ -604,6 +604,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [effectiveInvoice?.id, effectiveInvoice?.shdon, effectiveInvoice?.mhdon, effectiveInvoice?.lookupCode]);
 
+  // MISA có thể lấy bản thể hiện trực tiếp qua FKey; tự tải ngay khi mở hóa đơn.
+  useEffect(() => {
+    if (!effectiveInvoice || originalEasyInvoiceHtml || isDownloadingEasyInvoice) return;
+    const isMisa = effectiveInvoice.provider === 'MISA' ||
+      effectiveInvoice.msttcgp === '0101243150' ||
+      /meinvoice|misa/i.test(effectiveInvoice.lookupUrl || '');
+    const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
+    if (isMisa && code) void handleViewOriginalEasyInvoice();
+  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode, effectiveInvoice?.mhdon]);
+
   if (!invoice || !effectiveInvoice) return null;
 
   // Dò tìm tự động nhà cung cấp HĐĐT từ XML hoặc dữ liệu bóc tách.
@@ -740,11 +750,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     ? (selectedTemplateId as InvoiceProviderId)
     : autoDetectedProvider;
 
+  // Chỉ gán template TKJ cho đúng MST TKJ. MSTTCGP là MST của tổ chức cung cấp
+  // giải pháp, không phải căn cứ để kết luận người bán là TKJ.
+  const safeResolvedTemplateId: InvoiceProviderId =
+    resolvedTemplateId === 'TKJ' && effectiveInvoice.nbmst !== '0318443500'
+      ? 'DEFAULT'
+      : resolvedTemplateId;
+
   // Hóa đơn VNPAY & Vietcombank: Không có mã tra cứu trong XML GDT,
   // theo chỉ đạo của người dùng: Luôn sử dụng mẫu chuẩn Tổng cục Thuế (DEFAULT) để thông tin người bán và người mua chính xác 100%.
-  const effectiveTemplateId: InvoiceProviderId = (resolvedTemplateId === 'VNPAY')
+  const effectiveTemplateId: InvoiceProviderId = (safeResolvedTemplateId === 'VNPAY')
     ? 'DEFAULT'
-    : resolvedTemplateId;
+    : safeResolvedTemplateId;
 
   const currentProviderMeta: ProviderMeta = getProviderMeta(effectiveTemplateId);
 
@@ -1238,20 +1255,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : originalViettelPdfUrl ? 'Đang xem PDF gốc Viettel' : 'Xem PDF gốc Viettel'}</span>
                 </button>
 
-                {originalViettelPdfUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (originalViettelPdfUrl) window.URL.revokeObjectURL(originalViettelPdfUrl);
-                      setOriginalViettelPdfUrl(null);
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                    title="Chuyển về xem mẫu thể hiện nội bộ"
-                  >
-                    <span>Mẫu nội bộ</span>
-                  </button>
-                )}
-
                 <button
                   type="button"
                   onClick={handleDownloadViettelPdf}
@@ -1267,33 +1270,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleDownloadViettelZip}
-                  disabled={isDownloadingViettelZip}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-lg border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
-                  title="Tải tệp ZIP gốc (chứa XML và chữ ký) từ Viettel"
-                >
-                  {isDownloadingViettelZip ? (
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
-                  ) : (
-                    <FileCode2 className="w-3 h-3 text-amber-400" />
-                  )}
-                  <span>Tải ZIP</span>
-                </button>
-
-                {directLookupUrl && (
-                  <a
-                    href={directLookupUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                    title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
-                  >
-                    <ExternalLink className="w-3 h-3 text-slate-400" />
-                    <span>Tra link gốc</span>
-                  </a>
-                )}
               </div>
             ) : isVietcombankInvoice ? (
               <div className="inline-flex items-center gap-1.5">
