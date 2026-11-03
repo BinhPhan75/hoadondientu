@@ -14990,6 +14990,14 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
       overrideProvider,
       customInfo
     });
+    if (!forceFallback && result.isFallback) {
+      return res.status(502).json({
+        success: false,
+        error: `Nh\xE0 cung c\u1EA5p ${result.provider || overrideProvider || "h\xF3a \u0111\u01A1n"} kh\xF4ng tr\u1EA3 v\u1EC1 \u0111\u01B0\u1EE3c PDF g\u1ED1c.`,
+        provider: result.provider,
+        executionLogs: result.executionLogs
+      });
+    }
     if (req.query.format === "binary") {
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
