@@ -297,7 +297,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (!effectiveInvoice) return;
     setIsExportingPdf(true);
     try {
-      await exportInvoiceToPdfFile(effectiveInvoice);
+      // The fallback must never auto-select a supplier template. Supplier
+      // templates are only used for genuine provider originals above.
+      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, 'red', 'DEFAULT');
     } catch (err: any) {
       alert(`Không thể tạo bản PDF dự phòng: ${err?.message || String(err)}`);
     } finally {
@@ -1319,16 +1321,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             ) : null}
 
-            {/* Không sinh bản thể hiện từ template nội bộ. Chỉ hiển thị bản gốc ở phía trên. */}
+            {/* Generic fallback from CQT data; never use a supplier template here. */}
             <button
               type="button"
               onClick={handleDownloadPdfFile}
               disabled={isExportingPdf}
               className="inline-flex items-center gap-1.5 rounded-md border border-blue-600 bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
-              title="Tạo bản PDF dự phòng từ dữ liệu GDT"
+              title="Tạo bản thể hiện dự phòng từ dữ liệu Cổng Thuế"
             >
               <Download className="h-3.5 w-3.5" />
-              {isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF mẫu GDT'}
+              {isExportingPdf ? 'Đang tạo PDF...' : 'Tải bản thể hiện dự phòng GDT'}
             </button>
           </div>
         </div>
