@@ -29,6 +29,7 @@ import {
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
+import { resolveInvoiceProvider } from '../utils/providerRouting';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -40,6 +41,24 @@ interface InvoiceDetailModalProps {
   token?: string;
   cookieHeader?: string;
 }
+
+// Keep the provider's own HTML pagination when it is displayed inside the modal.
+// This is especially important for EasyInvoice invoices with many line items.
+const prepareOriginalInvoiceHtml = (html: string): string => {
+  if (!html || /id=["']gdt-original-page-style["']/i.test(html)) return html;
+  const style = `<style id="gdt-original-page-style">
+    @page { size: A4; margin: 0; }
+    html, body { margin: 0 !important; padding: 0 !important; background: #fff; }
+    table { max-width: 100%; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
+    tr, img, .invoice-row, .invoice-item { break-inside: avoid; page-break-inside: avoid; }
+    .page-break, .pageBreak, .invoice-page { break-after: page; page-break-after: always; }
+    @media print { body { background: #fff; } }
+  </style>`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${style}</head>`);
+  return `${style}${html}`;
+};
 
 export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   invoice,
@@ -549,9 +568,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const handleViewOriginalMisa = async () => {
     if (!effectiveInvoice) return;
-    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
     if (!lookupCode || !effectiveInvoice.rawXml) {
-      alert('Hóa đơn MISA chưa có FKey/TransactionID hoặc XML chi tiết để tải bản gốc.');
+      alert('Hóa đơn chưa có mã tra cứu hoặc XML chi tiết để tải bản gốc.');
       return;
     }
 
@@ -578,10 +597,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         body: JSON.stringify({
           xml: effectiveInvoice.rawXml,
           timeoutMs: 20000,
+          overrideProvider: resolveInvoiceProvider(effectiveInvoice),
           customInfo: {
             lookupCode: lookupCode.trim(),
             sellerTaxCode: effectiveInvoice.nbmst,
-            lookupUrl: lookupDetails.lookupUrl || effectiveInvoice.lookupUrl
+            lookupUrl: lookupDetails.lookupUrl || effectiveInvoice.lookupUrl,
+            invoiceNo: effectiveInvoice.shdon,
+            invoiceSeries: effectiveInvoice.khhdon
           }
         })
       });
@@ -678,14 +700,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Tự tải bản gốc cho mọi nhà cung cấp đã có driver và mã tra cứu.
   useEffect(() => {
     if (!effectiveInvoice || originalEasyInvoiceHtml || originalProviderPdfUrl || isDownloadingEasyInvoice) return;
-    const provider = String(effectiveInvoice.provider || '').toUpperCase();
+    const provider = resolveInvoiceProvider(effectiveInvoice);
     const hasProviderDriver = Boolean(
       (provider && provider !== 'DEFAULT' && provider !== 'UNKNOWN' && provider !== 'GENERIC') ||
       effectiveInvoice.msttcgp ||
       effectiveInvoice.lookupUrl
     );
-    const code = effectiveInvoice.lookupCode;
-    if (hasProviderDriver && code) void handleViewOriginalMisa();
+    const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
+    if (hasProviderDriver && code) {
+      if (provider === 'EASYINVOICE') {
+        void handleViewOriginalEasyInvoice();
+      } else {
+        void handleViewOriginalMisa();
+      }
+    }
   }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode, effectiveInvoice?.provider, effectiveInvoice?.msttcgp]);
 
   if (!invoice || !effectiveInvoice) return null;
@@ -1181,7 +1209,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   ) : originalEasyInvoiceHtml || originalVnptHtml ? (
                     <iframe
                       ref={iframeRef}
-                      srcDoc={originalEasyInvoiceHtml || originalVnptHtml || ''}
+                      srcDoc={prepareOriginalInvoiceHtml(originalEasyInvoiceHtml || originalVnptHtml || '')}
                       title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
                       className="w-full h-[1200px] border-0 bg-white"
                       sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"

@@ -22,6 +22,7 @@ import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from './utils/invoiceOriginalCache';
+import { resolveInvoiceProvider } from './utils/providerRouting';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
@@ -380,7 +381,7 @@ export default function App() {
 
   const prefetchOriginalPdf = async (invoice: GDTInvoice) => {
     const hasProviderHint = Boolean(invoice.provider || invoice.msttcgp || invoice.lookupUrl);
-    const code = invoice.lookupCode?.trim();
+    const code = (invoice.lookupCode || invoice.mhdon)?.trim();
     if (!hasProviderHint || !code || !invoice.rawXml) return;
     const cacheKey = getInvoiceOriginalCacheKey(invoice);
     if (originalPrefetchRef.current.has(cacheKey)) return;
@@ -393,7 +394,14 @@ export default function App() {
         body: JSON.stringify({
           xml: invoice.rawXml,
           timeoutMs: 20000,
-          customInfo: { lookupCode: code, sellerTaxCode: invoice.nbmst, lookupUrl: invoice.lookupUrl }
+          overrideProvider: resolveInvoiceProvider(invoice),
+          customInfo: {
+            lookupCode: code,
+            sellerTaxCode: invoice.nbmst,
+            lookupUrl: invoice.lookupUrl,
+            invoiceNo: invoice.shdon,
+            invoiceSeries: invoice.khhdon
+          }
         })
       });
       if (!response.ok) return;

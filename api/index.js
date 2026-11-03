@@ -14984,6 +14984,51 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
     if (!xml) {
       return res.status(400).json({ error: "N\u1ED9i dung XML kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
+    const requestedProvider = String(overrideProvider || customInfo?.provider || "").trim().toUpperCase();
+    if (!forceFallback && requestedProvider === "VNPT" && customInfo?.lookupCode) {
+      const vnpt = await downloadOriginalVnptPdf({
+        lookupCode: String(customInfo.lookupCode).trim(),
+        sellerTaxCode: customInfo.sellerTaxCode ? String(customInfo.sellerTaxCode).trim() : void 0,
+        portalUrl: customInfo.lookupUrl ? String(customInfo.lookupUrl).trim() : void 0,
+        invoiceNumber: customInfo.invoiceNo ? String(customInfo.invoiceNo).trim() : void 0
+      });
+      if (req.query.format === "binary") {
+        res.setHeader("Content-Type", vnpt.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(vnpt.filename)}"`);
+        return res.send(vnpt.data);
+      }
+      return res.json({
+        success: true,
+        provider: "VNPT",
+        driverName: "VNPT legacy portal",
+        filename: vnpt.filename,
+        isFallback: false,
+        pdfBase64: vnpt.data.toString("base64")
+      });
+    }
+    if (!forceFallback && requestedProvider === "EASYINVOICE" && customInfo?.lookupCode) {
+      const easy = await downloadOriginalEasyInvoice({
+        lookupCode: String(customInfo.lookupCode).trim(),
+        sellerTaxCode: customInfo.sellerTaxCode ? String(customInfo.sellerTaxCode).trim() : void 0,
+        lookupUrl: customInfo.lookupUrl ? String(customInfo.lookupUrl).trim() : void 0,
+        khhdon: customInfo.invoiceSeries ? String(customInfo.invoiceSeries).trim() : void 0,
+        shdon: customInfo.invoiceNo ? String(customInfo.invoiceNo).trim() : void 0
+      });
+      if (req.query.format === "binary") {
+        res.setHeader("Content-Type", easy.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(easy.filename)}"`);
+        return res.send(easy.buffer);
+      }
+      return res.json({
+        success: true,
+        provider: "EASYINVOICE",
+        driverName: "EasyInvoice portal",
+        filename: easy.filename,
+        isFallback: false,
+        pdfBase64: easy.pdfBase64 || easy.buffer.toString("base64"),
+        htmlContent: easy.htmlContent || ""
+      });
+    }
     const result = await invoiceManager.downloadInvoicePdf(xml, {
       forceFallback: Boolean(forceFallback),
       timeoutMs: timeoutMs ? Number(timeoutMs) : void 0,
