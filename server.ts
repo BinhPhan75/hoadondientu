@@ -1700,24 +1700,21 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
     }
 
     let requestedProvider = String(overrideProvider || customInfo?.provider || '').trim().toUpperCase();
-    // Some older GDT payloads omit MSTTCGP/provider fields from the list row.
-    // The XML still carries authoritative MISA markers, so recover the route
-    // server-side before the manager can fall back to GENERIC.
-    if (!requestedProvider || requestedProvider === 'UNKNOWN' || requestedProvider === 'GENERIC') {
-      const upperXml = String(xml).toUpperCase();
-      const sellerTaxCode = String(customInfo?.sellerTaxCode || '').replace(/\D/g, '');
-      if (
-        /MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) ||
-        ['0317978711', '0312105174', '0400557356', '0101243150'].includes(sellerTaxCode)
-      ) {
-        requestedProvider = 'MISA';
-      } else if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
-        requestedProvider = 'MINVOICE';
-      } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
-        requestedProvider = 'THAISON';
-      } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
-        requestedProvider = 'BKAV';
-      }
+    // Provider markers in the XML are authoritative. This prevents a stale
+    // provider badge from routing Thai Son/M-Invoice invoices through MISA.
+    const upperXml = String(xml).toUpperCase();
+    const sellerTaxCode = String(customInfo?.sellerTaxCode || '').replace(/\D/g, '');
+    if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
+      requestedProvider = 'MINVOICE';
+    } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
+      requestedProvider = 'THAISON';
+    } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
+      requestedProvider = 'BKAV';
+    } else if ((!requestedProvider || requestedProvider === 'UNKNOWN' || requestedProvider === 'GENERIC') && (
+      /MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) ||
+      ['0317978711', '0312105174', '0400557356', '0101243150'].includes(sellerTaxCode)
+    )) {
+      requestedProvider = 'MISA';
     }
 
     // VNPT has a legacy portal flow with its own cookie/check-code session.

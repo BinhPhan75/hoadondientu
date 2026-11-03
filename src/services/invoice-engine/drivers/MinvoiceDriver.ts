@@ -186,6 +186,56 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
           };
         } else {
           this.createLog(`[M-Invoice] Phản hồi từ server không phải định dạng PDF hợp lệ (Size: ${buffer.length} bytes)`, logs);
+
+          // Newer M-Invoice deployments may wrap the PDF/link in JSON instead
+          // of returning application/pdf directly.
+          const bodyText = buffer.toString('utf8').trim();
+          try {
+            const payload = JSON.parse(bodyText);
+            const findPdfCandidate = (value: any, depth = 0): string | undefined => {
+              if (depth > 4 || value == null) return undefined;
+              if (typeof value === 'string') return value;
+              if (Array.isArray(value)) {
+                for (const item of value) {
+                  const found = findPdfCandidate(item, depth + 1);
+                  if (found) return found;
+                }
+                return undefined;
+              }
+              if (typeof value === 'object') {
+                for (const key of ['data', 'Data', 'pdfBase64', 'fileData', 'pdf', 'PDF', 'url', 'Url', 'downloadUrl', 'fileUrl']) {
+                  const found = findPdfCandidate(value[key], depth + 1);
+                  if (found) return found;
+                }
+              }
+              return undefined;
+            };
+            const candidate = findPdfCandidate(payload);
+            if (typeof candidate === 'string' && candidate.length > 100) {
+              const base64 = candidate.replace(/^data:application\/pdf;base64,/i, '');
+              const jsonPdf = /^[A-Za-z0-9+/=]+$/.test(base64) ? Buffer.from(base64, 'base64') : null;
+              if (jsonPdf && jsonPdf.length > 500 && jsonPdf.toString('latin1', 0, 5).startsWith('%PDF')) {
+                return {
+                  success: true, provider: this.providerCode, driverName: this.name,
+                  pdfBuffer: jsonPdf, pdfBase64: jsonPdf.toString('base64'), contentType: 'application/pdf',
+                  filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: targetUrl, executionLogs: logs
+                };
+              }
+              if (/^https?:\/\//i.test(candidate)) {
+                const linked = await fetch(candidate, { headers: { Accept: 'application/pdf,*/*', Referer: targetUrl }, signal: AbortSignal.timeout(timeoutMs) });
+                const linkedBuffer = Buffer.from(await linked.arrayBuffer());
+                if (linked.ok && linkedBuffer.toString('latin1', 0, 5).startsWith('%PDF')) {
+                  return {
+                    success: true, provider: this.providerCode, driverName: this.name,
+                    pdfBuffer: linkedBuffer, pdfBase64: linkedBuffer.toString('base64'), contentType: 'application/pdf',
+                    filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: candidate, executionLogs: logs
+                  };
+                }
+              }
+            }
+          } catch {
+            // The response may be an HTML error page; continue to the fallback.
+          }
         }
       } else {
         this.createLog(`[M-Invoice] Server phản hồi mã trạng thái HTTP ${resp.status} ${resp.statusText}`, logs);

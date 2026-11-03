@@ -11697,6 +11697,66 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
           };
         } else {
           this.createLog(`[M-Invoice] Ph\u1EA3n h\u1ED3i t\u1EEB server kh\xF4ng ph\u1EA3i \u0111\u1ECBnh d\u1EA1ng PDF h\u1EE3p l\u1EC7 (Size: ${buffer.length} bytes)`, logs);
+          const bodyText = buffer.toString("utf8").trim();
+          try {
+            const payload = JSON.parse(bodyText);
+            const findPdfCandidate = (value2, depth = 0) => {
+              if (depth > 4 || value2 == null) return void 0;
+              if (typeof value2 === "string") return value2;
+              if (Array.isArray(value2)) {
+                for (const item of value2) {
+                  const found = findPdfCandidate(item, depth + 1);
+                  if (found) return found;
+                }
+                return void 0;
+              }
+              if (typeof value2 === "object") {
+                for (const key of ["data", "Data", "pdfBase64", "fileData", "pdf", "PDF", "url", "Url", "downloadUrl", "fileUrl"]) {
+                  const found = findPdfCandidate(value2[key], depth + 1);
+                  if (found) return found;
+                }
+              }
+              return void 0;
+            };
+            const candidate = findPdfCandidate(payload);
+            if (typeof candidate === "string" && candidate.length > 100) {
+              const base64 = candidate.replace(/^data:application\/pdf;base64,/i, "");
+              const jsonPdf = /^[A-Za-z0-9+/=]+$/.test(base64) ? Buffer.from(base64, "base64") : null;
+              if (jsonPdf && jsonPdf.length > 500 && jsonPdf.toString("latin1", 0, 5).startsWith("%PDF")) {
+                return {
+                  success: true,
+                  provider: this.providerCode,
+                  driverName: this.name,
+                  pdfBuffer: jsonPdf,
+                  pdfBase64: jsonPdf.toString("base64"),
+                  contentType: "application/pdf",
+                  filename: this.buildPdfFilename(info),
+                  isFallback: false,
+                  sourceUrl: targetUrl,
+                  executionLogs: logs
+                };
+              }
+              if (/^https?:\/\//i.test(candidate)) {
+                const linked = await fetch(candidate, { headers: { Accept: "application/pdf,*/*", Referer: targetUrl }, signal: AbortSignal.timeout(timeoutMs) });
+                const linkedBuffer = Buffer.from(await linked.arrayBuffer());
+                if (linked.ok && linkedBuffer.toString("latin1", 0, 5).startsWith("%PDF")) {
+                  return {
+                    success: true,
+                    provider: this.providerCode,
+                    driverName: this.name,
+                    pdfBuffer: linkedBuffer,
+                    pdfBase64: linkedBuffer.toString("base64"),
+                    contentType: "application/pdf",
+                    filename: this.buildPdfFilename(info),
+                    isFallback: false,
+                    sourceUrl: candidate,
+                    executionLogs: logs
+                  };
+                }
+              }
+            }
+          } catch {
+          }
         }
       } else {
         this.createLog(`[M-Invoice] Server ph\u1EA3n h\u1ED3i m\xE3 tr\u1EA1ng th\xE1i HTTP ${resp.status} ${resp.statusText}`, logs);
@@ -15087,18 +15147,16 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
       return res.status(400).json({ error: "N\u1ED9i dung XML kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
     let requestedProvider = String(overrideProvider || customInfo?.provider || "").trim().toUpperCase();
-    if (!requestedProvider || requestedProvider === "UNKNOWN" || requestedProvider === "GENERIC") {
-      const upperXml = String(xml).toUpperCase();
-      const sellerTaxCode = String(customInfo?.sellerTaxCode || "").replace(/\D/g, "");
-      if (/MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) || ["0317978711", "0312105174", "0400557356", "0101243150"].includes(sellerTaxCode)) {
-        requestedProvider = "MISA";
-      } else if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
-        requestedProvider = "MINVOICE";
-      } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
-        requestedProvider = "THAISON";
-      } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
-        requestedProvider = "BKAV";
-      }
+    const upperXml = String(xml).toUpperCase();
+    const sellerTaxCode = String(customInfo?.sellerTaxCode || "").replace(/\D/g, "");
+    if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
+      requestedProvider = "MINVOICE";
+    } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
+      requestedProvider = "THAISON";
+    } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
+      requestedProvider = "BKAV";
+    } else if ((!requestedProvider || requestedProvider === "UNKNOWN" || requestedProvider === "GENERIC") && (/MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) || ["0317978711", "0312105174", "0400557356", "0101243150"].includes(sellerTaxCode))) {
+      requestedProvider = "MISA";
     }
     if (!forceFallback && requestedProvider === "VNPT" && customInfo?.lookupCode) {
       const vnpt = await downloadOriginalVnptPdf({
