@@ -50,6 +50,7 @@ export default function App() {
     return {
       taxCode: parsed?.taxCode || '',
       password: parsed?.password || '',
+      customApiKey: parsed?.customApiKey || '',
       taxpayerName: parsed?.taxpayerName || 'Chưa đăng nhập CQT',
       address: parsed?.address || '',
       rememberMe: parsed?.rememberMe ?? true,
@@ -476,7 +477,7 @@ export default function App() {
         cookieHeader: activeCookie,
         includePos: true,
         posOnly: true,
-        customApiKey: credentials?.customApiKey || account.customApiKey
+        customApiKey: account.customApiKey
       });
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
