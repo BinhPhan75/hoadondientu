@@ -187,6 +187,23 @@ function extractCookies(res: any): string {
     .join('; ');
 }
 
+// GDT rotates session/F5 cookies when issuing a CAPTCHA. Do not send duplicate
+// cookie names: some gateways use the first value, which can bind the request
+// to an older CAPTCHA session.
+function mergeCookieHeaders(...headers: Array<string | undefined | null>): string {
+  const cookies = new Map<string, string>();
+  for (const header of headers) {
+    for (const part of String(header || '').split(';')) {
+      const separator = part.indexOf('=');
+      if (separator <= 0) continue;
+      const name = part.slice(0, separator).trim();
+      const value = part.slice(separator + 1).trim();
+      if (name && value) cookies.set(name, `${name}=${value}`);
+    }
+  }
+  return Array.from(cookies.values()).join('; ');
+}
+
 let globalF5Cookie = '';
 let lastF5CookieTime = 0;
 
@@ -235,7 +252,7 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
 
       const callerHeaders = (options.headers as Record<string, string> || {});
       const existingCookie = callerHeaders['Cookie'] || callerHeaders['cookie'] || '';
-      const mergedCookie = [f5Cookie, existingCookie].filter(Boolean).join('; ');
+      const mergedCookie = mergeCookieHeaders(f5Cookie, existingCookie);
 
       const mergedHeaders: Record<string, string> = {
         ...GDT_HEADERS,
@@ -1020,7 +1037,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
               'Action': source === 'sco-query'
                 ? (type === 'sold' ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)' : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)')
                 : '',
-              ...((sanitizedCookie || queryCaptcha?.cookie) ? { 'Cookie': [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join('; ') } : {})
+              ...((sanitizedCookie || queryCaptcha?.cookie) ? { 'Cookie': mergeCookieHeaders(sanitizedCookie, queryCaptcha?.cookie) } : {})
             }
           }, 1, 15000, vietnamProxy);
 

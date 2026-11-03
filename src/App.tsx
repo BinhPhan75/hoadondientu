@@ -482,6 +482,12 @@ export default function App() {
         const posInvoices = queryRes.invoices;
         total += posInvoices.length;
         const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
+        const posRequestFailed = Boolean(diagnostic?.status && (
+          diagnostic.status.includes('từ chối CAPTCHA') ||
+          diagnostic.status.includes('Không lấy') ||
+          diagnostic.status.includes('lỗi')
+        ));
+        if (posRequestFailed) failed++;
         setInvoices(prev => {
           const map = new Map<string, GDTInvoice>();
           prev.forEach(item => map.set(item.id, item));
@@ -492,8 +498,8 @@ export default function App() {
         setConsoleLogs(prev => [...prev, {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: posInvoices.length > 0 ? 'success' : 'warning',
-          message: `${posInvoices.length > 0 ? '✓' : '⚠️'} [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: nhận ${posInvoices.length} hóa đơn${diagnostic?.status ? ` (${diagnostic.status})` : ''}.`
+          level: posRequestFailed ? 'warning' : (posInvoices.length > 0 ? 'success' : 'warning'),
+          message: `${posRequestFailed || posInvoices.length === 0 ? '⚠️' : '✓'} [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: nhận ${posInvoices.length} hóa đơn${diagnostic?.status ? ` (${diagnostic.status})` : ''}.`
         }]);
         setSyncState(prev => ({
           ...prev,

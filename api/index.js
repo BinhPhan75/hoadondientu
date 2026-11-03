@@ -13714,6 +13714,19 @@ function extractCookies(res) {
   }
   return (cookieList || []).filter(Boolean).map((c) => c.trim().split(";")[0]).filter((c) => c && c.includes("=")).join("; ");
 }
+function mergeCookieHeaders(...headers) {
+  const cookies = /* @__PURE__ */ new Map();
+  for (const header of headers) {
+    for (const part of String(header || "").split(";")) {
+      const separator = part.indexOf("=");
+      if (separator <= 0) continue;
+      const name = part.slice(0, separator).trim();
+      const value2 = part.slice(separator + 1).trim();
+      if (name && value2) cookies.set(name, `${name}=${value2}`);
+    }
+  }
+  return Array.from(cookies.values()).join("; ");
+}
 var globalF5Cookie = "";
 var lastF5CookieTime = 0;
 async function ensureF5Session(customProxy) {
@@ -13756,7 +13769,7 @@ async function fetchGDT(url, options = {}, maxRetries = 1, timeoutMs = 12e3, cus
       timer = setTimeout(() => controller.abort(), timeoutMs);
       const callerHeaders = options.headers || {};
       const existingCookie = callerHeaders["Cookie"] || callerHeaders["cookie"] || "";
-      const mergedCookie = [f5Cookie, existingCookie].filter(Boolean).join("; ");
+      const mergedCookie = mergeCookieHeaders(f5Cookie, existingCookie);
       const mergedHeaders = {
         ...GDT_HEADERS,
         "request-id": crypto2.randomUUID ? crypto2.randomUUID() : `req_${Date.now()}`,
@@ -14384,7 +14397,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
               "Accept": "application/json, text/plain, */*",
               "End-Point": "/tra-cuu/tra-cuu-hoa-don",
               "Action": source === "sco-query" ? type === "sold" ? "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)" : "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)" : "",
-              ...sanitizedCookie || queryCaptcha?.cookie ? { "Cookie": [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join("; ") } : {}
+              ...sanitizedCookie || queryCaptcha?.cookie ? { "Cookie": mergeCookieHeaders(sanitizedCookie, queryCaptcha?.cookie) } : {}
             }
           }, 1, 15e3, vietnamProxy);
           if (resp.status === 401) {
