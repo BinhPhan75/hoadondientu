@@ -14269,7 +14269,7 @@ function splitDateRangeIntoFixedChunks(fromDateStr, toDateStr, daysPerChunk) {
   }
   return chunks;
 }
-async function getCaptchaForGdtQuery(existingCookie, customProxy) {
+async function getCaptchaForGdtQuery(existingCookie, customProxy, customApiKey) {
   const response = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
     headers: existingCookie ? { Cookie: existingCookie } : {}
   }, 1, 8e3, customProxy);
@@ -14277,7 +14277,7 @@ async function getCaptchaForGdtQuery(existingCookie, customProxy) {
   const cookie = extractCookies(response);
   const data = await response.json();
   if (!data.key || !data.content) throw new Error("Captcha c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7");
-  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content));
+  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content), customApiKey);
   const code = (solved.code || "").trim();
   if (!code) throw new Error(solved.error || "Kh\xF4ng t\u1EF1 nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c Captcha cho h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n");
   return { key: data.key, code, cookie };
@@ -14322,7 +14322,7 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey } = req.body || {};
   const parsedSize = parseInt(String(size), 10);
   const validSize = !isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500 ? parsedSize : 50;
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
@@ -14551,7 +14551,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       for (let captchaAttempt = 0; captchaAttempt < (source === "sco-query" ? 3 : 1); captchaAttempt++) {
         let queryCaptcha;
         try {
-          queryCaptcha = source === "sco-query" ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy) : void 0;
+          queryCaptcha = source === "sco-query" ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy, customApiKey) : void 0;
           if (diagnostic) diagnostic.attempts = captchaAttempt + 1;
         } catch (captchaError) {
           if (diagnostic) {

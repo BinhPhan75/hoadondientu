@@ -867,7 +867,7 @@ function splitDateRangeIntoFixedChunks(fromDateStr: string, toDateStr: string, d
 
 type GdtQueryCaptcha = { key: string; code: string; cookie: string };
 
-async function getCaptchaForGdtQuery(existingCookie: string, customProxy?: string): Promise<GdtQueryCaptcha> {
+async function getCaptchaForGdtQuery(existingCookie: string, customProxy?: string, customApiKey?: string): Promise<GdtQueryCaptcha> {
   const response = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {
     headers: existingCookie ? { Cookie: existingCookie } : {}
   }, 1, 8000, customProxy);
@@ -875,7 +875,7 @@ async function getCaptchaForGdtQuery(existingCookie: string, customProxy?: strin
   const cookie = extractCookies(response);
   const data = await response.json() as { key?: string; content?: string };
   if (!data.key || !data.content) throw new Error('Captcha của Tổng cục Thuế không có dữ liệu hợp lệ');
-  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content));
+  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content), customApiKey);
   const code = (solved.code || '').trim();
   if (!code) throw new Error(solved.error || 'Không tự nhận diện được Captcha cho hóa đơn máy tính tiền');
   return { key: data.key, code, cookie };
@@ -931,7 +931,7 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey } = req.body || {};
 
   // Validate and sanitize numeric parameters
   const parsedSize = parseInt(String(size), 10);
@@ -1219,7 +1219,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       for (let captchaAttempt = 0; captchaAttempt < (source === 'sco-query' ? 3 : 1); captchaAttempt++) {
         let queryCaptcha: GdtQueryCaptcha | undefined;
         try {
-          queryCaptcha = source === 'sco-query' ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy) : undefined;
+          queryCaptcha = source === 'sco-query' ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy, customApiKey) : undefined;
           if (diagnostic) diagnostic.attempts = captchaAttempt + 1;
         } catch (captchaError: any) {
           if (diagnostic) {

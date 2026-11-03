@@ -475,7 +475,8 @@ export default function App() {
         token: activeToken,
         cookieHeader: activeCookie,
         includePos: true,
-        posOnly: true
+        posOnly: true,
+        customApiKey: credentials?.customApiKey || account.customApiKey
       });
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
