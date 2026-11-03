@@ -7,6 +7,7 @@ import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
 import { GenericFallbackDriver } from './GenericFallbackDriver';
+import { downloadOriginalCyberbillPdf } from '../../cyberbillInvoiceService';
 
 export class CyberBillDriver extends BaseInvoiceProviderDriver {
   readonly name = 'CyberLotus CyberBill Driver';
@@ -16,7 +17,7 @@ export class CyberBillDriver extends BaseInvoiceProviderDriver {
     providerCode: 'CYBERBILL',
     description: 'Tra cứu & xử lý hóa đơn điện tử CyberBill (cyberbill.vn) qua Mã tra cứu / MST bên bán',
     sampleUrl: 'https://cyberbill.vn/tra-cuu',
-    supportsCaptcha: false,
+    supportsCaptcha: true,
     requiredFields: ['lookupCode', 'sellerTaxCode']
   };
 
@@ -64,11 +65,41 @@ export class CyberBillDriver extends BaseInvoiceProviderDriver {
   async fetchPdf(info: ExtractedInvoiceInfo, options?: DownloadOptions): Promise<DownloadResult> {
     const logs: string[] = [];
     this.createLog(`Khởi động xử lý HĐĐT CyberBill: Số ${info.invoiceNo}, Ký hiệu ${info.invoiceSeries}`, logs);
-    if (info.lookupCode) {
-      this.createLog(`Mã tra cứu CyberBill: "${info.lookupCode}"`, logs);
+
+    if (info.lookupCode && info.sellerTaxCode && !options?.forceFallback) {
+      try {
+        this.createLog(`Tìm thấy mã tra cứu CyberBill: "${info.lookupCode}", MST bên bán: "${info.sellerTaxCode}"`, logs);
+        this.createLog(`Đang gửi yêu cầu giải Captcha & tải PDF gốc từ máy chủ CyberBill (bill1app.xcyber.vn)...`, logs);
+
+        const result = await downloadOriginalCyberbillPdf({
+          sellerTaxCode: info.sellerTaxCode,
+          lookupCode: info.lookupCode,
+          invoiceNo: info.invoiceNo,
+          invoiceSeries: info.invoiceSeries
+        });
+
+        this.createLog(`Đã tải thành công tệp PDF gốc từ cổng CyberBill: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
+
+        return {
+          success: true,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64,
+          filename: result.filename,
+          contentType: 'application/pdf',
+          provider: this.providerCode,
+          driverName: this.name,
+          isFallback: false,
+          captchaSolved: 'auto',
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
+      } catch (err: any) {
+        this.createLog(`Tải PDF gốc CyberBill chưa thành công: ${err.message}. Tự động chuyển sang bộ tạo bản thể hiện vector chuẩn QĐ 1450.`, logs);
+      }
+    } else if (!info.lookupCode) {
+      this.createLog(`Hóa đơn XML không chứa mã tra cứu CyberBill. Chuyển sang bộ tạo bản thể hiện vector QĐ 1450.`, logs);
     }
-    this.createLog(`Chuyển sang bộ tạo bản thể hiện PDF vector độ phân giải cao chuẩn NĐ 123/2020/NĐ-CP`, logs);
-    
+
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,

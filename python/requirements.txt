@@ -1,2 +1,0 @@
-# Thư viện bổ trợ tùy chọn (Tool có khả năng chạy 100% bằng thư viện gốc có sẵn của Python 3.8 - 3.12)
-requests>=2.28.0

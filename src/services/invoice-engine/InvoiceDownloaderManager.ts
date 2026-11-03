@@ -2,7 +2,7 @@
  * InvoiceDownloaderManager: Bộ điều phối trung tâm (Provider Manager / Factory)
  * - Tự động quản lý danh sách các Driver đã đăng ký (MISA, Viettel, 4Si, VNPT, Fallback...)
  * - Tự động nhận diện nhà cung cấp từ XML
- * - Tự động giải Captcha bằng OCR Tesseract khi cần
+ * - Tự động giải Captcha bằng Gemini khi cần
  * - Tự động kích hoạt GenericFallbackDriver khi gặp lỗi, bảo đảm hệ thống không bao giờ bị gián đoạn
  */
 
@@ -17,11 +17,14 @@ import { CaptchaSolver } from './captcha/CaptchaSolver';
 import { MisaDriver } from './drivers/MisaDriver';
 import { ViettelDriver } from './drivers/ViettelDriver';
 import { FourSiDriver } from './drivers/FourSiDriver';
+import { LcsDriver } from './drivers/LcsDriver';
 import { VnptDriver } from './drivers/VnptDriver';
 import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
+import { MinvoiceDriver } from './drivers/MinvoiceDriver';
 import { BkavDriver } from './drivers/BkavDriver';
 import { ThaiSonDriver } from './drivers/ThaiSonDriver';
 import { CyberBillDriver } from './drivers/CyberBillDriver';
+import { VnpayDriver } from './drivers/VnpayDriver';
 import { GenericFallbackDriver } from './drivers/GenericFallbackDriver';
 import { detectProvider, detectProviderWithDetails, DetectedInvoiceProvider, DetectionResultDetails } from './providerDetector';
 
@@ -40,11 +43,14 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new MisaDriver());
     this.registerDriver(new ViettelDriver());
     this.registerDriver(new FourSiDriver());
+    this.registerDriver(new LcsDriver());
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
+    this.registerDriver(new MinvoiceDriver());
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());
+    this.registerDriver(new VnpayDriver());
   }
 
   /**

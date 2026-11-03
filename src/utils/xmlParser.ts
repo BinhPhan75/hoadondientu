@@ -396,7 +396,35 @@ function getFromStructuredArrays(source: any, fieldNames: string[]): string {
       }
     }
   }
-  return '';
+  const seen = new Set<any>();
+  const findNested = (value: any, depth: number): string => {
+    if (!value || typeof value !== 'object' || depth > 8 || seen.has(value)) return '';
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        const found = checkItem(entry) || findNested(entry, depth + 1);
+        if (found) return found;
+      }
+      return '';
+    }
+    for (const child of Object.values(value)) {
+      const found = checkItem(child) || findNested(child, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  };
+  return findNested(source, 0);
+}
+
+function hasPayloadMarker(source: any, keys: string[], expected: string[], depth = 0, seen = new Set<any>()): boolean {
+  if (!source || typeof source !== 'object' || depth > 8 || seen.has(source)) return false;
+  seen.add(source);
+  const normalizedExpected = expected.map(value => value.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  for (const key of keys) {
+    const value = getPayloadValue(source, [key]);
+    if (value !== undefined && normalizedExpected.includes(String(value).toLowerCase().replace(/[^a-z0-9]/g, ''))) return true;
+  }
+  return Object.values(source).some(value => hasPayloadMarker(value, keys, expected, depth + 1, seen));
 }
 
 function normalizeLookupLabel(value: string): string {
@@ -409,11 +437,18 @@ function normalizeLookupLabel(value: string): string {
 
 function isLookupCodeCandidate(value: string): boolean {
   if (!value || value.length < 4 || value.length > 120) return false;
+  const trimmed = value.trim();
+  // Không bao giờ coi tên bên bán 'Vietcombank' là mã tra cứu
+  if (/^vietcombank$/i.test(trimmed)) return false;
+  // Không bao giờ coi Mã thông điệp truyền nhận CQT (MTDiep / mtdtchieu có dạng V/T/M/B + 10-14 số MST + UUID Hex) là mã tra cứu
+  if (/^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(trimmed)) return false;
+  // Không bao giờ coi mã tham chiếu thông điệp chứa MST T-VAN VNPAY 0102182292 là mã tra cứu
+  if (trimmed.includes('0102182292') && trimmed.length > 20) return false;
   // Lookup codes are machine identifiers. A sentence, whitespace-separated
   // text, or markup from a generic TTin field must never become a code merely
   // because its label happens to mention "tra cứu".
-  return !/^https?:\/\//i.test(value)
-    && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(value);
+  return !/^https?:\/\//i.test(trimmed)
+    && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(trimmed);
 }
 
 /**
@@ -437,6 +472,184 @@ export function isVnptSource(source: any): boolean {
     provider === 'VNPT' ||
     provider === 'NGHIA_SON' ||
     lookupUrl.includes('vnpt-invoice.com.vn')
+  );
+}
+
+/**
+ * Kiểm tra hóa đơn Viettel S-Invoice theo MST tổ chức cung cấp hoặc tên T-VAN.
+ */
+export function isViettelSource(source: any): boolean {
+  if (!source) return false;
+  if (hasPayloadMarker(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP'], ['0100109106'])) return true;
+  if (hasPayloadMarker(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT'], ['tvan_viettel'])) return true;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'mst', 'sellerTaxCode']) || '').replace(/[^0-9]/g, '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'sellerName']) || '').toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '').replace(/[^0-9]/g, '');
+  const tentvandnknt = String(getPayloadValue(source, ['tentvandnkntt', 'tentvandnknt', 'ten_tvandnknt', 'TENTVANDNKNTT']) || '').toLowerCase();
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toLowerCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    nbmst === '0100109106' ||
+    nbmst === '0402307168' || // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
+    nbten.includes('SUNTALENT') ||
+    nbten.includes('VIETTEL') ||
+    msttcgp === '0100109106' ||
+    tentvandnknt === 'tvan_viettel' ||
+    tentvandnknt === 'tvan viettel' ||
+    tentcgp.includes('viettel') ||
+    provider === 'VIETTEL' ||
+    lookupUrl.includes('sinvoice.viettel.vn') ||
+    lookupUrl.includes('viettel-invoice.vn') ||
+    lookupUrl.includes('vinvoice.viettel.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp LCS Soft (PNJ - Công ty TNHH L.C.S) hay không.
+ */
+export function isLcsSource(source: any): boolean {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0302999571' || // CÔNG TY TNHH L.C.S
+    tentcgp.includes('L.C.S') ||
+    tentcgp.includes('LCSSOFT') ||
+    provider === 'LCS' ||
+    nbmst === '0315018466' || // CÔNG TY TNHH MTV CHẾ TÁC VÀ KINH DOANH TRANG SỨC PNJ
+    nbten.includes('TRANG SỨC PNJ') ||
+    nbten.includes('TRANG SUC PNJ') ||
+    lookupUrl.includes('lcssoft.com.vn') ||
+    lookupUrl.includes('eip.lcssoft')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp VNPAY Invoice (Vietcombank...) hay không.
+ */
+export function isVnpaySource(source: any): boolean {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
+  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0102182292' || // VNPAY
+    tentcgp.includes('VNPAY') ||
+    tentcgp.includes('THANH TOÁN VIỆT NAM') ||
+    tentcgp.includes('THANH TOAN VIET NAM') ||
+    provider === 'VNPAY' ||
+    nbmst === '0100112437' || // Vietcombank
+    nbten.includes('VIETCOMBANK') ||
+    lookupUrl.includes('vnpayinvoice.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp FPT hay không.
+ */
+export function isFptSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0104128565' || // FPT
+    tentcgp.includes('FPT') ||
+    provider === 'FPT' ||
+    lookupUrl.includes('ftg.vn') ||
+    lookupUrl.includes('fpt.com.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp M-Invoice (minvoice.vn) hay không.
+ */
+export function isMinvoiceSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0106026495' ||
+    tentcgp.includes('M-INVOICE') ||
+    tentcgp.includes('MINVOICE') ||
+    provider === 'MINVOICE' ||
+    provider === 'M-INVOICE' ||
+    lookupUrl.includes('minvoice.vn') ||
+    lookupUrl.includes('minvoice.com.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp Bkav eHoadon hay không.
+ */
+export function isBkavSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0101360697' ||
+    tentcgp.includes('BKAV') ||
+    provider === 'BKAV' ||
+    lookupUrl.includes('bkav.com') ||
+    lookupUrl.includes('ehoadon.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp Thái Sơn (einvoice.vn) hay không.
+ */
+export function isThaiSonSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0101300842' ||
+    tentcgp.includes('THÁI SƠN') ||
+    tentcgp.includes('THAISON') ||
+    provider === 'THAISON' ||
+    lookupUrl.includes('einvoice.vn') ||
+    lookupUrl.includes('thaison.vn')
+  );
+}
+
+/**
+ * Kiểm tra xem hóa đơn/payload có thuộc giải pháp CyberLotus CyberBill hay không.
+ */
+export function isCyberBillSource(source: any): boolean {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
+  const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
+  const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
+
+  return (
+    msttcgp === '0107871301' ||
+    tentcgp.includes('CYBERLOTUS') ||
+    tentcgp.includes('CYBERBILL') ||
+    provider === 'CYBERBILL' ||
+    lookupUrl.includes('cyberbill.vn')
   );
 }
 
@@ -477,12 +690,115 @@ export function getLookupCodeFromPayload(source: any): string {
   if (!source) return '';
 
   const isMisa = isMisaSource(source);
+  const isViettel = isViettelSource(source);
   const misaTransactionId = getFromStructuredArrays(source, ['TransactionID', 'TransactionId', 'transactionID']) ||
     getPayloadValue(source, ['transactionID', 'TransactionID']);
 
   // Đối với hóa đơn MISA: TransactionID là mã tra cứu chính thức in trên hóa đơn
   if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
     return cleanLookupValue(misaTransactionId);
+  }
+
+  // Viettel: "Mã số bí mật" trong ttkhac[] là mã tra cứu duy nhất.
+  // Không fallback sang mhdon hoặc mã nội bộ nếu trường này không tồn tại.
+  if (isViettel) {
+    const secretCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'Mã số bí mật', 'Ma so bi mat', 'ReservationCode', 'reservationCode',
+        'matracuu', 'MaTraCuu', 'Mã tra cứu', 'MaSoBiMat', 'SecretCode', 'secretCode'
+      ]) ||
+      getPayloadValue(source, ['lookupCode', 'secretCode', 'reservationCode', 'mabaomat', 'sobaomat'])
+    );
+    return isLookupCodeCandidate(secretCode) ? secretCode : '';
+  }
+
+  // Đối với hóa đơn LCS Soft (PNJ): mã tra cứu chính là mã CQT cấp (mhdon / mccqt 32 ký tự hex)
+  if (isLcsSource(source)) {
+    const cqtCode = getPayloadValue(source, ['mhdon', 'mccqt', 'MCCQT', 'cqtCode']);
+    if (cqtCode) {
+      const cleanCqt = cleanLookupValue(cqtCode);
+      if (cleanCqt) return cleanCqt;
+    }
+  }
+
+  // Đối với hóa đơn VNPAY (Vietcombank...):
+  // Kiểm tra các trường mở rộng đặc thù của VNPAY/Vietcombank: SoBaoMat, MaBaoMat, MaNhanHDon, MTCuu,...
+  // LƯU Ý: Tuyệt đối KHÔNG gán mhdon (mã CQT) hay mtdtchieu (mã thông điệp T-VAN) làm mã tra cứu VNPAY,
+  // vì Cổng VNPAY tra cứu theo Số bảo mật riêng. Nếu không có Số bảo mật, để trống để Cổng VNPAY không bị lỗi "Không tìm thấy hóa đơn".
+  if (isVnpaySource(source)) {
+    const vnpayCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'SoBaoMat', 'Số bảo mật', 'soBaoMat', 'sobaomat',
+        'MaSoBaoMat', 'Mã số bảo mật', 'maSoBaoMat',
+        'MaBaoMat', 'Mã bảo mật', 'maBaoMat', 'mabaomat',
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'maNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Mã tra cứu HĐ',
+        'Fkey', 'FKey', 'LookupCode', 'SecretCode', 'SecurityCode', 'AccessCode'
+      ]) ||
+      getPayloadValue(source, [
+        'soBaoMat', 'sobaomat', 'SoBaoMat',
+        'maSoBaoMat', 'maBaoMat', 'mabaomat', 'MaBaoMat',
+        'maNhanHDon', 'manhanhdon', 'MaNhanHDon', 'maNhanHoaDon',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu', 'matracuu'
+      ])
+    );
+    if (isLookupCodeCandidate(vnpayCode)) {
+      return vnpayCode;
+    }
+    // Không fallback sang mhdon cho VNPAY
+    return '';
+  }
+
+  // Đối với hóa đơn M-Invoice (minvoice.vn): Mã tra cứu chính là "Số bảo mật"
+  if (isMinvoiceSource(source)) {
+    const minvoiceCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'SoBaoMat', 'Số bảo mật', 'soBaoMat', 'sobaomat',
+        'CheckCode', 'checkCode', 'Checkcode',
+        'MaSoBaoMat', 'Mã số bảo mật', 'MaBaoMat', 'Mã bảo mật',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Fkey', 'FKey'
+      ]) ||
+      getPayloadValue(source, [
+        'soBaoMat', 'sobaomat', 'SoBaoMat', 'checkCode', 'CheckCode',
+        'maSoBaoMat', 'maBaoMat', 'mabaomat', 'MaBaoMat',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(minvoiceCode)) {
+      return minvoiceCode;
+    }
+  }
+
+  // Đối với hóa đơn Bkav eHoadon
+  if (isBkavSource(source)) {
+    const bkavCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'maNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+        'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu', 'Fkey', 'FKey'
+      ]) ||
+      getPayloadValue(source, [
+        'maNhanHDon', 'manhanhdon', 'MaNhanHDon', 'maNhanHoaDon',
+        'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(bkavCode)) {
+      return bkavCode;
+    }
+  }
+
+  // Đối với hóa đơn Thái Sơn (einvoice.vn)
+  if (isThaiSonSource(source)) {
+    const thaiSonCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        'MaNhanHDon', 'Mã nhận hóa đơn', 'MTCuu', 'mtcuu', 'MaTraCuu', 'matracuu', 'Mã tra cứu'
+      ]) ||
+      getPayloadValue(source, [
+        'maNhanHDon', 'mtcuu', 'MTCuu', 'maTraCuu', 'MaTraCuu'
+      ])
+    );
+    if (isLookupCodeCandidate(thaiSonCode)) {
+      return thaiSonCode;
+    }
   }
 
   const values = [
@@ -494,17 +810,18 @@ export function getLookupCodeFromPayload(source: any): string {
     // Cấu trúc mảng { ttruong: "Fkey", dlieu: "..." } - đã xác nhận đây là
     // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
     // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
-    getFromStructuredArrays(source, ['Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC']),
+    getFromStructuredArrays(source, [
+      'Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC',
+      'SoBaoMat', 'Số bảo mật', 'MaSoBaoMat', 'Mã số bảo mật', 'MaBaoMat', 'Mã bảo mật',
+      'MaNhanHDon', 'Mã nhận hóa đơn', 'MaNhanHoaDon', 'Mã tra cứu'
+    ]),
     getPayloadValue(source, ['fkey', 'FKey']),
+    getPayloadValue(source, ['soBaoMat', 'sobaomat', 'SoBaoMat', 'maBaoMat', 'MaBaoMat', 'maNhanHDon', 'MaNhanHDon']),
     getPayloadValue(source, ['invoiceLookupCode', 'InvoiceLookupCode']),
     // MISA meInvoice: mã tra cứu THẬT in trên hóa đơn nằm trong mảng cttkhac
     // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc).
     getFromStructuredArrays(source, ['TransactionID', 'TransactionId']),
-    getPayloadValue(source, ['transactionID', 'TransactionID']),
-    // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
-    // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
-    // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
-    getPayloadValue(source, ['mtdtchieu', 'MTDTCChieu', 'maDoiChieu', 'MaDoiChieu'])
+    getPayloadValue(source, ['transactionID', 'TransactionID'])
   ];
 
   const foundCode = values.map(cleanLookupValue).find(isLookupCodeCandidate);
@@ -523,6 +840,23 @@ export function getLookupCodeFromPayload(source: any): string {
 }
 
 export function getLookupUrlFromPayload(source: any): string {
+  if (isLcsSource(source)) {
+    return 'https://eip.lcssoft.com.vn/desktop/#/login';
+  }
+
+  if (isVnpaySource(source)) {
+    const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '');
+    const nbten = String(getPayloadValue(source, ['nbten', 'sellerName', 'supplierName']) || '').toUpperCase();
+    if (nbmst === '0100112437' || nbten.includes('VIETCOMBANK')) {
+      return 'https://einvoice.vietcombank.com.vn/';
+    }
+    return 'https://portal.vnpayinvoice.vn/';
+  }
+
+  if (isFptSource(source)) {
+    return 'https://hoadon.ftg.vn/';
+  }
+
   if (isVnptSource(source)) {
     const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'MST']) || '4000344946');
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
@@ -530,6 +864,22 @@ export function getLookupUrlFromPayload(source: any): string {
 
   if (isMisaSource(source)) {
     return 'https://www.meinvoice.vn/tra-cuu';
+  }
+
+  if (isMinvoiceSource(source)) {
+    return 'https://tracuuhoadon.minvoice.com.vn';
+  }
+
+  if (isBkavSource(source)) {
+    return 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  if (isThaiSonSource(source)) {
+    return 'https://einvoice.vn/tra-cuu';
+  }
+
+  if (isCyberBillSource(source)) {
+    return 'https://cyberbill.vn/tra-cuu';
   }
 
   const structured = getFromStructuredArrays(source, ['PortalLink', 'LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu']);
@@ -628,13 +978,34 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   };
 
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
-  const codeTags = ['MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey', 'LookupCode', 'InvoiceLookupCode', 'TransactionID'];
+  const codeTags = [
+    'SoBaoMat', 'sobaomat', 'SOBAOMAT',
+    'MaSoBaoMat', 'maSoBaoMat', 'MaBaoMat', 'mabaomat',
+    'MaNhanHDon', 'manhanhdon', 'MaNhanHoaDon',
+    'MTCuu', 'MaTraCuu', 'Matracuu', 'FKey', 'Fkey',
+    'LookupCode', 'InvoiceLookupCode', 'TransactionID',
+    'SecretCode', 'SecurityCode', 'AccessCode'
+  ];
   let lookupCode = tagValue(codeTags);
 
-  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:"
+  // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:" hoặc "Mã nhận hóa đơn:" hoặc "Số bảo mật:"
   if (!lookupCode) {
-    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don|Số\s+bảo\s+mật|So\s+bao\s+mat|Mã\s+số\s+bảo\s+mật|Mã\s+bảo\s+mật)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
+  }
+
+  // Viettel S-Invoice / vInvoice: chỉ dùng dlieu của TTKhac/TTin có TTruong "Mã số bí mật" hoặc ReservationCode
+  const isViettelXml = /0100109106|0402307168|suntalent|tvan[_\s-]*viettel|sinvoice|vinvoice|viettel|viettel-invoice/i.test(rawXml) ||
+    /Mã số bí mật|Ma so bi mat|ReservationCode|MaBiMat/i.test(rawXml);
+  if (isViettelXml) {
+    const secretBlocks = [...extractTagBlocks(rawXml, 'TTin'), ...extractTagBlocks(rawXml, 'TTKhac')];
+    const secretBlock = secretBlocks.find(block => {
+      const label = normalizeLookupLabel(extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong'));
+      return label === 'ma so bi mat' || label.includes('bi mat') || label.includes('secret') || label.includes('reservation');
+    });
+    if (secretBlock) {
+      lookupCode = cleanLookupValue(extractTagValue(secretBlock, 'DLieu') || extractTagValue(secretBlock, 'Data') || '');
+    }
   }
 
   // 3. Kiểm tra các khối mở rộng TTin / TTKhac
@@ -644,7 +1015,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
       extractTagValue(block, 'TTruong') || extractTagValue(block, 'TenTruong') || extractTagValue(block, 'Name')
     );
     if (!label || label.includes('bi mat') || label.includes('secret')) continue;
-    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc/i.test(label);
+    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc|bao\s*mat|nhan\s*h.*don/i.test(label);
     if (!lookupCode && isExplicitLookupLabel) {
       const value = cleanLookupValue(extractTagValue(block, 'DLieu') || extractTagValue(block, 'Data') || extractTagValue(block, 'Value'));
       if (isLookupCodeCandidate(value)) {
@@ -737,14 +1108,84 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
 
-  // 6c. 4SI / LCS (PNJ):
-  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883|0302999571|0315018466/i.test(rawXml);
+  // 6c. LCS Soft (PNJ - eip.lcssoft.com.vn)
+  const isLcs = /eip\.lcssoft\.com\.vn|lcssoft|0302999571|0315018466/i.test(rawXml) ||
+    /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(rawXml);
+  if (isLcs) {
+    if (!lookupUrl) lookupUrl = 'https://eip.lcssoft.com.vn/desktop/#/login';
+    if (!lookupCode) {
+      const mhdon = extractTagValue(rawXml, 'mhdon', '') || extractTagValue(rawXml, 'MCQTCap', '');
+      if (mhdon) lookupCode = mhdon;
+    }
+  }
+
+  // 6d. VNPAY Invoice (Vietcombank: 0100112437, VNPAY: 0102182292)
+  const isVnpay = /vnpayinvoice|0102182292|0100112437/i.test(rawXml) || /VIETCOMBANK/i.test(rawXml);
+  if (isVnpay) {
+    const isVcb = /0100112437|VIETCOMBANK/i.test(rawXml);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+    }
+    // Với VNPAY Invoice: Mã tra cứu là Số bảo mật riêng (không dùng mhdon/mccqt vì Cổng VNPAY sẽ báo không tìm thấy)
+    if (!lookupCode || lookupCode.toLowerCase() === 'vietcombank' || !isLookupCodeCandidate(lookupCode)) {
+      lookupCode = '';
+    }
+  }
+
+  // 6e. FPT Invoice
+  const isFpt = /hoadon\.ftg\.vn|0104128565/i.test(rawXml);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = 'https://hoadon.ftg.vn/';
+  }
+
+  // 6f. 4SI
+  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883/i.test(rawXml);
   if (is4Si) {
     if (!lookupUrl) lookupUrl = 'https://inv.4si.vn/tra-cuu-hoa-don';
-    // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
     if (!extractTagValue(rawXml, 'MTCuu') && !extractTagValue(rawXml, 'MaTraCuu') && !extractTagValue(rawXml, 'FKey')) {
       lookupCode = '';
     }
+  }
+
+  // 6g. Viettel vInvoice / S-Invoice
+  if (isViettelXml || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|0100109106|0402307168|suntalent/i.test(rawXml)) {
+    if (!lookupUrl) lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+  }
+
+  // 6h. M-Invoice (minvoice.vn)
+  const isMinvoice = /minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice|0106026495/i.test(rawXml) ||
+    /M-INVOICE|MINVOICE/i.test(rawXml);
+  if (isMinvoice) {
+    if (!lookupUrl) lookupUrl = 'https://tracuuhoadon.minvoice.com.vn';
+    if (!lookupCode) {
+      const sobaomat = extractTagValue(rawXml, 'SoBaoMat', '') ||
+        extractTagValue(rawXml, 'sobaomat', '') ||
+        extractTagValue(rawXml, 'CheckCode', '') ||
+        extractTagValue(rawXml, 'checkCode', '') ||
+        extractTagValue(rawXml, 'MaBaoMat', '') ||
+        extractTagValue(rawXml, 'mabaomat', '');
+      if (sobaomat && isLookupCodeCandidate(sobaomat)) {
+        lookupCode = sobaomat;
+      }
+    }
+  }
+
+  // 6i. Bkav eHoadon
+  const isBkav = /bkav|ehoadon\.vn|ehoadon\.bkav|0101360697/i.test(rawXml);
+  if (isBkav) {
+    if (!lookupUrl) lookupUrl = 'https://ehoadon.bkav.com/tra-cuu';
+  }
+
+  // 6j. Thái Sơn E-Invoice
+  const isThaiSon = /einvoice\.vn|thaison\.vn|0101300842/i.test(rawXml);
+  if (isThaiSon) {
+    if (!lookupUrl) lookupUrl = 'https://einvoice.vn/tra-cuu';
+  }
+
+  // 6k. CyberLotus CyberBill
+  const isCyberBill = /cyberbill\.vn|cyberlotus|0107871301/i.test(rawXml);
+  if (isCyberBill) {
+    if (!lookupUrl) lookupUrl = 'https://cyberbill.vn/tra-cuu';
   }
 
   return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : '', lookupUrl };
@@ -1553,9 +1994,9 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
   }
 
   // 8. Provider & Lookup Details (Nhà cung cấp giải pháp & Mã tra cứu)
-  const provider = detectProvider(xmlSource);
-  const msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
-  const tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
+  let provider = detectProvider(xmlSource);
+  let msttcgp = getTag(domDoc || xmlSource, 'MSTTCGP') || '';
+  let tentcgp = getTag(domDoc || xmlSource, 'TenTCGP') || getTag(domDoc || xmlSource, 'TCGP') || '';
 
   let { lookupCode, lookupUrl } = extractLookupDetailsFromXml(xmlSource);
 
@@ -1575,6 +2016,69 @@ export function parseGDTInvoiceXml(xmlString: string, filename?: string): GDTInv
     if (!lookupUrl) {
       lookupUrl = `https://${nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
     }
+  }
+
+  // Đối với hóa đơn LCS Soft (PNJ): mã tra cứu chính là mã CQT cấp (mhdon) và link tra cứu là eip.lcssoft.com.vn
+  const isLcs = provider === 'LCS' ||
+    msttcgp === '0302999571' ||
+    tentcgp.toUpperCase().includes('L.C.S') ||
+    tentcgp.toUpperCase().includes('LCSSOFT') ||
+    nbmst === '0315018466' ||
+    nbten.toUpperCase().includes('PNJ') ||
+    /eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlSource);
+
+  if (isLcs) {
+    if (!lookupCode && mhdon) {
+      lookupCode = mhdon;
+    }
+    if (!lookupUrl) {
+      lookupUrl = 'https://eip.lcssoft.com.vn/desktop/#/login';
+    }
+  }
+
+  // Đối với VNPAY Invoice
+  const isVnpay = provider === 'VNPAY' ||
+    msttcgp === '0102182292' ||
+    tentcgp.toUpperCase().includes('VNPAY') ||
+    nbmst === '0100112437' ||
+    /VIETCOMBANK/i.test(xmlSource) ||
+    /vnpayinvoice/i.test(xmlSource);
+
+  if (isVnpay) {
+    const isVcb = nbmst === '0100112437' || /VIETCOMBANK/i.test(xmlSource);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+    }
+    if (lookupCode && (lookupCode.toLowerCase() === 'vietcombank' || !isLookupCodeCandidate(lookupCode))) {
+      lookupCode = '';
+    }
+  }
+
+  // Đối với FPT Invoice
+  const isFpt = provider === 'FPT' ||
+    msttcgp === '0104128565' ||
+    tentcgp.toUpperCase().includes('FPT') ||
+    /hoadon\.ftg\.vn/i.test(xmlSource);
+
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = 'https://hoadon.ftg.vn/';
+  }
+
+  // Đối với Viettel vInvoice / S-Invoice
+  const cleanNbmst = (nbmst || '').replace(/\D/g, '');
+  const isViettel = provider === 'VIETTEL' ||
+    msttcgp === '0100109106' ||
+    cleanNbmst === '0402307168' ||
+    /SUNTALENT/i.test(nbten) ||
+    tentcgp.toUpperCase().includes('VIETTEL') ||
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlSource) ||
+    /sinvoice|vinvoice|viettel-invoice|0100109106|0402307168|suntalent/i.test(xmlSource);
+
+  if (isViettel) {
+    if (!lookupUrl) lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+    if (!msttcgp) msttcgp = '0100109106';
+    if (!tentcgp) tentcgp = 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)';
+    if (!provider) provider = 'VIETTEL';
   }
 
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;

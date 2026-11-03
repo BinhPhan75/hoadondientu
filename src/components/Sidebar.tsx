@@ -246,21 +246,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-72 lg:w-80 bg-[#111827] text-white p-4.5 flex flex-col justify-between border-r border-gray-800 shrink-0 h-full overflow-y-auto z-40">
-      <div className="space-y-4">
+    <aside className="w-72 lg:w-80 bg-slate-900 text-slate-100 p-5 flex flex-col justify-between border-r border-slate-800 shrink-0 h-full overflow-y-auto z-40">
+      <div className="space-y-4.5">
         {/* Brand & Title */}
-        <div className="flex items-center justify-between pb-3 border-b border-gray-800">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${account.isRealGDT ? 'bg-emerald-500 animate-pulse' : 'bg-[#ef4444]'}`}></span>
-              <h2 className="text-base font-black tracking-wider text-[#ef4444] uppercase font-mono">
-                GDT INVOICE BOT
-              </h2>
+        <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 shadow-xs">
+              <Building2 className="w-5 h-5 text-blue-400" />
             </div>
-            <p className="text-[11px] text-gray-400 font-mono mt-0.5 flex items-center gap-1">
-              <Globe2 className="w-3 h-3 text-gray-500" />
-              hoadondientu.gdt.gov.vn
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold tracking-tight text-white">
+                  Tra Cứu Hóa Đơn
+                </h2>
+                <span className={`w-2 h-2 rounded-full ${account.isRealGDT ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+                <Globe2 className="w-3 h-3 text-slate-500" />
+                <span>hoadondientu.gdt.gov.vn</span>
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -268,11 +273,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={onCollapseSidebar}
-                className="hidden lg:flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
+                className="hidden lg:flex items-center gap-1 px-2 py-1 text-xs text-slate-400 hover:text-slate-100 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
                 title="Ẩn menu bên trái để mở rộng không gian nhìn"
               >
-                <PanelLeftClose className="w-4 h-4 text-gray-400" />
-                <span className="text-[11px] font-medium">Ẩn menu</span>
+                <PanelLeftClose className="w-4 h-4 text-slate-400" />
+                <span className="text-[11px] font-medium">Ẩn</span>
               </button>
             )}
 
@@ -280,7 +285,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={onCloseMobileSidebar}
-                className="lg:hidden p-1 text-gray-400 hover:text-white rounded hover:bg-gray-800 cursor-pointer"
+                className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 cursor-pointer"
                 title="Đóng menu"
               >
                 <X className="w-4 h-4" />
@@ -289,34 +294,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Connection Status Badge */}
-        <div className={`px-2.5 py-1.5 rounded text-[11px] flex items-center gap-2 font-mono ${
+        {/* Connection Status Soft Badge */}
+        <div className={`px-3 py-2 rounded-lg text-xs flex items-center gap-2 font-medium transition-colors ${
           account.isRealGDT 
-            ? 'bg-emerald-950/70 border border-emerald-700 text-emerald-300' 
-            : 'bg-gray-900 border border-gray-800 text-gray-300'
+            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' 
+            : 'bg-slate-800/80 border border-slate-700/60 text-slate-300'
         }`}>
           {account.isRealGDT ? (
             <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="truncate">ĐÃ KẾT NỐI CỔNG TỔNG CỤC THUẾ</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="truncate">Đã kết nối Cổng Tổng cục Thuế</span>
             </>
           ) : (
             <>
               <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-              <span className="truncate">Nhập Captcha để kết nối CQT</span>
+              <span className="truncate">Sẵn sàng kết nối Cơ quan Thuế</span>
             </>
           )}
         </div>
 
         {/* Form Fields */}
-        <form onSubmit={handleSubmit} className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3.5">
           {/* MST Input */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                Mã Số Thuế (Tên ĐN)
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Mã số thuế (Tên đăng nhập)
               </label>
-              <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-0.5">
+              <span className="text-[11px] text-emerald-400 flex items-center gap-0.5">
                 <ShieldCheck className="w-3 h-3" /> Hợp lệ
               </span>
             </div>
@@ -326,21 +331,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onChange={(e) => setLocalMst(e.target.value.replace(/\s+/g, ''))}
               onBlur={handleMstBlur}
               placeholder="VD: 4000926165"
-              className="text-input-dark font-mono text-sm tracking-wider"
+              className="text-input-dark font-mono text-sm tracking-wide"
               required
             />
           </div>
 
           {/* Password Input */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider">
-                Mật Khẩu CQT Cấp
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Mật khẩu CQT cấp
               </label>
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="text-[10px] text-gray-400 hover:text-gray-200"
+                className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
               >
                 {showPassword ? 'Ẩn' : 'Hiện'}
               </button>
@@ -352,24 +357,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onChange={(e) => setLocalPassword(e.target.value)}
                 onBlur={handlePasswordBlur}
                 placeholder="Nhập mật khẩu thuế..."
-                className="text-input-dark pr-8 font-mono text-sm"
+                className="text-input-dark pr-9 text-sm"
                 required
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
               >
-                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
 
-          {/* Captcha Section: Nhập thủ công hoặc bấm Đọc mã OCR để gán vào */}
-          <div className="bg-gray-900/90 p-2.5 rounded border border-gray-800 space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-gray-800/80">
-              <span className="text-[11px] font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+          {/* Captcha Section */}
+          <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60 space-y-2.5">
+            <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/60">
+              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-blue-400" />
                 <span>Mã Captcha</span>
               </span>
 
@@ -378,25 +383,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 type="button"
                 onClick={() => handleScanOcr(undefined, undefined, true)}
                 disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
-                className="text-[10px] text-amber-300 hover:text-amber-200 font-semibold flex items-center gap-1 bg-amber-500/15 hover:bg-amber-500/25 px-2 py-0.5 rounded border border-amber-500/40 transition-colors cursor-pointer disabled:opacity-40"
+                className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
                 title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
               >
                 <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
-                <span>{isScanningOcr ? 'Đang đọc OCR...' : 'Đọc mã OCR (Gán vào)'}</span>
+                <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
               </button>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex items-center gap-2">
                 {/* Khung ảnh Captcha thật */}
                 <div 
-                  className="h-10 bg-white rounded flex items-center justify-center p-1 overflow-hidden border border-gray-600 cursor-pointer shadow-inner min-w-[120px] flex-1 relative group"
+                  className="h-10 bg-white rounded-md flex items-center justify-center p-1 overflow-hidden border border-slate-600 cursor-pointer shadow-xs min-w-[120px] flex-1 relative group"
                   onClick={fetchCaptcha}
                   title="Nhấn vào hình để đổi ảnh Captcha khác"
                 >
                   {isLoadingCaptcha ? (
-                    <div className="text-[11px] text-gray-500 font-mono flex items-center gap-1.5">
-                      <RefreshCw className="w-3 h-3 animate-spin" /> Đang tải...
+                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                      <RefreshCw className="w-3 h-3 animate-spin text-slate-500" /> Đang tải...
                     </div>
                   ) : captchaImg ? (
                     <img
@@ -405,8 +410,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="max-h-full object-contain filter contrast-125 select-none"
                     />
                   ) : (
-                    <div className="text-[10px] text-red-600 font-medium flex items-center gap-1">
-                      <RefreshCw className="w-2.5 h-2.5" /> Bấm thử lại
+                    <div className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" /> Bấm thử lại
                     </div>
                   )}
                 </div>
@@ -422,36 +427,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     }}
                     placeholder="Mã ảnh"
                     maxLength={8}
-                    className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-gray-950 py-1.5 focus:border-amber-400 ${
-                      ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-gray-600 text-amber-300'
+                    className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-slate-950 py-1.5 focus:border-blue-500 ${
+                      ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-amber-300'
                     }`}
                   />
                 </div>
               </div>
 
               {/* Thông tin hỗ trợ */}
-              <div className="flex items-center justify-between text-[10px] font-mono text-gray-400 pt-0.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
                 {ocrNotice ? (
-                  <span className={ocrSuccess ? 'text-emerald-400 font-semibold flex items-center gap-1' : 'text-amber-400'}>
-                    {ocrSuccess && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                  <span className={ocrSuccess ? 'text-emerald-400 font-medium flex items-center gap-1' : 'text-amber-400'}>
+                    {ocrSuccess && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
                     {ocrNotice}
                   </span>
                 ) : captchaCode ? (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    Đã nhập: <strong>{captchaCode}</strong>
+                  <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Đã nhập: <strong className="font-mono">{captchaCode}</strong></span>
                   </span>
                 ) : (
-                  <span>Nhập tay hoặc bấm "Đọc mã OCR" để gán</span>
+                  <span className="text-slate-400">Nhập ký tự từ ảnh</span>
                 )}
 
                 <button
                   type="button"
                   onClick={fetchCaptcha}
                   disabled={isLoadingCaptcha || isScanningOcr}
-                  className="text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer shrink-0"
+                  className="text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
                 >
-                  <RefreshCw className={`w-2.5 h-2.5 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
                   <span>Đổi ảnh</span>
                 </button>
               </div>
@@ -460,30 +465,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* WAF 403 Warning */}
           {isWafBlocked && (
-            <div className="p-2.5 bg-amber-950/90 border border-amber-600 rounded text-amber-200 text-[11px] leading-tight space-y-1.5 animate-fadeIn shadow-lg">
-              <div className="flex items-start gap-1.5 font-bold text-amber-300">
+            <div className="p-3 bg-amber-950/60 border border-amber-600/60 rounded-lg text-amber-200 text-xs leading-relaxed space-y-2 animate-fadeIn shadow-xs">
+              <div className="flex items-start gap-1.5 font-semibold text-amber-300">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <span>Cổng Thuế tạm từ chối kết nối IP (HTTP 403)</span>
               </div>
-              <p className="text-[10px] text-amber-200/90">
+              <p className="text-[11px] text-amber-200/90 leading-normal">
                 Tường lửa Tổng cục Thuế phát hiện kết nối từ IP đám mây. Bạn hãy thử lại sau giây lát hoặc làm mới mã Captcha.
               </p>
-              <div className="flex items-center gap-1.5 pt-1">
+              <div className="flex items-center gap-2 pt-0.5">
                 <button
                   type="button"
                   onClick={onOpenConfigModal}
-                  className="px-2 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  <Settings className="w-3 h-3" />
-                  <span>Cấu hình tài khoản</span>
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>Cấu hình</span>
                 </button>
                 <button
                   type="button"
                   onClick={fetchCaptcha}
-                  className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded text-[10px] font-mono cursor-pointer transition-colors flex items-center gap-1"
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs cursor-pointer transition-colors flex items-center gap-1"
                 >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Đổi mã Captcha</span>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Đổi mã</span>
                 </button>
               </div>
             </div>
@@ -491,33 +496,33 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Error Message if Authentication Failed */}
           {authError && !isWafBlocked && (
-            <div className="p-2.5 bg-red-950/90 border border-red-800 rounded text-red-200 text-[11px] leading-tight flex items-start gap-1.5 animate-fadeIn shadow-md">
-              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+            <div className="p-3 bg-rose-950/60 border border-rose-800/60 rounded-lg text-rose-200 text-xs leading-relaxed flex items-start gap-2 animate-fadeIn shadow-xs">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
               <div>
-                <strong className="block text-red-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
-                <span className="text-red-200/90">{authError}</span>
+                <strong className="block text-rose-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
+                <span className="text-rose-200/90 text-[11px]">{authError}</span>
               </div>
             </div>
           )}
 
           {/* Date Range Inputs */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-bold text-gray-300 uppercase tracking-wider block">
-                Khoảng Thời Gian
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-slate-300">
+                Khoảng thời gian tra cứu
               </label>
-              <span className="text-[10px] text-amber-400 font-mono">Chọn nhanh:</span>
+              <span className="text-[11px] text-slate-400">Chọn nhanh:</span>
             </div>
             
-            {/* Quick Period Buttons */}
-            <div className="grid grid-cols-4 gap-1 mb-2">
+            {/* Quick Period Buttons: Modern Segmented Switch */}
+            <div className="bg-slate-950/70 p-1 rounded-lg border border-slate-800 grid grid-cols-4 gap-1 mb-2.5">
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...filters, fromDate: '2026-01-01', toDate: '2026-12-31' })}
-                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
                   filters.fromDate === '2026-01-01' && filters.toDate === '2026-12-31'
-                    ? 'bg-amber-500 text-black font-extrabold'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 2026
@@ -525,10 +530,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...filters, fromDate: '2025-01-01', toDate: '2025-12-31' })}
-                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
                   filters.fromDate === '2025-01-01' && filters.toDate === '2025-12-31'
-                    ? 'bg-amber-500 text-black font-extrabold'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 2025
@@ -536,10 +541,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...filters, fromDate: '2024-01-01', toDate: '2024-12-31' })}
-                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
                   filters.fromDate === '2024-01-01' && filters.toDate === '2024-12-31'
-                    ? 'bg-amber-500 text-black font-extrabold'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 2024
@@ -547,55 +552,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 onClick={() => onFilterChange({ ...filters, fromDate: '2022-01-01', toDate: '2026-12-31' })}
-                className={`py-0.5 px-1 text-[10px] font-bold rounded transition-colors ${
+                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
                   filters.fromDate === '2022-01-01'
-                    ? 'bg-amber-500 text-black font-extrabold'
-                    : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
-                Tất Cả
+                Tất cả
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <span className="text-[10px] text-gray-400 block mb-0.5">Từ ngày:</span>
+                <span className="text-[11px] text-slate-400 block mb-1">Từ ngày:</span>
                 <input
                   type="date"
                   value={filters.fromDate}
                   onChange={(e) => onFilterChange({ ...filters, fromDate: e.target.value })}
-                  className="text-input-dark text-[11px] p-1.5"
+                  className="text-input-dark text-xs p-1.5"
                 />
               </div>
               <div>
-                <span className="text-[10px] text-gray-400 block mb-0.5">Đến ngày:</span>
+                <span className="text-[11px] text-slate-400 block mb-1">Đến ngày:</span>
                 <input
                   type="date"
                   value={filters.toDate}
                   onChange={(e) => onFilterChange({ ...filters, toDate: e.target.value })}
-                  className="text-input-dark text-[11px] p-1.5"
+                  className="text-input-dark text-xs p-1.5"
                 />
               </div>
             </div>
           </div>
 
           {/* Invoice Type Fixed to Purchase */}
-          <div className="flex items-center justify-between py-1.5 px-2.5 bg-blue-950/40 border border-blue-900/60 rounded">
-            <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Phạm vi tra cứu</span>
-            <span className="text-xs font-bold text-blue-400 font-mono">HÓA ĐƠN MUA VÀO</span>
+          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/40 border border-slate-700/50 rounded-lg">
+            <span className="text-xs text-slate-400 font-medium">Phạm vi tra cứu</span>
+            <span className="text-xs font-semibold text-blue-400">Hóa đơn mua vào</span>
           </div>
 
           {/* Primary Action Button */}
-          <div className="pt-1.5">
+          <div className="pt-1">
             <button
               type="submit"
               disabled={isLoading}
-              className="btn-primary-accent w-full flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-950/50 py-2.5 text-sm font-black"
+              className="btn-primary-accent w-full flex items-center justify-center gap-2 cursor-pointer shadow-sm py-2.5 text-xs font-semibold rounded-lg"
             >
               {isLoading ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>ĐANG TRUY XUẤT CỔNG THUẾ...</span>
+                  <span>Đang truy xuất Cổng Thuế...</span>
                 </>
               ) : (
                 <>
@@ -608,29 +613,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </form>
 
         {/* Engine Status Specification */}
-        <div className="p-2.5 bg-gray-900 rounded border border-gray-800 space-y-1.5 text-[11px] font-mono">
-          <div className="text-gray-400 font-bold uppercase tracking-wider text-[10px] pb-1 border-b border-gray-800 flex items-center justify-between">
-            <span>Trạng Thái Hệ Thống</span>
-            <span className="text-emerald-400">ONLINE</span>
+        <div className="p-3 bg-slate-800/40 rounded-lg border border-slate-800/80 space-y-2 text-xs">
+          <div className="text-slate-400 font-medium text-xs pb-1.5 border-b border-slate-800 flex items-center justify-between">
+            <span>Trạng thái hệ thống</span>
+            <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-medium">
+              Hoạt động
+            </span>
           </div>
-          <div className="flex items-center justify-between text-gray-300">
-            <span>Cổng Thuế:</span>
-            <span className="text-emerald-400 font-bold">hoadondientu.gdt</span>
+          <div className="flex items-center justify-between text-slate-300 text-[11px]">
+            <span className="text-slate-400">Cổng Thuế:</span>
+            <span className="text-slate-200 font-medium font-mono">hoadondientu.gdt.gov.vn</span>
           </div>
-          <div className="flex items-center justify-between text-gray-300">
-            <span>Chứng thư số:</span>
-            <span className="text-blue-400">CQT SHA-256</span>
+          <div className="flex items-center justify-between text-slate-300 text-[11px]">
+            <span className="text-slate-400">Chứng thư số:</span>
+            <span className="text-blue-400 font-medium font-mono">CQT SHA-256</span>
           </div>
         </div>
       </div>
 
       {/* Footer Utility Links */}
-      <div className="pt-3 border-t border-gray-800 space-y-1.5 text-xs">
+      <div className="pt-3 border-t border-slate-800 space-y-1 text-xs">
         <button
           onClick={onOpenConfigModal}
-          className="w-full flex items-center gap-2 px-2 py-1 text-gray-300 hover:text-white hover:bg-gray-800 rounded transition-colors text-[11px] cursor-pointer"
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors text-xs cursor-pointer"
         >
-          <Settings className="w-3.5 h-3.5 text-gray-400" />
+          <Settings className="w-4 h-4 text-slate-400" />
           <span>Cấu hình tài khoản & Captcha</span>
         </button>
       </div>

@@ -1,12 +1,13 @@
 // server.ts
-import "dotenv/config";
+import dotenv2 from "dotenv";
 import express from "express";
 import path2 from "path";
 import crypto2 from "crypto";
 import { spawn } from "child_process";
-import JSZip3 from "jszip";
+import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
-import Tesseract from "tesseract.js";
+import axios10 from "axios";
+import * as cheerio4 from "cheerio";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -22,6 +23,14 @@ function detectProviderWithDetails(xmlString) {
       priority: 0,
       matchedPattern: "",
       sourceDescription: "D\u1EEF li\u1EC7u XML r\u1ED7ng ho\u1EB7c kh\xF4ng h\u1EE3p l\u1EC7"
+    };
+  }
+  if (/0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlString) || /SUNTALENT/i.test(xmlString)) {
+    return {
+      provider: "VIETTEL",
+      priority: 1.5,
+      matchedPattern: "SUNTALENT (MST: 0402307168) -> Viettel S-Invoice",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng Viettel S-Invoice / vInvoice (SUNTALENT)"
     };
   }
   if (/meinvoice\.vn|tracuu\.meinvoice|misa\.vn/i.test(xmlString)) {
@@ -46,6 +55,30 @@ function detectProviderWithDetails(xmlString) {
       priority: 1,
       matchedPattern: "vnpt-invoice",
       sourceDescription: "Ph\xE1t hi\u1EC7n Domain/Chu\u1ED7i tra c\u1EE9u VNPT Invoice (vnpt-invoice)"
+    };
+  }
+  if (/eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlString)) {
+    return {
+      provider: "LCS",
+      priority: 1,
+      matchedPattern: "eip.lcssoft.com.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u LCS Soft EIP (eip.lcssoft.com.vn)"
+    };
+  }
+  if (/vnpayinvoice|vnpay\.vn/i.test(xmlString)) {
+    return {
+      provider: "VNPAY",
+      priority: 1,
+      matchedPattern: "vnpayinvoice.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u VNPAY Invoice (portal.vnpayinvoice.vn)"
+    };
+  }
+  if (/hoadon\.ftg\.vn|hoadondientu\.fpt|fpt\.com\.vn/i.test(xmlString)) {
+    return {
+      provider: "FPT",
+      priority: 1,
+      matchedPattern: "hoadon.ftg.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n C\u1ED5ng tra c\u1EE9u FPT Electronic Invoice"
     };
   }
   if (/inv\.4si\.vn|4si\.vn/i.test(xmlString)) {
@@ -88,9 +121,25 @@ function detectProviderWithDetails(xmlString) {
       sourceDescription: "Ph\xE1t hi\u1EC7n Domain tra c\u1EE9u CyberLotus CyberBill (cyberbill.vn)"
     };
   }
+  if (/minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice/i.test(xmlString)) {
+    return {
+      provider: "MINVOICE",
+      priority: 1,
+      matchedPattern: "minvoice.vn",
+      sourceDescription: "Ph\xE1t hi\u1EC7n Domain tra c\u1EE9u M-Invoice (minvoice.vn / tracuuhoadon.minvoice.com.vn)"
+    };
+  }
   const msttcgpMatch = xmlString.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
   if (msttcgpMatch && msttcgpMatch[1]) {
     const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+    if (msttcgp === "0106026495") {
+      return {
+        provider: "MINVOICE",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0106026495",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty TNHH H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED M-Invoice qua th\u1EBB <MSTTCGP> (0106026495)"
+      };
+    }
     if (msttcgp === "0101243150") {
       return {
         provider: "MISA",
@@ -129,6 +178,30 @@ function detectProviderWithDetails(xmlString) {
         priority: 1.5,
         matchedPattern: "MSTTCGP: 0105987432",
         sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p Softdreams EasyInvoice qua th\u1EBB <MSTTCGP> (0105987432)"
+      };
+    }
+    if (msttcgp === "0302999571") {
+      return {
+        provider: "LCS",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0302999571",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty TNHH L.C.S (LCS Soft) qua th\u1EBB <MSTTCGP> (0302999571)"
+      };
+    }
+    if (msttcgp === "0102182292") {
+      return {
+        provider: "VNPAY",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0102182292",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty C\u1ED5 ph\u1EA7n Gi\u1EA3i ph\xE1p Thanh to\xE1n Vi\u1EC7t Nam (VNPAY) qua th\u1EBB <MSTTCGP> (0102182292)"
+      };
+    }
+    if (msttcgp === "0104128565") {
+      return {
+        provider: "FPT",
+        priority: 1.5,
+        matchedPattern: "MSTTCGP: 0104128565",
+        sourceDescription: "Ph\xE1t hi\u1EC7n T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p C\xF4ng ty TNHH H\u1EC7 th\u1ED1ng Th\xF4ng tin FPT qua th\u1EBB <MSTTCGP> (0104128565)"
       };
     }
     if (msttcgp === "0315744883") {
@@ -174,6 +247,15 @@ function detectProviderWithDetails(xmlString) {
     if (tentcgp.includes("SOFTDREAMS") || tentcgp.includes("EASYINVOICE")) {
       return { provider: "EASYINVOICE", priority: 1.5, matchedPattern: "TenTCGP: SOFTDREAMS", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: Softdreams EasyInvoice" };
     }
+    if (tentcgp.includes("L.C.S") || tentcgp.includes("LCSSOFT")) {
+      return { provider: "LCS", priority: 1.5, matchedPattern: "TenTCGP: LCS", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: C\xF4ng ty TNHH L.C.S (LCS Soft)" };
+    }
+    if (tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM")) {
+      return { provider: "VNPAY", priority: 1.5, matchedPattern: "TenTCGP: VNPAY", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: VNPAY Invoice" };
+    }
+    if (tentcgp.includes("FPT")) {
+      return { provider: "FPT", priority: 1.5, matchedPattern: "TenTCGP: FPT", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: FPT Information System" };
+    }
     if (tentcgp.includes("4SI")) {
       return { provider: "4SI", priority: 1.5, matchedPattern: "TenTCGP: 4SI", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: 4Si" };
     }
@@ -183,6 +265,9 @@ function detectProviderWithDetails(xmlString) {
     if (tentcgp.includes("CYBERLOTUS") || tentcgp.includes("CYBERBILL")) {
       return { provider: "CYBERBILL", priority: 1.5, matchedPattern: "TenTCGP: CYBERBILL", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: CyberBill" };
     }
+    if (tentcgp.includes("M-INVOICE") || tentcgp.includes("MINVOICE")) {
+      return { provider: "MINVOICE", priority: 1.5, matchedPattern: "TenTCGP: MINVOICE", sourceDescription: "T\u1ED5 ch\u1EE9c gi\u1EA3i ph\xE1p: C\xF4ng ty TNHH H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED M-Invoice" };
+    }
   }
   if (/0317978711|0312105174|0400557356/i.test(xmlString) || /TÂN THANH DANH|TAN THANH DANH|TÀI TRÂM ANH|TAI TRAM ANH|XUÂN VINH|XUAN VINH|meInvoice/i.test(xmlString)) {
     return {
@@ -190,6 +275,30 @@ function detectProviderWithDetails(xmlString) {
       priority: 1.8,
       matchedPattern: "MISA Partner (T\xE2n Thanh Danh / T\xE0i Tr\xE2m Anh / Xu\xE2n Vinh)",
       sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng MISA meInvoice"
+    };
+  }
+  if (/0315018466/i.test(xmlString) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(xmlString)) {
+    return {
+      provider: "LCS",
+      priority: 1.8,
+      matchedPattern: "PNJ (C\xF4ng ty C\u1ED5 ph\u1EA7n V\xE0ng b\u1EA1c \u0110\xE1 qu\xFD Ph\xFA Nhu\u1EADn / LCS Soft)",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng LCS Soft EIP (PNJ)"
+    };
+  }
+  if (/0100112437/i.test(xmlString) || /VIETCOMBANK|NGOẠI THƯƠNG VIỆT NAM|NGOAI THUONG VIET NAM/i.test(xmlString)) {
+    return {
+      provider: "VNPAY",
+      priority: 1.8,
+      matchedPattern: "Vietcombank (VNPAY Invoice)",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng VNPAY Invoice (Ng\xE2n h\xE0ng Vietcombank)"
+    };
+  }
+  if (/0402307168/i.test(xmlString) || /SUNTALENT/i.test(xmlString) || /Mã số bí mật|Ma so bi mat|ReservationCode/i.test(xmlString) || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|viettel-ca|@viettel|@viettrel/i.test(xmlString)) {
+    return {
+      provider: "VIETTEL",
+      priority: 1.8,
+      matchedPattern: "Viettel vInvoice / S-Invoice (SUNTALENT / M\xE3 s\u1ED1 b\xED m\u1EADt / ReservationCode)",
+      sourceDescription: "H\xF3a \u0111\u01A1n ph\xE1t h\xE0nh qua h\u1EC7 th\u1ED1ng Viettel vInvoice / S-Invoice"
     };
   }
   const signatureIssuers = extractSignatureIssuers(xmlString);
@@ -259,12 +368,23 @@ function extractSignatureIssuers(xml) {
       }
     }
   }
-  for (const tag of ["CAProvider", "TenToChucChungThuc", "NhaCungCapChungThuSo", "ToChucChungThuc"]) {
+  for (const tag of ["CAProvider", "TenToChucChungThuc", "NhaCungCapChungThuSo", "ToChucChungThuc", "X509SubjectName"]) {
     const vals = extractTags(xml, tag);
     for (const v of vals) {
       if (!issuers.includes(v)) {
         issuers.push(v);
       }
+    }
+  }
+  const certList = extractTags(xml, "X509Certificate");
+  for (const certB64 of certList) {
+    try {
+      const cleanB64 = certB64.replace(/[\r\n\s]/g, "");
+      const decoded = Buffer.from(cleanB64, "base64").toString("latin1");
+      if (decoded) {
+        issuers.push(decoded);
+      }
+    } catch {
     }
   }
   return issuers;
@@ -624,14 +744,45 @@ function getFromStructuredArrays(source, fieldNames) {
       }
     }
   }
-  return "";
+  const seen = /* @__PURE__ */ new Set();
+  const findNested = (value2, depth) => {
+    if (!value2 || typeof value2 !== "object" || depth > 8 || seen.has(value2)) return "";
+    seen.add(value2);
+    if (Array.isArray(value2)) {
+      for (const entry of value2) {
+        const found = checkItem(entry) || findNested(entry, depth + 1);
+        if (found) return found;
+      }
+      return "";
+    }
+    for (const child of Object.values(value2)) {
+      const found = checkItem(child) || findNested(child, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  };
+  return findNested(source, 0);
+}
+function hasPayloadMarker(source, keys, expected, depth = 0, seen = /* @__PURE__ */ new Set()) {
+  if (!source || typeof source !== "object" || depth > 8 || seen.has(source)) return false;
+  seen.add(source);
+  const normalizedExpected = expected.map((value2) => value2.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  for (const key of keys) {
+    const value2 = getPayloadValue(source, [key]);
+    if (value2 !== void 0 && normalizedExpected.includes(String(value2).toLowerCase().replace(/[^a-z0-9]/g, ""))) return true;
+  }
+  return Object.values(source).some((value2) => hasPayloadMarker(value2, keys, expected, depth + 1, seen));
 }
 function normalizeLookupLabel(value2) {
   return cleanLookupValue(value2).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
 }
 function isLookupCodeCandidate(value2) {
   if (!value2 || value2.length < 4 || value2.length > 120) return false;
-  return !/^https?:\/\//i.test(value2) && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(value2);
+  const trimmed = value2.trim();
+  if (/^vietcombank$/i.test(trimmed)) return false;
+  if (/^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(trimmed)) return false;
+  if (trimmed.includes("0102182292") && trimmed.length > 20) return false;
+  return !/^https?:\/\//i.test(trimmed) && /^[A-Za-z0-9][A-Za-z0-9._-]{3,119}$/.test(trimmed);
 }
 function isVnptSource(source) {
   if (!source) return false;
@@ -644,6 +795,85 @@ function isVnptSource(source) {
   return nbmst === "4000344946" || // CÔNG TY TNHH NGHĨA SƠN
   nbten.includes("NGH\u0128A S\u01A0N") || nbten.includes("NGHIA SON") || msttcgp === "0100684378" || // MST VNPT TCGP
   tentcgp.includes("VNPT") || provider === "VNPT" || provider === "NGHIA_SON" || lookupUrl.includes("vnpt-invoice.com.vn");
+}
+function isViettelSource(source) {
+  if (!source) return false;
+  if (hasPayloadMarker(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"], ["0100109106"])) return true;
+  if (hasPayloadMarker(source, ["tentvandnkntt", "tentvandnknt", "ten_tvandnknt", "TENTVANDNKNTT"], ["tvan_viettel"])) return true;
+  const nbmst = String(getPayloadValue(source, ["nbmst", "mst", "sellerTaxCode"]) || "").replace(/[^0-9]/g, "");
+  const nbten = String(getPayloadValue(source, ["nbten", "sellerName"]) || "").toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "").replace(/[^0-9]/g, "");
+  const tentvandnknt = String(getPayloadValue(source, ["tentvandnkntt", "tentvandnknt", "ten_tvandnknt", "TENTVANDNKNTT"]) || "").toLowerCase();
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toLowerCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return nbmst === "0100109106" || nbmst === "0402307168" || // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
+  nbten.includes("SUNTALENT") || nbten.includes("VIETTEL") || msttcgp === "0100109106" || tentvandnknt === "tvan_viettel" || tentvandnknt === "tvan viettel" || tentcgp.includes("viettel") || provider === "VIETTEL" || lookupUrl.includes("sinvoice.viettel.vn") || lookupUrl.includes("viettel-invoice.vn") || lookupUrl.includes("vinvoice.viettel.vn");
+}
+function isLcsSource(source) {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "taxCodeNguoiBan", "MST"]) || "");
+  const nbten = String(getPayloadValue(source, ["nbten", "nbtnnt", "sellerName", "supplierName", "Ten"]) || "").toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0302999571" || // CÔNG TY TNHH L.C.S
+  tentcgp.includes("L.C.S") || tentcgp.includes("LCSSOFT") || provider === "LCS" || nbmst === "0315018466" || // CÔNG TY TNHH MTV CHẾ TÁC VÀ KINH DOANH TRANG SỨC PNJ
+  nbten.includes("TRANG S\u1EE8C PNJ") || nbten.includes("TRANG SUC PNJ") || lookupUrl.includes("lcssoft.com.vn") || lookupUrl.includes("eip.lcssoft");
+}
+function isVnpaySource(source) {
+  if (!source) return false;
+  const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "taxCodeNguoiBan", "MST"]) || "");
+  const nbten = String(getPayloadValue(source, ["nbten", "nbtnnt", "sellerName", "supplierName", "Ten"]) || "").toUpperCase();
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0102182292" || // VNPAY
+  tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM") || provider === "VNPAY" || nbmst === "0100112437" || // Vietcombank
+  nbten.includes("VIETCOMBANK") || lookupUrl.includes("vnpayinvoice.vn");
+}
+function isFptSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0104128565" || // FPT
+  tentcgp.includes("FPT") || provider === "FPT" || lookupUrl.includes("ftg.vn") || lookupUrl.includes("fpt.com.vn");
+}
+function isMinvoiceSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0106026495" || tentcgp.includes("M-INVOICE") || tentcgp.includes("MINVOICE") || provider === "MINVOICE" || provider === "M-INVOICE" || lookupUrl.includes("minvoice.vn") || lookupUrl.includes("minvoice.com.vn");
+}
+function isBkavSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0101360697" || tentcgp.includes("BKAV") || provider === "BKAV" || lookupUrl.includes("bkav.com") || lookupUrl.includes("ehoadon.vn");
+}
+function isThaiSonSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0101300842" || tentcgp.includes("TH\xC1I S\u01A0N") || tentcgp.includes("THAISON") || provider === "THAISON" || lookupUrl.includes("einvoice.vn") || lookupUrl.includes("thaison.vn");
+}
+function isCyberBillSource(source) {
+  if (!source) return false;
+  const msttcgp = String(getPayloadValue(source, ["msttcgp", "mst_tcgp", "tvandnkntt", "MSTTCGP"]) || "");
+  const tentcgp = String(getPayloadValue(source, ["tentcgp", "ten_tcgp", "TCGP", "TenTCGP"]) || "").toUpperCase();
+  const provider = String(getPayloadValue(source, ["provider", "Provider"]) || "").toUpperCase();
+  const lookupUrl = String(getPayloadValue(source, ["lookupUrl", "lookup_url", "linkTraCuu"]) || "").toLowerCase();
+  return msttcgp === "0107871301" || tentcgp.includes("CYBERLOTUS") || tentcgp.includes("CYBERBILL") || provider === "CYBERBILL" || lookupUrl.includes("cyberbill.vn");
 }
 function isMisaSource(source) {
   if (!source) return false;
@@ -662,9 +892,182 @@ function isMisaSource(source) {
 function getLookupCodeFromPayload(source) {
   if (!source) return "";
   const isMisa = isMisaSource(source);
+  const isViettel = isViettelSource(source);
   const misaTransactionId = getFromStructuredArrays(source, ["TransactionID", "TransactionId", "transactionID"]) || getPayloadValue(source, ["transactionID", "TransactionID"]);
   if (isMisa && misaTransactionId && isLookupCodeCandidate(cleanLookupValue(misaTransactionId))) {
     return cleanLookupValue(misaTransactionId);
+  }
+  if (isViettel) {
+    const secretCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        "M\xE3 s\u1ED1 b\xED m\u1EADt",
+        "Ma so bi mat",
+        "ReservationCode",
+        "reservationCode",
+        "matracuu",
+        "MaTraCuu",
+        "M\xE3 tra c\u1EE9u",
+        "MaSoBiMat",
+        "SecretCode",
+        "secretCode"
+      ]) || getPayloadValue(source, ["lookupCode", "secretCode", "reservationCode", "mabaomat", "sobaomat"])
+    );
+    return isLookupCodeCandidate(secretCode) ? secretCode : "";
+  }
+  if (isLcsSource(source)) {
+    const cqtCode = getPayloadValue(source, ["mhdon", "mccqt", "MCCQT", "cqtCode"]);
+    if (cqtCode) {
+      const cleanCqt = cleanLookupValue(cqtCode);
+      if (cleanCqt) return cleanCqt;
+    }
+  }
+  if (isVnpaySource(source)) {
+    const vnpayCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        "SoBaoMat",
+        "S\u1ED1 b\u1EA3o m\u1EADt",
+        "soBaoMat",
+        "sobaomat",
+        "MaSoBaoMat",
+        "M\xE3 s\u1ED1 b\u1EA3o m\u1EADt",
+        "maSoBaoMat",
+        "MaBaoMat",
+        "M\xE3 b\u1EA3o m\u1EADt",
+        "maBaoMat",
+        "mabaomat",
+        "MaNhanHDon",
+        "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n",
+        "maNhanHDon",
+        "manhanhdon",
+        "MaNhanHoaDon",
+        "MTCuu",
+        "mtcuu",
+        "MaTraCuu",
+        "matracuu",
+        "M\xE3 tra c\u1EE9u",
+        "M\xE3 tra c\u1EE9u H\u0110",
+        "Fkey",
+        "FKey",
+        "LookupCode",
+        "SecretCode",
+        "SecurityCode",
+        "AccessCode"
+      ]) || getPayloadValue(source, [
+        "soBaoMat",
+        "sobaomat",
+        "SoBaoMat",
+        "maSoBaoMat",
+        "maBaoMat",
+        "mabaomat",
+        "MaBaoMat",
+        "maNhanHDon",
+        "manhanhdon",
+        "MaNhanHDon",
+        "maNhanHoaDon",
+        "mtcuu",
+        "MTCuu",
+        "maTraCuu",
+        "MaTraCuu",
+        "matracuu"
+      ])
+    );
+    if (isLookupCodeCandidate(vnpayCode)) {
+      return vnpayCode;
+    }
+    return "";
+  }
+  if (isMinvoiceSource(source)) {
+    const minvoiceCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        "SoBaoMat",
+        "S\u1ED1 b\u1EA3o m\u1EADt",
+        "soBaoMat",
+        "sobaomat",
+        "CheckCode",
+        "checkCode",
+        "Checkcode",
+        "MaSoBaoMat",
+        "M\xE3 s\u1ED1 b\u1EA3o m\u1EADt",
+        "MaBaoMat",
+        "M\xE3 b\u1EA3o m\u1EADt",
+        "MTCuu",
+        "mtcuu",
+        "MaTraCuu",
+        "matracuu",
+        "M\xE3 tra c\u1EE9u",
+        "Fkey",
+        "FKey"
+      ]) || getPayloadValue(source, [
+        "soBaoMat",
+        "sobaomat",
+        "SoBaoMat",
+        "checkCode",
+        "CheckCode",
+        "maSoBaoMat",
+        "maBaoMat",
+        "mabaomat",
+        "MaBaoMat",
+        "mtcuu",
+        "MTCuu",
+        "maTraCuu",
+        "MaTraCuu"
+      ])
+    );
+    if (isLookupCodeCandidate(minvoiceCode)) {
+      return minvoiceCode;
+    }
+  }
+  if (isBkavSource(source)) {
+    const bkavCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        "MaNhanHDon",
+        "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n",
+        "maNhanHDon",
+        "manhanhdon",
+        "MaNhanHoaDon",
+        "MTCuu",
+        "mtcuu",
+        "MaTraCuu",
+        "matracuu",
+        "M\xE3 tra c\u1EE9u",
+        "Fkey",
+        "FKey"
+      ]) || getPayloadValue(source, [
+        "maNhanHDon",
+        "manhanhdon",
+        "MaNhanHDon",
+        "maNhanHoaDon",
+        "mtcuu",
+        "MTCuu",
+        "maTraCuu",
+        "MaTraCuu"
+      ])
+    );
+    if (isLookupCodeCandidate(bkavCode)) {
+      return bkavCode;
+    }
+  }
+  if (isThaiSonSource(source)) {
+    const thaiSonCode = cleanLookupValue(
+      getFromStructuredArrays(source, [
+        "MaNhanHDon",
+        "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n",
+        "MTCuu",
+        "mtcuu",
+        "MaTraCuu",
+        "matracuu",
+        "M\xE3 tra c\u1EE9u"
+      ]) || getPayloadValue(source, [
+        "maNhanHDon",
+        "mtcuu",
+        "MTCuu",
+        "maTraCuu",
+        "MaTraCuu"
+      ])
+    );
+    if (isLookupCodeCandidate(thaiSonCode)) {
+      return thaiSonCode;
+    }
   }
   const values = [
     misaTransactionId,
@@ -675,17 +1078,31 @@ function getLookupCodeFromPayload(source) {
     // Cấu trúc mảng { ttruong: "Fkey", dlieu: "..." } - đã xác nhận đây là
     // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
     // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
-    getFromStructuredArrays(source, ["Fkey", "FKey", "MaTraCuu", "LookupCode", "MTCuu", "MTC"]),
+    getFromStructuredArrays(source, [
+      "Fkey",
+      "FKey",
+      "MaTraCuu",
+      "LookupCode",
+      "MTCuu",
+      "MTC",
+      "SoBaoMat",
+      "S\u1ED1 b\u1EA3o m\u1EADt",
+      "MaSoBaoMat",
+      "M\xE3 s\u1ED1 b\u1EA3o m\u1EADt",
+      "MaBaoMat",
+      "M\xE3 b\u1EA3o m\u1EADt",
+      "MaNhanHDon",
+      "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n",
+      "MaNhanHoaDon",
+      "M\xE3 tra c\u1EE9u"
+    ]),
     getPayloadValue(source, ["fkey", "FKey"]),
+    getPayloadValue(source, ["soBaoMat", "sobaomat", "SoBaoMat", "maBaoMat", "MaBaoMat", "maNhanHDon", "MaNhanHDon"]),
     getPayloadValue(source, ["invoiceLookupCode", "InvoiceLookupCode"]),
     // MISA meInvoice: mã tra cứu THẬT in trên hóa đơn nằm trong mảng cttkhac
     // với ttruong = "TransactionID" (đã kiểm chứng khớp 100% với PDF gốc).
     getFromStructuredArrays(source, ["TransactionID", "TransactionId"]),
-    getPayloadValue(source, ["transactionID", "TransactionID"]),
-    // Field phẳng "mtdtchieu" - chỉ dùng khi không có nguồn nào ở trên,
-    // vì đã có trường hợp thực tế field này KHÔNG khớp mã tra cứu in trên
-    // hóa đơn (nó có thể là một mã đối chiếu nội bộ khác).
-    getPayloadValue(source, ["mtdtchieu", "MTDTCChieu", "maDoiChieu", "MaDoiChieu"])
+    getPayloadValue(source, ["transactionID", "TransactionID"])
   ];
   const foundCode = values.map(cleanLookupValue).find(isLookupCodeCandidate);
   if (foundCode) return foundCode;
@@ -699,12 +1116,38 @@ function getLookupCodeFromPayload(source) {
   return "";
 }
 function getLookupUrlFromPayload(source) {
+  if (isLcsSource(source)) {
+    return "https://eip.lcssoft.com.vn/desktop/#/login";
+  }
+  if (isVnpaySource(source)) {
+    const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "MST"]) || "");
+    const nbten = String(getPayloadValue(source, ["nbten", "sellerName", "supplierName"]) || "").toUpperCase();
+    if (nbmst === "0100112437" || nbten.includes("VIETCOMBANK")) {
+      return "https://einvoice.vietcombank.com.vn/";
+    }
+    return "https://portal.vnpayinvoice.vn/";
+  }
+  if (isFptSource(source)) {
+    return "https://hoadon.ftg.vn/";
+  }
   if (isVnptSource(source)) {
     const nbmst = String(getPayloadValue(source, ["nbmst", "sellerTaxCode", "MST"]) || "4000344946");
     return `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
   if (isMisaSource(source)) {
     return "https://www.meinvoice.vn/tra-cuu";
+  }
+  if (isMinvoiceSource(source)) {
+    return "https://tracuuhoadon.minvoice.com.vn";
+  }
+  if (isBkavSource(source)) {
+    return "https://ehoadon.bkav.com/tra-cuu";
+  }
+  if (isThaiSonSource(source)) {
+    return "https://einvoice.vn/tra-cuu";
+  }
+  if (isCyberBillSource(source)) {
+    return "https://cyberbill.vn/tra-cuu";
   }
   const structured = getFromStructuredArrays(source, ["PortalLink", "LinkTraCuu", "WebsiteTraCuu", "WebTraCuu"]);
   const value2 = cleanLookupValue(structured || String(getPayloadValue(source, [
@@ -811,11 +1254,44 @@ function extractLookupDetailsFromXml(rawXml) {
     }
     return "";
   };
-  const codeTags = ["MTCuu", "MaTraCuu", "Matracuu", "FKey", "Fkey", "LookupCode", "InvoiceLookupCode", "TransactionID"];
+  const codeTags = [
+    "SoBaoMat",
+    "sobaomat",
+    "SOBAOMAT",
+    "MaSoBaoMat",
+    "maSoBaoMat",
+    "MaBaoMat",
+    "mabaomat",
+    "MaNhanHDon",
+    "manhanhdon",
+    "MaNhanHoaDon",
+    "MTCuu",
+    "MaTraCuu",
+    "Matracuu",
+    "FKey",
+    "Fkey",
+    "LookupCode",
+    "InvoiceLookupCode",
+    "TransactionID",
+    "SecretCode",
+    "SecurityCode",
+    "AccessCode"
+  ];
   let lookupCode = tagValue(codeTags);
   if (!lookupCode) {
-    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+    const textMatch = rawXml.match(/(?:Mã\s+tra\s+cứu|Ma\s+tra\s+cuu|Mã\s+nhận\s+hóa\s+đơn|Ma\s+nhan\s+hoa\s+don|Số\s+bảo\s+mật|So\s+bao\s+mat|Mã\s+số\s+bảo\s+mật|Mã\s+bảo\s+mật)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
     if (textMatch?.[1]) lookupCode = cleanLookupValue(textMatch[1]);
+  }
+  const isViettelXml = /0100109106|0402307168|suntalent|tvan[_\s-]*viettel|sinvoice|vinvoice|viettel|viettel-invoice/i.test(rawXml) || /Mã số bí mật|Ma so bi mat|ReservationCode|MaBiMat/i.test(rawXml);
+  if (isViettelXml) {
+    const secretBlocks = [...extractTagBlocks(rawXml, "TTin"), ...extractTagBlocks(rawXml, "TTKhac")];
+    const secretBlock = secretBlocks.find((block) => {
+      const label = normalizeLookupLabel(extractTagValue(block, "TTruong") || extractTagValue(block, "TenTruong"));
+      return label === "ma so bi mat" || label.includes("bi mat") || label.includes("secret") || label.includes("reservation");
+    });
+    if (secretBlock) {
+      lookupCode = cleanLookupValue(extractTagValue(secretBlock, "DLieu") || extractTagValue(secretBlock, "Data") || "");
+    }
   }
   const ttinBlocks = [...extractTagBlocks(rawXml, "TTin"), ...extractTagBlocks(rawXml, "TTKhac")];
   for (const block of ttinBlocks) {
@@ -823,7 +1299,7 @@ function extractLookupDetailsFromXml(rawXml) {
       extractTagValue(block, "TTruong") || extractTagValue(block, "TenTruong") || extractTagValue(block, "Name")
     );
     if (!label || label.includes("bi mat") || label.includes("secret")) continue;
-    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc/i.test(label);
+    const isExplicitLookupLabel = /tra\s*cuu|lookup|transaction\s*id|fkey|f_key|ma_tc|mtc|bao\s*mat|nhan\s*h.*don/i.test(label);
     if (!lookupCode && isExplicitLookupLabel) {
       const value2 = cleanLookupValue(extractTagValue(block, "DLieu") || extractTagValue(block, "Data") || extractTagValue(block, "Value"));
       if (isLookupCodeCandidate(value2)) {
@@ -884,12 +1360,59 @@ function extractLookupDetailsFromXml(rawXml) {
     const nbmst = extractTagValue(rawXml, "MST", "") || extractTagValue(rawXml, "nbmst", "") || "4000344946";
     lookupUrl = `https://${nbmst}-tt78.vnpt-invoice.com.vn`;
   }
-  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883|0302999571|0315018466/i.test(rawXml);
+  const isLcs = /eip\.lcssoft\.com\.vn|lcssoft|0302999571|0315018466/i.test(rawXml) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(rawXml);
+  if (isLcs) {
+    if (!lookupUrl) lookupUrl = "https://eip.lcssoft.com.vn/desktop/#/login";
+    if (!lookupCode) {
+      const mhdon = extractTagValue(rawXml, "mhdon", "") || extractTagValue(rawXml, "MCQTCap", "");
+      if (mhdon) lookupCode = mhdon;
+    }
+  }
+  const isVnpay = /vnpayinvoice|0102182292|0100112437/i.test(rawXml) || /VIETCOMBANK/i.test(rawXml);
+  if (isVnpay) {
+    const isVcb = /0100112437|VIETCOMBANK/i.test(rawXml);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? "https://einvoice.vietcombank.com.vn/" : "https://portal.vnpayinvoice.vn/";
+    }
+    if (!lookupCode || lookupCode.toLowerCase() === "vietcombank" || !isLookupCodeCandidate(lookupCode)) {
+      lookupCode = "";
+    }
+  }
+  const isFpt = /hoadon\.ftg\.vn|0104128565/i.test(rawXml);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = "https://hoadon.ftg.vn/";
+  }
+  const is4Si = /4si\.vn|inv\.4si\.vn|0315744883/i.test(rawXml);
   if (is4Si) {
     if (!lookupUrl) lookupUrl = "https://inv.4si.vn/tra-cuu-hoa-don";
     if (!extractTagValue(rawXml, "MTCuu") && !extractTagValue(rawXml, "MaTraCuu") && !extractTagValue(rawXml, "FKey")) {
       lookupCode = "";
     }
+  }
+  if (isViettelXml || /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|0100109106|0402307168|suntalent/i.test(rawXml)) {
+    if (!lookupUrl) lookupUrl = "https://vinvoice.viettel.vn/utilities/invoice-search";
+  }
+  const isMinvoice = /minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice|0106026495/i.test(rawXml) || /M-INVOICE|MINVOICE/i.test(rawXml);
+  if (isMinvoice) {
+    if (!lookupUrl) lookupUrl = "https://tracuuhoadon.minvoice.com.vn";
+    if (!lookupCode) {
+      const sobaomat = extractTagValue(rawXml, "SoBaoMat", "") || extractTagValue(rawXml, "sobaomat", "") || extractTagValue(rawXml, "CheckCode", "") || extractTagValue(rawXml, "checkCode", "") || extractTagValue(rawXml, "MaBaoMat", "") || extractTagValue(rawXml, "mabaomat", "");
+      if (sobaomat && isLookupCodeCandidate(sobaomat)) {
+        lookupCode = sobaomat;
+      }
+    }
+  }
+  const isBkav = /bkav|ehoadon\.vn|ehoadon\.bkav|0101360697/i.test(rawXml);
+  if (isBkav) {
+    if (!lookupUrl) lookupUrl = "https://ehoadon.bkav.com/tra-cuu";
+  }
+  const isThaiSon = /einvoice\.vn|thaison\.vn|0101300842/i.test(rawXml);
+  if (isThaiSon) {
+    if (!lookupUrl) lookupUrl = "https://einvoice.vn/tra-cuu";
+  }
+  const isCyberBill = /cyberbill\.vn|cyberlotus|0107871301/i.test(rawXml);
+  if (isCyberBill) {
+    if (!lookupUrl) lookupUrl = "https://cyberbill.vn/tra-cuu";
   }
   return { lookupCode: isLookupCodeCandidate(lookupCode) ? lookupCode : "", lookupUrl };
 }
@@ -1555,9 +2078,9 @@ function parseGDTInvoiceXml(xmlString, filename) {
     buyerSignerName = extractTagValue(buyerSigBlock, "X509SubjectName") || nmten;
     buyerSignedDate = extractTagValue(buyerSigBlock, "SigningTime") || nlap;
   }
-  const provider = detectProvider(xmlSource);
-  const msttcgp = getTag(domDoc || xmlSource, "MSTTCGP") || "";
-  const tentcgp = getTag(domDoc || xmlSource, "TenTCGP") || getTag(domDoc || xmlSource, "TCGP") || "";
+  let provider = detectProvider(xmlSource);
+  let msttcgp = getTag(domDoc || xmlSource, "MSTTCGP") || "";
+  let tentcgp = getTag(domDoc || xmlSource, "TenTCGP") || getTag(domDoc || xmlSource, "TCGP") || "";
   let { lookupCode, lookupUrl } = extractLookupDetailsFromXml(xmlSource);
   const isVnpt = provider === "VNPT" || msttcgp === "0100684378" || tentcgp.toUpperCase().includes("VNPT") || nbmst === "4000344946" || nbten.toUpperCase().includes("NGH\u0128A S\u01A0N") || nbten.toUpperCase().includes("NGHIA SON") || /vnpt-invoice|invoice\.vnpt\.vn|tracuu\.vnpt-invoice/i.test(xmlSource);
   if (isVnpt) {
@@ -1567,6 +2090,37 @@ function parseGDTInvoiceXml(xmlString, filename) {
     if (!lookupUrl) {
       lookupUrl = `https://${nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn`;
     }
+  }
+  const isLcs = provider === "LCS" || msttcgp === "0302999571" || tentcgp.toUpperCase().includes("L.C.S") || tentcgp.toUpperCase().includes("LCSSOFT") || nbmst === "0315018466" || nbten.toUpperCase().includes("PNJ") || /eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlSource);
+  if (isLcs) {
+    if (!lookupCode && mhdon) {
+      lookupCode = mhdon;
+    }
+    if (!lookupUrl) {
+      lookupUrl = "https://eip.lcssoft.com.vn/desktop/#/login";
+    }
+  }
+  const isVnpay = provider === "VNPAY" || msttcgp === "0102182292" || tentcgp.toUpperCase().includes("VNPAY") || nbmst === "0100112437" || /VIETCOMBANK/i.test(xmlSource) || /vnpayinvoice/i.test(xmlSource);
+  if (isVnpay) {
+    const isVcb = nbmst === "0100112437" || /VIETCOMBANK/i.test(xmlSource);
+    if (!lookupUrl) {
+      lookupUrl = isVcb ? "https://einvoice.vietcombank.com.vn/" : "https://portal.vnpayinvoice.vn/";
+    }
+    if (lookupCode && (lookupCode.toLowerCase() === "vietcombank" || !isLookupCodeCandidate(lookupCode))) {
+      lookupCode = "";
+    }
+  }
+  const isFpt = provider === "FPT" || msttcgp === "0104128565" || tentcgp.toUpperCase().includes("FPT") || /hoadon\.ftg\.vn/i.test(xmlSource);
+  if (isFpt) {
+    if (!lookupUrl) lookupUrl = "https://hoadon.ftg.vn/";
+  }
+  const cleanNbmst = (nbmst || "").replace(/\D/g, "");
+  const isViettel = provider === "VIETTEL" || msttcgp === "0100109106" || cleanNbmst === "0402307168" || /SUNTALENT/i.test(nbten) || tentcgp.toUpperCase().includes("VIETTEL") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlSource) || /sinvoice|vinvoice|viettel-invoice|0100109106|0402307168|suntalent/i.test(xmlSource);
+  if (isViettel) {
+    if (!lookupUrl) lookupUrl = "https://vinvoice.viettel.vn/utilities/invoice-search";
+    if (!msttcgp) msttcgp = "0100109106";
+    if (!tentcgp) tentcgp = "T\u1EADp \u0111o\xE0n C\xF4ng nghi\u1EC7p - Vi\u1EC5n th\xF4ng Qu\xE2n \u0111\u1ED9i (Viettel)";
+    if (!provider) provider = "VIETTEL";
   }
   const id = `XML_${khhdon}_${shdon}_${nbmst}_${Date.now()}`;
   const draftInvoice = {
@@ -1639,27 +2193,38 @@ function detectPartnerTemplate(invoice, rawXml) {
   if (nbmst === "0318443500") return "TKJ";
   if (nbmst === "4000344946") return "NGHIA_SON";
   if (nbmst === "0317978711") return "TAN_THANH_DANH";
+  if (nbmst === "0402307168") return "VIETTEL";
+  if (nbmst === "0102182292" || nbmst === "0100112437") return "DEFAULT";
   const msttcgp = (invoice.msttcgp || "").replace(/[^0-9]/g, "");
+  if (msttcgp === "0100109106") return "VIETTEL";
+  if (msttcgp === "0102182292") return "DEFAULT";
   if (msttcgp === "0302999571" || msttcgp === "0315744883") return "DEFAULT";
   if (msttcgp === "0100684378") return "NGHIA_SON";
   if (nbten.includes("baoduy")) return "BAO_DUY";
   if (nbten.includes("pnj") || nbten.includes("chetac") && nbten.includes("trangsuc")) return "DEFAULT";
+  if (nbten.includes("suntalent")) return "VIETTEL";
   if (nbten.includes("taitramanh") || nbten.includes("tramanh")) return "TAI_TRAM_ANH";
   if (nbten.includes("xuanvinh")) return "XUAN_VINH";
   if (nbten.includes("kimloantuan")) return "KIM_LOAN_TUAN";
   if (nbten.includes("tkj")) return "TKJ";
   if (nbten.includes("nghiason")) return "NGHIA_SON";
   if (nbten.includes("tanthanhdanh") || nbten.includes("thanhdanh")) return "TAN_THANH_DANH";
+  if (nbten.includes("vnpay") || nbten.includes("vietcombank")) return "DEFAULT";
   if (xml) {
     if (xml.includes("0318657735") || xml.includes("b\u1EA3o duy") || xml.includes("bao duy")) return "BAO_DUY";
     if (xml.includes("0315018466") || xml.includes("4si.vn") || xml.includes("l.c.s") || xml.includes("pnj")) return "DEFAULT";
+    if (xml.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/.test(xml) || xml.includes("suntalent")) return "VIETTEL";
     if (xml.includes("0312105174") || xml.includes("t\xE0i tr\xE2m anh") || xml.includes("tai tram anh")) return "TAI_TRAM_ANH";
     if (xml.includes("0400557356") || xml.includes("xu\xE2n vinh") || xml.includes("xuan vinh")) return "XUAN_VINH";
     if (xml.includes("0318391940") || xml.includes("kim loan tu\u1EA5n") || xml.includes("kim loan tuan")) return "KIM_LOAN_TUAN";
     if (xml.includes("0318443500") || xml.includes("tkj")) return "TKJ";
     if (xml.includes("4000344946") || xml.includes("ngh\u0129a s\u01A1n") || xml.includes("nghia son")) return "NGHIA_SON";
     if (xml.includes("0317978711") || xml.includes("t\xE2n thanh danh") || xml.includes("tan thanh danh")) return "TAN_THANH_DANH";
+    if (xml.includes("vnpayinvoice") || xml.includes("0102182292") || xml.includes("vietcombank")) return "DEFAULT";
   }
+  const p = (invoice.provider || "").toUpperCase();
+  if (p === "VIETTEL") return "VIETTEL";
+  if (p.includes("VNPAY")) return "DEFAULT";
   return "DEFAULT";
 }
 
@@ -1723,15 +2288,12 @@ function buildDirectLookupUrl(portalUrl, lookupCode, providerOrTemplateId, selle
   }
   const isVnpt = provider.includes("VNPT") || provider.includes("NGHIA_SON") || /vnpt-invoice\.com\.vn/i.test(url);
   if (isVnpt) {
-    let vnptUrl = url;
-    if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
-      vnptUrl = `https://${sellerTaxCode || "4000344946"}-tt78.vnpt-invoice.com.vn`;
+    const cleanTaxCode = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
+    let targetDomain = (url || "").trim().split("?")[0].replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+    if (!targetDomain || !/vnpt-invoice/i.test(targetDomain)) {
+      targetDomain = cleanTaxCode ? `https://${cleanTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
     }
-    const cleanUrl = vnptUrl.split("?")[0].replace(/\/+$/, "");
-    if (code) {
-      return `${cleanUrl}/?strFkey=${encodeURIComponent(code)}`;
-    }
-    return cleanUrl;
+    return `${targetDomain}/HomeNoLogin/SearchByFkey`;
   }
   const isEasyInvoice = provider.includes("EASY") || provider.includes("SOFTDREAMS") || provider.includes("BAO_DUY") || provider.includes("KIM_LOAN") || provider.includes("TKJ") || /easyinvoice/i.test(url);
   if (isEasyInvoice) {
@@ -1748,7 +2310,30 @@ function buildDirectLookupUrl(portalUrl, lookupCode, providerOrTemplateId, selle
     }
     return cleanUrl;
   }
-  const is4Si = provider.includes("4SI") || provider.includes("PNJ") || /4si\.vn/i.test(url);
+  const isLcs = provider.includes("LCS") || provider.includes("PNJ") || sellerTaxCode === "0315018466" || sellerTaxCode === "0302999571" || /eip\.lcssoft\.com\.vn|lcssoft/i.test(url);
+  if (isLcs) {
+    return "https://eip.lcssoft.com.vn/desktop/#/login";
+  }
+  const isVnpay = provider.includes("VNPAY") || sellerTaxCode === "0100112437" || sellerTaxCode === "0102182292" || /vnpayinvoice/i.test(url);
+  if (isVnpay) {
+    const isVcb = sellerTaxCode === "0100112437";
+    const isInvalid = !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+    const validCode = !isInvalid ? code.trim() : "";
+    const baseVnpayUrl = "https://portal.vnpayinvoice.vn";
+    const params = new URLSearchParams();
+    if (validCode) params.set("lookupCode", validCode);
+    if (sellerTaxCode) params.set("taxCode", sellerTaxCode);
+    const qs = params.toString();
+    if (isVcb && !validCode) {
+      return "https://einvoice.vietcombank.com.vn/";
+    }
+    return qs ? `${baseVnpayUrl}/?${qs}` : isVcb ? "https://einvoice.vietcombank.com.vn/" : `${baseVnpayUrl}/`;
+  }
+  const isFpt = provider.includes("FPT") || /hoadon\.ftg\.vn|fpt\.com\.vn/i.test(url);
+  if (isFpt) {
+    return "https://hoadon.ftg.vn/";
+  }
+  const is4Si = provider.includes("4SI") || /4si\.vn/i.test(url);
   if (is4Si) {
     return "https://inv.4si.vn/tra-cuu-hoa-don";
   }
@@ -2297,10 +2882,11 @@ function renderDefaultTemplate(invoice, rawXml, options) {
   );
   const sellerName = invoice.nbten || "";
   const sellerTaxCode = invoice.nbmst || "";
-  const sellerStoreCode = invoice.sellerStoreCode || "";
-  const sellerStoreName = invoice.sellerStoreName || "";
+  const sellerStoreCode = invoice.sellerStoreCode || invoice.nbmchhang || "";
+  const sellerStoreName = invoice.sellerStoreName || invoice.nbtchhang || "";
   const sellerAddress = invoice.nbdchi || "";
   const sellerPhone = invoice.nbsdt || invoice.sellerPhone || "";
+  const sellerEmail = invoice.nbemail || invoice.sellerEmail || "";
   const sellerBankAcc = invoice.nbstk || "";
   const sellerBankName = invoice.nbnhang || "";
   const buyerName = invoice.nmten || "";
@@ -2741,31 +3327,37 @@ ${printControls}
         <div class="di-value"><div style="font-weight: bold; font-family: monospace; font-size: 13pt;">${escapeHtml(sellerTaxCode)}</div></div>
       </div>
     </li>
-    <li>
+    ${sellerStoreCode ? `<li>
       <div class="data-item">
         <div class="di-label"><span>M\xE3 c\u1EEDa h\xE0ng:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerStoreCode)}</div></div>
       </div>
-    </li>
-    <li>
+    </li>` : ""}
+    ${sellerStoreName ? `<li>
       <div class="data-item">
         <div class="di-label"><span>T\xEAn c\u1EEDa h\xE0ng:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerStoreName)}</div></div>
       </div>
-    </li>
+    </li>` : ""}
     <li>
       <div class="data-item">
         <div class="di-label"><span>\u0110\u1ECBa ch\u1EC9:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerAddress)}</div></div>
       </div>
     </li>
-    <li>
+    ${sellerPhone ? `<li>
       <div class="data-item">
         <div class="di-label"><span>\u0110i\u1EC7n tho\u1EA1i:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerPhone)}</div></div>
       </div>
-    </li>
-    <li>
+    </li>` : ""}
+    ${sellerEmail ? `<li>
+      <div class="data-item">
+        <div class="di-label"><span>Email:</span></div>
+        <div class="di-value"><div>${escapeHtml(sellerEmail)}</div></div>
+      </div>
+    </li>` : ""}
+    ${sellerBankAcc || sellerBankName ? `<li>
       <div class="data-item">
         <div class="di-label"><span>S\u1ED1 t\xE0i kho\u1EA3n:</span></div>
         <div class="di-value">
@@ -2776,7 +3368,7 @@ ${printControls}
           </div>
         </div>
       </div>
-    </li>
+    </li>` : ""}
     <li>
       <div class="vip-divide" style="margin: 5px 0;"></div>
     </li>
@@ -5060,7 +5652,7 @@ function renderNghiaSonTemplate(invoice, rawXml, options) {
     <!-- FOOTER -->
     <div class="footer-area">
       <div style="font-style:italic;color:#64748b;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      <div style="margin-top:2px;">Tra c\u1EE9u h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
+      <div style="margin-top:2px;">Tra c\u1EE9u h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
     </div>
   </div>
 </body>
@@ -5468,6 +6060,627 @@ function renderTanThanhDanhTemplate(invoice, rawXml, options) {
 </html>`;
 }
 
+// src/templates/VnpayTemplate.ts
+function renderVnpayTemplate(invoice, rawXml, options) {
+  const { day, month, year } = extractDateParts(invoice);
+  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
+  const isInvalidCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+  const mCode = (!isInvalidCode(lookupCode) ? lookupCode : !isInvalidCode(invoice.lookupCode) ? invoice.lookupCode : "") || "";
+  const isVcb = invoice.nbmst === "0100112437" || (invoice.nbten || "").toUpperCase().includes("VIETCOMBANK");
+  const defaultPortalUrl = isVcb ? "https://einvoice.vietcombank.com.vn/" : "https://portal.vnpayinvoice.vn/";
+  const pUrl = lookupUrl || invoice.lookupUrl || defaultPortalUrl;
+  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VNPAY", invoice.nbmst);
+  const qrPayload = invoice.mhdon ? `https://hoadondientu.gdt.gov.vn/tra-cuu?cqt=${encodeURIComponent(invoice.mhdon)}` : `MST:${invoice.nbmst};KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`;
+  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(qrPayload);
+  const items = ensureInvoiceItems(invoice);
+  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
+  const vatAmount = typeof invoice.tgtthue === "number" ? invoice.tgtthue : 0;
+  const subTotal = typeof invoice.tgtcthue === "number" ? invoice.tgtcthue : totalAmount - vatAmount > 0 ? totalAmount - vatAmount : totalAmount;
+  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
+  const taxAuthorityCode = invoice.mhdon || "";
+  const showControls = options?.showPrintControls !== false;
+  const mauSo = invoice.khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : "1");
+  const kyHieu = invoice.khhdon || "";
+  const soHdon = invoice.shdon || "";
+  let invoiceTitle = invoice.thdon || "";
+  if (!invoiceTitle) {
+    if (kyHieu.startsWith("2")) {
+      invoiceTitle = "H\xD3A \u0110\u01A0N B\xC1N H\xC0NG";
+    } else {
+      invoiceTitle = "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG";
+    }
+  } else {
+    invoiceTitle = invoiceTitle.toUpperCase();
+  }
+  const isVatInvoice = !kyHieu.startsWith("2") && (vatAmount > 0 || invoiceTitle.includes("GI\xC1 TR\u1ECA GIA T\u0102NG"));
+  const paymentMethod = invoice.htttoan || "TM/CK";
+  const taxRateGroups = {};
+  items.forEach((it) => {
+    const rate = it.taxRate || it.tsuat || (isVatInvoice ? "10%" : "KCT");
+    if (!taxRateGroups[rate]) {
+      taxRateGroups[rate] = { subTotal: 0, taxAmount: 0 };
+    }
+    const itemSubTotal = it.amount || it.thtien || 0;
+    taxRateGroups[rate].subTotal += itemSubTotal;
+    taxRateGroups[rate].taxAmount += it.taxAmount || it.tthue || 0;
+  });
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(invoiceTitle)} - ${escapeHtml(invoice.nbten || "VNPAY")} - S\u1ED1: ${escapeHtml(soHdon)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 8mm 10mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: 'Times New Roman', Times, serif;
+      background: #f8fafc;
+      margin: 0;
+      padding: 16px;
+      color: #0f172a;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .invoice-card {
+      max-width: 840px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1.5px solid #005baa;
+      padding: 24px 28px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      position: relative;
+    }
+    .watermark-bg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-30deg);
+      font-size: 58px;
+      color: rgba(0, 91, 170, 0.035);
+      font-weight: 800;
+      pointer-events: none;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+      user-select: none;
+      z-index: 0;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 2px solid #005baa;
+      padding-bottom: 14px;
+      margin-bottom: 14px;
+      position: relative;
+      z-index: 1;
+    }
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex: 1;
+    }
+    .vnpay-logo-badge {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #005baa 0%, #003e75 100%);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 6px;
+      min-width: 100px;
+      text-align: center;
+    }
+    .vnpay-logo-badge .brand-title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      color: #fff;
+      line-height: 1.1;
+    }
+    .vnpay-logo-badge .brand-sub {
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      color: #fbbf24;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .seller-header-info {
+      flex: 1;
+    }
+    .seller-header-info h2 {
+      margin: 0 0 4px 0;
+      font-size: 15px;
+      font-weight: 700;
+      color: #005baa;
+      text-transform: uppercase;
+      line-height: 1.25;
+    }
+    .seller-header-info .meta-line {
+      font-size: 12px;
+      color: #334155;
+      margin: 2px 0;
+    }
+    .invoice-meta-box {
+      min-width: 210px;
+      text-align: right;
+      padding-left: 16px;
+    }
+    .invoice-meta-box .meta-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+    .invoice-meta-box .meta-label {
+      color: #64748b;
+    }
+    .invoice-meta-box .meta-val {
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .invoice-meta-box .so-hd {
+      color: #ed1c24;
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .title-section {
+      text-align: center;
+      margin: 14px 0 12px 0;
+      position: relative;
+      z-index: 1;
+    }
+    .title-section h1 {
+      margin: 0;
+      font-size: 21px;
+      font-weight: 800;
+      color: #005baa;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .title-section .cqt-badge {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 11px;
+      font-style: italic;
+      color: #475569;
+    }
+    .title-section .cqt-code-box {
+      margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #eff6ff;
+      border: 1px dashed #3b82f6;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #1e40af;
+      font-weight: 700;
+    }
+    .title-section .date-line {
+      margin-top: 4px;
+      font-size: 12.5px;
+      font-style: italic;
+      color: #334155;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 14px;
+      position: relative;
+      z-index: 1;
+    }
+    .info-box {
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      padding: 10px 14px;
+      background: #fdfefe;
+    }
+    .info-box-header {
+      font-weight: 700;
+      color: #005baa;
+      font-size: 13px;
+      text-transform: uppercase;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 4px;
+      margin-bottom: 8px;
+    }
+    .info-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    .info-table td {
+      padding: 3px 0;
+      vertical-align: top;
+    }
+    .info-table .lbl {
+      width: 140px;
+      color: #475569;
+      font-weight: 600;
+    }
+    .info-table .val {
+      color: #0f172a;
+    }
+
+    .items-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 12px;
+      position: relative;
+      z-index: 1;
+      font-size: 12.5px;
+    }
+    .items-table th, .items-table td {
+      border: 1px solid #94a3b8;
+      padding: 6px 8px;
+    }
+    .items-table th {
+      background: #005baa;
+      color: #ffffff;
+      font-weight: 700;
+      text-align: center;
+      font-size: 12px;
+    }
+    .items-table th.col-sub {
+      background: #004684;
+      font-size: 11px;
+      font-weight: normal;
+    }
+    .items-table td.center { text-align: center; }
+    .items-table td.right { text-align: right; }
+    .items-table tr:nth-child(even) td { background-color: #f8fafc; }
+
+    .summary-section {
+      margin-bottom: 16px;
+      position: relative;
+      z-index: 1;
+    }
+    .summary-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+      border: 1px solid #94a3b8;
+    }
+    .summary-table td {
+      padding: 6px 12px;
+      border: 1px solid #cbd5e1;
+    }
+    .summary-table .sum-lbl {
+      text-align: right;
+      font-weight: 600;
+      color: #334155;
+      background: #f8fafc;
+    }
+    .summary-table .sum-val {
+      text-align: right;
+      font-weight: 700;
+      color: #0f172a;
+      width: 170px;
+    }
+    .summary-table .total-row td {
+      background: #eff6ff;
+      border-top: 2px solid #005baa;
+      font-size: 13.5px;
+    }
+    .summary-table .total-val {
+      color: #ed1c24 !important;
+      font-size: 15px !important;
+      font-weight: 800 !important;
+    }
+    .amount-words-box {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border-left: 4px solid #005baa;
+      font-size: 12.5px;
+      font-style: italic;
+      color: #1e293b;
+    }
+
+    .signature-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 18px;
+      margin-bottom: 18px;
+      position: relative;
+      z-index: 1;
+    }
+    .sig-box {
+      text-align: center;
+      padding: 10px;
+    }
+    .sig-box .sig-title {
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #005baa;
+      font-size: 13px;
+    }
+    .sig-box .sig-note {
+      font-size: 11.5px;
+      font-style: italic;
+      color: #64748b;
+      margin-top: 2px;
+    }
+    .sig-stamp {
+      margin-top: 14px;
+      border: 1.5px dashed #16a34a;
+      background: #f0fdf4;
+      border-radius: 6px;
+      padding: 10px;
+      display: inline-block;
+      min-width: 220px;
+      text-align: left;
+    }
+    .sig-stamp .stamp-title {
+      color: #15803d;
+      font-weight: 800;
+      font-size: 11px;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .sig-stamp .stamp-detail {
+      font-size: 11px;
+      color: #166534;
+      line-height: 1.35;
+    }
+
+    .footer-box {
+      border-top: 1.5px solid #005baa;
+      padding-top: 12px;
+      margin-top: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+      font-size: 11.5px;
+      color: #475569;
+    }
+    .footer-links a {
+      color: #005baa;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .footer-links a:hover {
+      text-decoration: underline;
+    }
+    .vnpay-powered {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .qr-container {
+      width: 54px;
+      height: 54px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .qr-container img, .qr-container svg {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .invoice-card { border: 1.5px solid #005baa; box-shadow: none; padding: 14mm 16mm; max-width: 100%; }
+      .print-actions { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  ${showControls ? getPrintControlsHtml(`H\xF3a \u0111\u01A1n VNPAY: ${invoice.nbten || "VNPAY"} - S\u1ED1: ${soHdon}`) : ""}
+
+  <div class="invoice-card">
+    <div class="watermark-bg">VNPAY INVOICE</div>
+
+    <!-- Header -->
+    <div class="header-row">
+      <div class="brand-section">
+        <div class="vnpay-logo-badge">
+          <span class="brand-title">VNPAY</span>
+          <span class="brand-sub">INVOICE</span>
+        </div>
+        <div class="seller-header-info">
+          <h2>${escapeHtml(invoice.nbten || "C\xD4NG TY C\u1ED4 PH\u1EA6N GI\u1EA2I PH\xC1P THANH TO\xC1N VI\u1EC6T NAM")}</h2>
+          <div class="meta-line"><strong>M\xE3 s\u1ED1 thu\u1EBF:</strong> ${renderSpacedTaxCode(invoice.nbmst || "0102182292")}</div>
+          <div class="meta-line"><strong>\u0110\u1ECBa ch\u1EC9:</strong> ${escapeHtml(invoice.nbdchi || "T\u1EA7ng 8, S\u1ED1 22 ph\u1ED1 L\xE1ng H\u1EA1, Ph\u01B0\u1EDDng L\xE1ng H\u1EA1, Qu\u1EADn \u0110\u1ED1ng \u0110a, TP H\xE0 N\u1ED9i, Vi\u1EC7t Nam")}</div>
+          ${invoice.nbsdt ? `<div class="meta-line"><strong>\u0110i\u1EC7n tho\u1EA1i:</strong> ${escapeHtml(invoice.nbsdt)}</div>` : ""}
+          ${invoice.nbemail ? `<div class="meta-line"><strong>Email:</strong> ${escapeHtml(invoice.nbemail)}</div>` : ""}
+        </div>
+      </div>
+
+      <div class="invoice-meta-box">
+        <div class="meta-row">
+          <span class="meta-label">M\u1EABu s\u1ED1 (Form):</span>
+          <span class="meta-val">${escapeHtml(mauSo)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">K\xFD hi\u1EC7u (Serial):</span>
+          <span class="meta-val">${escapeHtml(kyHieu)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">S\u1ED1 (No.):</span>
+          <span class="meta-val so-hd">${escapeHtml(soHdon)}</span>
+        </div>
+        ${taxAuthorityCode ? `
+        <div class="meta-row" style="margin-top:4px;">
+          <span class="meta-label">M\xE3 CQT:</span>
+          <span class="meta-val" style="font-size:11px;color:#0284c7;">${escapeHtml(taxAuthorityCode)}</span>
+        </div>` : ""}
+      </div>
+    </div>
+
+    <!-- Title Section -->
+    <div class="title-section">
+      <h1>${escapeHtml(invoiceTitle)}</h1>
+      <div class="cqt-badge">
+        ${taxAuthorityCode ? "H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED c\xF3 m\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF" : "H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED kh\u1EDFi t\u1EA1o t\u1EEB m\xE1y t\xEDnh ti\u1EC1n / kh\xF4ng c\xF3 m\xE3 CQT"}
+      </div>
+      ${taxAuthorityCode ? `
+      <div>
+        <span class="cqt-code-box">
+          <span>\u{1F3DB}\uFE0F M\xE3 CQT:</span>
+          <span>${escapeHtml(taxAuthorityCode)}</span>
+        </span>
+      </div>` : ""}
+      <div class="date-line">
+        Ng\xE0y ${escapeHtml(day)} th\xE1ng ${escapeHtml(month)} n\u0103m ${escapeHtml(year)}
+      </div>
+    </div>
+
+    <!-- Buyer & Seller Info -->
+    <div class="info-grid">
+      <div class="info-box">
+        <div class="info-box-header">Th\xF4ng Tin Ng\u01B0\u1EDDi Mua H\xE0ng (Customer)</div>
+        <table class="info-table">
+          <tr>
+            <td class="lbl">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua:</td>
+            <td class="val"><strong>${escapeHtml(invoice.nmten || "Kh\xE1ch h\xE0ng kh\xF4ng l\u1EA5y h\xF3a \u0111\u01A1n")}</strong></td>
+          </tr>
+          ${invoice.nmmst ? `
+          <tr>
+            <td class="lbl">M\xE3 s\u1ED1 thu\u1EBF:</td>
+            <td class="val">${renderSpacedTaxCode(invoice.nmmst)}</td>
+          </tr>` : ""}
+          ${invoice.nmdchi ? `
+          <tr>
+            <td class="lbl">\u0110\u1ECBa ch\u1EC9:</td>
+            <td class="val">${escapeHtml(invoice.nmdchi)}</td>
+          </tr>` : ""}
+          <tr>
+            <td class="lbl">H\xECnh th\u1EE9c thanh to\xE1n:</td>
+            <td class="val">${escapeHtml(paymentMethod)}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Items Table -->
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th style="width: 40px;">STT</th>
+          <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
+          <th style="width: 60px;">\u0110VT</th>
+          <th style="width: 65px;">S\u1ED1 l\u01B0\u1EE3ng</th>
+          <th style="width: 95px;">\u0110\u01A1n gi\xE1</th>
+          <th style="width: 110px;">Th\xE0nh ti\u1EC1n</th>
+          ${isVatInvoice ? '<th style="width: 70px;">Thu\u1EBF su\u1EA5t</th>' : ""}
+        </tr>
+        <tr>
+          <th class="col-sub">(1)</th>
+          <th class="col-sub">(2)</th>
+          <th class="col-sub">(3)</th>
+          <th class="col-sub">(4)</th>
+          <th class="col-sub">(5)</th>
+          <th class="col-sub">(6 = 4 \xD7 5)</th>
+          ${isVatInvoice ? '<th class="col-sub">(7)</th>' : ""}
+        </tr>
+      </thead>
+      <tbody>
+        ${items.length > 0 ? items.map((item, idx) => `
+          <tr>
+            <td class="center">${idx + 1}</td>
+            <td><strong>${escapeHtml(item.itemName || item.ten || "D\u1ECBch v\u1EE5 / H\xE0ng h\xF3a")}</strong></td>
+            <td class="center">${escapeHtml(item.unit || item.dvt || "")}</td>
+            <td class="right">${formatNum(item.quantity || item.sluong || 0)}</td>
+            <td class="right">${formatVND(item.unitPrice || item.dgia || 0)}</td>
+            <td class="right">${formatVND(item.amount || item.thtien || 0)}</td>
+            ${isVatInvoice ? `<td class="center">${escapeHtml(item.taxRate || item.tsuat || "10%")}</td>` : ""}
+          </tr>
+        `).join("") : `
+          <tr>
+            <td class="center">1</td>
+            <td><strong>Cung c\u1EA5p d\u1ECBch v\u1EE5 / H\xE0ng h\xF3a thanh to\xE1n</strong></td>
+            <td class="center">G\xF3i</td>
+            <td class="right">1</td>
+            <td class="right">${formatVND(totalAmount)}</td>
+            <td class="right">${formatVND(totalAmount)}</td>
+            ${isVatInvoice ? '<td class="center">10%</td>' : ""}
+          </tr>
+        `}
+      </tbody>
+    </table>
+
+    <!-- Summary Section -->
+    <div class="summary-section">
+      <table class="summary-table">
+        ${isVatInvoice ? `
+        <tr>
+          <td class="sum-lbl">C\u1ED9ng ti\u1EC1n h\xE0ng (Subtotal):</td>
+          <td class="sum-val">${formatVND(subTotal)}</td>
+        </tr>
+        <tr>
+          <td class="sum-lbl">Ti\u1EC1n thu\u1EBF GTGT (VAT Amount):</td>
+          <td class="sum-val">${formatVND(vatAmount)}</td>
+        </tr>` : ""}
+        <tr class="total-row">
+          <td class="sum-lbl" style="font-weight: 700; color: #005baa;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total Payment):</td>
+          <td class="sum-val total-val">${formatVND(totalAmount)} VND</td>
+        </tr>
+      </table>
+      <div class="amount-words-box">
+        <strong>S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF:</strong> ${escapeHtml(wordsAmount)}.
+      </div>
+    </div>
+
+    <!-- Signatures -->
+    <div class="signature-grid">
+      <div class="sig-box">
+        <div class="sig-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
+        <div class="sig-note">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
+      </div>
+
+      <div class="sig-box">
+        <div class="sig-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
+        <div class="sig-note">(K\xFD \u0111i\u1EC7n t\u1EED, ghi r\xF5 h\u1ECD t\xEAn)</div>
+        <div class="sig-stamp">
+          <div class="stamp-title">
+            <span>\u2713</span> K\xDD B\u1EDEI: ${escapeHtml(invoice.nbten || "VNPAY")}
+          </div>
+          <div class="stamp-detail">
+            <div>Ng\xE0y k\xFD: ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
+            <div>Tr\u1EA1ng th\xE1i: <strong>H\u1EE3p l\u1EC7</strong> theo Ngh\u1ECB \u0111\u1ECBnh 123/2020/N\u0110-CP</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-box">
+      <div class="footer-links">
+        <div><strong>Tra c\u1EE9u h\xF3a \u0111\u01A1n:</strong> <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(pUrl)}</a></div>
+        ${mCode ? `<div><strong>S\u1ED1 b\u1EA3o m\u1EADt:</strong> <span style="font-family:monospace;font-weight:700;color:#005baa;">${escapeHtml(mCode)}</span></div>` : `<div><em>\u0110\xE3 x\xE1c th\u1EF1c m\xE3 C\u01A1 quan Thu\u1EBF c\u1EA5p: <strong>${escapeHtml(taxAuthorityCode || "H\u1EE3p l\u1EC7")}</strong></em></div>`}
+        <div style="font-size: 11px; margin-top: 3px; color: #64748b;">Gi\u1EA3i ph\xE1p H\u0110\u0110T VNPAY Invoice (C\xF4ng ty CP Gi\u1EA3i ph\xE1p Thanh to\xE1n Vi\u1EC7t Nam)</div>
+      </div>
+
+      <div class="vnpay-powered">
+        <div class="qr-container">
+          <img src="${qrImg}" alt="QR Tra c\u1EE9u h\xF3a \u0111\u01A1n" />
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 // src/utils/multiTemplateRenderer.ts
 function detectInvoiceProvider(xmlString, invoice) {
   const raw = xmlString || (invoice?.rawXml || "");
@@ -5478,11 +6691,19 @@ function detectInvoiceProvider(xmlString, invoice) {
       return partnerId;
     }
   }
+  const cleanNbmst = (invoice?.nbmst || "").replace(/\D/g, "");
+  const cleanRawStr = (raw || "").replace(/\s+/g, "");
+  if (cleanNbmst === "0402307168" || invoice?.nbten && /SUNTALENT/i.test(invoice.nbten) || cleanRawStr.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(raw || "") || raw && /SUNTALENT/i.test(raw)) {
+    return "VIETTEL";
+  }
   if (raw && typeof raw === "string") {
+    if (/vnpayinvoice|0102182292/i.test(raw)) {
+      return "DEFAULT";
+    }
     if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return "MISA";
     }
-    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom/i.test(raw)) {
+    if (/sinvoice|vinvoice|viettel\.vn|vietteltelecom|viettel-invoice|0100109106/i.test(raw)) {
       return "VIETTEL";
     }
     if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
@@ -5500,6 +6721,7 @@ function detectInvoiceProvider(xmlString, invoice) {
     const msttcgpMatch = raw.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
     if (msttcgpMatch && msttcgpMatch[1]) {
       const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
+      if (msttcgp === "0102182292") return "DEFAULT";
       if (msttcgp === "0100684378") return "VNPT";
       if (msttcgp === "0101243150") return "MISA";
       if (msttcgp === "0100109106") return "VIETTEL";
@@ -5510,6 +6732,7 @@ function detectInvoiceProvider(xmlString, invoice) {
     const sigMatches = raw.match(/<(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)>/gi);
     if (sigMatches) {
       const sigText = sigMatches.join(" ").toUpperCase();
+      if (sigText.includes("VNPAY")) return "DEFAULT";
       if (sigText.includes("VNPT")) return "VNPT";
       if (sigText.includes("MISA")) return "MISA";
       if (sigText.includes("VIETTEL")) return "VIETTEL";
@@ -5521,6 +6744,7 @@ function detectInvoiceProvider(xmlString, invoice) {
   if (invoice) {
     if (invoice.provider && invoice.provider !== "DEFAULT" && invoice.provider !== "UNKNOWN") {
       const p = String(invoice.provider).toUpperCase();
+      if (p.includes("VNPAY")) return "DEFAULT";
       if (p.includes("VNPT")) return "VNPT";
       if (p.includes("MISA")) return "MISA";
       if (p.includes("VIETTEL")) return "VIETTEL";
@@ -5529,6 +6753,8 @@ function detectInvoiceProvider(xmlString, invoice) {
       if (p.includes("BKAV")) return "BKAV";
     }
     const msttcgp = (invoice.msttcgp || "").trim();
+    if (invoice.nbmst === "0402307168" || invoice.nbten && /SUNTALENT/i.test(invoice.nbten)) return "VIETTEL";
+    if (msttcgp === "0102182292") return "DEFAULT";
     if (msttcgp === "0100684378") return "VNPT";
     if (msttcgp === "0101243150") return "MISA";
     if (msttcgp === "0105987432") return "EASYINVOICE";
@@ -5536,6 +6762,7 @@ function detectInvoiceProvider(xmlString, invoice) {
     if (msttcgp === "0100109106") return "VIETTEL";
     if (msttcgp === "0101360697") return "BKAV";
     const tentcgp = (invoice.tentcgp || "").toUpperCase();
+    if (tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM")) return "DEFAULT";
     if (tentcgp.includes("VNPT")) return "VNPT";
     if (tentcgp.includes("MISA")) return "MISA";
     if (tentcgp.includes("EASY") || tentcgp.includes("SOFTDREAMS")) return "EASYINVOICE";
@@ -5543,13 +6770,15 @@ function detectInvoiceProvider(xmlString, invoice) {
     if (tentcgp.includes("VIETTEL")) return "VIETTEL";
     if (tentcgp.includes("BKAV")) return "BKAV";
     const lookupUrl = (invoice.lookupUrl || "").toLowerCase();
+    if (lookupUrl.includes("vnpayinvoice") || lookupUrl.includes("vietcombank")) return "DEFAULT";
     if (lookupUrl.includes("vnpt")) return "VNPT";
     if (lookupUrl.includes("meinvoice") || lookupUrl.includes("misa")) return "MISA";
     if (lookupUrl.includes("easyinvoice") || lookupUrl.includes("softdreams")) return "EASYINVOICE";
-    if (lookupUrl.includes("4si")) return "4SI";
+    if (lookupUrl.includes("4si")) return "DEFAULT";
     if (lookupUrl.includes("sinvoice") || lookupUrl.includes("viettel")) return "VIETTEL";
     if (lookupUrl.includes("bkav") || lookupUrl.includes("ehoadon")) return "BKAV";
     const ca = (invoice.caProvider || "").toUpperCase();
+    if (ca.includes("VNPAY")) return "DEFAULT";
     if (ca.includes("VNPT")) return "VNPT";
     if (ca.includes("MISA")) return "MISA";
     if (ca.includes("VIETTEL")) return "VIETTEL";
@@ -5605,7 +6834,7 @@ function renderInvoiceHtml(invoiceData, providerId, rawXmlInput, options) {
       html = renderMisaTemplate(invoice, rawXml, options);
       break;
     case "VIETTEL":
-      html = renderViettelTemplate(invoice, rawXml, options);
+      html = renderViettelTemplate2(invoice, rawXml, options);
       break;
     case "EASYINVOICE":
       html = renderEasyInvoiceTemplate(invoice, rawXml, options);
@@ -5618,6 +6847,9 @@ function renderInvoiceHtml(invoiceData, providerId, rawXmlInput, options) {
       break;
     case "BKAV":
       html = renderBkavTemplate(invoice, rawXml, options);
+      break;
+    case "VNPAY":
+      html = renderVnpayTemplate(invoice, rawXml, options);
       break;
     case "DEFAULT":
     default:
@@ -6376,11 +7608,11 @@ function renderEasyInvoiceTemplate(invoice, rawXml, options) {
 </body>
 </html>`;
 }
-function renderViettelTemplate(invoice, rawXml, options) {
+function renderViettelTemplate2(invoice, rawXml, options) {
   const { day, month, year } = extractDateParts2(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
   const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || "https://www.sinvoice.vn/p/tra-cuu-hoa-don.html";
+  const pUrl = lookupUrl || invoice.lookupUrl || "https://vinvoice.viettel.vn/utilities/invoice-search";
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VIETTEL", invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || "0024A998811234F9004B2C89";
@@ -7089,7 +8321,7 @@ function renderVnptTemplate(invoice, rawXml, options) {
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao nh\u1EADn h\xF3a \u0111\u01A1n)</div>
       <div>Kh\u1EDFi t\u1EA1o t\u1EEB H\u1EC7 th\u1ED1ng H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED <b>VNPT Invoice</b> - T\u1EADp \u0111o\xE0n B\u01B0u ch\xEDnh Vi\u1EC5n th\xF4ng Vi\u1EC7t Nam</div>
-      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml2(mUrl)}</a> &nbsp;&nbsp; M\xE3 tra c\u1EE9u: <b style="color: #005baa;">${escapeHtml2(mCode)}</b></div>
+      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml2(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml2(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color: #005baa; font-weight: bold;">${escapeHtml2(mUrl)}</a> &nbsp;&nbsp; M\xE3 tra c\u1EE9u: <b style="color: #005baa;">${escapeHtml2(mCode)}</b></div>
     </div>
   </div>
 </body>
@@ -7457,312 +8689,119 @@ var OFFICIAL_GDT_INVOICE_XSLT = `<?xml version="1.0" encoding="UTF-8"?>
 
 </xsl:stylesheet>`;
 
-// src/services/invoice-engine/captcha/CaptchaSolver.ts
-import { createWorker } from "tesseract.js";
+// src/services/invoice-engine/captcha/geminiCaptchaSolver.ts
 import { GoogleGenAI } from "@google/genai";
-var aiClient = null;
+var VNPT_CAPTCHA_PROMPT = "This is a 4-digit captcha image with a noisy gray background. Please ignore the background noise and strike-through lines, and focus only on identifying the 4 main numbers. Output ONLY the 4 digits, nothing else.";
+var EASYINVOICE_CAPTCHA_PROMPT = "This is a 4-digit EasyInvoice captcha image. Identify and extract the 4 digits clearly visible in the image. Ignore any gradient shading, noise, or background artifacts. Output ONLY the 4 digits, nothing else.";
+var CANDIDATE_MODELS = ["gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-latest"];
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey });
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5u h\xECnh.");
   }
-  return aiClient;
+  return new GoogleGenAI({ apiKey });
 }
-var CaptchaSolver = class {
-  static {
-    this.workerInstance = null;
+function toImagePart(image) {
+  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
+    return { data: Buffer.from(image).toString("base64"), mimeType: "image/png" };
   }
-  static {
-    this.isInitializing = false;
+  const source = image.trim();
+  const dataUri = source.match(/^data:(image\/[^;]+);base64,(.+)$/s);
+  if (dataUri) {
+    return { data: dataUri[2], mimeType: dataUri[1] };
   }
-  static {
-    this.initPromise = null;
-  }
-  /**
-   * Giải Captcha bằng AI (Gemini Vision) theo chỉ thị trích xuất ký tự chuyên sâu
-   */
-  static async solveWithAI(imageInput, options) {
-    const ai = getGenAI();
-    if (!ai) return null;
-    const startTime = Date.now();
+  return { data: source, mimeType: "image/png" };
+}
+async function solveCaptchaWithGemini(base64Image, customPrompt) {
+  const promptToUse = customPrompt || VNPT_CAPTCHA_PROMPT;
+  const image = toImagePart(base64Image);
+  const ai = getGenAI();
+  let lastError = null;
+  for (const modelName of CANDIDATE_MODELS) {
     try {
-      let buf;
-      let mimeType = "image/png";
-      if (Buffer.isBuffer(imageInput)) {
-        buf = imageInput;
-      } else if (imageInput instanceof Uint8Array) {
-        buf = Buffer.from(imageInput);
-      } else if (typeof imageInput === "string") {
-        const trimmed = imageInput.trim();
-        if (trimmed.startsWith("data:image/")) {
-          const match = trimmed.match(/^data:(image\/[a-zA-Z+]+);base64,/);
-          if (match) {
-            mimeType = match[1];
-            buf = Buffer.from(trimmed.substring(match[0].length), "base64");
-          } else {
-            buf = Buffer.from(trimmed, "base64");
-          }
-        } else {
-          buf = Buffer.from(trimmed, "base64");
-        }
-      } else {
-        return null;
-      }
-      if (buf[0] === 255 && buf[1] === 216) {
-        mimeType = "image/jpeg";
-      } else if (buf[0] === 137 && buf[1] === 80) {
-        mimeType = "image/png";
-      } else if (buf[0] === 71 && buf[1] === 73) {
-        mimeType = "image/gif";
-      }
-      const base64Data = buf.toString("base64");
-      const prompt = `Nhi\u1EC7m v\u1EE5:
-1. Nh\xECn v\xE0o h\xECnh \u1EA3nh captcha \u0111\u01B0\u1EE3c cung c\u1EA5p.
-2. Tr\xEDch xu\u1EA5t ch\xEDnh x\xE1c c\xE1c k\xFD t\u1EF1/ch\u1EEF s\u1ED1 xu\u1EA5t hi\u1EC7n trong captcha.
-3. B\u1ECF qua t\u1EA5t c\u1EA3 nhi\u1EC5u, \u0111\u01B0\u1EDDng g\u1EA1ch ngang, n\u1EC1n m\u1EDD ho\u1EB7c m\xE0u s\u1EAFc xung quanh.
-
-Quy t\u1EAFc tr\u1EA3 v\u1EC1 (B\u1EAET BU\u1ED8C):
-- CH\u1EC8 tr\u1EA3 v\u1EC1 \u0111\xFAng chu\u1ED7i k\xFD t\u1EF1/ch\u1EEF s\u1ED1 \u0111\xE3 \u0111\u1ECDc \u0111\u01B0\u1EE3c.
-- KH\xD4NG gi\u1EA3i th\xEDch, KH\xD4NG ch\xE0o h\u1ECFi, KH\xD4NG \u0111\xEDnh k\xE8m d\u1EA5u c\xE2u ho\u1EB7c kho\u1EA3ng tr\u1EAFng d\u01B0 th\u1EEBa.`;
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: modelName,
         contents: [
           {
-            role: "user",
-            parts: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data
-                }
-              },
-              {
-                text: prompt
-              }
-            ]
-          }
-        ]
-      });
-      const responseText = response.text ? response.text.trim() : "";
-      const cleanCode = responseText.replace(/[^a-zA-Z0-9]/g, "").trim();
-      if (cleanCode.length >= 2 && cleanCode.length <= 10) {
-        console.log(`[CaptchaSolver:AI] \u0110\xE3 tr\xEDch xu\u1EA5t Captcha b\u1EB1ng AI: "${cleanCode}" (${Date.now() - startTime}ms)`);
-        return {
-          code: cleanCode,
-          confidence: 99,
-          engine: "gemini",
-          processingTimeMs: Date.now() - startTime
-        };
-      }
-    } catch (aiErr) {
-      console.warn("[CaptchaSolver:AI] AI gi\u1EA3i Captcha l\u1ED7i ho\u1EB7c timeout, chuy\u1EC3n sang Tesseract/Fallback:", aiErr.message);
-    }
-    return null;
-  }
-  /**
-   * Khởi tạo hoặc lấy worker Tesseract.js dạng Singleton để tối ưu hiệu năng
-   */
-  static async getWorker(lang = "eng") {
-    if (this.workerInstance) {
-      return this.workerInstance;
-    }
-    if (this.initPromise) {
-      return this.initPromise;
-    }
-    this.isInitializing = true;
-    this.initPromise = (async () => {
-      try {
-        console.log("[CaptchaSolver] \u0110ang kh\u1EDFi t\u1EA1o Tesseract.js OCR Worker...");
-        const worker = await createWorker(lang, 1, {
-          errorHandler: (err) => {
-            if (process.env.DEBUG_OCR) {
-              console.warn("[CaptchaSolver] Worker error handled safely:", err);
+            inlineData: {
+              data: image.data,
+              mimeType: image.mimeType
             }
           },
-          logger: (m) => {
-            if (process.env.DEBUG_OCR) {
-              console.log(`[Tesseract Log] ${m.status}: ${(m.progress * 100).toFixed(0)}%`);
-            }
-          }
-        });
-        await worker.setParameters({
-          tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-          tessedit_pageseg_mode: "7"
-        });
-        this.workerInstance = worker;
-        this.isInitializing = false;
-        console.log("[CaptchaSolver] Kh\u1EDFi t\u1EA1o Tesseract.js Worker th\xE0nh c\xF4ng.");
-        return worker;
-      } catch (error) {
-        this.isInitializing = false;
-        this.initPromise = null;
-        console.error("[CaptchaSolver] L\u1ED7i kh\u1EDFi t\u1EA1o Tesseract Worker:", error);
-        throw error;
+          promptToUse
+        ],
+        config: {
+          temperature: 0,
+          maxOutputTokens: 8
+        }
+      });
+      const rawText = response.text || "";
+      const digits = rawText.replace(/\D/g, "");
+      if (digits.length === 4) {
+        return digits;
       }
-    })();
-    return this.initPromise;
+      const match = rawText.match(/\b\d{4}\b/);
+      if (match) {
+        return match[0];
+      }
+      if (digits.length > 4) {
+        return digits.slice(0, 4);
+      }
+      throw new Error(`Gemini (${modelName}) tr\u1EA3 v\u1EC1 m\xE3 Captcha kh\xF4ng h\u1EE3p l\u1EC7: "${rawText.trim()}"`);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[Gemini CAPTCHA] Model ${modelName} th\u1EA5t b\u1EA1i:`, error?.message || error);
+    }
   }
-  /**
-   * Kiểm tra xem Buffer có phải là ảnh Raster (PNG, JPG, GIF, BMP, TIFF, WebP) hợp lệ không
-   */
+  console.error("[Gemini CAPTCHA] T\u1EA5t c\u1EA3 c\xE1c model gi\u1EA3i Captcha th\u1EA5t b\u1EA1i:", lastError?.message || lastError);
+  throw lastError || new Error("Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha b\u1EB1ng Gemini.");
+}
+
+// src/services/invoice-engine/captcha/CaptchaSolver.ts
+var CaptchaSolver = class {
+  static async solveWithAI(imageInput, options) {
+    try {
+      const startTime = Date.now();
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
+      return {
+        code,
+        confidence: 99,
+        engine: "gemini",
+        processingTimeMs: Date.now() - startTime
+      };
+    } catch {
+      return null;
+    }
+  }
   static isValidImageBuffer(buf) {
     if (!buf || buf.length < 8) return false;
-    const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-    if (b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71) return true;
-    if (b[0] === 255 && b[1] === 216 && b[2] === 255) return true;
-    if (b[0] === 71 && b[1] === 73 && b[2] === 70) return true;
-    if (b[0] === 66 && b[1] === 77) return true;
-    if (b[0] === 82 && b[1] === 73 && b[2] === 70 && b[3] === 70) return true;
-    if (b[0] === 73 && b[1] === 73 || b[0] === 77 && b[1] === 77) return true;
-    return false;
+    const image = Buffer.from(buf);
+    return image[0] === 137 && image[1] === 80 && image[2] === 78 && image[3] === 71 || image[0] === 255 && image[1] === 216 && image[2] === 255 || image[0] === 71 && image[1] === 73 && image[2] === 70 || image[0] === 66 && image[1] === 77 || image[0] === 82 && image[1] === 73 && image[2] === 70 && image[3] === 70;
   }
-  /**
-   * Giải mã Captcha từ ảnh (Buffer, Base64 String, hoặc SVG)
-   * @param imageInput Buffer hoặc chuỗi Base64 / SVG
-   * @param options Cấu hình whitelist, timeout, v.v.
-   * @returns Chuỗi text kết quả đã được làm sạch
-   */
   static async solve(imageInput, options) {
     const result = await this.solveWithDetails(imageInput, options);
     return result.code;
   }
-  /**
-   * Giải mã Captcha kèm chi tiết (độ tin cậy, thời gian xử lý, engine)
-   */
   static async solveWithDetails(imageInput, options) {
     const startTime = Date.now();
-    const timeoutMs = options?.timeoutMs || 1e4;
     if (!imageInput) {
       throw new Error("[CaptchaSolver] D\u1EEF li\u1EC7u \u1EA3nh Captcha r\u1ED7ng.");
     }
-    const asString = typeof imageInput === "string" ? imageInput : Buffer.isBuffer(imageInput) ? imageInput.toString("utf-8", 0, 100) : "";
-    if (asString.includes("<svg") || asString.startsWith("data:image/svg+xml")) {
-      const fullSvgStr = typeof imageInput === "string" ? imageInput : imageInput.toString("utf-8");
-      const svgText = this.tryExtractTextFromSvg(fullSvgStr);
-      if (svgText) {
-        return {
-          code: svgText,
-          confidence: 100,
-          engine: "regex",
-          processingTimeMs: Date.now() - startTime
-        };
-      }
-    }
-    const aiResult = await this.solveWithAI(imageInput, options);
-    if (aiResult && aiResult.code) {
-      return aiResult;
-    }
-    const imagePayload = this.normalizeImagePayload(imageInput);
-    if (Buffer.isBuffer(imagePayload)) {
-      const isRaster = this.isValidImageBuffer(imagePayload);
-      if (!isRaster) {
-        const textPreview = imagePayload.toString("utf-8", 0, 80).toLowerCase();
-        if (textPreview.includes("<html") || textPreview.includes("<!doctype")) {
-          throw new Error("[CaptchaSolver] Server tr\u1EA3 v\u1EC1 trang HTML thay v\xEC \u1EA3nh Captcha (404/Login required).");
-        }
-        throw new Error("[CaptchaSolver] \u0110\u1ECBnh d\u1EA1ng \u1EA3nh kh\xF4ng \u0111\u01B0\u1EE3c h\u1ED7 tr\u1EE3 ho\u1EB7c kh\xF4ng ph\u1EA3i \u1EA3nh h\u1EE3p l\u1EC7.");
-      }
-    }
     try {
-      const worker = await this.getWorker(options?.lang || "eng");
-      if (options?.whitelist) {
-        await worker.setParameters({
-          tessedit_char_whitelist: options.whitelist
-        });
-      }
-      const ocrPromise = worker.recognize(imagePayload);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error(`[CaptchaSolver] Qu\xE1 th\u1EDDi gian OCR (${timeoutMs}ms)`)), timeoutMs);
-      });
-      const { data } = await Promise.race([ocrPromise, timeoutPromise]);
-      const rawText = data.text || "";
-      const cleanCode = rawText.replace(/[^a-zA-Z0-9]/g, "").trim();
-      console.log(`[CaptchaSolver] \u0110\xE3 gi\u1EA3i Captcha: "${cleanCode}" (Confidence: ${data.confidence?.toFixed(1)}%, Time: ${Date.now() - startTime}ms)`);
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
       return {
-        code: cleanCode,
-        confidence: data.confidence,
-        engine: "tesseract",
+        code,
+        confidence: 99,
+        engine: "gemini",
         processingTimeMs: Date.now() - startTime
       };
     } catch (error) {
-      console.warn("[CaptchaSolver] Tesseract OCR th\u1EA5t b\u1EA1i ho\u1EB7c timeout:", error.message);
-      await this.resetWorker();
-      throw new Error(`Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha t\u1EF1 \u0111\u1ED9ng b\u1EB1ng OCR: ${error.message}`);
+      throw new Error(`Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha b\u1EB1ng Gemini: ${error?.message || error}`);
     }
   }
-  /**
-   * Trích xuất văn bản trực tiếp từ thẻ SVG nếu có
-   */
-  static tryExtractTextFromSvg(svgString) {
-    try {
-      let rawSvg = svgString;
-      if (rawSvg.startsWith("data:image/svg+xml;base64,")) {
-        rawSvg = Buffer.from(rawSvg.replace("data:image/svg+xml;base64,", ""), "base64").toString("utf-8");
-      } else if (rawSvg.startsWith("data:image/svg+xml;utf8,")) {
-        rawSvg = decodeURIComponent(rawSvg.replace("data:image/svg+xml;utf8,", ""));
-      }
-      const textTagMatches = rawSvg.match(/<text[^>]*>([\s\S]*?)<\/text>/gi);
-      if (textTagMatches && textTagMatches.length > 0) {
-        const textContent = textTagMatches.map((m) => m.replace(/<[^>]+>/g, "").trim()).join("");
-        const clean = textContent.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-        if (clean.length >= 2 && clean.length <= 10) {
-          return clean;
-        }
-      }
-    } catch {
-    }
-    return null;
-  }
-  /**
-   * Chuẩn hóa đầu vào ảnh về dạng Buffer hoặc String Data URI
-   */
-  static normalizeImagePayload(input) {
-    if (Buffer.isBuffer(input)) {
-      return input;
-    }
-    if (input instanceof Uint8Array) {
-      return Buffer.from(input);
-    }
-    if (typeof input === "string") {
-      const trimmed = input.trim();
-      if (trimmed.startsWith("data:image/")) {
-        const base64Index = trimmed.indexOf(";base64,");
-        if (base64Index !== -1) {
-          const rawBase64 = trimmed.substring(base64Index + 8);
-          return Buffer.from(rawBase64, "base64");
-        }
-      }
-      if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length > 50) {
-        try {
-          return Buffer.from(trimmed, "base64");
-        } catch {
-        }
-      }
-      return trimmed;
-    }
-    throw new Error("[CaptchaSolver] \u0110\u1ECBnh d\u1EA1ng \u0111\u1EA7u v\xE0o kh\xF4ng h\u1EE3p l\u1EC7");
-  }
-  /**
-   * Đặt lại worker khi xảy ra lỗi nghiêm trọng
-   */
   static async resetWorker() {
-    if (this.workerInstance) {
-      try {
-        await this.workerInstance.terminate();
-      } catch {
-      }
-      this.workerInstance = null;
-    }
-    this.initPromise = null;
-    this.isInitializing = false;
   }
-  /**
-   * Giải phóng worker khi ứng dụng tắt
-   */
   static async terminate() {
-    await this.resetWorker();
-    console.log("[CaptchaSolver] \u0110\xE3 gi\u1EA3i ph\xF3ng OCR Worker.");
   }
 };
 
@@ -7806,12 +8845,16 @@ var BaseInvoiceProviderDriver = class {
    * Nhiều nhà cung cấp HĐĐT (MISA, Viettel, 4Si, VNPT) để Mã tra cứu trong <TTin><TTruong>...</TTruong><DLieu>...</DLieu></TTin>
    */
   extractCustomField(xml, fieldKeywords) {
-    const ttinBlocks = this.extractXmlBlocks(xml, "TTin");
-    for (const block of ttinBlocks) {
-      const truong = this.extractXmlTag(block, "TTruong").toLowerCase();
-      for (const kw of fieldKeywords) {
-        if (truong.includes(kw.toLowerCase())) {
-          return this.extractXmlTag(block, "DLieu");
+    const blocks = [...this.extractXmlBlocks(xml, "TTin"), ...this.extractXmlBlocks(xml, "TTKhac")];
+    const strip = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]/g, "");
+    const wanted = fieldKeywords.map(strip);
+    for (const block of blocks) {
+      const truong = strip(this.extractXmlTag(block, "TTruong") || this.extractXmlTag(block, "TenTruong") || this.extractXmlTag(block, "Name"));
+      if (!truong) continue;
+      for (const kw of wanted) {
+        if (truong.includes(kw) || kw.includes(truong)) {
+          const val = this.extractXmlTag(block, "DLieu") || this.extractXmlTag(block, "Data") || this.extractXmlTag(block, "Value");
+          if (val) return val;
         }
       }
     }
@@ -8036,24 +9079,193 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
-// src/services/invoice-engine/drivers/ViettelDriver.ts
+// src/services/viettelInvoiceService.ts
 import axios2 from "axios";
+var COMMON_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Origin": "https://vinvoice.viettel.vn",
+  "Referer": "https://vinvoice.viettel.vn/utilities/invoice-search",
+  "Accept-Language": "vi,en-US;q=0.9,en;q=0.8"
+};
+async function downloadOriginalViettelPdf(params) {
+  const supplierTaxCode = (params.supplierTaxCode || "").trim();
+  const reservationCode = (params.reservationCode || "").trim();
+  if (!supplierTaxCode) {
+    throw new Error("M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (supplierTaxCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng khi tra c\u1EE9u h\xF3a \u0111\u01A1n Viettel.");
+  }
+  if (!reservationCode) {
+    throw new Error("M\xE3 b\xED m\u1EADt (reservationCode / M\xE3 s\u1ED1 b\xED m\u1EADt) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng khi tra c\u1EE9u h\xF3a \u0111\u01A1n Viettel.");
+  }
+  const cleanShd = (params.invoiceNo || "0000000").padStart(7, "0");
+  const cleanKhhdon = (params.invoiceSeries || "").replace(/[^a-zA-Z0-9]/g, "");
+  const defaultFilename = `HoaDon_Viettel_${supplierTaxCode}_${cleanKhhdon ? cleanKhhdon + "_" : ""}${cleanShd}_${reservationCode}.pdf`;
+  console.log(`[Viettel] B\u1EAFt \u0111\u1EA7u t\u1EA3i PDF g\u1ED1c: MST=${supplierTaxCode}, M\xE3 b\xED m\u1EADt=${reservationCode}...`);
+  const endpoints = [
+    // 1. Endpoint chính thức hiện tại (Angular portal utility)
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoicequery/sync/utility/downloadPDF?taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "POST",
+      data: {
+        supplierTaxCode,
+        reservationCode
+      }
+    },
+    // 2. Endpoint phụ sinh PDF trực tiếp bằng GET
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoicequery/sync/utility/generatePDF?reservationCode=${encodeURIComponent(reservationCode)}&supplierTaxCode=${encodeURIComponent(supplierTaxCode)}&taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "GET",
+      data: void 0
+    },
+    // 3. Endpoint phiên bản V1 không cần xác thực
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoiceadminapplication/no-auth/invoice-v1/downloadPDF?taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "POST",
+      data: {
+        supplierTaxCode,
+        reservationCode
+      }
+    },
+    // 4. Endpoint phiên bản V1 GET
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoiceadminapplication/no-auth/invoice-v1/generatePDF?reservationCode=${encodeURIComponent(reservationCode)}&supplierTaxCode=${encodeURIComponent(supplierTaxCode)}&taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "GET",
+      data: void 0
+    }
+  ];
+  let lastError = "";
+  for (let i = 0; i < endpoints.length; i++) {
+    const ep = endpoints[i];
+    try {
+      console.log(`[Viettel] Th\u1EED endpoint ${i + 1}/${endpoints.length}: ${ep.method} ${ep.url}`);
+      const response = await axios2({
+        url: ep.url,
+        method: ep.method,
+        data: ep.data,
+        headers: {
+          ...COMMON_HEADERS,
+          ...ep.method === "POST" ? { "Content-Type": "application/json" } : {}
+        },
+        responseType: "arraybuffer",
+        timeout: 25e3,
+        validateStatus: (status) => status >= 200 && status < 400
+      });
+      if (response.data && response.data.byteLength > 100) {
+        const buffer = Buffer.from(response.data);
+        const headerSlice = buffer.toString("utf-8", 0, 10);
+        if (headerSlice.startsWith("%PDF") || buffer.includes(Buffer.from("%PDF"))) {
+          console.log(`[Viettel] T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c (${(buffer.length / 1024).toFixed(1)} KB) t\u1EEB endpoint ${i + 1}`);
+          return {
+            success: true,
+            pdfBuffer: buffer,
+            pdfBase64: buffer.toString("base64"),
+            filename: defaultFilename,
+            contentType: "application/pdf",
+            sourceUrl: ep.url
+          };
+        } else {
+          const textError = buffer.toString("utf-8");
+          console.warn(`[Viettel] Endpoint ${i + 1} tr\u1EA3 v\u1EC1 text/JSON thay v\xEC PDF:`, textError.substring(0, 200));
+          try {
+            const parsed = JSON.parse(textError);
+            lastError = parsed.message || parsed.error || parsed.error_description || textError;
+          } catch {
+            lastError = textError;
+          }
+        }
+      } else {
+        lastError = `Endpoint ${i + 1} tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u r\u1ED7ng (${response.data ? response.data.byteLength : 0} bytes)`;
+      }
+    } catch (err) {
+      const errMsg = err.response?.data ? Buffer.from(err.response.data).toString("utf-8") : err.message;
+      console.warn(`[Viettel] L\u1ED7i khi g\u1ECDi endpoint ${i + 1}:`, errMsg);
+      lastError = errMsg;
+    }
+  }
+  throw new Error(
+    `Kh\xF4ng th\u1EC3 t\u1EA3i h\xF3a \u0111\u01A1n PDF g\u1ED1c t\u1EEB h\u1EC7 th\u1ED1ng Viettel S-Invoice/vInvoice: ${lastError || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n ho\u1EB7c m\xE3 b\xED m\u1EADt/MST kh\xF4ng ch\xEDnh x\xE1c."}`
+  );
+}
+async function downloadOriginalViettelZip(params) {
+  const supplierTaxCode = (params.supplierTaxCode || "").trim();
+  const reservationCode = (params.reservationCode || "").trim();
+  if (!supplierTaxCode || !reservationCode) {
+    throw new Error("C\u1EA7n c\xF3 M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n v\xE0 M\xE3 b\xED m\u1EADt \u0111\u1EC3 t\u1EA3i file ZIP t\u1EEB Viettel.");
+  }
+  const cleanShd = (params.invoiceNo || "0000000").padStart(7, "0");
+  const defaultFilename = `HoaDon_Viettel_${supplierTaxCode}_${cleanShd}_${reservationCode}.zip`;
+  const endpoints = [
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoicequery/sync/utility/downloadFileZip?taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "POST",
+      data: {
+        supplierTaxCode,
+        reservationCode
+      }
+    },
+    {
+      url: `https://vinvoice.viettel.vn/api/services/einvoiceadminapplication/no-auth/invoice-v1/downloadFileZip?taxCode=${encodeURIComponent(supplierTaxCode)}`,
+      method: "POST",
+      data: {
+        supplierTaxCode,
+        reservationCode
+      }
+    }
+  ];
+  let lastError = "";
+  for (let i = 0; i < endpoints.length; i++) {
+    const ep = endpoints[i];
+    try {
+      const response = await axios2({
+        url: ep.url,
+        method: ep.method,
+        data: ep.data,
+        headers: {
+          ...COMMON_HEADERS,
+          "Content-Type": "application/json"
+        },
+        responseType: "arraybuffer",
+        timeout: 25e3,
+        validateStatus: (status) => status >= 200 && status < 400
+      });
+      if (response.data && response.data.byteLength > 100) {
+        const buffer = Buffer.from(response.data);
+        if (buffer[0] === 80 && buffer[1] === 75) {
+          console.log(`[Viettel] T\u1EA3i th\xE0nh c\xF4ng file ZIP g\u1ED1c (${(buffer.length / 1024).toFixed(1)} KB)`);
+          return {
+            success: true,
+            zipBuffer: buffer,
+            zipBase64: buffer.toString("base64"),
+            filename: defaultFilename,
+            contentType: "application/zip",
+            sourceUrl: ep.url
+          };
+        }
+      }
+    } catch (err) {
+      lastError = err.message;
+    }
+  }
+  throw new Error(`Kh\xF4ng th\u1EC3 t\u1EA3i t\u1EC7p ZIP t\u1EEB Viettel: ${lastError || "L\u1ED7i k\u1EBFt n\u1ED1i"}`);
+}
+
+// src/services/invoice-engine/drivers/ViettelDriver.ts
 var ViettelDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
-    this.name = "Viettel S-Invoice Driver";
+    this.name = "Viettel vInvoice / S-Invoice Driver";
     this.providerCode = "VIETTEL";
     this.metadata = {
-      name: "Viettel S-Invoice Driver",
+      name: "Viettel vInvoice / S-Invoice Driver",
       providerCode: "VIETTEL",
-      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng Viettel S-Invoice qua S\u1ED1 h\xF3a \u0111\u01A1n, M\xE3 s\u1ED1 b\xED m\u1EADt v\xE0 OCR Captcha",
-      sampleUrl: "https://www.sinvoice.vn/p/tra-cuu-hoa-don.html",
-      supportsCaptcha: true,
-      requiredFields: ["sellerTaxCode", "invoiceNo", "secretCode"]
+      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng Viettel vInvoice / S-Invoice qua M\xE3 s\u1ED1 thu\u1EBF v\xE0 M\xE3 s\u1ED1 b\xED m\u1EADt (ReservationCode)",
+      sampleUrl: "https://vinvoice.viettel.vn/utilities/invoice-search",
+      supportsCaptcha: false,
+      requiredFields: ["sellerTaxCode", "secretCode"]
     };
   }
   /**
-   * Nhận diện hóa đơn Viettel S-Invoice theo đúng thứ tự ưu tiên nghiêm ngặt
+   * Nhận diện hóa đơn Viettel S-Invoice / vInvoice
    */
   canHandle(xmlData) {
     if (typeof xmlData !== "string") {
@@ -8068,7 +9280,7 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
     const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst");
     const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten");
     const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
-    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C26TGT";
     const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
     const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
     const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
@@ -8078,16 +9290,41 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
       "M\xE3 b\xED m\u1EADt",
       "ReservationCode",
       "SecretCode",
-      "MaSoBiMat"
+      "MaSoBiMat",
+      "M\xE3 b\u1EA3o m\u1EADt",
+      "MaBaoMat"
     ]);
     if (!secretCode) {
-      secretCode = this.extractXmlTag(xmlData, "ReservationCode") || this.extractXmlTag(xmlData, "SecretCode");
+      secretCode = this.extractXmlTag(xmlData, "ReservationCode") || this.extractXmlTag(xmlData, "SecretCode") || this.extractXmlTag(xmlData, "MaBiMat") || this.extractXmlTag(xmlData, "MaSoBiMat");
+    }
+    if (!secretCode) {
+      const ttinBlocks = this.extractXmlBlocks(xmlData, "TTin");
+      for (const block of ttinBlocks) {
+        const truong = (this.extractXmlTag(block, "TTruong") || this.extractXmlTag(block, "TenTruong")).toLowerCase();
+        if (truong.includes("b\xED m\u1EADt") || truong.includes("bi mat") || truong.includes("secret") || truong.includes("reservation")) {
+          const val = this.extractXmlTag(block, "DLieu") || this.extractXmlTag(block, "Data");
+          if (val) {
+            secretCode = val.trim();
+            break;
+          }
+        }
+      }
+    }
+    if (!secretCode) {
+      const match = xmlData.match(/\b([A-Z0-9]{12,20})\b/);
+      if (match && match[1] && !match[1].startsWith("0") && /[A-Z]/.test(match[1]) && /\d/.test(match[1])) {
+        const index = xmlData.indexOf(match[1]);
+        const snippet = xmlData.substring(Math.max(0, index - 80), Math.min(xmlData.length, index + 80)).toLowerCase();
+        if (snippet.includes("b\xED m\u1EADt") || snippet.includes("bi mat") || snippet.includes("secret") || snippet.includes("reservation")) {
+          secretCode = match[1];
+        }
+      }
     }
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
     return {
       provider: this.providerCode,
-      providerName: "Viettel S-Invoice",
+      providerName: "Viettel vInvoice / S-Invoice",
       sellerTaxCode,
       sellerName,
       invoiceNo,
@@ -8095,7 +9332,7 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
       templateCode,
       invoiceDate,
       secretCode: secretCode || void 0,
-      lookupUrl: "https://sinvoice.viettel.vn/tra-cuu-hoa-don",
+      lookupUrl: "https://vinvoice.viettel.vn/utilities/invoice-search",
       cqtCode: cqtCode || void 0,
       totalAmount,
       totalTaxAmount,
@@ -8107,131 +9344,383 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
     };
   }
   /**
-   * Tải PDF Hóa đơn gốc Viettel với quy trình giải Captcha tự động bằng OCR
+   * Tải PDF Hóa đơn gốc Viettel trực tiếp từ máy chủ vinvoice.viettel.vn
    */
   async fetchPdf(info, options) {
     const logs = [];
-    this.createLog(`Kh\u1EDFi ch\u1EA1y Viettel S-Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
-    if (!info.secretCode) {
-      this.createLog("C\u1EA3nh b\xE1o: Kh\xF4ng t\xECm th\u1EA5y M\xE3 b\xED m\u1EADt (SecretCode) trong XML. Viettel Sinvoice y\xEAu c\u1EA7u m\xE3 b\xED m\u1EADt.", logs);
-    } else {
-      this.createLog(`M\xE3 b\xED m\u1EADt Viettel ph\xE1t hi\u1EC7n: "${info.secretCode}"`, logs);
+    this.createLog(`Kh\u1EDFi ch\u1EA1y Viettel vInvoice Driver cho H\u0110 ${info.invoiceSeries || ""} - ${info.invoiceNo || ""}`, logs);
+    const supplierTaxCode = (info.sellerTaxCode || "").trim();
+    const reservationCode = (info.secretCode || "").trim();
+    if (!supplierTaxCode) {
+      this.createLog("L\u1ED6I: Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode).", logs);
+      throw new Error("[ViettelDriver] Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) \u0111\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n Viettel.");
     }
-    const timeoutMs = options?.timeoutMs || 15e3;
-    let solvedCaptchaCode = "";
-    let cookieHeader = "";
-    const client = axios2.create({
-      baseURL: "https://sinvoice.viettel.vn",
-      timeout: timeoutMs,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://sinvoice.viettel.vn/tra-cuu-hoa-don",
-        "Origin": "https://sinvoice.viettel.vn",
-        ...options?.customHeaders || {}
-      }
-    });
+    if (!reservationCode) {
+      this.createLog("L\u1ED6I: Kh\xF4ng t\xECm th\u1EA5y M\xE3 s\u1ED1 b\xED m\u1EADt (reservationCode) trong XML.", logs);
+      throw new Error("[ViettelDriver] Kh\xF4ng t\xECm th\u1EA5y M\xE3 s\u1ED1 b\xED m\u1EADt (M\xE3 b\xED m\u1EADt / ReservationCode) trong XML h\xF3a \u0111\u01A1n.");
+    }
+    this.createLog(`Th\xF4ng tin tra c\u1EE9u: MST b\xEAn b\xE1n=${supplierTaxCode}, M\xE3 b\xED m\u1EADt=${reservationCode}`, logs);
+    this.createLog("\u0110ang k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u1ED5ng d\u1ECBch v\u1EE5 Viettel vInvoice (vinvoice.viettel.vn)...", logs);
     try {
-      this.createLog("\u0110ang k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u1ED5ng Viettel \u0111\u1EC3 l\u1EA5y \u1EA3nh Captcha...", logs);
-      const captchaEndpoints = [
-        "/sinvoice-web/captcha",
-        "/sinvoice-web/api/captcha",
-        "/captcha"
-      ];
-      let captchaBuffer = null;
-      for (const ep of captchaEndpoints) {
-        try {
-          const capRes = await client.get(ep, {
-            responseType: "arraybuffer",
-            validateStatus: (s) => s === 200
-          });
-          const contentType = String(capRes.headers["content-type"] || "");
-          if (capRes.data && capRes.data.byteLength > 100) {
-            const rawBuf = Buffer.from(capRes.data);
-            if (contentType.includes("image") || CaptchaSolver.isValidImageBuffer(rawBuf)) {
-              captchaBuffer = rawBuf;
-              const setCookie = capRes.headers["set-cookie"];
-              if (setCookie && Array.isArray(setCookie)) {
-                cookieHeader = setCookie.map((c) => c.split(";")[0]).join("; ");
-              }
-              this.createLog(`\u0110\xE3 t\u1EA3i \u1EA3nh Captcha (${(captchaBuffer.length / 1024).toFixed(1)} KB), Session Cookie \u0111\xE3 \u0111\u01B0\u1EE3c thi\u1EBFt l\u1EADp`, logs);
-              break;
-            } else {
-              this.createLog(`C\u1ED5ng Viettel tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u kh\xF4ng ph\u1EA3i \u1EA3nh (${contentType || "HTML/Text"}), b\u1ECF qua endpoint ${ep}`, logs);
-            }
-          }
-        } catch {
-        }
-      }
-      if (captchaBuffer) {
-        this.createLog("\u0110ang chuy\u1EC3n \u1EA3nh Captcha sang module OCR Tesseract \u0111\u1EC3 gi\u1EA3i m\xE3...", logs);
-        try {
-          const ocrResult = await CaptchaSolver.solveWithDetails(captchaBuffer, {
-            whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-            timeoutMs: 8e3
-          });
-          solvedCaptchaCode = ocrResult.code;
-          this.createLog(`Gi\u1EA3i Captcha Viettel th\xE0nh c\xF4ng: "${solvedCaptchaCode}" (\u0110\u1ED9 tin c\u1EADy: ${ocrResult.confidence?.toFixed(0)}%)`, logs);
-        } catch (ocrErr) {
-          this.createLog(`L\u1ED7i khi gi\u1EA3i Captcha: ${ocrErr.message}`, logs);
-        }
-      }
-      const queryPayload = {
-        supplierTaxCode: (info.sellerTaxCode || "").trim(),
-        invoiceNo: (info.invoiceNo || "").trim(),
-        reservationCode: (info.secretCode || "").trim(),
-        secretCode: (info.secretCode || "").trim(),
-        templateCode: info.templateCode || "1",
-        series: info.invoiceSeries || "",
-        captcha: solvedCaptchaCode
-      };
-      this.createLog(`G\u1EEDi y\xEAu c\u1EA7u tra c\u1EE9u Viettel v\u1EDBi MST: ${queryPayload.supplierTaxCode}, S\u1ED1 H\u0110: ${queryPayload.invoiceNo}...`, logs);
-      const downloadEndpoints = [
-        "/sinvoice-web/public/invoice/view-invoice-pdf",
-        "/sinvoice-web/public/invoice/get-invoice-pdf",
-        "/sinvoice-web/api/invoice/download-pdf"
-      ];
-      for (const dep of downloadEndpoints) {
-        try {
-          const resp = await client.post(dep, queryPayload, {
-            responseType: "arraybuffer",
-            headers: {
-              ...cookieHeader ? { "Cookie": cookieHeader } : {}
-            }
-          });
-          if (resp.status === 200 && resp.data) {
-            const buf = Buffer.from(resp.data);
-            if (buf.length > 50 && buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-              this.createLog(`T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB Viettel S-Invoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString("base64"),
-                contentType: "application/pdf",
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: `https://sinvoice.viettel.vn${dep}`,
-                captchaSolved: solvedCaptchaCode,
-                executionLogs: logs
-              };
-            }
-          }
-        } catch (postErr) {
-          this.createLog(`Endpoint ${dep} ph\u1EA3n h\u1ED3i c\u1EA3nh b\xE1o: ${postErr.message}`, logs);
-        }
+      const result = await downloadOriginalViettelPdf({
+        supplierTaxCode,
+        reservationCode,
+        invoiceNo: info.invoiceNo,
+        invoiceSeries: info.invoiceSeries
+      });
+      if (result.success && result.pdfBuffer) {
+        this.createLog(`T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB Viettel (${(result.pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: this.name,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64 || result.pdfBuffer.toString("base64"),
+          contentType: "application/pdf",
+          filename: this.buildPdfFilename(info),
+          isFallback: false,
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
       }
     } catch (err) {
-      this.createLog(`L\u1ED7i x\u1EED l\xFD Viettel S-Invoice: ${err.message}`, logs);
+      this.createLog(`L\u1ED7i khi t\u1EA3i PDF t\u1EEB Viettel: ${err.message}`, logs);
+      throw new Error(`[ViettelDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB Viettel vInvoice: ${err.message}`);
     }
-    throw new Error(`[ViettelDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB Viettel Sinvoice. Vui l\xF2ng ki\u1EC3m tra M\xE3 b\xED m\u1EADt v\xE0 k\u1EBFt n\u1ED1i.`);
+    throw new Error(`[ViettelDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB Viettel vInvoice.`);
   }
 };
 
 // src/services/invoice-engine/drivers/FourSiDriver.ts
-import axios3 from "axios";
+import axios4 from "axios";
 import * as cheerio from "cheerio";
+
+// src/services/fourSiInvoiceService.ts
+import axios3 from "axios";
+import https from "https";
+
+// src/utils/xmlGenerator.ts
+function generateGDTInvoiceXml(invoice) {
+  const tdlap = invoice.tdlap || (/* @__PURE__ */ new Date()).toISOString();
+  const formattedDate = tdlap.split("T")[0];
+  const formattedTime = tdlap.includes("T") ? tdlap.split("T")[1].substring(0, 8) : "09:00:00";
+  const signingTimeIso = `${formattedDate}T${formattedTime}`;
+  const cleanId = String(invoice.id || `GDT_${invoice.khhdon}_${invoice.shdon}`).replace(/[^a-zA-Z0-9_]/g, "_");
+  const numericShd = parseInt(String(invoice.shdon).replace(/\D/g, ""), 10) || 1;
+  const taxGroupMap = /* @__PURE__ */ new Map();
+  let items = ensureInvoiceItems(invoice);
+  if (!items || items.length === 0) {
+    const totalBeforeTax = Number(invoice.tgtcthue ?? invoice.tgtttbso ?? 0);
+    const taxAmount = Number(invoice.tgtthue ?? 0);
+    const taxRate = invoice.tgtthue && invoice.tgtcthue && Number(invoice.tgtcthue) > 0 ? `${Math.round(taxAmount / totalBeforeTax * 100)}%` : "10%";
+    const taxRatePercent = invoice.tgtthue && invoice.tgtcthue && Number(invoice.tgtcthue) > 0 ? Math.round(taxAmount / totalBeforeTax * 100) : 10;
+    const totalAmount = totalBeforeTax + taxAmount;
+    items = [{
+      lineNo: 1,
+      itemName: `H\xE0ng h\xF3a, d\u1ECBch v\u1EE5 theo h\xF3a \u0111\u01A1n ${invoice.khhdon || ""}-${invoice.shdon || ""}`,
+      unit: "G\xF3i",
+      quantity: 1,
+      unitPrice: totalBeforeTax,
+      amount: totalBeforeTax,
+      taxRate,
+      taxRatePercent,
+      taxAmount,
+      totalAmount
+    }];
+  }
+  items.forEach((item) => {
+    const rate = item.taxRate || (item.taxRatePercent ? `${item.taxRatePercent}%` : "10%");
+    const existing = taxGroupMap.get(rate) || { thtien: 0, tthue: 0 };
+    existing.thtien += Number(item.amount || 0);
+    existing.tthue += Number(item.taxAmount || Math.round((item.amount || 0) * (item.taxRatePercent || 10) / 100));
+    taxGroupMap.set(rate, existing);
+  });
+  if (taxGroupMap.size === 0) {
+    taxGroupMap.set("10%", {
+      thtien: Number(invoice.tgtcthue ?? invoice.tgtttbso ?? 0),
+      tthue: Number(invoice.tgtthue ?? 0)
+    });
+  }
+  const itemsXml = items.map((item, idx) => {
+    const lineNo = item.lineNo || idx + 1;
+    const rate = item.taxRate || (item.taxRatePercent ? `${item.taxRatePercent}%` : "10%");
+    return `      <HHDVu>
+        <TChat>1</TChat>
+        <STT>${lineNo}</STT>
+        <MHHDVu>HH${String(lineNo).padStart(2, "0")}</MHHDVu>
+        <THHDVu>${escapeXml(item.itemName)}</THHDVu>
+        <DVTinh>${escapeXml(item.unit || "C\xE1i")}</DVTinh>
+        <SLuong>${Number(item.quantity || 1)}</SLuong>
+        <DGia>${Number(item.unitPrice || 0)}</DGia>
+        <TLCKhau>0</TLCKhau>
+        <STCKhau>0</STCKhau>
+        <ThTien>${Number(item.amount || 0)}</ThTien>
+        <TSuat>${rate}</TSuat>
+      </HHDVu>`;
+  }).join("\n");
+  const taxSummaryXml = Array.from(taxGroupMap.entries()).map(([rate, vals]) => `        <LTSuat>
+          <TSuat>${rate}</TSuat>
+          <ThTien>${vals.thtien}</ThTien>
+          <TThue>${vals.tthue}</TThue>
+        </LTSuat>`).join("\n");
+  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
+  const maCqt = invoice.mhdon || "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<HDon xmlns="http://hoadondientu.gdt.gov.vn/2021/tvan" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <DLHDon Id="HD_${cleanId}">
+    <TTChung>
+      <PBan>2.0.0</PBan>
+      <THDon>${invoice.khmshdon === "2" ? "H\xF3a \u0111\u01A1n b\xE1n h\xE0ng" : "H\xF3a \u0111\u01A1n gi\xE1 tr\u1ECB gia t\u0103ng"}</THDon>
+      <KHMSHDon>${invoice.khmshdon || (invoice.khhdon?.startsWith("2") ? "2" : "1")}</KHMSHDon>
+      <KHHDon>${invoice.khhdon || "C26TAA"}</KHHDon>
+      <SHDon>${numericShd}</SHDon>
+      <NLap>${formattedDate}</NLap>
+      <SBKe></SBKe>
+      <NBKe></NBKe>
+      <DVTTe>${invoice.dvtte || "VND"}</DVTTe>
+      <TGia>${invoice.tygia || 1}</TGia>
+      <HTTToan>${invoice.htttoan || "TM/CK"}</HTTToan>
+      ${invoice.lookupCode ? `<MTCuu>${escapeXml(invoice.lookupCode)}</MTCuu>` : ""}
+      ${(() => {
+    let msttcgp = invoice.msttcgp;
+    if (!msttcgp) {
+      if (invoice.provider === "MISA") msttcgp = "0101243150";
+      else if (invoice.provider === "VIETTEL" || invoice.nbmst === "0402307168" || invoice.nbten && /SUNTALENT/i.test(invoice.nbten)) msttcgp = "0100109106";
+      else if (invoice.provider === "VNPT") msttcgp = "0100684378";
+      else if (invoice.provider === "4SI") msttcgp = "0315744883";
+      else if (invoice.provider === "EASYINVOICE") msttcgp = "0105987432";
+      else if (invoice.provider === "BKAV") msttcgp = "0101360697";
+      else if (invoice.provider === "THAISON") msttcgp = "0101300842";
+      else if (invoice.provider === "CYBERBILL") msttcgp = "0107871301";
+    }
+    return msttcgp ? `<MSTTCGP>${msttcgp}</MSTTCGP>` : "";
+  })()}
+    </TTChung>
+    <NDHDon>
+      <NBan>
+        <Ten>${escapeXml(invoice.nbten || "C\xD4NG TY B\xC1N H\xC0NG")}</Ten>
+        <MST>${invoice.nbmst || "0100000000"}</MST>
+        <DChi>${escapeXml(invoice.nbdchi || "Vi\u1EC7t Nam")}</DChi>
+        <SDThoai>${invoice.nbsdt || ""}</SDThoai>
+        <DCTDTu>${invoice.nbemail || ""}</DCTDTu>
+        <STKNHang>${invoice.nbstk || ""}</STKNHang>
+        <TNHang>${escapeXml(invoice.nbnhang || "")}</TNHang>
+        <FAX></FAX>
+        <TNVBan></TNVBan>
+      </NBan>
+      <NMua>
+        <Ten>${escapeXml(invoice.nmten || "NG\u01AF\u1EDCI MUA H\xC0NG")}</Ten>
+        <MST>${invoice.nmmst || ""}</MST>
+        <DChi>${escapeXml(invoice.nmdchi || "")}</DChi>
+        <MKHang></MKHang>
+        <SDThoai>${invoice.nmsdt || ""}</SDThoai>
+        <DCTDTu>${invoice.nmemail || ""}</DCTDTu>
+        <HVTNMHang></HVTNMHang>
+        <STKNHang>${invoice.nmstk || ""}</STKNHang>
+        <TNHang>${escapeXml(invoice.nmnhang || "")}</TNHang>
+      </NMua>
+      <DSHHDVu>
+${itemsXml}
+      </DSHHDVu>
+      <TToan>
+        <THTTLTSuat>
+${taxSummaryXml}
+        </THTTLTSuat>
+        <TgTCThue>${invoice.tgtcthue ?? (invoice.tgtttbso || 0)}</TgTCThue>
+        <TgTThue>${invoice.tgtthue ?? 0}</TgTThue>
+        <TgTTTBSo>${invoice.tgtttbso ?? (invoice.tgtcthue || 0)}</TgTTTBSo>
+        <TgTTTBChu>${escapeXml(wordsAmount)}</TgTTTBChu>
+      </TToan>
+    </NDHDon>
+    <TTKhac>
+      <TTin>
+        <TTruong>MaCQT</TTruong>
+        <KDLieu>string</KDLieu>
+        <DLieu>${maCqt}</DLieu>
+      </TTin>
+      ${invoice.lookupCode ? `
+      <TTin>
+        <TTruong>MaTraCuu</TTruong>
+        <KDLieu>string</KDLieu>
+        <DLieu>${escapeXml(invoice.lookupCode)}</DLieu>
+      </TTin>` : ""}
+      ${invoice.lookupUrl ? `
+      <TTin>
+        <TTruong>Website</TTruong>
+        <KDLieu>string</KDLieu>
+        <DLieu>${escapeXml(invoice.lookupUrl)}</DLieu>
+      </TTin>` : ""}
+    </TTKhac>
+  </DLHDon>
+  <DSCKS>
+    <NBan>
+      <Signature xmlns="http://www.w3.org/2000/09/xmldsig#" Id="SellerSignature">
+        <SignedInfo>
+          <CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+          <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+          <Reference URI="#HD_${cleanId}">
+            <Transforms>
+              <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+            </Transforms>
+            <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+            <DigestValue>MEQCIG3D9f4k0f3jR4p4L4z9k0f3jR4p4L4z9k0f3jR4p4L4=</DigestValue>
+          </Reference>
+        </SignedInfo>
+        <SignatureValue>MEQCIG3D9f4k0f3jR4p4L4z9k0f3jR4p4L4z9k0f3jR4p4L4AiA9X2w1v0u8t7s6r5q4p3o2n1m0l9k8j7h6g5f4e3d2c1b0a==</SignatureValue>
+        <KeyInfo>
+          <X509Data>
+            <X509SubjectName>CN=${escapeXml(invoice.signerName || invoice.nbten)}, OID.0.9.2342.19200300.100.1.1=MST:${invoice.nbmst}, C=VN</X509SubjectName>
+            <X509Certificate>${invoice.certificate && !invoice.certificate.includes("...") ? invoice.certificate : "MIIBmTCCAQKgAwIBAgIUQW5kcm9pZFZpZXRuYW1URFMwDQYJKoZIhvcNAQELBQAwDTELMAkGA1UEAxMDTENTMB4XDTI0MDEwMTAwMDAwMFoXDTI3MDEwMTAwMDAwMFowDTELMAkGA1UEAxMDTENTMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC3jT+P/sVq1Rfx3Aup5E75G66hCq6D7r2E5Z6C7qYyZg3Q3o5J+4yM2n3K/9X+rA2d/8v4M2a3B1q0C5w+7g1x5B8="}</X509Certificate>
+            <X509IssuerName>C=VN, O=${escapeXml(
+    invoice.caProvider && invoice.caProvider !== "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT" ? invoice.caProvider : invoice.provider === "VIETTEL" || invoice.nbmst === "0402307168" || invoice.nbten && /SUNTALENT/i.test(invoice.nbten) ? "VIETTEL-CA" : invoice.provider === "VNPT" ? "VNPT-CA" : invoice.provider === "MISA" ? "MISA-CA" : "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT"
+  )}, CN=${escapeXml(
+    invoice.caProvider && invoice.caProvider !== "T\u1ED5ng c\u1EE5c Thu\u1EBF CQT" ? invoice.caProvider : invoice.provider === "VIETTEL" || invoice.nbmst === "0402307168" || invoice.nbten && /SUNTALENT/i.test(invoice.nbten) ? "VIETTEL" : invoice.provider === "VNPT" ? "VNPT" : invoice.provider === "MISA" ? "MISA" : "CQT Timestamping CA"
+  )}</X509IssuerName>
+          </X509Data>
+        </KeyInfo>
+        <Object>
+          <SigningTime>${signingTimeIso}</SigningTime>
+        </Object>
+      </Signature>
+    </NBan>
+  </DSCKS>
+</HDon>`;
+}
+function escapeXml(unsafe) {
+  if (!unsafe) return "";
+  return String(unsafe).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// src/services/fourSiInvoiceService.ts
+var FOUR_SI_LCS_READER_URL = "https://dochoadon.lcssoft.com.vn/";
+var httpsAgent = new https.Agent({
+  rejectUnauthorized: false,
+  // Máy chủ LCS Soft dochoadon hiện có chứng chỉ SSL quá hạn
+  keepAlive: true
+});
+var fourSiPdfCache = /* @__PURE__ */ new Map();
+function getFourSiCacheKey(xml, invoice) {
+  if (invoice?.id) return `id_${invoice.id}`;
+  if (invoice?.nbmst && invoice?.khhdon && invoice?.shdon) {
+    const cleanShd = String(invoice.shdon).replace(/\D/g, "").padStart(7, "0");
+    return `inv_${invoice.nbmst}_${invoice.khhdon}_${cleanShd}`;
+  }
+  return `xml_${xml.length}_${xml.slice(0, 80)}`;
+}
+async function renderFourSiPdfViaLcs(xmlInput, invoice) {
+  try {
+    let xml = (xmlInput || "").trim();
+    if (!xml && invoice) {
+      xml = generateGDTInvoiceXml(invoice);
+    }
+    if (!xml) {
+      throw new Error("D\u1EEF li\u1EC7u XML h\xF3a \u0111\u01A1n kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng.");
+    }
+    const khhdon = invoice?.khhdon || "4SI";
+    const shdon = invoice?.shdon ? String(invoice.shdon).padStart(7, "0") : "0000000";
+    const sellerMst = invoice?.nbmst || "LCS";
+    const exportFilename = `HD_4SI_${khhdon}_${shdon}_${sellerMst}.pdf`;
+    const cacheKey = getFourSiCacheKey(xml, invoice);
+    const cached = fourSiPdfCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 36e5) {
+      console.log(`[FourSiService] L\u1EA5y PDF 4Si t\u1EEB b\u1ED9 nh\u1EDB \u0111\u1EC7m (Cache HIT: ${cacheKey})...`);
+      return {
+        success: true,
+        pdfBuffer: cached.buffer,
+        pdfBase64: cached.base64,
+        filename: cached.filename || exportFilename,
+        contentType: "application/pdf",
+        sourceUrl: cached.sourceUrl || FOUR_SI_LCS_READER_URL,
+        portalUrl: FOUR_SI_LCS_READER_URL,
+        isDisplayOnly: true
+      };
+    }
+    let xmlForLcs = xml;
+    if (xmlForLcs.includes("...") || xmlForLcs.includes("MIIFuzCCA")) {
+      xmlForLcs = xmlForLcs.replace(/<DSCKS>[\s\S]*?<\/DSCKS>/gi, "");
+    }
+    const uploadFilename = `invoice_${sellerMst}_${khhdon}_${shdon}_${Date.now()}.xml`;
+    const form = new FormData();
+    const blob = new Blob([xmlForLcs], { type: "text/xml" });
+    form.append("file", blob, uploadFilename);
+    console.log(`[FourSiService] G\u1EEDi XML (${xmlForLcs.length} bytes) l\xEAn ${FOUR_SI_LCS_READER_URL}detect...`);
+    const detectResponse = await axios3.post("https://dochoadon.lcssoft.com.vn/detect", form, {
+      httpsAgent,
+      timeout: 25e3
+    });
+    const resData = detectResponse.data;
+    if (!resData || resData.status !== 0 || !resData.data) {
+      const errMsg = resData?.data?.errorCode || "M\xE1y ch\u1EE7 LCS Soft t\u1EEB ch\u1ED1i x\u1EED l\xFD XML.";
+      throw new Error(`C\u1ED5ng LCS Soft ph\u1EA3n h\u1ED3i: ${errMsg}`);
+    }
+    const filePdfName = resData.data.filePdfName || resData.data.fileName?.replace(/\.xml$/i, ".pdf") || uploadFilename.replace(/\.xml$/i, ".pdf");
+    if (!filePdfName) {
+      throw new Error("C\u1ED5ng LCS Soft kh\xF4ng t\u1EA1o \u0111\u01B0\u1EE3c t\u1EC7p PDF t\u1EEB XML n\xE0y.");
+    }
+    const downloadPdfUrl = `https://dochoadon.lcssoft.com.vn/download/pdf/${filePdfName}`;
+    console.log(`[FourSiService] T\u1EA3i t\u1EC7p PDF k\u1EBFt qu\u1EA3 t\u1EEB ${downloadPdfUrl}...`);
+    let pdfBuffer = null;
+    let lastErr = null;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      try {
+        if (attempt > 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        const pdfResponse = await axios3.get(downloadPdfUrl, {
+          httpsAgent,
+          responseType: "arraybuffer",
+          timeout: 25e3
+        });
+        const buf = Buffer.from(pdfResponse.data);
+        if (buf.length >= 100 && buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+          pdfBuffer = buf;
+          console.log(`[FourSiService] T\u1EA3i PDF 4Si th\xE0nh c\xF4ng \u1EDF l\u1EA7n th\u1EED ${attempt} (${buf.length} bytes)!`);
+          break;
+        }
+      } catch (e) {
+        lastErr = e;
+        console.log(`[FourSiService] L\u1EA7n th\u1EED ${attempt}/6 ch\u01B0a c\xF3 file (${e.response?.status || e.message}), ti\u1EBFp t\u1EE5c \u0111\u1EE3i...`);
+      }
+    }
+    if (!pdfBuffer) {
+      throw new Error(
+        lastErr?.message ? `Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c t\u1EC7p PDF t\u1EEB LCS Soft: ${lastErr.message}` : "T\u1EC7p t\u1EA3i v\u1EC1 t\u1EEB LCS Soft kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c b\u1ECB l\u1ED7i."
+      );
+    }
+    const pdfBase64 = pdfBuffer.toString("base64");
+    fourSiPdfCache.set(cacheKey, {
+      buffer: pdfBuffer,
+      base64: pdfBase64,
+      filename: exportFilename,
+      sourceUrl: downloadPdfUrl,
+      timestamp: Date.now()
+    });
+    return {
+      success: true,
+      pdfBuffer,
+      pdfBase64,
+      filename: exportFilename,
+      contentType: "application/pdf",
+      sourceUrl: downloadPdfUrl,
+      portalUrl: FOUR_SI_LCS_READER_URL,
+      filePdfName,
+      isDisplayOnly: true
+    };
+  } catch (err) {
+    console.error("[FourSiService] L\u1ED7i khi t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n 4Si qua LCS Soft:", err.message);
+    return {
+      success: false,
+      filename: `HD_4SI_${invoice?.khhdon || ""}_${invoice?.shdon || ""}.pdf`,
+      contentType: "application/pdf",
+      sourceUrl: FOUR_SI_LCS_READER_URL,
+      portalUrl: FOUR_SI_LCS_READER_URL,
+      error: err.message || "Kh\xF4ng th\u1EC3 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n 4Si qua LCS Soft"
+    };
+  }
+}
+
+// src/services/invoice-engine/drivers/FourSiDriver.ts
 var FourSiDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8316,7 +9805,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
     const timeoutMs = options?.timeoutMs || 15e3;
     const baseUrl = "https://inv.4si.vn";
     let cookieHeader = "";
-    const client = axios3.create({
+    const client = axios4.create({
       baseURL: baseUrl,
       timeout: timeoutMs,
       headers: {
@@ -8427,14 +9916,42 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
         }
       }
     } catch (err) {
-      this.createLog(`L\u1ED7i x\u1EED l\xFD 4Si Driver: ${err.message}`, logs);
+      this.createLog(`L\u1ED7i x\u1EED l\xFD tr\u1EF1c ti\u1EBFp qua inv.4si.vn: ${err.message}`, logs);
     }
-    throw new Error(`[FourSiDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF t\u1EEB inv.4si.vn. H\u1EC7 th\u1ED1ng s\u1EBD t\u1EF1 \u0111\u1ED9ng k\xEDch ho\u1EA1t GenericFallbackDriver.`);
+    try {
+      this.createLog(`Kh\u1EDFi \u0111\u1ED9ng gi\u1EA3i ph\xE1p t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n 4Si qua LCS Soft (dochoadon.lcssoft.com.vn)...`, logs);
+      const lcsResult = await renderFourSiPdfViaLcs(info.rawXml, {
+        khhdon: info.invoiceSeries,
+        shdon: info.invoiceNo,
+        nbmst: info.sellerTaxCode
+      });
+      if (lcsResult.success && lcsResult.pdfBuffer) {
+        this.createLog(`T\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n 4Si th\xE0nh c\xF4ng t\u1EEB dochoadon.lcssoft.com.vn (${(lcsResult.pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: `${this.name} (LCS Soft dochoadon)`,
+          pdfBuffer: lcsResult.pdfBuffer,
+          pdfBase64: lcsResult.pdfBase64 || lcsResult.pdfBuffer.toString("base64"),
+          contentType: "application/pdf",
+          filename: lcsResult.filename || this.buildPdfFilename(info),
+          isFallback: false,
+          sourceUrl: FOUR_SI_LCS_READER_URL,
+          executionLogs: logs
+        };
+      }
+      if (lcsResult.error) {
+        this.createLog(`dochoadon.lcssoft.com.vn ph\u1EA3n h\u1ED3i: ${lcsResult.error}`, logs);
+      }
+    } catch (lcsErr) {
+      this.createLog(`L\u1ED7i gi\u1EA3i ph\xE1p LCS Soft dochoadon: ${lcsErr.message}`, logs);
+    }
+    throw new Error(`[FourSiDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF t\u1EEB inv.4si.vn hay dochoadon.lcssoft.com.vn. H\u1EC7 th\u1ED1ng s\u1EBD t\u1EF1 \u0111\u1ED9ng k\xEDch ho\u1EA1t GenericFallbackDriver.`);
   }
 };
 
 // src/services/invoice-engine/drivers/VnptDriver.ts
-import axios4 from "axios";
+import axios5 from "axios";
 
 // src/services/invoice-engine/drivers/GenericFallbackDriver.ts
 import { jsPDF } from "jspdf";
@@ -8758,7 +10275,7 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
     for (const url of directEndpoints) {
       try {
         this.createLog(`\u0110ang th\u1EED t\u1EA3i tr\u1EF1c ti\u1EBFp t\u1EEB VNPT: ${url.substring(0, 65)}...`, logs);
-        const resp = await axios4.get(url, {
+        const resp = await axios5.get(url, {
           timeout: timeoutMs,
           responseType: "arraybuffer",
           headers: {
@@ -8800,7 +10317,7 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
       try {
         const captchaUrl = `${portal}/Captcha.ashx`;
         this.createLog(`Y\xEAu c\u1EA7u \u1EA3nh Captcha t\u1EEB c\u1ED5ng VNPT: ${captchaUrl}`, logs);
-        const captchaResp = await axios4.get(captchaUrl, {
+        const captchaResp = await axios5.get(captchaUrl, {
           timeout: 8e3,
           responseType: "arraybuffer",
           headers: {
@@ -8816,7 +10333,7 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
           const captchaCode = captchaResult.code;
           this.createLog(`\u0110\xE3 gi\u1EA3i Captcha VNPT th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
           const queryUrl = `${portal}/TraCuu/TraCuuHoaDon`;
-          const queryResp = await axios4.post(queryUrl, {
+          const queryResp = await axios5.post(queryUrl, {
             fkey,
             mst: cleanMst,
             captcha: captchaCode,
@@ -8868,8 +10385,435 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
+// src/services/easyInvoiceService.ts
+import axios6 from "axios";
+import * as cheerio2 from "cheerio";
+import JSZip2 from "jszip";
+import https2 from "https";
+import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+
+// src/services/invoice-engine/captcha/tesseractCaptchaSolver.ts
+import { createWorker } from "tesseract.js";
+import zlib from "zlib";
+var isServerless = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
+);
+var tesseractWorker = null;
+var workerInitializing = null;
+async function getWorker(whitelist) {
+  if (tesseractWorker) {
+    if (whitelist) {
+      await tesseractWorker.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: "7"
+        // Single text line
+      });
+    }
+    return tesseractWorker;
+  }
+  if (workerInitializing) {
+    const w2 = await workerInitializing;
+    if (whitelist) {
+      await w2.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: "7"
+      });
+    }
+    return w2;
+  }
+  workerInitializing = (async () => {
+    try {
+      const cachePath = isServerless ? "/tmp" : ".";
+      const w2 = await createWorker("eng", 1, {
+        cachePath
+      });
+      await w2.setParameters({
+        tessedit_char_whitelist: whitelist || "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        tessedit_pageseg_mode: "7"
+      });
+      tesseractWorker = w2;
+      return w2;
+    } finally {
+      workerInitializing = null;
+    }
+  })();
+  const w = await workerInitializing;
+  return w;
+}
+function decodePngRgba(buf) {
+  try {
+    let offset = 8;
+    const idatChunks = [];
+    let width = 0;
+    let height = 0;
+    while (offset < buf.length) {
+      const len = buf.readUInt32BE(offset);
+      const type = buf.slice(offset + 4, offset + 8).toString("ascii");
+      if (type === "IHDR") {
+        width = buf.readUInt32BE(offset + 8);
+        height = buf.readUInt32BE(offset + 12);
+      } else if (type === "IDAT") {
+        idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
+      }
+      offset += 12 + len;
+    }
+    if (!width || !height || idatChunks.length === 0) return null;
+    const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
+    const rawRgba = Buffer.alloc(width * height * 4);
+    const stride = width * 4 + 1;
+    const prevRow = Buffer.alloc(width * 4);
+    for (let y = 0; y < height; y++) {
+      const filter = decompressed[y * stride];
+      const rowOffset = y * stride + 1;
+      const destOffset = y * width * 4;
+      for (let x = 0; x < width * 4; x++) {
+        const bpp = 4;
+        const raw = decompressed[rowOffset + x];
+        const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
+        const b = prevRow[x];
+        const c = x >= bpp ? prevRow[x - bpp] : 0;
+        let val = raw;
+        if (filter === 1) val = raw + a & 255;
+        else if (filter === 2) val = raw + b & 255;
+        else if (filter === 3) val = raw + Math.floor((a + b) / 2) & 255;
+        else if (filter === 4) {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
+        }
+        rawRgba[destOffset + x] = val;
+        prevRow[x] = val;
+      }
+    }
+    return { width, height, data: rawRgba };
+  } catch {
+    return null;
+  }
+}
+function createBinarizedBmp(decoded, scale = 3, cropLeft = 30, cropRight = 142) {
+  const { width, height, data } = decoded;
+  const cropX1 = Math.max(0, Math.min(cropLeft, width - 10));
+  const cropX2 = Math.min(cropRight, width);
+  const cropW = Math.max(1, cropX2 - cropX1);
+  const cropH = height;
+  const newW = cropW * scale;
+  const newH = cropH * scale;
+  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
+  const imageSize = rowSize * newH;
+  const fileSize = 54 + imageSize;
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write("BM", 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(newW, 18);
+  bmp.writeInt32LE(newH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+  for (let destY = 0; destY < newH; destY++) {
+    const srcY = Math.floor((newH - 1 - destY) / scale);
+    const rowStart = 54 + destY * rowSize;
+    for (let destX = 0; destX < newW; destX++) {
+      const srcX = cropX1 + Math.floor(destX / scale);
+      const srcIdx = (srcY * width + srcX) * 4;
+      const r = data[srcIdx] || 0;
+      const g = data[srcIdx + 1] || 0;
+      const b = data[srcIdx + 2] || 0;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      const isText = lum > 140;
+      const val = isText ? 0 : 255;
+      const pxOffset = rowStart + destX * 3;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+  return bmp;
+}
+async function solveCaptchaWithTesseract(imageInput, options) {
+  const timeoutMs = options?.timeoutMs || 2500;
+  const recognitionPromise = (async () => {
+    let buf;
+    if (typeof imageInput === "string") {
+      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, "");
+      buf = Buffer.from(cleanB64, "base64");
+    } else {
+      buf = Buffer.from(imageInput);
+    }
+    const digitsOnly = options?.digitsOnly !== false;
+    const whitelist = options?.whitelist || (digitsOnly ? "0123456789" : "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+    let processBuf = buf;
+    if (options?.preprocessEasyInvoice || buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
+        processBuf = binarized;
+      }
+    }
+    const worker = await getWorker(whitelist);
+    const result = await worker.recognize(processBuf);
+    let text = result.data.text || "";
+    if (digitsOnly) {
+      text = text.replace(/[^0-9]/g, "");
+    } else {
+      text = text.replace(/[^a-zA-Z0-9]/g, "");
+    }
+    return {
+      code: text,
+      confidence: result.data.confidence || 0
+    };
+  })();
+  const timeoutPromise = new Promise(
+    (_, reject) => setTimeout(() => reject(new Error(`Tesseract timeout v\u01B0\u1EE3t qu\xE1 ${timeoutMs}ms`)), timeoutMs)
+  );
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+
+// src/services/easyInvoiceService.ts
+var httpsAgent2 = new https2.Agent({ rejectUnauthorized: false });
+var isServerless2 = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
+);
+async function solveEasyInvoiceCaptcha(captchaBuf) {
+  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+  if (isServerless2 && hasGeminiKey) {
+    try {
+      console.log("[EasyInvoice] M\xF4i tr\u01B0\u1EDDng Vercel/Serverless: S\u1EED d\u1EE5ng Gemini Vision gi\u1EA3i Captcha tr\u1EF1c ti\u1EBFp...");
+      const digits2 = await solveCaptchaWithGemini(captchaBuf, EASYINVOICE_CAPTCHA_PROMPT);
+      if (digits2 && digits2.length === 4) {
+        console.log(`[EasyInvoice] Gemini gi\u1EA3i Captcha th\xE0nh c\xF4ng tr\xEAn Vercel: "${digits2}"`);
+        return { code: digits2, confidence: 99, engine: "gemini" };
+      }
+    } catch (geminiErr) {
+      console.warn(`[EasyInvoice] Gemini tr\xEAn Vercel g\u1EB7p l\u1ED7i: ${geminiErr.message}, th\u1EED ph\u01B0\u01A1ng \xE1n ti\u1EBFp theo...`);
+    }
+  }
+  try {
+    const tessResult = await solveCaptchaWithTesseract(captchaBuf, {
+      digitsOnly: true,
+      expectedLength: 4,
+      preprocessEasyInvoice: true,
+      timeoutMs: 2e3
+    });
+    if (tessResult.code && tessResult.code.length === 4) {
+      console.log(`[EasyInvoice] Tesseract.js gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${tessResult.code}" (\u0110\u1ED9 tin c\u1EADy: ${tessResult.confidence}%)`);
+      return { code: tessResult.code, confidence: tessResult.confidence, engine: "tesseract" };
+    }
+    console.log(`[EasyInvoice] Tesseract \u0111\u1ECDc \u0111\u01B0\u1EE3c "${tessResult.code}" (${tessResult.code.length} k\xFD t\u1EF1), chuy\u1EC3n sang Gemini...`);
+  } catch (err) {
+    console.warn(`[EasyInvoice] Tesseract.js g\u1EB7p l\u1ED7i ho\u1EB7c timeout: ${err.message}, th\u1EED Gemini...`);
+  }
+  const digits = await solveCaptchaWithGemini(captchaBuf, EASYINVOICE_CAPTCHA_PROMPT);
+  console.log(`[EasyInvoice] Gemini gi\u1EA3i Captcha th\xE0nh c\xF4ng: "${digits}"`);
+  return { code: digits, confidence: 99, engine: "gemini" };
+}
+async function downloadOriginalEasyInvoice(params) {
+  const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon } = params;
+  if (!lookupCode) {
+    throw new Error("M\xE3 tra c\u1EE9u h\xF3a \u0111\u01A1n EasyInvoice (FKey) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng.");
+  }
+  let domain = "";
+  if (lookupUrl && /easyinvoice\.com\.vn|easyinvoice\.vn/i.test(lookupUrl)) {
+    try {
+      const parsedUrl = new URL(lookupUrl);
+      domain = `${parsedUrl.protocol}//${parsedUrl.host}`;
+    } catch {
+    }
+  }
+  if (!domain && sellerTaxCode) {
+    domain = `http://${sellerTaxCode.trim()}hd.easyinvoice.com.vn`;
+  }
+  if (!domain) {
+    domain = "https://tracuu.easyinvoice.vn";
+  }
+  console.log(`[EasyInvoice] Kh\u1EDFi \u0111\u1ED9ng t\u1EA3i H\u0110 g\u1ED1c: FKey="${lookupCode}", MST="${sellerTaxCode || ""}", C\u1ED5ng="${domain}"`);
+  const maxRetries = isServerless2 ? 2 : 3;
+  let lastError = "";
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let currentDomain = domain;
+      if (attempt > 1 && domain !== "https://tracuu.easyinvoice.vn") {
+        currentDomain = "https://tracuu.easyinvoice.vn";
+        console.log(`[EasyInvoice] L\u1EA7n th\u1EED ${attempt}: Chuy\u1EC3n sang C\u1ED5ng chung ${currentDomain}...`);
+      } else {
+        console.log(`[EasyInvoice] L\u1EA7n th\u1EED ${attempt}/${maxRetries}: L\u1EA5y Captcha t\u1EEB ${currentDomain}/Captcha/Show...`);
+      }
+      const cRes = await axios6.get(`${currentDomain}/Captcha/Show`, {
+        responseType: "arraybuffer",
+        timeout: 6e3,
+        httpsAgent: httpsAgent2,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          "Referer": `${currentDomain}/Search/Index`
+        }
+      });
+      const cookie = cRes.headers["set-cookie"] ? Array.isArray(cRes.headers["set-cookie"]) ? cRes.headers["set-cookie"].join("; ") : cRes.headers["set-cookie"] : "";
+      const captchaBuf = Buffer.from(cRes.data);
+      let code = "";
+      let confidence = 0;
+      let engine = "gemini";
+      try {
+        const solved = await solveEasyInvoiceCaptcha(captchaBuf);
+        code = solved.code;
+        confidence = solved.confidence;
+        engine = solved.engine;
+      } catch (error) {
+        lastError = `Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha: ${error?.message || error}`;
+        console.warn(`[EasyInvoice] ${lastError}`);
+        continue;
+      }
+      if (!code || code.length !== 4) {
+        lastError = "Ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u1EE7 4 ch\u1EEF s\u1ED1 Captcha EasyInvoice.";
+        console.warn(`[EasyInvoice] Ch\u01B0a \u0111\u1ECDc \u0111\u01B0\u1EE3c m\xE3 4 s\u1ED1 \u1EDF l\u1EA7n th\u1EED ${attempt}. Ti\u1EBFp t\u1EE5c th\u1EED l\u1EA1i...`);
+        continue;
+      }
+      console.log(`[EasyInvoice] \u0110\xE3 gi\u1EA3i Captcha: "${code}" (Engine: ${engine}, \u0110\u1ED9 tin c\u1EADy: ${confidence}%). G\u1EEDi y\xEAu c\u1EA7u t\xECm ki\u1EBFm...`);
+      const postRes = await axios6.post(
+        `${currentDomain}/Search/Search`,
+        `typeSearch=&FKey=${encodeURIComponent(lookupCode.trim())}&Capcha=${encodeURIComponent(code)}`,
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Cookie": cookie,
+            "Referer": `${currentDomain}/Search/Index?fkey=${encodeURIComponent(lookupCode.trim())}`,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+          },
+          timeout: 8e3,
+          httpsAgent: httpsAgent2
+        }
+      );
+      const $ = cheerio2.load(postRes.data);
+      const msg = $("#msg").val();
+      if (msg) {
+        console.warn(`[EasyInvoice] Th\xF4ng b\xE1o t\u1EEB c\u1ED5ng: "${msg}"`);
+        if (msg.includes("M\xE3 x\xE1c th\u1EF1c kh\xF4ng ch\xEDnh x\xE1c") || msg.includes("sai m\xE3 x\xE1c th\u1EF1c") || msg.includes("captcha")) {
+          console.log("[EasyInvoice] Sai Captcha, th\u1EED l\u1EA1i...");
+          continue;
+        }
+        if (msg.includes("Kh\xF4ng t\xECm th\u1EA5y") || msg.includes("kh\xF4ng t\u1ED3n t\u1EA1i")) {
+          throw new Error(`C\u1ED5ng EasyInvoice th\xF4ng b\xE1o: ${msg}`);
+        }
+      }
+      const invDataStr = $("#InvData").val();
+      if (!invDataStr) {
+        console.warn(`[EasyInvoice] Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c InvData \u1EDF l\u1EA7n th\u1EED ${attempt}.`);
+        continue;
+      }
+      let invData = {};
+      try {
+        invData = JSON.parse(invDataStr);
+      } catch (e) {
+        console.error("[EasyInvoice] Kh\xF4ng th\u1EC3 parse InvData JSON:", e.message);
+      }
+      const scriptMatch = postRes.data.match(/showInv\([^;]+,\s*'([^']+)'\);/);
+      const token = scriptMatch ? scriptMatch[1] : "";
+      const invoiceHtml = invData.str || "";
+      const b64Html = Buffer.from(invoiceHtml, "utf-8").toString("base64");
+      let downloadFileName = `HOADON_${sellerTaxCode || "EASYINVOICE"}_${khhdon || "HD"}_${shdon || lookupCode}`;
+      if (params.viewOnly && invoiceHtml) {
+        return {
+          success: true,
+          filename: `${downloadFileName}.html`,
+          contentType: "text/html",
+          buffer: Buffer.from(invoiceHtml, "utf-8"),
+          htmlContent: invoiceHtml,
+          message: "\u0110\xE3 tra c\u1EE9u v\xE0 nh\u1EADn b\u1EA3n th\u1EC3 hi\u1EC7n g\u1ED1c EasyInvoice."
+        };
+      }
+      if (token && b64Html) {
+        try {
+          console.log("[EasyInvoice] G\u1ECDi API t\u1EA1o g\xF3i PDF ch\xEDnh th\u1EE9c...");
+          const pdfGenRes = await axios6.post(
+            `${currentDomain}/Invoice/DownloadPdfAndFileAttachFromAvailableHtml`,
+            new URLSearchParams({ token, html: b64Html }).toString(),
+            {
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": cookie,
+                "Referer": `${currentDomain}/Search/Index`,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+              },
+              timeout: 1e4,
+              httpsAgent: httpsAgent2
+            }
+          );
+          if (pdfGenRes.data && pdfGenRes.data.fileGuid) {
+            const dlFileName = pdfGenRes.data.fileName || `${downloadFileName}.zip`;
+            const dlUrl = `${currentDomain}/Invoice/Download?fileGuid=${encodeURIComponent(pdfGenRes.data.fileGuid)}&fileName=${encodeURIComponent(dlFileName)}`;
+            console.log(`[EasyInvoice] T\u1EA3i file t\u1EEB: ${dlUrl}`);
+            const dlRes = await axios6.get(dlUrl, {
+              headers: { "Cookie": cookie },
+              responseType: "arraybuffer",
+              timeout: 1e4,
+              httpsAgent: httpsAgent2
+            });
+            const downloadedBuf = Buffer.from(dlRes.data);
+            if (downloadedBuf.length > 4 && downloadedBuf[0] === 80 && downloadedBuf[1] === 75) {
+              try {
+                const zip = new JSZip2();
+                const unzipped = await zip.loadAsync(downloadedBuf);
+                const pdfFile = Object.values(unzipped.files).find((f) => !f.dir && f.name.toLowerCase().endsWith(".pdf"));
+                if (pdfFile) {
+                  const pdfBuf = await pdfFile.async("nodebuffer");
+                  console.log(`[EasyInvoice] \u0110\xE3 tr\xEDch xu\u1EA5t th\xE0nh c\xF4ng PDF "${pdfFile.name}" (${(pdfBuf.length / 1024).toFixed(1)} KB)`);
+                  return {
+                    success: true,
+                    filename: pdfFile.name,
+                    contentType: "application/pdf",
+                    buffer: pdfBuf,
+                    pdfBase64: pdfBuf.toString("base64"),
+                    htmlContent: invoiceHtml
+                  };
+                }
+              } catch (zipErr) {
+                console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 gi\u1EA3i n\xE9n ZIP, g\u1EEDi nguy\xEAn file ZIP:", zipErr.message);
+              }
+              return {
+                success: true,
+                filename: dlFileName,
+                contentType: "application/x-zip-compressed",
+                buffer: downloadedBuf,
+                pdfBase64: downloadedBuf.toString("base64"),
+                htmlContent: invoiceHtml
+              };
+            } else if (downloadedBuf.toString("utf-8", 0, 5).startsWith("%PDF")) {
+              return {
+                success: true,
+                filename: `${downloadFileName}.pdf`,
+                contentType: "application/pdf",
+                buffer: downloadedBuf,
+                pdfBase64: downloadedBuf.toString("base64"),
+                htmlContent: invoiceHtml
+              };
+            }
+          }
+        } catch (pdfErr) {
+          console.warn("[EasyInvoice] Kh\xF4ng th\u1EC3 t\u1EA3i PDF qua DownloadPdfAndFileAttachFromAvailableHtml:", pdfErr.message);
+        }
+      }
+      if (invoiceHtml) {
+        console.log(`[EasyInvoice] Tr\u1EA3 v\u1EC1 b\u1EA3n th\u1EC3 hi\u1EC7n HTML g\u1ED1c EasyInvoice (${(invoiceHtml.length / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filename: `${downloadFileName}.html`,
+          contentType: "text/html",
+          buffer: Buffer.from(invoiceHtml, "utf-8"),
+          htmlContent: invoiceHtml
+        };
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.warn(`[EasyInvoice] L\u1ED7i \u1EDF l\u1EA7n th\u1EED ${attempt}:`, err.message);
+    }
+  }
+  throw new Error(lastError || "Kh\xF4ng th\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng EasyInvoice sau 3 l\u1EA7n th\u1EED.");
+}
+
 // src/services/invoice-engine/drivers/EasyInvoiceDriver.ts
-import axios5 from "axios";
 var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8921,72 +10865,33 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
     const lookupCode = (info.lookupCode || "").trim();
     const cleanMst = (info.sellerTaxCode || "").trim();
     this.createLog(`M\xE3 tra c\u1EE9u EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
-    const timeoutMs = options?.timeoutMs || 15e3;
-    const portalCandidates = [
-      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, "") : null,
-      "https://easyinvoice.vn",
-      "https://tracuu.easyinvoice.vn",
-      cleanMst ? `https://${cleanMst}.easyinvoice.com.vn` : null
-    ].filter(Boolean);
-    for (const portal of portalCandidates) {
+    if (lookupCode) {
       try {
-        const captchaUrl = `${portal}/Home/GetCaptcha`;
-        this.createLog(`\u0110ang l\u1EA5y \u1EA3nh Captcha t\u1EEB c\u1ED5ng EasyInvoice: ${captchaUrl}`, logs);
-        const captchaResp = await axios5.get(captchaUrl, {
-          timeout: 8e3,
-          responseType: "arraybuffer",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Referer": portal
-          },
-          validateStatus: (s) => s === 200
+        this.createLog(`\u0110ang k\u1EBFt n\u1ED1i c\u1ED5ng EasyInvoice v\xE0 gi\u1EA3i Captcha b\u1EB1ng Gemini...`, logs);
+        const dlRes = await downloadOriginalEasyInvoice({
+          lookupCode,
+          sellerTaxCode: cleanMst,
+          lookupUrl: info.lookupUrl,
+          khhdon: info.invoiceSeries,
+          shdon: info.invoiceNo
         });
-        const cookieHeader = captchaResp.headers["set-cookie"] ? Array.isArray(captchaResp.headers["set-cookie"]) ? captchaResp.headers["set-cookie"].join("; ") : captchaResp.headers["set-cookie"] : "";
-        if (captchaResp.data && captchaResp.data.byteLength > 20) {
-          this.createLog("\u0110\xE3 nh\u1EADn \u1EA3nh Captcha EasyInvoice. \u0110ang tr\xEDch xu\u1EA5t m\xE3 Captcha...", logs);
-          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
-          const captchaCode = captchaResult.code;
-          this.createLog(`\u0110\xE3 gi\u1EA3i Captcha EasyInvoice th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
-          const queryUrl = `${portal}/Home/TraCuuHoaDon`;
-          const queryResp = await axios5.post(queryUrl, {
-            Ikey: lookupCode,
-            Mst: cleanMst,
-            Captcha: captchaCode,
-            Pattern: info.templateCode,
-            Serial: info.invoiceSeries
-          }, {
-            timeout: timeoutMs,
-            responseType: "arraybuffer",
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-              "Referer": portal,
-              "Cookie": cookieHeader,
-              ...options?.customHeaders || {}
-            },
-            validateStatus: (s) => s < 500
-          });
-          if (queryResp.data && queryResp.data.byteLength > 50) {
-            const buf = Buffer.from(queryResp.data);
-            if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-              this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB EasyInvoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString("base64"),
-                contentType: "application/pdf",
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: queryUrl,
-                captchaSolved: captchaCode,
-                executionLogs: logs
-              };
-            }
-          }
+        if (dlRes.success && dlRes.buffer && dlRes.buffer.length > 50) {
+          this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: dlRes.buffer,
+            pdfBase64: dlRes.pdfBase64 || dlRes.buffer.toString("base64"),
+            contentType: dlRes.contentType || "application/pdf",
+            filename: dlRes.filename || this.buildPdfFilename(info),
+            isFallback: false,
+            sourceUrl: info.lookupUrl || "https://tracuu.easyinvoice.vn",
+            executionLogs: logs
+          };
         }
-      } catch (portalErr) {
-        this.createLog(`C\u1ED5ng EasyInvoice ${portal} ch\u01B0a ho\xE0n t\u1EA5t: ${portalErr.message}`, logs);
+      } catch (err) {
+        this.createLog(`T\u1EA3i t\u1EEB c\u1ED5ng EasyInvoice ch\u01B0a ho\xE0n t\u1EA5t: ${err.message}`, logs);
       }
     }
     this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78`, logs);
@@ -9031,6 +10936,7 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
     const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
     const lookupCode = this.extractCustomField(xmlData, ["M\xE3 tra c\u1EE9u", "MaTraCuu", "MTCuu", "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n", "Bkav"]) || this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "MaTraCuu");
+    const lookupUrl = lookupCode ? `https://tchd.ehoadon.vn/TCHD?MTC=${encodeURIComponent(lookupCode)}` : "https://tchd.ehoadon.vn/TCHD";
     return {
       provider: this.providerCode,
       providerName: "Bkav eHoadon",
@@ -9042,14 +10948,18 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
       invoiceDate,
       cqtCode,
       lookupCode,
-      lookupUrl: "https://ehoadon.bkav.com/tra-cuu",
+      lookupUrl,
       rawXml: xmlData
     };
   }
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi \u0111\u1ED9ng x\u1EED l\xFD H\u0110\u0110T Bkav eHoadon: S\u1ED1 ${info.invoiceNo}, K\xFD hi\u1EC7u ${info.invoiceSeries}`, logs);
-    this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF & HTML/CSS chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78`, logs);
+    if (info.lookupCode) {
+      this.createLog(`M\xE3 tra c\u1EE9u Bkav: "${info.lookupCode}"`, logs);
+      this.createLog(`C\u1ED5ng m\u1EDF h\xF3a \u0111\u01A1n tr\u1EF1c ti\u1EBFp: ${info.lookupUrl || "https://tchd.ehoadon.vn/TCHD"}`, logs);
+    }
+    this.createLog(`T\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF & HTML/CSS chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Quy\u1EBFt \u0111\u1ECBnh 1450/TCT`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,
@@ -9059,6 +10969,899 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
     };
   }
 };
+
+// src/services/vnpayInvoiceService.ts
+import axios7 from "axios";
+var COMMON_VNPAY_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Origin": "https://portal.vnpayinvoice.vn",
+  "Referer": "https://portal.vnpayinvoice.vn/",
+  "Accept-Language": "vi,en-US;q=0.9,en;q=0.8"
+};
+function generateVnpayRequestId(length = 6) {
+  const now = /* @__PURE__ */ new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  const timestamp = `${year}${month}${day}${hours}${minutes}${seconds}`;
+  const min = Math.pow(10, length - 1);
+  const max = Math.pow(10, length) - 1;
+  const rand = Math.floor(min + Math.random() * (max - min + 1));
+  return `${timestamp}-${rand}`;
+}
+function buildVnpayPortalUrl(lookupCode, taxCode) {
+  const base = "https://portal.vnpayinvoice.vn/";
+  const params = new URLSearchParams();
+  if (lookupCode) params.set("lookupCode", lookupCode.trim());
+  if (taxCode) params.set("taxCode", taxCode.trim());
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+function isInvalidVnpayLookupCode(code) {
+  if (!code) return true;
+  const trimmed = code.trim();
+  if (!trimmed) return true;
+  if (trimmed.toLowerCase() === "vietcombank") return true;
+  if (/^M\d-\d{2}-/i.test(trimmed)) return true;
+  if (trimmed.includes("-") && (trimmed.length > 15 || /^M/i.test(trimmed))) return true;
+  if (/^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(trimmed)) return true;
+  if (/^[0-9A-Z]{23,34}$/i.test(trimmed)) return true;
+  if (trimmed.includes("0102182292") && trimmed.length > 15) return true;
+  return false;
+}
+async function lookupVnpayInvoice(params) {
+  let lookupCode = (params.lookupCode || "").trim();
+  const taxCode = (params.taxCode || "").trim();
+  if (isInvalidVnpayLookupCode(lookupCode)) {
+    lookupCode = "";
+  }
+  if (!lookupCode) {
+    const directUrl2 = buildVnpayPortalUrl("", taxCode);
+    return {
+      success: false,
+      directUrl: directUrl2,
+      error: "H\xF3a \u0111\u01A1n VNPAY y\xEAu c\u1EA7u S\u1ED1 b\u1EA3o m\u1EADt in tr\xEAn h\xF3a \u0111\u01A1n \u0111\u1EC3 tra c\u1EE9u tr\xEAn C\u1ED5ng VNPAY. B\u1EA1n c\xF3 th\u1EC3 m\u1EDF tr\u1EF1c ti\u1EBFp C\u1ED5ng VNPAY (\u0111\xE3 \u0111i\u1EC1n s\u1EB5n MST ng\u01B0\u1EDDi b\xE1n) \u0111\u1EC3 nh\u1EADp m\xE3, ho\u1EB7c tra c\u1EE9u tr\xEAn C\u1ED5ng H\u0110\u0110T T\u1ED5ng c\u1EE5c Thu\u1EBF."
+    };
+  }
+  if (!taxCode) {
+    return {
+      success: false,
+      error: "Vui l\xF2ng cung c\u1EA5p M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n \u0111\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n VNPAY."
+    };
+  }
+  const reqId = generateVnpayRequestId();
+  const queryParams = new URLSearchParams({
+    lookupCode,
+    taxCode
+  });
+  if (params.captchaToken) {
+    queryParams.set("captchaToken", params.captchaToken);
+  }
+  const directUrl = buildVnpayPortalUrl(lookupCode, taxCode);
+  const url = `https://portal.vnpayinvoice.vn/api/v6/invoices?${queryParams.toString()}`;
+  try {
+    console.log(`[VNPAY] \u0110ang g\u1EEDi y\xEAu c\u1EA7u tra c\u1EE9u: MST=${taxCode}, M\xE3 tra c\u1EE9u=${lookupCode}, RequestId=${reqId}...`);
+    const response = await axios7.get(url, {
+      headers: {
+        ...COMMON_VNPAY_HEADERS,
+        "X-Request-ID": reqId
+      },
+      timeout: 15e3,
+      validateStatus: () => true
+    });
+    if (response.status === 200 && response.data) {
+      const data = response.data;
+      const list = Array.isArray(data) ? data : data.data || data.items || (data.stringId ? [data] : []);
+      const invoices = list.map((item) => ({
+        stringId: item.stringId || item.id || item.invoiceId,
+        id: item.id,
+        invoiceNo: item.invoiceNo || item.shdon,
+        invoiceSeries: item.invoiceSeries || item.khhdon,
+        templateCode: item.templateCode || item.khmshdon,
+        issueDate: item.issueDate || item.nlap,
+        sellerTaxCode: item.sellerTaxCode || item.taxCode || taxCode,
+        sellerName: item.sellerName || item.supplierName,
+        buyerTaxCode: item.buyerTaxCode,
+        buyerName: item.buyerName,
+        totalAmount: item.totalAmount || item.tgtttbso,
+        totalTaxAmount: item.totalTaxAmount || item.tgtthue,
+        currency: item.currency || item.dvtte || "VND",
+        status: item.status,
+        raw: item
+      }));
+      const first = invoices[0];
+      return {
+        success: true,
+        invoices,
+        firstInvoice: first,
+        stringId: first?.stringId,
+        directUrl
+      };
+    }
+    if (response.status === 400) {
+      if (response.data?.code === "PORTAL_101") {
+        return {
+          success: false,
+          errorCode: "PORTAL_101",
+          requiresCaptcha: true,
+          directUrl,
+          error: "C\u1ED5ng VNPAY Invoice y\xEAu c\u1EA7u x\xE1c th\u1EF1c Google reCAPTCHA. B\u1EA1n c\xF3 th\u1EC3 m\u1EDF tr\u1EF1c ti\u1EBFp c\u1ED5ng tra c\u1EE9u VNPAY (\u0111\xE3 \u0111\u01B0\u1EE3c t\u1EF1 \u0111\u1ED9ng \u0111i\u1EC1n s\u1EB5n th\xF4ng tin)."
+        };
+      }
+      return {
+        success: false,
+        directUrl,
+        error: response.data?.message || "C\u1ED5ng VNPAY ph\u1EA3n h\u1ED3i: M\xE3 tra c\u1EE9u (S\u1ED1 b\u1EA3o m\u1EADt) ho\u1EB7c MST kh\xF4ng ch\xEDnh x\xE1c. Vui l\xF2ng ki\u1EC3m tra S\u1ED1 b\u1EA3o m\u1EADt tr\xEAn h\xF3a \u0111\u01A1n."
+      };
+    }
+    const errMsg = response.data?.message || response.data?.error || `L\u1ED7i ph\u1EA3n h\u1ED3i t\u1EEB VNPAY (M\xE3 l\u1ED7i ${response.status})`;
+    return {
+      success: false,
+      directUrl,
+      error: errMsg
+    };
+  } catch (err) {
+    return {
+      success: false,
+      directUrl,
+      error: `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn C\u1ED5ng VNPAY Invoice: ${err.message}`
+    };
+  }
+}
+async function downloadOriginalVnpayPdf(params) {
+  let stringId = params.stringId;
+  const sellerTaxCode = (params.sellerTaxCode || "").trim();
+  if (!sellerTaxCode) {
+    throw new Error("M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) l\xE0 b\u1EAFt bu\u1ED9c khi t\u1EA3i h\xF3a \u0111\u01A1n VNPAY.");
+  }
+  const candidateLookupCode = !isInvalidVnpayLookupCode(params.lookupCode) ? params.lookupCode.trim() : "";
+  if (!stringId && candidateLookupCode) {
+    const lookupRes = await lookupVnpayInvoice({
+      lookupCode: candidateLookupCode,
+      taxCode: sellerTaxCode,
+      cqtCode: params.cqtCode,
+      captchaToken: params.captchaToken
+    });
+    if (lookupRes.success && lookupRes.stringId) {
+      stringId = lookupRes.stringId;
+    } else if (lookupRes.requiresCaptcha) {
+      return {
+        success: false,
+        filename: "",
+        contentType: "application/pdf",
+        sourceUrl: lookupRes.directUrl || "https://portal.vnpayinvoice.vn/",
+        requiresCaptcha: true,
+        error: lookupRes.error
+      };
+    } else {
+      throw new Error(lookupRes.error || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n tr\xEAn h\u1EC7 th\u1ED1ng VNPAY Invoice.");
+    }
+  }
+  if (!stringId) {
+    throw new Error("C\u1EA7n c\xF3 ID h\xF3a \u0111\u01A1n (stringId) ho\u1EB7c M\xE3 tra c\u1EE9u h\u1EE3p l\u1EC7 \u0111\u1EC3 t\u1EA3i PDF t\u1EEB VNPAY.");
+  }
+  const reqId = generateVnpayRequestId();
+  const downloadUrl = `https://portal.vnpayinvoice.vn/api/v6/download-pdf/${encodeURIComponent(stringId)}?taxCode=${encodeURIComponent(sellerTaxCode)}`;
+  console.log(`[VNPAY] \u0110ang t\u1EA3i PDF g\u1ED1c: stringId=${stringId}, taxCode=${sellerTaxCode}...`);
+  const response = await axios7.get(downloadUrl, {
+    headers: {
+      ...COMMON_VNPAY_HEADERS,
+      "Accept": "application/pdf, application/octet-stream, */*",
+      "X-Request-ID": reqId
+    },
+    responseType: "arraybuffer",
+    timeout: 25e3,
+    validateStatus: (status) => status >= 200 && status < 400
+  });
+  if (response.data && response.data.byteLength > 100) {
+    const buffer = Buffer.from(response.data);
+    const headerSlice = buffer.toString("utf-8", 0, 10);
+    if (headerSlice.startsWith("%PDF") || buffer.includes(Buffer.from("%PDF"))) {
+      const shd = (params.invoiceNo || "0000000").padStart(7, "0");
+      const khh = (params.invoiceSeries || "").replace(/[^a-zA-Z0-9]/g, "");
+      const filename = `HoaDon_VNPAY_${sellerTaxCode}_${khh ? khh + "_" : ""}${shd}_${stringId}.pdf`;
+      console.log(`[VNPAY] T\u1EA3i PDF th\xE0nh c\xF4ng (${(buffer.length / 1024).toFixed(1)} KB)`);
+      return {
+        success: true,
+        pdfBuffer: buffer,
+        pdfBase64: buffer.toString("base64"),
+        filename,
+        contentType: "application/pdf",
+        sourceUrl: downloadUrl
+      };
+    } else {
+      const text = buffer.toString("utf-8");
+      console.warn("[VNPAY] Download tr\u1EA3 v\u1EC1 n\u1ED9i dung kh\xF4ng ph\u1EA3i PDF:", text.substring(0, 200));
+      throw new Error(`M\xE1y ch\u1EE7 VNPAY ph\u1EA3n h\u1ED3i l\u1ED7i: ${text}`);
+    }
+  }
+  throw new Error("D\u1EEF li\u1EC7u tr\u1EA3 v\u1EC1 t\u1EEB m\xE1y ch\u1EE7 VNPAY r\u1ED7ng ho\u1EB7c kh\xF4ng h\u1EE3p l\u1EC7.");
+}
+async function downloadOriginalVnpayXml(params) {
+  let stringId = params.stringId;
+  const sellerTaxCode = (params.sellerTaxCode || "").trim();
+  if (!sellerTaxCode) {
+    throw new Error("M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n l\xE0 b\u1EAFt bu\u1ED9c khi t\u1EA3i XML t\u1EEB VNPAY.");
+  }
+  const candidateLookupCode = !isInvalidVnpayLookupCode(params.lookupCode) ? params.lookupCode.trim() : "";
+  if (!stringId && candidateLookupCode) {
+    const lookupRes = await lookupVnpayInvoice({
+      lookupCode: candidateLookupCode,
+      taxCode: sellerTaxCode,
+      cqtCode: params.cqtCode,
+      captchaToken: params.captchaToken
+    });
+    if (lookupRes.success && lookupRes.stringId) {
+      stringId = lookupRes.stringId;
+    } else {
+      throw new Error(lookupRes.error || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n tr\xEAn VNPAY.");
+    }
+  }
+  if (!stringId) {
+    throw new Error("C\u1EA7n c\xF3 ID h\xF3a \u0111\u01A1n (stringId) \u0111\u1EC3 t\u1EA3i XML t\u1EEB VNPAY.");
+  }
+  const reqId = generateVnpayRequestId();
+  const downloadUrl = `https://portal.vnpayinvoice.vn/api/v6/private/download-xml/${encodeURIComponent(stringId)}?taxCode=${encodeURIComponent(sellerTaxCode)}`;
+  console.log(`[VNPAY] \u0110ang t\u1EA3i XML g\u1ED1c: stringId=${stringId}, taxCode=${sellerTaxCode}...`);
+  const response = await axios7.get(downloadUrl, {
+    headers: {
+      ...COMMON_VNPAY_HEADERS,
+      "Accept": "application/xml, text/xml, */*",
+      "X-Request-ID": reqId
+    },
+    responseType: "arraybuffer",
+    timeout: 25e3,
+    validateStatus: (status) => status >= 200 && status < 400
+  });
+  if (response.data && response.data.byteLength > 50) {
+    const buffer = Buffer.from(response.data);
+    const content = buffer.toString("utf-8");
+    const shd = (params.invoiceNo || "0000000").padStart(7, "0");
+    const khh = (params.invoiceSeries || "").replace(/[^a-zA-Z0-9]/g, "");
+    const filename = `HoaDon_VNPAY_${sellerTaxCode}_${khh ? khh + "_" : ""}${shd}_${stringId}.xml`;
+    return {
+      success: true,
+      xmlContent: content,
+      filename,
+      contentType: "application/xml",
+      sourceUrl: downloadUrl
+    };
+  }
+  throw new Error("Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c n\u1ED9i dung XML h\u1EE3p l\u1EC7 t\u1EEB VNPAY.");
+}
+
+// src/services/invoice-engine/drivers/VnpayDriver.ts
+var VnpayDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "VNPAY Invoice Driver";
+    this.providerCode = "VNPAY";
+    this.metadata = {
+      name: "VNPAY Invoice Driver",
+      providerCode: "VNPAY",
+      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T g\u1ED1c t\u1EEB c\u1ED5ng VNPAY Invoice (portal.vnpayinvoice.vn) qua M\xE3 tra c\u1EE9u v\xE0 M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n",
+      sampleUrl: "https://portal.vnpayinvoice.vn/",
+      supportsCaptcha: true,
+      requiredFields: ["sellerTaxCode", "lookupCode"]
+    };
+  }
+  /**
+   * Nhận diện hóa đơn VNPAY Invoice
+   */
+  canHandle(xmlData) {
+    if (typeof xmlData !== "string") {
+      return xmlData.provider === "VNPAY";
+    }
+    return detectProvider(xmlData) === "VNPAY";
+  }
+  /**
+   * Trích xuất thông tin hóa đơn VNPAY từ XML
+   */
+  extractInfo(xmlData) {
+    const nbanBlock = this.extractXmlBlocks(xmlData, "NBan")[0] || "";
+    const nmuaBlock = this.extractXmlBlocks(xmlData, "NMua")[0] || "";
+    const sellerTaxCode = this.extractXmlTag(nbanBlock, "MST") || this.extractXmlTag(xmlData, "nbmst") || this.extractXmlTag(xmlData, "MST") || "";
+    const sellerName = this.extractXmlTag(nbanBlock, "Ten") || this.extractXmlTag(xmlData, "nbten") || this.extractXmlTag(xmlData, "Ten") || "";
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, "MST") || this.extractXmlTag(xmlData, "nmmst") || this.extractXmlTag(xmlData, "nm_mst");
+    const buyerName = this.extractXmlTag(nmuaBlock, "Ten") || this.extractXmlTag(xmlData, "nmten") || this.extractXmlTag(xmlData, "nm_ten");
+    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
+    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
+    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
+    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
+    let lookupCode = this.extractCustomField(xmlData, [
+      "M\xE3 tra c\u1EE9u",
+      "MaTraCuu",
+      "MTCuu",
+      "MTC",
+      "FKey",
+      "LookupCode",
+      "TransactionID"
+    ]);
+    if (!lookupCode) {
+      lookupCode = this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "MaTraCuu") || this.extractXmlTag(xmlData, "LookupCode") || this.extractXmlTag(xmlData, "FKey") || this.extractXmlTag(xmlData, "TransactionID");
+    }
+    if (!lookupCode) {
+      const ttinBlocks = this.extractXmlBlocks(xmlData, "TTin");
+      for (const block of ttinBlocks) {
+        const truong = (this.extractXmlTag(block, "TTruong") || this.extractXmlTag(block, "TenTruong")).toLowerCase();
+        if (truong.includes("tra c\u1EE9u") || truong.includes("tra cuu") || truong.includes("lookup") || truong.includes("fkey")) {
+          const val = this.extractXmlTag(block, "DLieu") || this.extractXmlTag(block, "Data");
+          if (val) {
+            lookupCode = val.trim();
+            break;
+          }
+        }
+      }
+    }
+    const isInvalidVnpayCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+    const validLookupCode = !isInvalidVnpayCode(lookupCode) ? lookupCode?.trim() || "" : "";
+    const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
+    const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    const directUrl = validLookupCode ? buildVnpayPortalUrl(validLookupCode, sellerTaxCode) : "";
+    return {
+      provider: this.providerCode,
+      providerName: "VNPAY Invoice (C\xF4ng ty C\u1ED5 ph\u1EA7n Gi\u1EA3i ph\xE1p Thanh to\xE1n Vi\u1EC7t Nam)",
+      sellerTaxCode,
+      sellerName,
+      buyerTaxCode: buyerTaxCode || void 0,
+      buyerName: buyerName || void 0,
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+      invoiceDate,
+      lookupCode: validLookupCode || void 0,
+      lookupUrl: directUrl || void 0,
+      cqtCode: cqtCode || void 0,
+      totalAmount,
+      totalTaxAmount,
+      currency: this.extractXmlTag(xmlData, "DVTTe") || "VND",
+      rawXml: xmlData,
+      additionalData: {
+        msttcgp: "0102182292",
+        portalUrl: "https://portal.vnpayinvoice.vn/"
+      }
+    };
+  }
+  /**
+   * Tải PDF Hóa đơn gốc VNPAY từ cổng portal.vnpayinvoice.vn
+   */
+  async fetchPdf(info, options) {
+    const logs = [];
+    this.createLog(`Kh\u1EDFi ch\u1EA1y VNPAY Invoice Driver cho H\u0110 ${info.invoiceSeries || ""} - ${info.invoiceNo || ""} (MST: ${info.sellerTaxCode})`, logs);
+    const sellerTaxCode = (info.sellerTaxCode || "").trim();
+    const lookupCode = (info.lookupCode || "").trim();
+    if (!sellerTaxCode) {
+      this.createLog("L\u1ED6I: Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode).", logs);
+      throw new Error("[VnpayDriver] Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) \u0111\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n VNPAY.");
+    }
+    if (!lookupCode) {
+      this.createLog("L\u1ED6I: Kh\xF4ng t\xECm th\u1EA5y M\xE3 tra c\u1EE9u trong XML h\xF3a \u0111\u01A1n.", logs);
+      throw new Error("[VnpayDriver] Kh\xF4ng t\xECm th\u1EA5y M\xE3 tra c\u1EE9u trong XML h\xF3a \u0111\u01A1n VNPAY.");
+    }
+    this.createLog(`Th\xF4ng tin tra c\u1EE9u: MST b\xEAn b\xE1n=${sellerTaxCode}, M\xE3 tra c\u1EE9u=${lookupCode}`, logs);
+    this.createLog("\u0110ang k\u1EBFt n\u1ED1i \u0111\u1EBFn C\u1ED5ng VNPAY Invoice (portal.vnpayinvoice.vn)...", logs);
+    try {
+      const result = await downloadOriginalVnpayPdf({
+        sellerTaxCode,
+        lookupCode,
+        invoiceNo: info.invoiceNo,
+        invoiceSeries: info.invoiceSeries
+      });
+      if (result.success && result.pdfBuffer) {
+        this.createLog(`T\u1EA3i PDF H\u0110\u0110T g\u1ED1c th\xE0nh c\xF4ng t\u1EEB VNPAY Invoice (${(result.pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: this.name,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64 || result.pdfBuffer.toString("base64"),
+          contentType: "application/pdf",
+          filename: result.filename || this.buildPdfFilename(info),
+          isFallback: false,
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
+      }
+      if (result.requiresCaptcha) {
+        this.createLog(`[L\u01AFU \xDD] C\u1ED5ng VNPAY Invoice y\xEAu c\u1EA7u x\xE1c th\u1EF1c reCAPTCHA v3. Cung c\u1EA5p \u0111\u01B0\u1EDDng d\u1EABn tra c\u1EE9u tr\u1EF1c ti\u1EBFp: ${buildVnpayPortalUrl(lookupCode, sellerTaxCode)}`, logs);
+        throw new Error(result.error || "C\u1ED5ng VNPAY Invoice y\xEAu c\u1EA7u x\xE1c th\u1EF1c reCAPTCHA.");
+      }
+    } catch (err) {
+      this.createLog(`L\u1ED7i khi g\u1ECDi c\u1ED5ng VNPAY: ${err.message}`, logs);
+      throw new Error(`[VnpayDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF tr\u1EF1c ti\u1EBFp t\u1EEB C\u1ED5ng VNPAY: ${err.message}`);
+    }
+    throw new Error("[VnpayDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB C\u1ED5ng VNPAY Invoice.");
+  }
+};
+
+// src/services/invoice-engine/drivers/LcsDriver.ts
+import axios8 from "axios";
+var LcsDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "LCS Soft E-Invoice Driver";
+    this.providerCode = "LCS";
+    this.metadata = {
+      name: "LCS Soft E-Invoice Driver",
+      providerCode: "LCS",
+      description: "Tra c\u1EE9u v\xE0 t\u1EA3i PDF H\u0110\u0110T t\u1EEB C\u1ED5ng th\xF4ng tin LCS Soft EIP (https://eip.lcssoft.com.vn) qua M\xE3 CQT c\u1EA5p v\xE0 MST b\xEAn b\xE1n",
+      sampleUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+      supportsCaptcha: true,
+      requiredFields: ["sellerTaxCode", "cqtCode"]
+    };
+  }
+  /**
+   * Nhận diện hóa đơn LCS Soft
+   */
+  canHandle(xmlData) {
+    if (typeof xmlData !== "string") {
+      return xmlData.provider === "LCS";
+    }
+    return detectProvider(xmlData) === "LCS";
+  }
+  /**
+   * Trích xuất thông tin hóa đơn LCS Soft từ XML
+   */
+  extractInfo(xmlData) {
+    const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst") || "0315018466";
+    const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten") || "C\xD4NG TY TNHH MTV CH\u1EBE T\xC1C V\xC0 KINH DOANH TRANG S\u1EE8C PNJ";
+    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TGT";
+    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
+    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
+    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon") || this.extractXmlTag(xmlData, "cqtCode");
+    let lookupCode = this.extractCustomField(xmlData, [
+      "M\xE3 tra c\u1EE9u",
+      "MaTraCuu",
+      "MTCuu",
+      "MTC",
+      "FKey",
+      "TransactionID"
+    ]);
+    if (!lookupCode) {
+      lookupCode = this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "InvoiceCode") || cqtCode;
+    }
+    const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
+    const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    return {
+      provider: this.providerCode,
+      providerName: "LCS Soft EIP (C\xF4ng ty TNHH L.C.S)",
+      sellerTaxCode,
+      sellerName,
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+      invoiceDate,
+      lookupCode: lookupCode || void 0,
+      lookupUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+      cqtCode: cqtCode || void 0,
+      totalAmount,
+      totalTaxAmount,
+      currency: this.extractXmlTag(xmlData, "DVTTe") || "VND",
+      rawXml: xmlData,
+      additionalData: {
+        msttcgp: "0302999571"
+      }
+    };
+  }
+  /**
+   * Tải PDF Hóa đơn gốc LCS Soft từ Cổng eip.lcssoft.com.vn
+   */
+  async fetchPdf(info, options) {
+    const logs = [];
+    this.createLog(`Kh\u1EDFi ch\u1EA1y LCS Soft E-Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo} (MST: ${info.sellerTaxCode})`, logs);
+    const client = axios8.create({
+      baseURL: "https://eip.lcssoft.com.vn",
+      timeout: options?.timeoutMs || 15e3,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://eip.lcssoft.com.vn/"
+      }
+    });
+    const lookupCode = (info.lookupCode || info.cqtCode || info.invoiceNo || "").trim();
+    try {
+      this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u tra c\u1EE9u \u0111\u1EBFn C\u1ED5ng LCS Soft EIP (M\xE3 tra c\u1EE9u: ${lookupCode})...`, logs);
+      const response = await client.post("/api/invoice/lookup", {
+        taxCode: info.sellerTaxCode,
+        invoiceNo: info.invoiceNo,
+        series: info.invoiceSeries,
+        lookupCode
+      }, {
+        responseType: "arraybuffer",
+        validateStatus: () => true
+      });
+      if (response.status === 200 && response.data && response.data.length > 500) {
+        const contentType = String(response.headers["content-type"] || "");
+        if (contentType.includes("pdf") || response.data.slice(0, 4).toString() === "%PDF") {
+          this.createLog(`T\u1EA3i PDF H\u0110\u0110T g\u1ED1c th\xE0nh c\xF4ng t\u1EEB LCS Soft EIP (${response.data.length} bytes)`, logs);
+          const pdfBuffer = Buffer.from(response.data);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer,
+            pdfBase64: pdfBuffer.toString("base64"),
+            contentType: "application/pdf",
+            filename: `LCS_HD_${info.sellerTaxCode}_${info.invoiceSeries}_${info.invoiceNo}.pdf`,
+            isFallback: false,
+            captchaSolved: void 0,
+            sourceUrl: "https://eip.lcssoft.com.vn/desktop/#/login",
+            executionLogs: logs
+          };
+        }
+      }
+      this.createLog(`C\u1ED5ng eip.lcssoft.com.vn y\xEAu c\u1EA7u phi\xEAn l\xE0m vi\u1EC7c ho\u1EB7c giao di\u1EC7n Desktop. T\u1EF1 \u0111\u1ED9ng k\xEDch ho\u1EA1t c\u01A1 ch\u1EBF Fallback ti\xEAu chu\u1EA9n.`, logs);
+    } catch (err) {
+      this.createLog(`L\u1ED7i k\u1EBFt n\u1ED1i C\u1ED5ng LCS Soft: ${err.message}`, logs);
+    }
+    throw new Error("LCS Soft EIP y\xEAu c\u1EA7u x\xE1c th\u1EF1c ho\u1EB7c \u0111\u0103ng nh\u1EADp desktop.");
+  }
+};
+
+// src/services/invoice-engine/drivers/MinvoiceDriver.ts
+var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "M-Invoice Driver";
+    this.providerCode = "MINVOICE";
+    this.metadata = {
+      name: "M-Invoice Driver",
+      providerCode: "MINVOICE",
+      description: "Tra c\u1EE9u & t\u1EA3i h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED g\u1ED1c M-Invoice (minvoice.vn) qua M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n v\xE0 S\u1ED1 b\u1EA3o m\u1EADt",
+      sampleUrl: "https://tracuuhoadon.minvoice.com.vn",
+      supportsCaptcha: false,
+      requiredFields: ["sellerTaxCode", "lookupCode"]
+    };
+    this.fallback = new GenericFallbackDriver();
+  }
+  canHandle(xmlData) {
+    if (typeof xmlData !== "string") {
+      return xmlData.provider === "MINVOICE";
+    }
+    return detectProvider(xmlData) === "MINVOICE" || /minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice|0106026495/i.test(xmlData);
+  }
+  extractInfo(xmlData) {
+    const sellerTaxCode = this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst");
+    const sellerName = this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten");
+    const invoiceNo = (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0");
+    const invoiceSeries = this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C24TMI";
+    const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
+    const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
+    const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
+    const details = extractLookupDetailsFromXml(xmlData);
+    let lookupCode = details.lookupCode || "";
+    if (!lookupCode) {
+      lookupCode = this.extractCustomField(xmlData, [
+        "S\u1ED1 b\u1EA3o m\u1EADt",
+        "SoBaoMat",
+        "so_baomat",
+        "CheckCode",
+        "checkCode",
+        "M\xE3 b\u1EA3o m\u1EADt",
+        "MaBaoMat",
+        "M\xE3 tra c\u1EE9u",
+        "MaTraCuu",
+        "MTCuu"
+      ]);
+    }
+    if (!lookupCode) {
+      lookupCode = this.extractXmlTag(xmlData, "SoBaoMat") || this.extractXmlTag(xmlData, "sobaomat") || this.extractXmlTag(xmlData, "CheckCode") || this.extractXmlTag(xmlData, "checkCode") || this.extractXmlTag(xmlData, "MaBaoMat") || this.extractXmlTag(xmlData, "MTCuu") || this.extractXmlTag(xmlData, "MaTraCuu");
+    }
+    if (!lookupCode) {
+      const match = xmlData.match(/(?:Số\s*bảo\s*mật|So\s*bao\s*mat|Mã\s*bảo\s*mật|CheckCode)\s*[:：=]\s*([A-Za-z0-9._-]+)/i);
+      if (match && match[1]) {
+        lookupCode = match[1].trim();
+      }
+    }
+    return {
+      provider: this.providerCode,
+      providerName: "M-Invoice (minvoice.vn)",
+      sellerTaxCode,
+      sellerName,
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+      invoiceDate,
+      cqtCode,
+      lookupCode: lookupCode.trim(),
+      lookupUrl: details.lookupUrl || "https://tracuuhoadon.minvoice.com.vn",
+      rawXml: xmlData,
+      additionalData: {
+        msttcgp: "0106026495",
+        soBaoMat: lookupCode.trim()
+      }
+    };
+  }
+  async fetchPdf(info, options) {
+    const logs = [];
+    const timeoutMs = options?.timeoutMs || 25e3;
+    this.createLog(`[M-Invoice] B\u1EAFt \u0111\u1EA7u tra c\u1EE9u h\xF3a \u0111\u01A1n: K\xFD hi\u1EC7u ${info.invoiceSeries}, S\u1ED1 ${info.invoiceNo}`, logs);
+    const sellerTaxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || "").trim();
+    const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || "").trim();
+    if (!sellerTaxCode) {
+      this.createLog(`[M-Invoice] Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode). Chuy\u1EC3n sang Render PDF chu\u1EA9n GDT.`, logs);
+      const fallbackRes2 = await this.fallback.fetchPdf(info, options);
+      return {
+        ...fallbackRes2,
+        provider: this.providerCode,
+        driverName: this.name,
+        executionLogs: [...logs, ...fallbackRes2.executionLogs]
+      };
+    }
+    if (!lookupCode) {
+      this.createLog(`[M-Invoice] H\xF3a \u0111\u01A1n kh\xF4ng c\xF3 S\u1ED1 b\u1EA3o m\u1EADt (lookupCode / checkCode). Chuy\u1EC3n sang Render PDF chu\u1EA9n GDT.`, logs);
+      const fallbackRes2 = await this.fallback.fetchPdf(info, options);
+      return {
+        ...fallbackRes2,
+        provider: this.providerCode,
+        driverName: this.name,
+        executionLogs: [...logs, ...fallbackRes2.executionLogs]
+      };
+    }
+    this.createLog(`[M-Invoice] G\u1EEDi y\xEAu c\u1EA7u t\u1EA3i PDF g\u1ED1c: MST ${sellerTaxCode}, S\u1ED1 b\u1EA3o m\u1EADt: ${lookupCode}`, logs);
+    try {
+      const targetUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+        sellerTaxCode
+      )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const resp = await fetch(targetUrl, {
+        method: "GET",
+        headers: {
+          "Accept": "application/pdf, application/octet-stream, */*",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Referer": "https://tracuuhoadon.minvoice.com.vn/",
+          "Origin": "https://tracuuhoadon.minvoice.com.vn"
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const arrayBuf = await resp.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.length >= 500 && buffer.subarray(0, 10).toString("latin1").includes("%PDF")) {
+          this.createLog(`[M-Invoice] \u0110\xE3 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB server M-Invoice (${(buffer.length / 1024).toFixed(1)} KB)`, logs);
+          const filename = this.buildPdfFilename(info);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: buffer,
+            pdfBase64: buffer.toString("base64"),
+            contentType: "application/pdf",
+            filename,
+            isFallback: false,
+            sourceUrl: targetUrl,
+            executionLogs: logs
+          };
+        } else {
+          this.createLog(`[M-Invoice] Ph\u1EA3n h\u1ED3i t\u1EEB server kh\xF4ng ph\u1EA3i \u0111\u1ECBnh d\u1EA1ng PDF h\u1EE3p l\u1EC7 (Size: ${buffer.length} bytes)`, logs);
+        }
+      } else {
+        this.createLog(`[M-Invoice] Server ph\u1EA3n h\u1ED3i m\xE3 tr\u1EA1ng th\xE1i HTTP ${resp.status} ${resp.statusText}`, logs);
+      }
+    } catch (err) {
+      this.createLog(`[M-Invoice] L\u1ED7i k\u1EBFt n\u1ED1i t\u1EDBi server M-Invoice: ${err.message}`, logs);
+    }
+    this.createLog(`[M-Invoice] Chuy\u1EC3n \u0111\u1ED5i sang b\u1ED9 t\u1EA1o PDF vector ch\u1EA5t l\u01B0\u1EE3ng cao chu\u1EA9n N\u0110 123/2020/N\u0110-CP`, logs);
+    const fallbackRes = await this.fallback.fetchPdf(info, options);
+    return {
+      ...fallbackRes,
+      provider: this.providerCode,
+      driverName: this.name,
+      executionLogs: [...logs, ...fallbackRes.executionLogs]
+    };
+  }
+  /**
+   * Tải tệp XML hóa đơn gốc từ cổng M-Invoice
+   */
+  async downloadXml(sellerTaxCode, lookupCode, timeoutMs = 2e4) {
+    try {
+      const targetUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/DownloadXml?masothue=${encodeURIComponent(
+        sellerTaxCode.trim()
+      )}&sobaomat=${encodeURIComponent(lookupCode.trim())}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const resp = await fetch(targetUrl, {
+        method: "GET",
+        headers: {
+          "Accept": "application/xml, text/xml, application/zip, */*",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "Referer": "https://tracuuhoadon.minvoice.com.vn/",
+          "Origin": "https://tracuuhoadon.minvoice.com.vn"
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const arrayBuf = await resp.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.length > 50) {
+          return buffer;
+        }
+      }
+    } catch (err) {
+      console.error("[MinvoiceDriver] L\u1ED7i downloadXml:", err);
+    }
+    return null;
+  }
+};
+
+// src/services/thaiSonInvoiceService.ts
+import { GoogleGenAI as GoogleGenAI3 } from "@google/genai";
+var THAISON_PORTAL_URL = "https://einvoice.vn/tra-cuu";
+var aiClient = null;
+function getGenAI2(customApiKey) {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiClient || customApiKey) {
+    aiClient = new GoogleGenAI3({ apiKey });
+  }
+  return aiClient;
+}
+async function solveThaiSonCaptcha(imageBuffer, customApiKey) {
+  const ai = getGenAI2(customApiKey);
+  const base64Data = imageBuffer.toString("base64");
+  if (ai) {
+    try {
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                inlineData: {
+                  mimeType: "image/gif",
+                  data: base64Data
+                }
+              },
+              {
+                text: "This is a captcha image from Thai Son e-invoice portal (einvoice.vn). Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation."
+              }
+            ]
+          });
+          const text = (response.text || "").replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+          if (text.length >= 4) {
+            return text;
+          }
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  try {
+    const code = await solveCaptchaWithGemini(
+      `data:image/gif;base64,${base64Data}`,
+      "This is a captcha image. Extract and return ONLY the 4 to 6 alphanumeric characters without spaces."
+    );
+    const cleaned = code.replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+    if (cleaned.length >= 4) return cleaned;
+  } catch {
+  }
+  try {
+    const tResult = await solveCaptchaWithTesseract(imageBuffer);
+    const cleaned = tResult.code.replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+    if (cleaned.length >= 4) return cleaned;
+  } catch {
+  }
+  return "";
+}
+async function downloadOriginalThaiSonPdf(params) {
+  const lookupCode = params.lookupCode.trim();
+  const sellerTaxCode = params.sellerTaxCode ? params.sellerTaxCode.trim() : "THAISON";
+  const invoiceNo = (params.invoiceNo || "1").padStart(7, "0");
+  const invoiceSeries = params.invoiceSeries || "EINVOICE";
+  let lastError = "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u1ED5ng tra c\u1EE9u Th\xE1i S\u01A1n";
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[Th\xE1i S\u01A1n] L\u1EA7n th\u1EED ${attempt}/${maxAttempts}: T\u1EA3i trang tra c\u1EE9u v\xE0 l\u1EA5y Captcha...`);
+      const initResp = await fetch(THAISON_PORTAL_URL, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+      });
+      if (!initResp.ok) {
+        throw new Error(`C\u1ED5ng Th\xE1i S\u01A1n tr\u1EA3 v\u1EC1 HTTP ${initResp.status}`);
+      }
+      const rawSetCookie = initResp.headers.get("set-cookie") || "";
+      const cookies = rawSetCookie.split(",").map((c) => c.split(";")[0].trim()).filter((c) => c.includes("=")).join("; ");
+      const html = await initResp.text();
+      const tokenMatch = html.match(/id=[\"\x27]CaptchaDeText[\"\x27][^>]*value=[\"\x27]([^\"]+)[\"\x27]/i);
+      const token = tokenMatch ? tokenMatch[1] : "";
+      if (!token) {
+        throw new Error("Kh\xF4ng t\xECm th\u1EA5y CaptchaDeText tr\xEAn c\u1ED5ng Th\xE1i S\u01A1n");
+      }
+      const imgResp = await fetch(`https://einvoice.vn/DefaultCaptcha/Generate?t=${token}`, {
+        headers: {
+          "Cookie": cookies,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": THAISON_PORTAL_URL
+        }
+      });
+      if (!imgResp.ok) {
+        throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c \u1EA3nh Captcha: HTTP ${imgResp.status}`);
+      }
+      const imgBuffer = Buffer.from(await imgResp.arrayBuffer());
+      const captchaCode = await solveThaiSonCaptcha(imgBuffer, params.customApiKey);
+      if (!captchaCode) {
+        console.warn(`[Th\xE1i S\u01A1n] L\u1EA7n ${attempt}: Kh\xF4ng gi\u1EA3i \u0111\u01B0\u1EE3c Captcha, th\u1EED l\u1EA1i...`);
+        continue;
+      }
+      console.log(`[Th\xE1i S\u01A1n] L\u1EA7n ${attempt}: \u0110\xE3 gi\u1EA3i Captcha -> "${captchaCode}". G\u1EEDi y\xEAu c\u1EA7u tra c\u1EE9u...`);
+      const postBody = new URLSearchParams();
+      postBody.append("MaNhanHoaDon", lookupCode);
+      postBody.append("CaptchaDeText", token);
+      postBody.append("CaptchaInputText", captchaCode);
+      const postResp = await fetch(THAISON_PORTAL_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Cookie": cookies,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": THAISON_PORTAL_URL
+        },
+        body: postBody.toString()
+      });
+      const postHtml = await postResp.text();
+      if (postHtml.includes("M\xE3 ki\u1EC3m tra kh\xF4ng \u0111\xFAng")) {
+        console.warn(`[Th\xE1i S\u01A1n] L\u1EA7n ${attempt}: M\xE3 ki\u1EC3m tra kh\xF4ng \u0111\xFAng, th\u1EED l\u1EA1i v\u1EDBi m\xE3 m\u1EDBi...`);
+        lastError = "M\xE3 Captcha nh\u1EADn di\u1EC7n ch\u01B0a kh\u1EDBp";
+        continue;
+      }
+      if (postHtml.includes("kh\xF4ng \u0111\xFAng") || postHtml.includes("kh\xF4ng t\xECm th\u1EA5y") || postHtml.includes("kh\xF4ng t\u1ED3n t\u1EA1i")) {
+        const errMatch = postHtml.match(/text-danger[^>]*>([^<]+)</i);
+        const errDetail = errMatch ? errMatch[1].trim() : "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c kh\xF4ng t\u1ED3n t\u1EA1i tr\xEAn h\u1EC7 th\u1ED1ng Th\xE1i S\u01A1n.";
+        throw new Error(errDetail);
+      }
+      console.log(`[Th\xE1i S\u01A1n] \u0110ang t\u1EA3i file PDF g\u1ED1c...`);
+      const pdfResp = await fetch("https://einvoice.vn/tra-cuu/tai-hoa-don-dien-tu?format=pdf", {
+        headers: {
+          "Cookie": cookies,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": THAISON_PORTAL_URL
+        }
+      });
+      if (!pdfResp.ok) {
+        throw new Error(`T\u1EA3i PDF tr\u1EA3 v\u1EC1 HTTP ${pdfResp.status}`);
+      }
+      const pdfArrayBuf = await pdfResp.arrayBuffer();
+      const pdfBuffer = Buffer.from(pdfArrayBuf);
+      if (pdfBuffer.length < 500 || !pdfBuffer.subarray(0, 10).toString("latin1").includes("%PDF")) {
+        throw new Error("D\u1EEF li\u1EC7u t\u1EA3i v\u1EC1 t\u1EEB c\u1ED5ng Th\xE1i S\u01A1n kh\xF4ng ph\u1EA3i t\u1EC7p PDF h\u1EE3p l\u1EC7");
+      }
+      const filename = `HoaDon_ThaiSon_${sellerTaxCode}_${invoiceSeries}_${invoiceNo}.pdf`;
+      return {
+        success: true,
+        filename,
+        contentType: "application/pdf",
+        pdfBuffer,
+        pdfBase64: pdfBuffer.toString("base64"),
+        sourceUrl: THAISON_PORTAL_URL
+      };
+    } catch (err) {
+      console.error(`[Th\xE1i S\u01A1n] L\u1ED7i l\u1EA7n ${attempt}:`, err.message);
+      lastError = err.message;
+    }
+  }
+  throw new Error(`T\u1EA3i h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n th\u1EA5t b\u1EA1i sau ${maxAttempts} l\u1EA7n th\u1EED: ${lastError}`);
+}
+async function downloadOriginalThaiSonXml(params) {
+  const pdfResult = await downloadOriginalThaiSonPdf(params);
+  return {
+    success: true,
+    filename: pdfResult.filename.replace(/\.pdf$/, ".xml"),
+    xmlContent: ""
+  };
+}
 
 // src/services/invoice-engine/drivers/ThaiSonDriver.ts
 var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
@@ -9071,7 +11874,7 @@ var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
       providerCode: "THAISON",
       description: "Tra c\u1EE9u & x\u1EED l\xFD h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED Th\xE1i S\u01A1n (einvoice.vn) qua M\xE3 tra c\u1EE9u / MST b\xEAn b\xE1n",
       sampleUrl: "https://einvoice.vn/tra-cuu",
-      supportsCaptcha: false,
+      supportsCaptcha: true,
       requiredFields: ["lookupCode", "sellerTaxCode"]
     };
     this.fallback = new GenericFallbackDriver();
@@ -9112,10 +11915,36 @@ var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi \u0111\u1ED9ng x\u1EED l\xFD H\u0110\u0110T Th\xE1i S\u01A1n E-Invoice: S\u1ED1 ${info.invoiceNo}, K\xFD hi\u1EC7u ${info.invoiceSeries}`, logs);
-    if (info.lookupCode) {
-      this.createLog(`M\xE3 tra c\u1EE9u Th\xE1i S\u01A1n: "${info.lookupCode}"`, logs);
+    if (info.lookupCode && !options?.forceFallback) {
+      try {
+        this.createLog(`T\xECm th\u1EA5y m\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n: "${info.lookupCode}"`, logs);
+        this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u gi\u1EA3i Captcha & t\u1EA3i PDF g\u1ED1c t\u1EEB c\u1ED5ng Th\xE1i S\u01A1n (einvoice.vn)...`, logs);
+        const result = await downloadOriginalThaiSonPdf({
+          lookupCode: info.lookupCode,
+          sellerTaxCode: info.sellerTaxCode,
+          invoiceNo: info.invoiceNo,
+          invoiceSeries: info.invoiceSeries
+        });
+        this.createLog(`\u0110\xE3 t\u1EA3i th\xE0nh c\xF4ng t\u1EC7p PDF g\u1ED1c t\u1EEB c\u1ED5ng Th\xE1i S\u01A1n: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
+        return {
+          success: true,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64,
+          filename: result.filename,
+          contentType: "application/pdf",
+          provider: this.providerCode,
+          driverName: this.name,
+          isFallback: false,
+          captchaSolved: "auto",
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
+      } catch (err) {
+        this.createLog(`T\u1EA3i PDF g\u1ED1c Th\xE1i S\u01A1n ch\u01B0a th\xE0nh c\xF4ng: ${err.message}. T\u1EF1 \u0111\u1ED9ng chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n vector chu\u1EA9n Q\u0110 1450.`, logs);
+      }
+    } else if (!info.lookupCode) {
+      this.createLog(`H\xF3a \u0111\u01A1n XML kh\xF4ng ch\u1EE9a m\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n. Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n vector Q\u0110 1450.`, logs);
     }
-    this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF vector \u0111\u1ED9 ph\xE2n gi\u1EA3i cao chu\u1EA9n N\u0110 123/2020/N\u0110-CP`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,
@@ -9125,6 +11954,185 @@ var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
     };
   }
 };
+
+// src/services/cyberbillInvoiceService.ts
+import { GoogleGenAI as GoogleGenAI4 } from "@google/genai";
+var CYBERBILL_PORTAL_URL = "https://cyberbill.vn/tra-cuu";
+var CYBERBILL_API_BASE = "https://bill1app.xcyber.vn/api/services/hddt/TraCuuHoaDon";
+var aiClient2 = null;
+function getGenAI3(customApiKey) {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  if (!aiClient2 || customApiKey) {
+    aiClient2 = new GoogleGenAI4({ apiKey });
+  }
+  return aiClient2;
+}
+async function solveCyberBillCaptcha(imageDataUri, customApiKey) {
+  const ai = getGenAI3(customApiKey);
+  if (ai) {
+    try {
+      const match = imageDataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+      const mimeType = match ? match[1] : "image/jpeg";
+      const base64Data = match ? match[2] : imageDataUri;
+      const candidateModels = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-latest"];
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: "This is a captcha image from CyberBill e-invoice portal. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation."
+              }
+            ]
+          });
+          const text = (response.text || "").replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+          if (text.length >= 4) {
+            return text;
+          }
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  try {
+    const code = await solveCaptchaWithGemini(
+      imageDataUri,
+      "This is a captcha image. Extract and return ONLY the 4 to 6 alphanumeric characters without spaces."
+    );
+    const cleaned = code.replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+    if (cleaned.length >= 4) return cleaned;
+  } catch {
+  }
+  try {
+    const tResult = await solveCaptchaWithTesseract(imageDataUri);
+    const cleaned = tResult.code.replace(/[^A-Za-z0-9]/g, "").trim().toUpperCase();
+    if (cleaned.length >= 4) return cleaned;
+  } catch {
+  }
+  return "";
+}
+async function downloadOriginalCyberbillPdf(params) {
+  const sellerTaxCode = params.sellerTaxCode.trim();
+  const lookupCode = params.lookupCode.trim();
+  const invoiceNo = (params.invoiceNo || "1").padStart(7, "0");
+  const invoiceSeries = params.invoiceSeries || "CYBERBILL";
+  let lastError = "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u1ED5ng tra c\u1EE9u CyberBill";
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[CyberBill] L\u1EA7n th\u1EED ${attempt}/${maxAttempts}: Kh\u1EDFi t\u1EA1o phi\xEAn tra c\u1EE9u v\xE0 l\u1EA5y Captcha...`);
+      const capResp = await fetch(`${CYBERBILL_API_BASE}/RefreshCaptcha`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        },
+        body: JSON.stringify({})
+      });
+      if (!capResp.ok) {
+        throw new Error(`C\u1ED5ng CyberBill tr\u1EA3 v\u1EC1 HTTP ${capResp.status}`);
+      }
+      const capData = await capResp.json();
+      const captchaKey = capData?.result?.key;
+      const captchaImage = capData?.result?.image;
+      if (!captchaKey || !captchaImage) {
+        throw new Error("Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c m\xE3 phi\xEAn Captcha t\u1EEB CyberBill");
+      }
+      const captchaCode = await solveCyberBillCaptcha(captchaImage, params.customApiKey);
+      if (!captchaCode) {
+        console.warn(`[CyberBill] L\u1EA7n ${attempt}: Kh\xF4ng gi\u1EA3i \u0111\u01B0\u1EE3c Captcha, th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh m\u1EDBi...`);
+        continue;
+      }
+      console.log(`[CyberBill] L\u1EA7n ${attempt}: \u0110\xE3 gi\u1EA3i Captcha th\xE0nh c\xF4ng -> "${captchaCode}". Th\u1EF1c hi\u1EC7n tra c\u1EE9u...`);
+      const traCuuResp = await fetch(`${CYBERBILL_API_BASE}/TraCuu`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://cyberbill.vn/"
+        },
+        body: JSON.stringify({
+          key: captchaKey,
+          captcha: captchaCode,
+          doanhNghiep_MST: sellerTaxCode,
+          maSoBiMat: lookupCode
+        })
+      });
+      if (!traCuuResp.ok) {
+        throw new Error(`TraCuu tr\u1EA3 v\u1EC1 l\u1ED7i HTTP ${traCuuResp.status}`);
+      }
+      const traCuuData = await traCuuResp.json();
+      const result = traCuuData?.result;
+      if (!result) {
+        throw new Error("Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c d\u1EEF li\u1EC7u ph\u1EA3n h\u1ED3i t\u1EEB CyberBill");
+      }
+      if (result.status === 2 && result.message && result.message.includes("x\xE1c th\u1EF1c kh\xF4ng h\u1EE3p l\u1EC7")) {
+        console.warn(`[CyberBill] L\u1EA7n ${attempt}: M\xE3 x\xE1c th\u1EF1c sai, l\xE0m m\u1EDBi Captcha...`);
+        lastError = "M\xE3 Captcha nh\u1EADn di\u1EC7n ch\u01B0a kh\u1EDBp";
+        continue;
+      }
+      if (result.message && (result.message.includes("kh\xF4ng t\xECm th\u1EA5y") || result.message.includes("kh\xF4ng t\u1ED3n t\u1EA1i"))) {
+        throw new Error(`C\u1ED5ng CyberBill ph\u1EA3n h\u1ED3i: ${result.message}`);
+      }
+      let pdfBase64 = "";
+      let htmlContent = result.html || "";
+      console.log(`[CyberBill] \u0110ang t\u1EA3i file PDF g\u1ED1c qua DownloadPdf...`);
+      const downloadResp = await fetch(`${CYBERBILL_API_BASE}/DownloadPdf`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Referer": "https://cyberbill.vn/"
+        },
+        body: JSON.stringify({
+          key: captchaKey,
+          doanhNghiep_MST: sellerTaxCode,
+          maSoBiMat: lookupCode
+        })
+      });
+      if (downloadResp.ok) {
+        const downloadData = await downloadResp.json();
+        if (downloadData?.result?.fileData) {
+          pdfBase64 = downloadData.result.fileData;
+        }
+      }
+      if (!pdfBase64 && result.base64) {
+        pdfBase64 = result.base64;
+      }
+      if (!pdfBase64 && !htmlContent) {
+        throw new Error(result.message || "Kh\xF4ng nh\u1EADn \u0111\u01B0\u1EE3c d\u1EEF li\u1EC7u t\u1EC7p PDF ho\u1EB7c HTML t\u1EEB CyberBill.");
+      }
+      let pdfBuffer;
+      if (pdfBase64) {
+        pdfBuffer = Buffer.from(pdfBase64, "base64");
+      } else {
+        pdfBuffer = Buffer.from(htmlContent, "utf-8");
+      }
+      const cleanFilename = `HoaDon_CyberBill_${sellerTaxCode}_${invoiceSeries}_${invoiceNo}.pdf`;
+      return {
+        success: true,
+        filename: cleanFilename,
+        contentType: "application/pdf",
+        pdfBuffer,
+        pdfBase64: pdfBuffer.toString("base64"),
+        sourceUrl: CYBERBILL_PORTAL_URL,
+        htmlContent
+      };
+    } catch (err) {
+      console.error(`[CyberBill] L\u1ED7i l\u1EA7n ${attempt}:`, err.message);
+      lastError = err.message;
+    }
+  }
+  throw new Error(`T\u1EA3i h\xF3a \u0111\u01A1n CyberBill th\u1EA5t b\u1EA1i sau ${maxAttempts} l\u1EA7n th\u1EED: ${lastError}`);
+}
 
 // src/services/invoice-engine/drivers/CyberBillDriver.ts
 var CyberBillDriver = class extends BaseInvoiceProviderDriver {
@@ -9137,7 +12145,7 @@ var CyberBillDriver = class extends BaseInvoiceProviderDriver {
       providerCode: "CYBERBILL",
       description: "Tra c\u1EE9u & x\u1EED l\xFD h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED CyberBill (cyberbill.vn) qua M\xE3 tra c\u1EE9u / MST b\xEAn b\xE1n",
       sampleUrl: "https://cyberbill.vn/tra-cuu",
-      supportsCaptcha: false,
+      supportsCaptcha: true,
       requiredFields: ["lookupCode", "sellerTaxCode"]
     };
     this.fallback = new GenericFallbackDriver();
@@ -9178,10 +12186,36 @@ var CyberBillDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi \u0111\u1ED9ng x\u1EED l\xFD H\u0110\u0110T CyberBill: S\u1ED1 ${info.invoiceNo}, K\xFD hi\u1EC7u ${info.invoiceSeries}`, logs);
-    if (info.lookupCode) {
-      this.createLog(`M\xE3 tra c\u1EE9u CyberBill: "${info.lookupCode}"`, logs);
+    if (info.lookupCode && info.sellerTaxCode && !options?.forceFallback) {
+      try {
+        this.createLog(`T\xECm th\u1EA5y m\xE3 tra c\u1EE9u CyberBill: "${info.lookupCode}", MST b\xEAn b\xE1n: "${info.sellerTaxCode}"`, logs);
+        this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u gi\u1EA3i Captcha & t\u1EA3i PDF g\u1ED1c t\u1EEB m\xE1y ch\u1EE7 CyberBill (bill1app.xcyber.vn)...`, logs);
+        const result = await downloadOriginalCyberbillPdf({
+          sellerTaxCode: info.sellerTaxCode,
+          lookupCode: info.lookupCode,
+          invoiceNo: info.invoiceNo,
+          invoiceSeries: info.invoiceSeries
+        });
+        this.createLog(`\u0110\xE3 t\u1EA3i th\xE0nh c\xF4ng t\u1EC7p PDF g\u1ED1c t\u1EEB c\u1ED5ng CyberBill: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
+        return {
+          success: true,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64,
+          filename: result.filename,
+          contentType: "application/pdf",
+          provider: this.providerCode,
+          driverName: this.name,
+          isFallback: false,
+          captchaSolved: "auto",
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
+      } catch (err) {
+        this.createLog(`T\u1EA3i PDF g\u1ED1c CyberBill ch\u01B0a th\xE0nh c\xF4ng: ${err.message}. T\u1EF1 \u0111\u1ED9ng chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n vector chu\u1EA9n Q\u0110 1450.`, logs);
+      }
+    } else if (!info.lookupCode) {
+      this.createLog(`H\xF3a \u0111\u01A1n XML kh\xF4ng ch\u1EE9a m\xE3 tra c\u1EE9u CyberBill. Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n vector Q\u0110 1450.`, logs);
     }
-    this.createLog(`Chuy\u1EC3n sang b\u1ED9 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF vector \u0111\u1ED9 ph\xE2n gi\u1EA3i cao chu\u1EA9n N\u0110 123/2020/N\u0110-CP`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,
@@ -9203,11 +12237,14 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
     this.registerDriver(new MisaDriver());
     this.registerDriver(new ViettelDriver());
     this.registerDriver(new FourSiDriver());
+    this.registerDriver(new LcsDriver());
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
+    this.registerDriver(new MinvoiceDriver());
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());
+    this.registerDriver(new VnpayDriver());
   }
   static {
     this.instance = null;
@@ -9387,8 +12424,323 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 // src/services/invoice-engine/index.ts
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
+// src/services/vnptInvoiceService.ts
+import axios9 from "axios";
+import https3 from "https";
+import * as cheerio3 from "cheerio";
+var vnptHttpsAgent = new https3.Agent({
+  keepAlive: true,
+  maxSockets: 30,
+  keepAliveMsecs: 3e4
+});
+var vnptClient = axios9.create({
+  httpsAgent: vnptHttpsAgent,
+  timeout: 25e3
+});
+var vnptInvoiceCache = /* @__PURE__ */ new Map();
+var inFlightLookups = /* @__PURE__ */ new Map();
+function getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl) {
+  const cleanMst = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
+  const cleanCode = (lookupCode || "").trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  let portalBase = (portalUrl || "").trim().replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+  if (!portalBase) {
+    portalBase = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  return `${portalBase}|${cleanCode}`;
+}
+function getCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  const entry = vnptInvoiceCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > 2 * 60 * 60 * 1e3) {
+    vnptInvoiceCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+function setCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl, entry) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  vnptInvoiceCache.set(key, entry);
+}
+async function lookupOriginalVnptInvoice(params) {
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u VNPT kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng");
+  const portal = (params.lookupUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn")).replace(/\/+$/, "");
+  const cacheKey = getVnptCacheKey(params.sellerTaxCode, lookupCode, portal);
+  if (!params.forceRefresh) {
+    const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (cached && cached.htmlContent) {
+      console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 t\u1EEB Cache t\u1EE9c th\xEC cho m\xE3: ${lookupCode}`);
+      return {
+        success: true,
+        htmlContent: cached.htmlContent,
+        checkCode: cached.checkCode,
+        pdfDownloadUrl: `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(cached.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`,
+        portalUrl: portal,
+        isCached: true,
+        invoiceInfo: cached.invoiceInfo
+      };
+    }
+  }
+  if (inFlightLookups.has(cacheKey)) {
+    console.log(`[VNPT Speed] T\xE1i s\u1EED d\u1EE5ng ti\u1EBFn tr\xECnh tra c\u1EE9u \u0111ang ch\u1EA1y cho m\xE3: ${lookupCode}`);
+    return inFlightLookups.get(cacheKey);
+  }
+  const lookupPromise = (async () => {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    };
+    const maxAttempts = 2;
+    let lastError = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const t0 = Date.now();
+        console.log(`[VNPT] B\u1EAFt \u0111\u1EA7u tra c\u1EE9u t\u1ED1i \u01B0u l\u1EA7n ${attempt}/${maxAttempts} (M\xE3: ${lookupCode}, C\u1ED5ng: ${portal})...`);
+        const page = await vnptClient.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
+          headers,
+          timeout: 1e4,
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
+        const $ = cheerio3.load(page.data);
+        const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
+        const captcha = await vnptClient.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
+          responseType: "arraybuffer",
+          timeout: 1e4
+        });
+        const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const tAiStart = Date.now();
+        const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data), {
+          prompt: VNPT_CAPTCHA_PROMPT
+        })).code;
+        console.log(`[VNPT Speed] Gi\u1EA3i Captcha trong ${Date.now() - tAiStart}ms: "${captchaCode}"`);
+        const form = new URLSearchParams({
+          __RequestVerificationToken: token,
+          strFkey: lookupCode,
+          captch: captchaCode,
+          submit: ""
+        });
+        const result = await vnptClient.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+          headers: {
+            ...headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+            Cookie: sessionCookie
+          },
+          maxRedirects: 5,
+          timeout: 2e4,
+          responseType: "text",
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const html = String(result.data || "");
+        const isCaptchaError = /captcha|mã xác thực không đúng|sai mã xác thực|không chính xác/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html);
+        if (isCaptchaError) {
+          lastError = "VNPT b\xE1o sai m\xE3 x\xE1c th\u1EF1c Captcha.";
+          console.warn(`[VNPT] L\u1EA7n ${attempt} sai Captcha, \u0111ang th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh m\u1EDBi...`);
+          continue;
+        }
+        const postCookies = (result.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const finalCookies = [...sessionCookie.split("; ").filter(Boolean), ...postCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const $search = cheerio3.load(html);
+        let checkCode = "";
+        const onclickAttr = $search('a[onclick*="ajxCall4Portal"]').attr("onclick") || "";
+        const matchOnclick = onclickAttr.match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (matchOnclick) {
+          checkCode = matchOnclick[1];
+        }
+        if (!checkCode) {
+          const downloadHref = $search('a[href*="downloadPDF"]').attr("href") || "";
+          const matchHref = downloadHref.match(/checkCode=([^&"']+)/);
+          if (matchHref) {
+            checkCode = decodeURIComponent(matchHref[1]);
+          }
+        }
+        let invoiceInfo = void 0;
+        const firstRow = $search("table tr").filter((_, tr) => $search(tr).find("td").length >= 5).first();
+        if (firstRow.length > 0) {
+          const tds = firstRow.find("td");
+          invoiceInfo = {
+            name: $search(tds[1]).text().trim(),
+            template: $search(tds[2]).text().trim(),
+            series: $search(tds[3]).text().trim(),
+            number: $search(tds[4]).text().trim(),
+            totalAmount: $search(tds[5]).text().trim(),
+            issueDate: $search(tds[6]).text().trim(),
+            status: $search(tds[7]).text().trim(),
+            cqtStatus: $search(tds[8]).text().trim()
+          };
+        }
+        let fullInvoiceHtml = "";
+        let prefetchedPdfBuffer = void 0;
+        if (checkCode) {
+          const previewPayload = new URLSearchParams({
+            checkCode,
+            fkey: lookupCode,
+            nameCus: ""
+          });
+          const previewPromise = vnptClient.post(`${portal}/HomeNoLogin/ajxPreview/`, previewPayload.toString(), {
+            headers: {
+              ...headers,
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+              Cookie: finalCookies
+            },
+            timeout: 2e4
+          });
+          const pdfDownloadUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+          const pdfPromise = vnptClient.get(pdfDownloadUrl, {
+            headers: {
+              ...headers,
+              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+              Cookie: finalCookies
+            },
+            responseType: "arraybuffer",
+            timeout: 2e4
+          });
+          const [previewRes, pdfRes] = await Promise.allSettled([previewPromise, pdfPromise]);
+          if (previewRes.status === "fulfilled" && previewRes.value.data?.str) {
+            fullInvoiceHtml = String(previewRes.value.data.str);
+            if (!/<base /i.test(fullInvoiceHtml)) {
+              if (/<head([^>]*)>/i.test(fullInvoiceHtml)) {
+                fullInvoiceHtml = fullInvoiceHtml.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
+              } else {
+                fullInvoiceHtml = `<base href="${portal}/">
+` + fullInvoiceHtml;
+              }
+            }
+          }
+          if (pdfRes.status === "fulfilled" && pdfRes.value.data) {
+            const buf = Buffer.from(pdfRes.value.data);
+            if (buf.length > 1e3 && buf.slice(0, 5).toString().startsWith("%PDF")) {
+              prefetchedPdfBuffer = buf;
+              console.log(`[VNPT Speed] \u0110\xE3 n\u1EA1p s\u1EB5n file PDF g\u1ED1c (${buf.length} bytes) v\xE0o cache song song v\u1EDBi HTML!`);
+            }
+          }
+        }
+        if (!fullInvoiceHtml) {
+          fullInvoiceHtml = html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
+        }
+        const cacheEntry = {
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || "",
+          portalUrl: portal,
+          pdfBuffer: prefetchedPdfBuffer,
+          cookies: finalCookies,
+          invoiceInfo,
+          cachedAt: Date.now()
+        };
+        setCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal, cacheEntry);
+        console.log(`[VNPT Speed] Ho\xE0n t\u1EA5t tra c\u1EE9u t\u1ED5ng c\u1ED9ng trong ${Date.now() - t0}ms!`);
+        return {
+          success: true,
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || void 0,
+          pdfDownloadUrl: checkCode ? `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}` : void 0,
+          portalUrl: portal,
+          isCached: false,
+          invoiceInfo
+        };
+      } catch (err) {
+        lastError = err.message || String(err);
+        console.warn(`[VNPT] L\u1ED7i tra c\u1EE9u l\u1EA7n ${attempt}:`, lastError);
+      }
+    }
+    throw new Error(`Tra c\u1EE9u h\xF3a \u0111\u01A1n g\u1ED1c VNPT th\u1EA5t b\u1EA1i: ${lastError || "VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n."}`);
+  })();
+  inFlightLookups.set(cacheKey, lookupPromise);
+  try {
+    return await lookupPromise;
+  } finally {
+    inFlightLookups.delete(cacheKey);
+  }
+}
+async function downloadOriginalVnptPdf(params) {
+  let portal = params.portalUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn");
+  portal = portal.replace(/\/+$/, "");
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  const cleanShd = params.invoiceNumber ? String(params.invoiceNumber).padStart(7, "0") : lookupCode.slice(0, 16);
+  const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+  if (cached?.pdfBuffer && cached.pdfBuffer.length > 1e3) {
+    console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 PDF g\u1ED1c t\u1EEB b\u1ED9 nh\u1EDB \u0111\u1EC7m (0ms delay)!`);
+    return {
+      data: cached.pdfBuffer,
+      filename: `HoaDon_VNPT_${cleanShd}.pdf`,
+      contentType: "application/pdf"
+    };
+  }
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+    Referer: `${portal}/HomeNoLogin/SearchByFkey/`
+  };
+  let validPdfBuffer = null;
+  const checkCode = params.checkCode && params.checkCode !== "undefined" && params.checkCode !== "null" ? params.checkCode.trim() : cached?.checkCode;
+  const cookies = cached?.cookies || "";
+  if (checkCode && cookies) {
+    const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+    console.log(`[VNPT Speed] T\u1EA3i PDF tr\u1EF1c ti\u1EBFp b\u1EB1ng checkCode v\xE0 cookies c\xF3 s\u1EB5n: ${pdfUrl}`);
+    try {
+      const res = await vnptClient.get(pdfUrl, {
+        headers: { ...headers, Cookie: cookies },
+        responseType: "arraybuffer",
+        timeout: 15e3,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1e3) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
+          validPdfBuffer = tempBuf;
+          if (cached) cached.pdfBuffer = tempBuf;
+          console.log(`[VNPT Speed] T\u1EA3i nhanh PDF th\xE0nh c\xF4ng (${validPdfBuffer.length} bytes)!`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[VNPT] Kh\xF4ng th\u1EC3 t\u1EA3i b\u1EB1ng cookies c\xF3 s\u1EB5n: ${err.message}.`);
+    }
+  }
+  if (!validPdfBuffer) {
+    console.log(`[VNPT Speed] Ch\u01B0a c\xF3 PDF trong cache, k\xEDch ho\u1EA1t tra c\u1EE9u nhanh \u0111\u1EC3 l\u1EA5y PDF...`);
+    const lookupRes = await lookupOriginalVnptInvoice({
+      lookupCode,
+      sellerTaxCode: params.sellerTaxCode,
+      lookupUrl: portal
+    });
+    const refreshedCache = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (refreshedCache?.pdfBuffer && refreshedCache.pdfBuffer.length > 1e3) {
+      validPdfBuffer = refreshedCache.pdfBuffer;
+    } else if (lookupRes.checkCode) {
+      const finalCookies = refreshedCache?.cookies || "";
+      const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+      const res = await vnptClient.get(freshPdfUrl, {
+        headers: { ...headers, Cookie: finalCookies },
+        responseType: "arraybuffer",
+        timeout: 2e4,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1e3) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
+          validPdfBuffer = tempBuf;
+          if (refreshedCache) refreshedCache.pdfBuffer = tempBuf;
+        }
+      }
+    }
+  }
+  if (!validPdfBuffer || validPdfBuffer.length === 0 || !validPdfBuffer.slice(0, 5).toString().startsWith("%PDF")) {
+    throw new Error("C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7 cho h\xF3a \u0111\u01A1n n\xE0y.");
+  }
+  return {
+    data: validPdfBuffer,
+    filename: `HoaDon_VNPT_${cleanShd}.pdf`,
+    contentType: "application/pdf"
+  };
+}
+
 // src/utils/gdtDetail.ts
-import JSZip2 from "jszip";
+import JSZip3 from "jszip";
 var value = (source, keys) => {
   if (!source || typeof source !== "object") return "";
   for (const key of keys) {
@@ -9434,7 +12786,7 @@ async function readXmlFromExport(bytes, contentType) {
   const text = new TextDecoder("utf-8").decode(bytes).replace(/^\uFEFF/, "").trim();
   if (isXml(text) && /(?:HDon|DLHDon|HHDVu|Invoice|Factura)/i.test(text)) return text;
   if (!contentType.toLowerCase().includes("zip") && !(bytes[0] === 80 && bytes[1] === 75)) return "";
-  const zip = await JSZip2.loadAsync(bytes);
+  const zip = await JSZip3.loadAsync(bytes);
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
     const entryText = (await entry.async("text")).replace(/^\uFEFF/, "").trim();
@@ -9598,7 +12950,7 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
   const detailSource = candidates.find(hasNamedItems) || candidates.find((candidate) => {
     const xml = [candidate.xml, candidate.xmlData, candidate.dataXml, candidate.invoiceXml];
     return xml.some((v) => typeof v === "string" && isXml(v));
-  }) || candidates.find((candidate) => getLookupCodeFromPayload(candidate) || value(candidate, ["mtdtchieu", "mhdon", "nbmst"])) || detail;
+  }) || candidates.find((candidate) => getLookupCodeFromPayload(candidate) || value(candidate, ["mhdon", "nbmst"])) || detail;
   const seller = getSellerFromPayload(detailSource);
   const detailItems = getInvoiceItemListFromPayload(detail).map((item, index) => normalizeInvoiceItem(item, index)).filter((item) => !isPlaceholderItemName(item.itemName));
   const detailXml = exportedXml || findInvoiceDocument(detail);
@@ -9616,8 +12968,20 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
   const resolvedMhdon = value(detailSource, ["mhdon", "mccqt", "MCCQT"]) || invoice.mhdon;
   const isVnpt = isVnptSource(detailSource) || isVnptSource(invoice);
   const isMisa = isMisaSource(detailSource) || isMisaSource(invoice);
-  const finalLookupCode = isVnpt && resolvedMhdon ? resolvedMhdon : detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || void 0;
-  const finalLookupUrl = isVnpt ? detailUrl || invoice.lookupUrl || `https://${seller.taxCode || invoice.nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn` : isMisa ? detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || "https://www.meinvoice.vn/tra-cuu" : detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || void 0;
+  const isViettel = isViettelSource(detail) || isViettelSource(detailSource) || isViettelSource(invoice);
+  const isVnpay = isVnpaySource(detailSource) || isVnpaySource(invoice);
+  let rawLookup = isViettel ? detailLookup || xmlLookup?.lookupCode || void 0 : isVnpt && resolvedMhdon ? resolvedMhdon : detailLookup || xmlLookup?.lookupCode || invoice.lookupCode || void 0;
+  if (isVnpay) {
+    if (rawLookup && rawLookup.toLowerCase() === "vietcombank") {
+      rawLookup = void 0;
+    }
+    if (!rawLookup && resolvedMhdon) {
+      rawLookup = resolvedMhdon;
+    }
+  }
+  const finalLookupCode = rawLookup;
+  const isVcb = invoice.nbmst === "0100112437" || seller.taxCode === "0100112437" || /vietcombank/i.test(seller.name || invoice.nbten || "");
+  const finalLookupUrl = isVnpt ? detailUrl || invoice.lookupUrl || `https://${seller.taxCode || invoice.nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn` : isMisa ? detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || "https://www.meinvoice.vn/tra-cuu" : isVnpay ? detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || (isVcb ? "https://einvoice.vietcombank.com.vn/" : "https://portal.vnpayinvoice.vn/") : isViettel ? detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || "https://vinvoice.viettel.vn/utilities/invoice-search" : detailUrl || xmlLookup?.lookupUrl || invoice.lookupUrl || void 0;
   return {
     ...invoice,
     nbmst: seller.taxCode || value(detailSource, ["nbmst"]) || invoice.nbmst,
@@ -9627,8 +12991,8 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
     nmten: value(detailSource, ["nmten", "nmtnnt", "nmtlhdon"]) || invoice.nmten,
     nmdchi: value(detailSource, ["nmdchi"]) || invoice.nmdchi,
     mhdon: resolvedMhdon,
-    msttcgp: value(detailSource, ["msttcgp", "mst_tcgp", "tvandnkntt"]) || (isMisa ? "0101243150" : invoice.msttcgp),
-    provider: isMisa ? "MISA" : isVnpt ? "VNPT" : invoice.provider || void 0,
+    msttcgp: value(detailSource, ["msttcgp", "mst_tcgp", "tvandnkntt"]) || (isMisa ? "0101243150" : isVnpay ? "0102182292" : isViettel ? "0100109106" : isVnpt ? "0100684378" : invoice.msttcgp),
+    provider: isMisa ? "MISA" : isVnpt ? "VNPT" : isViettel ? "VIETTEL" : isVnpay ? "VNPAY" : invoice.provider || void 0,
     lookupCode: finalLookupCode,
     lookupUrl: finalLookupUrl,
     items: authoritativeItems,
@@ -9640,30 +13004,63 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
 }
 
 // src/db/neonDb.ts
-import "dotenv/config";
-import { Pool } from "pg";
+import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
-var DATA_DIR = path.join(process.cwd(), "data");
-var LOCAL_USERS_FILE = path.join(DATA_DIR, "web_users.json");
+import { Pool } from "pg";
+dotenv.config({ override: true });
+var CONFIG_FILE = path.join(process.cwd(), "neon_config.json");
 var pool = null;
+var currentPoolUrl = null;
 var isPostgresConnected = false;
 var isTableInitialized = false;
+var lastPostgresError = null;
+function cleanDatabaseUrl(rawUrl) {
+  if (!rawUrl) return "";
+  let url = rawUrl.trim().replace(/^["']|["']$/g, "").trim();
+  url = url.replace(/([?&])channel_binding=[^&]*(&|$)/gi, (_m, p1, p2) => p2 ? p1 : "");
+  return url;
+}
+function getStoredDatabaseUrl() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
+      const data = JSON.parse(raw);
+      if (data && typeof data.databaseUrl === "string" && data.databaseUrl.trim()) {
+        return cleanDatabaseUrl(data.databaseUrl);
+      }
+    }
+  } catch {
+  }
+  return "";
+}
 function getDatabaseConfig() {
+  try {
+    dotenv.config({ override: true });
+  } catch {
+  }
+  const storedUrl = getStoredDatabaseUrl();
+  if (storedUrl) {
+    return {
+      source: "CONFIG_FILE",
+      url: storedUrl
+    };
+  }
   const candidates = [
     ["POSTGRES_URL", process.env.POSTGRES_URL],
     ["DATABASE_URL", process.env.DATABASE_URL],
-    ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL],
     ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
     ["POSTGRES_URL_NON_POOLING", process.env.POSTGRES_URL_NON_POOLING],
-    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED]
+    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED],
+    ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL]
   ];
   const selected = candidates.find(([, value2]) => value2 && value2.trim());
-  let url = (selected?.[1] || "").trim().replace(/^["']|["']$/g, "").trim();
+  let url = cleanDatabaseUrl(selected?.[1] || "");
   if (!url && process.env.POSTGRES_HOST && process.env.POSTGRES_USER) {
     const user = encodeURIComponent(process.env.POSTGRES_USER || "");
     const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || "");
     const host = process.env.POSTGRES_HOST;
-    const db = process.env.POSTGRES_DATABASE || "neondb";
+    const db = process.env.POSTGRES_DATABASE || "postgres";
     url = `postgresql://${user}:${pass}@${host}/${db}?sslmode=require`;
     return {
       source: "POSTGRES_HOST_CONFIG",
@@ -9671,12 +13068,23 @@ function getDatabaseConfig() {
     };
   }
   return {
-    source: selected?.[0] || "",
+    source: selected ? selected[0] : "NONE",
     url
   };
 }
 function getDatabaseUrl() {
   return getDatabaseConfig().url;
+}
+function getMaskedDatabaseUrl() {
+  const url = getDatabaseUrl();
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    const pass = u.password ? "***" : "";
+    return `${u.protocol}//${u.username}:${pass}@${u.host}${u.pathname}`;
+  } catch {
+    return url.replace(/:([^:@]+)@/, ":***@");
+  }
 }
 function safeDatabaseError(error) {
   const message = error instanceof Error ? error.message : String(error);
@@ -9687,6 +13095,15 @@ function getPostgresPool() {
   if (!databaseUrl) {
     return null;
   }
+  if (pool && currentPoolUrl !== databaseUrl) {
+    try {
+      pool.end();
+    } catch {
+    }
+    pool = null;
+    isPostgresConnected = false;
+    isTableInitialized = false;
+  }
   if (!pool) {
     try {
       const isLocalhost = databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
@@ -9694,20 +13111,33 @@ function getPostgresPool() {
         connectionString: databaseUrl,
         ssl: isLocalhost ? false : { rejectUnauthorized: false },
         max: process.env.VERCEL ? 3 : 10,
-        connectionTimeoutMillis: 15e3,
-        idleTimeoutMillis: 2e4
+        connectionTimeoutMillis: 5e3,
+        idleTimeoutMillis: 15e3
       });
+      currentPoolUrl = databaseUrl;
       pool.on("error", (err) => {
-        console.warn("[Neon PostgreSQL] Pool background error:", err.message);
         isPostgresConnected = false;
-        pool = null;
+        lastPostgresError = safeDatabaseError(err);
       });
     } catch (err) {
-      console.error("[Neon PostgreSQL] Kh\u1EDFi t\u1EA1o pool th\u1EA5t b\u1EA1i:", err.message);
+      lastPostgresError = safeDatabaseError(err);
       return null;
     }
   }
   return pool;
+}
+async function resetPostgresPool() {
+  if (pool) {
+    try {
+      await pool.end();
+    } catch {
+    }
+    pool = null;
+  }
+  currentPoolUrl = null;
+  isPostgresConnected = false;
+  isTableInitialized = false;
+  lastPostgresError = null;
 }
 function calculateExpiryDate(startDate, durationMonths) {
   const expiry = new Date(startDate);
@@ -9736,144 +13166,253 @@ function enrichUserWithStatus(user) {
     status
   };
 }
+var inMemoryUsers = /* @__PURE__ */ new Map();
+var isMemoryInitialized = false;
+function initInMemoryStore() {
+  if (isMemoryInitialized) return;
+  const now = /* @__PURE__ */ new Date();
+  const adminExpiry = calculateExpiryDate(now, 120);
+  const userExpiry = calculateExpiryDate(now, 12);
+  const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim() || "admin";
+  const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim() || "admin";
+  const initialAdminName = (process.env.ADMIN_INITIAL_FULLNAME || "").trim() || "Qu\u1EA3n tr\u1ECB vi\xEAn Demo";
+  inMemoryUsers.set(initialAdminUser.toLowerCase(), {
+    id: 1,
+    username: initialAdminUser,
+    password: initialAdminPass,
+    full_name: initialAdminName,
+    role: "admin",
+    duration_months: 120,
+    created_at: now.toISOString(),
+    expires_at: adminExpiry.toISOString(),
+    is_active: true,
+    notes: "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn (Ch\u1EBF \u0111\u1ED9 d\u1EF1 ph\xF2ng khi ch\u01B0a k\u1EBFt n\u1ED1i Neon)"
+  });
+  isMemoryInitialized = true;
+}
 async function initDatabase() {
+  initInMemoryStore();
   const databaseConfig = getDatabaseConfig();
   const databaseUrl = databaseConfig.url;
   if (!databaseUrl) {
     isPostgresConnected = false;
+    lastPostgresError = null;
     return {
-      success: false,
-      type: "local_file",
-      message: "Ch\u01B0a c\u1EA5u h\xECnh connection string Neon tr\xEAn Vercel (POSTGRES_URL, DATABASE_URL ho\u1EB7c NEON_DATABASE_URL)."
+      success: true,
+      type: "in_memory_mock",
+      message: "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock). \u0110\u1EC3 l\u01B0u tr\u1EEF v\u0129nh vi\u1EC5n, b\u1EA1n c\xF3 th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL."
     };
   }
   const p = getPostgresPool();
-  if (p) {
-    try {
-      if (!isTableInitialized) {
-        let tableExists = false;
-        try {
-          await p.query("SELECT 1 FROM web_users LIMIT 1;");
-          tableExists = true;
-        } catch {
-          tableExists = false;
-        }
-        if (!tableExists) {
-          await p.query(`
-            CREATE TABLE IF NOT EXISTS web_users (
-              id SERIAL PRIMARY KEY,
-              username VARCHAR(50) UNIQUE NOT NULL,
-              password VARCHAR(255) NOT NULL,
-              full_name VARCHAR(255),
-              role VARCHAR(20) DEFAULT 'user',
-              duration_months INTEGER DEFAULT 1,
-              created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-              expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-              is_active BOOLEAN DEFAULT TRUE,
-              notes TEXT
-            );
-            CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-          `);
-          console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 kh\u1EDFi t\u1EA1o b\u1EA3ng web_users tr\xEAn Neon.");
-        }
+  if (!p) {
+    isPostgresConnected = false;
+    return {
+      success: true,
+      type: "in_memory_mock",
+      message: `C\u01A1 s\u1EDF d\u1EEF li\u1EC7u t\u1EA1m th\u1EDDi ch\u01B0a k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c (${lastPostgresError || "L\u1ED7i kh\xF4ng x\xE1c \u0111\u1ECBnh"}), chuy\u1EC3n sang ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m.`
+    };
+  }
+  try {
+    await p.query("SELECT 1;");
+    if (!isTableInitialized) {
+      await p.query(`
+        CREATE TABLE IF NOT EXISTS web_users (
+          id SERIAL PRIMARY KEY,
+          username VARCHAR(50) UNIQUE NOT NULL,
+          password VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255),
+          role VARCHAR(20) DEFAULT 'user',
+          duration_months INTEGER DEFAULT 1,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE,
+          notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+      `);
+      const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim();
+      const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim();
+      if (initialAdminUser && initialAdminPass) {
         try {
           const countRes = await p.query("SELECT COUNT(*) as count FROM web_users;");
           const count = parseInt(countRes.rows[0]?.count || "0", 10);
           if (count === 0) {
-            const defaultAdminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
+            const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
             await p.query(`
               INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
               ON CONFLICT (username) DO NOTHING;
             `, [
-              "admin",
-              process.env.ADMIN_DEFAULT_PASSWORD || "Admin@123",
-              "Qu\u1EA3n tr\u1ECB vi\xEAn h\u1EC7 th\u1ED1ng",
+              initialAdminUser,
+              initialAdminPass,
+              process.env.ADMIN_INITIAL_FULLNAME || "Qu\u1EA3n tr\u1ECB vi\xEAn",
               "admin",
               120,
               (/* @__PURE__ */ new Date()).toISOString(),
-              defaultAdminExpiry.toISOString(),
+              adminExpiry.toISOString(),
               true,
-              "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn kh\u1EDFi t\u1EA1o t\u1EF1 \u0111\u1ED9ng t\u1EEB Neon DB"
+              "T\xE0i kho\u1EA3n kh\u1EDFi t\u1EA1o t\u1EEB c\u1EA5u h\xECnh ban \u0111\u1EA7u"
             ]);
-            console.log("[Neon PostgreSQL] \u2713 \u0110\xE3 t\u1EA1o t\xE0i kho\u1EA3n Admin m\u1EB7c \u0111\u1ECBnh (admin / Admin@123)");
           }
-        } catch (seedErr) {
-          console.warn("[Neon PostgreSQL] Ki\u1EC3m tra admin seed:", seedErr);
+        } catch {
         }
-        isTableInitialized = true;
       }
-      isPostgresConnected = true;
-      return {
-        success: true,
-        type: "neon_postgres",
-        message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi Neon PostgreSQL (${databaseConfig.source}).`
-      };
-    } catch (err) {
-      const safeErr = safeDatabaseError(err);
-      console.warn("[Neon PostgreSQL] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i t\u1EDBi Neon:", safeErr);
-      isPostgresConnected = false;
-      return {
-        success: false,
-        type: "local_file",
-        message: `L\u1ED7i k\u1EBFt n\u1ED1i Neon PostgreSQL (${databaseConfig.source}): ${safeErr}`
-      };
+      isTableInitialized = true;
     }
+    isPostgresConnected = true;
+    lastPostgresError = null;
+    return {
+      success: true,
+      type: "neon_postgres",
+      message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi c\u01A1 s\u1EDF d\u1EEF li\u1EC7u.`
+    };
+  } catch (err) {
+    const safeErr = safeDatabaseError(err);
+    lastPostgresError = safeErr;
+    isPostgresConnected = false;
+    console.warn(`[Database Init] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL: ${safeErr} - Ho\u1EA1t \u0111\u1ED9ng b\u1EB1ng In-Memory Mock`);
+    return {
+      success: true,
+      type: "in_memory_mock",
+      message: `\u0110ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock) do PostgreSQL ch\u01B0a s\u1EB5n s\xE0ng: ${safeErr}`
+    };
   }
-  return {
-    success: false,
-    type: "local_file",
-    message: `Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o pool PostgreSQL (${databaseConfig.source}). Vui l\xF2ng ki\u1EC3m tra connection string.`
-  };
 }
 async function getDatabaseStatus() {
-  const p = getPostgresPool();
+  initInMemoryStore();
   const databaseConfig = getDatabaseConfig();
   const dbConfigured = Boolean(databaseConfig.url);
-  if (p) {
-    try {
-      await p.query("SELECT 1;");
-      const res = await p.query("SELECT COUNT(*) as count FROM web_users;");
-      const totalUsers = parseInt(res.rows[0]?.count || "0", 10);
-      return {
-        connected: true,
-        type: "neon_postgres",
-        message: "Neon PostgreSQL \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1ED5n \u0111\u1ECBnh",
-        totalUsers,
-        databaseUrlConfigured: true,
-        connectionSource: databaseConfig.source
-      };
-    } catch (err) {
-      const message = safeDatabaseError(err);
-      console.warn("[DB Status] Error checking Postgres:", message);
-      return {
-        connected: false,
-        type: "neon_postgres",
-        message: `Neon PostgreSQL l\u1ED7i (${message})`,
-        totalUsers: 0,
-        databaseUrlConfigured: true,
-        connectionSource: databaseConfig.source
-      };
+  if (dbConfigured) {
+    const p = getPostgresPool();
+    if (p) {
+      try {
+        await p.query("SELECT 1;");
+        const res = await p.query("SELECT COUNT(*) as count FROM web_users;");
+        const totalUsers = parseInt(res.rows[0]?.count || "0", 10);
+        isPostgresConnected = true;
+        lastPostgresError = null;
+        return {
+          connected: true,
+          type: "neon_postgres",
+          message: "C\u01A1 s\u1EDF d\u1EEF li\u1EC7u PostgreSQL \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1ED5n \u0111\u1ECBnh",
+          totalUsers,
+          databaseUrlConfigured: true,
+          connectionSource: databaseConfig.source,
+          maskedUrl: getMaskedDatabaseUrl()
+        };
+      } catch (err) {
+        lastPostgresError = safeDatabaseError(err);
+        isPostgresConnected = false;
+      }
     }
   }
   return {
-    connected: false,
-    type: "neon_postgres",
-    message: dbConfigured ? "Kh\xF4ng th\u1EC3 truy v\u1EA5n Neon PostgreSQL. Kh\xF4ng s\u1EED d\u1EE5ng d\u1EEF li\u1EC7u local." : "Ch\u01B0a c\u1EA5u h\xECnh connection string cho Neon",
-    totalUsers: 0,
+    connected: true,
+    type: "in_memory_mock",
+    message: dbConfigured ? `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL (${lastPostgresError || "L\u1ED7i m\u1EA1ng"}), h\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi In-Memory Mock.` : "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-Memory Mock).",
+    totalUsers: inMemoryUsers.size,
     databaseUrlConfigured: dbConfigured,
-    connectionSource: databaseConfig.source
+    connectionSource: dbConfigured ? databaseConfig.source : "IN_MEMORY",
+    maskedUrl: getMaskedDatabaseUrl()
   };
 }
-async function findUserByUsername(username) {
-  const cleanUsername = (username || "").trim().toLowerCase();
-  if (!cleanUsername) return null;
-  const dbConfigured = Boolean(getDatabaseUrl());
-  if (!dbConfigured) {
-    return null;
+async function saveNeonDatabaseUrl(rawUrl, initialAdmin) {
+  const cleaned = cleanDatabaseUrl(rawUrl);
+  if (!cleaned) {
+    return { success: false, message: "Chu\u1ED7i k\u1EBFt n\u1ED1i kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng." };
   }
+  const testPool = new Pool({
+    connectionString: cleaned,
+    ssl: cleaned.includes("localhost") ? false : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 7e3
+  });
+  try {
+    await testPool.query("SELECT 1;");
+  } catch (err) {
+    try {
+      await testPool.end();
+    } catch {
+    }
+    const safeErr = safeDatabaseError(err);
+    let friendly = safeErr;
+    if (safeErr.includes("password authentication failed")) {
+      friendly = "M\u1EADt kh\u1EA9u x\xE1c th\u1EF1c c\u01A1 s\u1EDF d\u1EEF li\u1EC7u kh\xF4ng ch\xEDnh x\xE1c.";
+    }
+    return {
+      success: false,
+      message: `K\u1EBFt n\u1ED1i c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\u1EA5t b\u1EA1i: ${friendly}`
+    };
+  }
+  try {
+    await testPool.query(`
+      CREATE TABLE IF NOT EXISTS web_users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255),
+        role VARCHAR(20) DEFAULT 'user',
+        duration_months INTEGER DEFAULT 1,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        notes TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
+    `);
+    if (initialAdmin?.username && initialAdmin?.password) {
+      const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
+      await testPool.query(`
+        INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
+        VALUES ($1, $2, $3, 'admin', 120, $4, $5, true, $6)
+        ON CONFLICT (username) DO NOTHING;
+      `, [
+        initialAdmin.username.trim(),
+        initialAdmin.password.trim(),
+        initialAdmin.fullName || "Qu\u1EA3n tr\u1ECB vi\xEAn",
+        (/* @__PURE__ */ new Date()).toISOString(),
+        adminExpiry.toISOString(),
+        "Kh\u1EDFi t\u1EA1o qua c\u1EA5u h\xECnh"
+      ]);
+    }
+  } catch {
+  } finally {
+    try {
+      await testPool.end();
+    } catch {
+    }
+  }
+  try {
+    fs.writeFileSync(
+      CONFIG_FILE,
+      JSON.stringify(
+        {
+          databaseUrl: cleaned,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        null,
+        2
+      ),
+      "utf-8"
+    );
+    await resetPostgresPool();
+    await initDatabase();
+    return {
+      success: true,
+      connected: true,
+      message: "\u0110\xE3 k\u1EBFt n\u1ED1i v\xE0 l\u01B0u c\u1EA5u h\xECnh c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\xE0nh c\xF4ng!"
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: `Kh\xF4ng th\u1EC3 l\u01B0u c\u1EA5u h\xECnh: ${err.message}`
+    };
+  }
+}
+async function findUserByUsername(username) {
+  const cleanUsername = (username || "").trim();
+  if (!cleanUsername) return null;
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const res = await p.query(
         "SELECT * FROM web_users WHERE LOWER(username) = LOWER($1) LIMIT 1;",
@@ -9882,27 +13421,35 @@ async function findUserByUsername(username) {
       if (res.rows.length > 0) {
         return enrichUserWithStatus(res.rows[0]);
       }
+      return null;
     } catch (err) {
-      console.warn("[findUserByUsername] PostgreSQL error:", err.message);
+      console.warn(`[findUserByUsername] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
     }
+  }
+  initInMemoryStore();
+  const lower = cleanUsername.toLowerCase();
+  const memoryUser = inMemoryUsers.get(lower);
+  if (memoryUser) {
+    return enrichUserWithStatus(memoryUser);
+  }
+  if (lower === "admin") {
+    const adminUser = Array.from(inMemoryUsers.values()).find((u) => u.role === "admin");
+    if (adminUser) return enrichUserWithStatus(adminUser);
   }
   return null;
 }
 async function getAllUsers() {
-  const dbConfigured = Boolean(getDatabaseUrl());
-  if (!dbConfigured) {
-    return [];
-  }
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const res = await p.query("SELECT * FROM web_users ORDER BY id DESC;");
       return res.rows.map(enrichUserWithStatus);
     } catch (err) {
-      console.warn("[getAllUsers] PostgreSQL error:", err.message);
+      console.warn(`[getAllUsers] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
     }
   }
-  return [];
+  initInMemoryStore();
+  return Array.from(inMemoryUsers.values()).sort((a, b) => Number(b.id) - Number(a.id)).map(enrichUserWithStatus);
 }
 async function createUser(params) {
   const cleanUsername = (params.username || "").trim();
@@ -9918,11 +13465,11 @@ async function createUser(params) {
   const expiresAt = calculateExpiryDate(now, durationMonths);
   const role = params.role || "user";
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const checkRes = await p.query("SELECT id FROM web_users WHERE LOWER(username) = LOWER($1);", [cleanUsername]);
       if (checkRes.rows.length > 0) {
-        return { success: false, error: `M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i tr\xEAn h\u1EC7 th\u1ED1ng.` };
+        return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
       }
       const insertRes = await p.query(`
         INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
@@ -9941,27 +13488,45 @@ async function createUser(params) {
       const newUser = enrichUserWithStatus(insertRes.rows[0]);
       return { success: true, user: newUser };
     } catch (err) {
-      console.error("[createUser] PostgreSQL insert error:", err.message);
-      return { success: false, error: err.message };
+      console.warn(`[createUser] PostgreSQL insert failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 t\u1EA1o ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const lower = cleanUsername.toLowerCase();
+  if (inMemoryUsers.has(lower)) {
+    return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
+  }
+  const newId = inMemoryUsers.size + 1;
+  const record = {
+    id: newId,
+    username: cleanUsername,
+    password: cleanPassword,
+    full_name: params.fullName || "",
+    role,
+    duration_months: durationMonths,
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    is_active: true,
+    notes: params.notes || ""
+  };
+  inMemoryUsers.set(lower, record);
+  return { success: true, user: enrichUserWithStatus(record) };
 }
 async function updateUser(id, params) {
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const curRes = await p.query("SELECT * FROM web_users WHERE id = $1;", [id]);
       if (curRes.rows.length === 0) {
-        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng c\u1EA7n c\u1EADp nh\u1EADt." };
+        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
       }
       const current = curRes.rows[0];
-      let expiresAt = new Date(current.expires_at);
+      let expiresAt2 = new Date(current.expires_at);
       if (params.extendMonths) {
-        const baseDate = expiresAt.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt;
-        expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
+        const baseDate = expiresAt2.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt2;
+        expiresAt2 = calculateExpiryDate(baseDate, params.extendMonths);
       } else if (params.newExpiresAt) {
-        expiresAt = new Date(params.newExpiresAt);
+        expiresAt2 = new Date(params.newExpiresAt);
       }
       const password = params.password !== void 0 && params.password.trim() !== "" ? params.password.trim() : current.password;
       const fullName = params.fullName !== void 0 ? params.fullName : current.full_name;
@@ -9972,18 +13537,43 @@ async function updateUser(id, params) {
         SET password = $1, full_name = $2, expires_at = $3, is_active = $4, notes = $5
         WHERE id = $6
         RETURNING *;
-      `, [password, fullName, expiresAt.toISOString(), isActive, notes, id]);
+      `, [password, fullName, expiresAt2.toISOString(), isActive, notes, id]);
       return { success: true, user: enrichUserWithStatus(updateRes.rows[0]) };
     } catch (err) {
-      console.error("[updateUser] PostgreSQL update error:", err.message);
-      return { success: false, error: err.message };
+      console.warn(`[updateUser] PostgreSQL update failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 c\u1EADp nh\u1EADt ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
+  if (!existing) {
+    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
+  }
+  let expiresAt = new Date(existing.expires_at);
+  if (params.extendMonths) {
+    const baseDate = expiresAt.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt;
+    expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
+  } else if (params.newExpiresAt) {
+    expiresAt = new Date(params.newExpiresAt);
+  }
+  if (params.password !== void 0 && params.password.trim() !== "") {
+    existing.password = params.password.trim();
+  }
+  if (params.fullName !== void 0) {
+    existing.full_name = params.fullName;
+  }
+  if (params.isActive !== void 0) {
+    existing.is_active = params.isActive;
+  }
+  if (params.notes !== void 0) {
+    existing.notes = params.notes;
+  }
+  existing.expires_at = expiresAt.toISOString();
+  inMemoryUsers.set(existing.username.toLowerCase(), existing);
+  return { success: true, user: enrichUserWithStatus(existing) };
 }
 async function deleteUser(id) {
   const p = getPostgresPool();
-  if (p) {
+  if (p && isPostgresConnected) {
     try {
       const curRes = await p.query("SELECT role, username FROM web_users WHERE id = $1;", [id]);
       if (curRes.rows.length === 0) {
@@ -9995,16 +13585,42 @@ async function deleteUser(id) {
       await p.query("DELETE FROM web_users WHERE id = $1;", [id]);
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message };
+      console.warn(`[deleteUser] PostgreSQL delete failed, falling back to in-memory store:`, safeDatabaseError(err));
     }
   }
-  return { success: false, error: "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i Neon PostgreSQL \u0111\u1EC3 x\xF3a ng\u01B0\u1EDDi d\xF9ng." };
+  initInMemoryStore();
+  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
+  if (!existing) {
+    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng" };
+  }
+  if (existing.role === "admin" || existing.username.toLowerCase() === "admin") {
+    return { success: false, error: "Kh\xF4ng th\u1EC3 x\xF3a t\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn Master." };
+  }
+  inMemoryUsers.delete(existing.username.toLowerCase());
+  return { success: true };
 }
 
 // server.ts
-import { GoogleGenAI as GoogleGenAI2 } from "@google/genai";
+import { GoogleGenAI as GoogleGenAI5 } from "@google/genai";
+dotenv2.config({ override: true });
 var app = express();
-var PORT = Number(process.env.PORT) || 3e3;
+function resolvePort() {
+  const portIdx = process.argv.indexOf("--port");
+  if (portIdx !== -1 && process.argv[portIdx + 1]) {
+    const p = parseInt(process.argv[portIdx + 1], 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const p = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.PORT && process.env.PORT !== "8080") {
+    const p = parseInt(process.env.PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  return 3e3;
+}
+var PORT = resolvePort();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
@@ -10024,7 +13640,7 @@ app.use((req, res, next) => {
     }
   }
   if (!req.url.startsWith("/api")) {
-    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
+    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/easyinvoice") || req.url.startsWith("/vnpt") || req.url.startsWith("/viettel") || req.url.startsWith("/vnpay") || req.url.startsWith("/foursi") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
       req.url = "/api" + req.url;
     }
   }
@@ -10199,7 +13815,7 @@ function getGeminiClient(customKey) {
   const apiKey = customKey || process.env.GEMINI_API_KEY;
   if (!apiKey) return null;
   if (!geminiAiClient || customKey) {
-    const client = new GoogleGenAI2({
+    const client = new GoogleGenAI5({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
@@ -10243,7 +13859,7 @@ async function solveCaptchaOCR(svgOrDataUri, customApiKey) {
   const activeAi = getGeminiClient(customApiKey);
   if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
     const candidateModels = [
-      "gemini-2.5-flash",
+      "gemini-3.5-flash-lite",
       "gemini-3.6-flash",
       "gemini-flash-latest"
     ];
@@ -10297,22 +13913,6 @@ ${svgSnippet}
           break;
         }
       }
-    }
-  }
-  if (isBitmap && bitmapBase64) {
-    try {
-      console.log("[Tesseract OCR] Running local fallback OCR on bitmap...");
-      const imageBuffer = Buffer.from(bitmapBase64, "base64");
-      const { data } = await Tesseract.recognize(imageBuffer, "eng");
-      if (data && data.text) {
-        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-        if (cleaned.length >= 4 && cleaned.length <= 6) {
-          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
-          return { code: cleaned, modelUsed: "tesseract-local" };
-        }
-      }
-    } catch (tessErr) {
-      console.warn("[Tesseract OCR] Recognition error:", tessErr?.message);
     }
   }
   return {
@@ -10657,17 +14257,17 @@ function splitDateRangeIntoFixedChunks(fromDateStr, toDateStr, daysPerChunk) {
   return chunks;
 }
 async function getCaptchaForGdtQuery(existingCookie, customProxy) {
-  const captchaResponse = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
+  const response = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
     headers: existingCookie ? { Cookie: existingCookie } : {}
   }, 1, 8e3, customProxy);
-  if (!captchaResponse.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c Captcha (HTTP ${captchaResponse.status})`);
-  const captchaCookie = extractCookies(captchaResponse);
-  const data = await captchaResponse.json();
+  if (!response.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c Captcha (HTTP ${response.status})`);
+  const cookie = extractCookies(response);
+  const data = await response.json();
   if (!data.key || !data.content) throw new Error("Captcha c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7");
   const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content));
   const code = (solved.code || "").trim();
   if (!code) throw new Error(solved.error || "Kh\xF4ng t\u1EF1 nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c Captcha cho h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n");
-  return { key: data.key, code, cookie: captchaCookie };
+  return { key: data.key, code, cookie };
 }
 app.post("/api/gdt/invoice-detail", async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
@@ -10709,7 +14309,16 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  const { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
+  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+  const parsedSize = parseInt(String(size), 10);
+  const validSize = !isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500 ? parsedSize : 50;
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (fromDate && typeof fromDate === "string" && !dateRegex.test(fromDate.trim())) {
+    fromDate = void 0;
+  }
+  if (toDate && typeof toDate === "string" && !dateRegex.test(toDate.trim())) {
+    toDate = void 0;
+  }
   const authHeader = req.headers.authorization || bodyToken || currentSession?.token || "";
   const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
@@ -10753,16 +14362,9 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     const seenInChunk = /* @__PURE__ */ new Set();
     let hasNextPage = true;
     while (hasNextPage && page < 100) {
-      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
       if (queryCaptcha) {
-        const captchaParams = new URLSearchParams({
-          captchaKey: queryCaptcha.key,
-          captchaCode: queryCaptcha.code,
-          captcha: queryCaptcha.code,
-          ckey: queryCaptcha.key,
-          cvalue: queryCaptcha.code
-        });
-        url += `&${captchaParams.toString()}`;
+        url += `&${new URLSearchParams({ captchaKey: queryCaptcha.key, captchaCode: queryCaptcha.code, captcha: queryCaptcha.code, ckey: queryCaptcha.key, cvalue: queryCaptcha.code }).toString()}`;
       }
       if (currentState) {
         url += `&state=${encodeURIComponent(currentState)}`;
@@ -10780,12 +14382,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
               "Accept": "application/json, text/plain, */*",
               "End-Point": "/tra-cuu/tra-cuu-hoa-don",
               "Action": source === "sco-query" ? type === "sold" ? "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)" : "Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)" : "",
-              ...queryCaptcha ? {
-                "Captcha-Key": queryCaptcha.key,
-                "Captcha-Code": queryCaptcha.code,
-                "X-Captcha-Key": queryCaptcha.key,
-                "X-Captcha-Code": queryCaptcha.code
-              } : {},
+              ...queryCaptcha ? { "Captcha-Key": queryCaptcha.key, "Captcha-Code": queryCaptcha.code, "X-Captcha-Key": queryCaptcha.key, "X-Captcha-Code": queryCaptcha.code } : {},
               ...sanitizedCookie || queryCaptcha?.cookie ? { "Cookie": [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join("; ") } : {}
             }
           }, 1, 15e3, vietnamProxy);
@@ -10928,7 +14525,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     }
     return accumulated;
   };
-  const fetchAllChunksForType = async (type, source = "query", chunks = dateChunks) => {
+  const fetchAllChunksForType = async (type, source = "query", chunks = source === "sco-query" ? posDateChunks : dateChunks) => {
     let allInvoices = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
@@ -10937,11 +14534,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       }
       let chunkResult = [];
       for (let captchaAttempt = 0; captchaAttempt < (source === "sco-query" ? 3 : 1); captchaAttempt++) {
-        let queryCaptcha;
-        if (source === "sco-query") {
-          queryCaptcha = await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy);
-          console.info(`[GDT POS] \u0110\xE3 l\u1EA5y v\xE0 gi\u1EA3i Captcha cho k\u1EF3 ${chunk.from}..${chunk.to} (l\u1EA7n ${captchaAttempt + 1})`);
-        }
+        const queryCaptcha = source === "sco-query" ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy) : void 0;
         chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source, 2, queryCaptcha);
         if (chunkResult?.error !== "CAPTCHA_INVALID") break;
         await sleep(500);
@@ -10987,14 +14580,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     }
     try {
       if (!includePos && !posOnly) {
-        return res.json({
-          success: true,
-          isRealGDT: true,
-          invoices: results,
-          count: results.length,
-          chunksQueried: dateChunks.length,
-          message: `\u0110\xE3 truy xu\u1EA5t ${results.length} h\xF3a \u0111\u01A1n th\u01B0\u1EDDng t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF.`
-        });
+        return res.json({ success: true, isRealGDT: true, invoices: results, count: results.length, chunksQueried: dateChunks.length, message: `\u0110\xE3 truy xu\u1EA5t ${results.length} h\xF3a \u0111\u01A1n th\u01B0\u1EDDng t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF.` });
       }
       await sleep(250);
       const posPurchaseList = await fetchAllChunksForType("purchase", "sco-query", posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
@@ -11044,7 +14630,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       isRealGDT: true,
       invoices: dedupedResults,
       count: dedupedResults.length,
-      chunksQueried: dateChunks.length + posDateChunks.length,
+      chunksQueried: dateChunks.length,
       message: includeDetails ? `\u0110\xE3 truy xu\u1EA5t ${dedupedResults.length} h\xF3a \u0111\u01A1n v\xE0 t\u1EA3i b\u1ED5 sung d\u1EEF li\u1EC7u chi ti\u1EBFt t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF (${dateChunks.length} k\u1EF3 con).` : `\u0110\xE3 truy xu\u1EA5t ${dedupedResults.length} h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF (${dateChunks.length} k\u1EF3 con).`
     });
   } catch (err) {
@@ -11067,7 +14653,10 @@ app.get("/api/gdt/status", (req, res) => {
 });
 app.post("/api/gdt/run-selenium", (req, res) => {
   const { taxCode, password, invoiceType, fromDate, toDate, headless } = req.body;
-  const mst = taxCode || currentSession?.taxCode || "0316892345";
+  const mst = (taxCode || currentSession?.taxCode || "").trim();
+  if (!mst) {
+    return res.status(400).json({ success: false, message: "Vui l\xF2ng cung c\u1EA5p M\xE3 s\u1ED1 thu\u1EBF h\u1EE3p l\u1EC7." });
+  }
   const pwd = password || "";
   seleniumLogs = [];
   const addLog = (level, message, stepName, progress) => {
@@ -11140,8 +14729,8 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 });
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
-    const zip = new JSZip3();
-    const fs = await import("fs");
+    const zip = new JSZip4();
+    const fs2 = await import("fs");
     const pythonDir = path2.join(process.cwd(), "python");
     const files = [
       "gdt_selenium_crawler.py",
@@ -11154,8 +14743,8 @@ app.get("/api/gdt/download-python-package", async (req, res) => {
     ];
     for (const file of files) {
       const fullPath = path2.join(pythonDir, file);
-      if (fs.existsSync(fullPath)) {
-        const content = fs.readFileSync(fullPath, "utf-8");
+      if (fs2.existsSync(fullPath)) {
+        const content = fs2.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
@@ -11267,8 +14856,8 @@ echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
 python3 gdt_selenium_crawler.py --type purchase
 `;
-    if (fs.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
-      zip.file("run_windows.bat", fs.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
+    if (fs2.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs2.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
     } else {
       zip.file("run_windows.bat", runBat);
     }
@@ -11399,9 +14988,1052 @@ app.post("/api/invoice-downloader/solve-captcha", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+app.post("/api/easyinvoice/download", async (req, res) => {
+  try {
+    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon, viewOnly } = req.body;
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 tra c\u1EE9u EasyInvoice (FKey) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalEasyInvoice({
+      lookupCode: String(lookupCode).trim(),
+      sellerTaxCode: sellerTaxCode ? String(sellerTaxCode).trim() : void 0,
+      lookupUrl: lookupUrl ? String(lookupUrl).trim() : void 0,
+      khhdon: khhdon ? String(khhdon).trim() : void 0,
+      shdon: shdon ? String(shdon).trim() : void 0,
+      viewOnly: Boolean(viewOnly)
+    });
+    if (req.query.format === "binary") {
+      res.setHeader("Content-Type", result.contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+      return res.send(result.buffer);
+    }
+    res.json({
+      success: true,
+      filename: result.filename,
+      contentType: result.contentType,
+      pdfBase64: result.pdfBase64 || result.buffer.toString("base64"),
+      htmlContent: result.htmlContent || "",
+      message: "\u0110\xE3 t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i v\u1EC1 h\xF3a \u0111\u01A1n g\u1ED1c th\xE0nh c\xF4ng."
+    });
+  } catch (error) {
+    console.error("[EasyInvoice] L\u1ED7i t\u1EA3i h\xF3a \u0111\u01A1n g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/vnpt/view-original", async (req, res) => {
+  try {
+    const result = await lookupOriginalVnptInvoice({
+      lookupCode: String(req.body.lookupCode || ""),
+      sellerTaxCode: req.body.sellerTaxCode ? String(req.body.sellerTaxCode) : void 0,
+      lookupUrl: req.body.lookupUrl ? String(req.body.lookupUrl) : void 0
+    });
+    res.json({
+      success: true,
+      htmlContent: result.htmlContent,
+      checkCode: result.checkCode,
+      pdfDownloadUrl: result.pdfDownloadUrl,
+      portalUrl: result.portalUrl,
+      invoiceInfo: result.invoiceInfo
+    });
+  } catch (error) {
+    console.error("[VNPT] L\u1ED7i xem h\xF3a \u0111\u01A1n g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/vnpt/download-pdf", async (req, res) => {
+  try {
+    const lookupCode = String(req.query.lookupCode || req.query.fkey || req.body?.lookupCode || req.body?.fkey || "").trim();
+    let checkCode = req.query.checkCode ? String(req.query.checkCode) : req.body?.checkCode ? String(req.body.checkCode) : void 0;
+    if (checkCode === "undefined" || checkCode === "null" || !checkCode?.trim()) {
+      checkCode = void 0;
+    }
+    const sellerTaxCode = req.query.sellerTaxCode ? String(req.query.sellerTaxCode) : req.body?.sellerTaxCode ? String(req.body.sellerTaxCode) : void 0;
+    const portalUrl = req.query.portalUrl || req.query.portal ? String(req.query.portalUrl || req.query.portal) : req.body?.portalUrl ? String(req.body.portalUrl) : void 0;
+    const invoiceNumber = req.query.invoiceNumber ? String(req.query.invoiceNumber) : req.body?.invoiceNumber ? String(req.body.invoiceNumber) : void 0;
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 tra c\u1EE9u VNPT (fkey) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalVnptPdf({
+      lookupCode,
+      checkCode,
+      sellerTaxCode,
+      portalUrl,
+      invoiceNumber
+    });
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.data.length);
+    res.send(result.data);
+  } catch (error) {
+    console.error("[VNPT] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+var vnptPortalSessions = /* @__PURE__ */ new Map();
+var latestVnptSessionId = "";
+function parseRequestCookies(cookieHeader) {
+  const result = {};
+  if (!cookieHeader) return result;
+  cookieHeader.split(";").forEach((item) => {
+    const parts = item.split("=");
+    const name = parts[0]?.trim();
+    if (name) {
+      result[name] = parts.slice(1).join("=").trim();
+    }
+  });
+  return result;
+}
+function getVnptSession(req) {
+  const cookies = parseRequestCookies(req.headers.cookie);
+  const sessionId = String(req.query.sessionId || req.body?.sessionId || cookies["vnpt_portal_session_id"] || "").trim();
+  if (sessionId && vnptPortalSessions.has(sessionId)) {
+    return vnptPortalSessions.get(sessionId);
+  }
+  if (latestVnptSessionId && vnptPortalSessions.has(latestVnptSessionId)) {
+    const s = vnptPortalSessions.get(latestVnptSessionId);
+    if (s && s.expiresAt > Date.now()) return s;
+  }
+  for (const session of vnptPortalSessions.values()) {
+    if (session.expiresAt > Date.now()) {
+      return session;
+    }
+  }
+  return void 0;
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of vnptPortalSessions.entries()) {
+    if (session.expiresAt < now) {
+      vnptPortalSessions.delete(key);
+    }
+  }
+}, 10 * 60 * 1e3);
+app.all(["/api/vnpt/ajxPreview", "/api/vnpt/ajx-preview", "/HomeNoLogin/ajxPreview", "/HomeNoLogin/ajxPreview/"], express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.body.portalUrl || req.query.portalUrl || (req.body.sellerTaxCode ? `https://${req.body.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.body.checkCode || req.query.checkCode || "");
+    const fkey = String(req.body.fkey || req.body.lookupCode || req.query.fkey || req.query.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.body.nameCus || req.query.nameCus || "");
+    const params = new URLSearchParams({
+      checkCode,
+      fkey,
+      nameCus
+    });
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    console.log(`[VNPT Proxy ajxPreview] T\u1EA3i b\u1EA3n th\u1EC3 hi\u1EC7n: portal=${portal}, fkey="${fkey}", checkCode="${checkCode}"...`);
+    const previewRes = await axios10.post(`${portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
+      headers,
+      timeout: 25e3
+    });
+    res.json(previewRes.data);
+  } catch (err) {
+    console.error("[VNPT Proxy ajxPreview] L\u1ED7i:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+app.all(["/api/vnpt/downloadPDF", "/HomeNoLogin/downloadPDF", "/HomeNoLogin/downloadPDF/"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || "");
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || "");
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    const targetUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    console.log(`[VNPT Proxy downloadPDF] T\u1EA3i PDF t\u1EEB: ${targetUrl}...`);
+    const pdfRes = await axios10.get(targetUrl, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="HoaDon_VNPT_${fkey || "DT"}.pdf"`);
+    res.send(Buffer.from(pdfRes.data));
+  } catch (err) {
+    console.error("[VNPT Proxy downloadPDF] L\u1ED7i:", err.message);
+    res.status(500).send("L\u1ED7i khi t\u1EA3i file PDF t\u1EEB C\u1ED5ng VNPT: " + err.message);
+  }
+});
+app.all(["/api/vnpt/downloadZip", "/api/vnpt/download-zip", "/HomeNoLogin/downloadZip", "/HomeNoLogin/downloadZip/"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://1801660803-001-tt78.vnpt-invoice.com.vn"));
+    const cookies = session?.cookies || "";
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || "");
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || "");
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || "");
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+    const targetUrl = `${portal}/HomeNoLogin/downloadZip?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    const zipRes = await axios10.get(targetUrl, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="HoaDon_VNPT_${fkey || "DT"}.zip"`);
+    res.send(Buffer.from(zipRes.data));
+  } catch (err) {
+    console.error("[VNPT Proxy downloadZip] L\u1ED7i:", err.message);
+    res.status(500).send("L\u1ED7i khi t\u1EA3i file Zip: " + err.message);
+  }
+});
+app.all(["/Record/DownloadMultiFiles", "/HomeNoLogin/DownloadMultiFiles"], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send("Phi\xEAn l\xE0m vi\u1EC7c \u0111\xE3 h\u1EBFt h\u1EA1n.");
+    }
+    const targetUrl = `${session.portal}${req.originalUrl}`;
+    const fileRes = await axios10.get(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+        Cookie: session.cookies
+      },
+      responseType: "arraybuffer",
+      timeout: 3e4
+    });
+    res.setHeader("Content-Type", String(fileRes.headers["content-type"] || "application/octet-stream"));
+    res.send(Buffer.from(fileRes.data));
+  } catch (err) {
+    res.status(500).send(err.message);
+  }
+});
+app.all("/api/vnpt/portal", (req, res) => {
+  const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || req.body?.mst || req.body?.sellerTaxCode || "").trim();
+  const code = String(req.query.code || req.query.fkey || req.query.lookupCode || req.body?.code || req.body?.fkey || "").trim();
+  const rawPortal = String(req.query.portal || req.query.portalUrl || req.body?.portal || req.body?.portalUrl || "").trim();
+  const cleanMst = rawMst.replace(/[^0-9\-]/g, "");
+  let portal = rawPortal.replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+  if (!portal || !/vnpt-invoice/i.test(portal)) {
+    portal = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  const actionUrl = `${portal}/HomeNoLogin/SearchByFkey`;
+  const safeCode = code.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  res.type("html").send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>\u0110ang m\u1EDF C\u1ED5ng tra c\u1EE9u VNPT...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc;">
+  <div style="text-align: center; color: #475569;">
+    <p style="font-size: 15px; font-weight: 500;">\u0110ang m\u1EDF C\u1ED5ng tra c\u1EE9u VNPT...</p>
+    <form id="vnptForm" method="POST" action="${actionUrl}">
+      <input type="hidden" name="strFkey" value="${safeCode}" />
+      <noscript>
+        <button type="submit" style="background: #0284c7; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+          B\u1EA5m v\xE0o \u0111\xE2y \u0111\u1EC3 ti\u1EBFp t\u1EE5c m\u1EDF C\u1ED5ng VNPT
+        </button>
+      </noscript>
+    </form>
+  </div>
+  <script>
+    document.getElementById('vnptForm').submit();
+  </script>
+</body>
+</html>`);
+});
+app.get("/api/vnpt/captcha", async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send("Session expired");
+    }
+    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Cookie: session.cookies,
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`
+      },
+      responseType: "arraybuffer",
+      timeout: 1e4
+    });
+    const captchaCookies = (captchaRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    res.setHeader("Content-Type", "image/png");
+    res.send(Buffer.from(captchaRes.data));
+  } catch (e) {
+    res.status(500).send("Error refreshing captcha");
+  }
+});
+app.get("/api/vnpt/auto-solve-captcha", async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Phi\xEAn tra c\u1EE9u \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng t\u1EA3i l\u1EA1i trang." });
+    }
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers,
+      responseType: "arraybuffer",
+      timeout: 15e3
+    });
+    const captchaCookies = (captchaRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaRes.data), {
+      prompt: VNPT_CAPTCHA_PROMPT
+    });
+    res.json({
+      success: true,
+      code: captchaResult.code,
+      base64: `data:image/png;base64,${Buffer.from(captchaRes.data).toString("base64")}`
+    });
+  } catch (err) {
+    console.error("[VNPT Auto Solve Captcha] L\u1ED7i:", err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+app.post("/api/vnpt/portal-submit", express.urlencoded({ extended: true }), async (req, res) => {
+  const sessionId = String(req.query.sessionId || "").trim();
+  const session = getVnptSession(req);
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.headers["x-forwarded-host"] || req.get("host");
+  const baseUrl = `${proto}://${host}`;
+  if (!session) {
+    const mst = String(req.body.mst || "");
+    const code = String(req.body.strFkey || "");
+    return res.redirect(`/api/vnpt/portal?mst=${encodeURIComponent(mst)}&code=${encodeURIComponent(code)}`);
+  }
+  try {
+    const strFkey = String(req.body.strFkey || session.lookupCode || "").trim();
+    const captch = String(req.body.captch || "").trim();
+    const token = String(req.body.__RequestVerificationToken || session.token || "").trim();
+    console.log(`[VNPT Portal Submit] G\u1EEDi t\xECm ki\u1EBFm: portal=${session.portal}, strFkey="${strFkey}", captcha="${captch}"...`);
+    const form = new URLSearchParams({
+      __RequestVerificationToken: token,
+      strFkey,
+      captch,
+      submit: ""
+    });
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+    const postRes = await axios10.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+      headers,
+      responseType: "text",
+      validateStatus: (s) => s >= 200 && s < 400
+    });
+    const postCookies = (postRes.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+    if (postCookies.length > 0) {
+      session.cookies = [...session.cookies.split("; "), ...postCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+    }
+    res.setHeader("Set-Cookie", `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
+    const html = String(postRes.data || "");
+    const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
+    const $ = cheerio4.load(html);
+    $("head").prepend(`<base href="${session.portal}/">`);
+    if (isCaptchaError) {
+      try {
+        const freshCaptcha = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Cookie: session.cookies, Referer: `${session.portal}/HomeNoLogin/SearchByFkey/` },
+          responseType: "arraybuffer",
+          timeout: 1e4
+        });
+        const captchaCookies = (freshCaptcha.headers["set-cookie"] || []).map((c) => c.split(";")[0]);
+        session.cookies = [...session.cookies.split("; "), ...captchaCookies].filter((c, idx, arr) => arr.findIndex((item) => item.split("=")[0] === c.split("=")[0]) === idx).join("; ");
+        const freshBase64 = `data:image/png;base64,${Buffer.from(freshCaptcha.data).toString("base64")}`;
+        $('img[src*="/Captcha/Show"], img#imgCaptcha, img.captcha_img').attr("src", freshBase64);
+      } catch (err) {
+        console.warn("[VNPT Portal Submit] L\u1ED7i l\xE0m m\u1EDBi captcha:", err.message);
+      }
+      $("#strFkey").attr("value", strFkey);
+      $('form[action*="/HomeNoLogin/SearchByFkey"]').attr("action", `${baseUrl}/api/vnpt/portal-submit?sessionId=${sessionId}`);
+      $("body").prepend(`
+        <div style="background: #dc2626; color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+          <span>\u26A0\uFE0F <strong>M\xE3 x\xE1c th\u1EF1c kh\xF4ng ch\xEDnh x\xE1c.</strong> \u0110\xE3 l\xE0m m\u1EDBi \u1EA3nh m\xE3 x\xE1c th\u1EF1c. Vui l\xF2ng nh\xECn h\xECnh v\xE0 nh\u1EADp l\u1EA1i (M\xE3 tra c\u1EE9u <strong>${strFkey}</strong> v\u1EABn \u0111\u01B0\u1EE3c gi\u1EEF nguy\xEAn).</span>
+          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}');" style="color: #fecaca; text-decoration: underline; font-size: 12px;">M\u1EDF link g\u1ED1c tr\u1EF1c ti\u1EBFp t\u1EA1i C\u1ED5ng VNPT &rarr;</a>
+        </div>
+      `);
+      $("body").append(`
+        <script>
+          $(document).ready(function() {
+            $('#strFkey').val(${JSON.stringify(strFkey)});
+            $('#captch').val('').focus();
+            $('img.captcha_img, img[src*="data:image"], img[src*="/Captcha/Show"]').css('cursor', 'pointer').on('click', function() {
+              var imgEl = this;
+              fetch('${baseUrl}/api/vnpt/captcha?sessionId=${sessionId}&t=' + Date.now())
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                  imgEl.src = URL.createObjectURL(blob);
+                  $('#captch').val('').focus();
+                });
+            });
+          });
+        </script>
+      `);
+      return res.type("html").send($.html());
+    }
+    $("head").append(`
+      <style>
+        body { background: #f8fafc !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; }
+        #banner-vnptinvoice, #body, #bodyMain { height: auto !important; min-height: auto !important; overflow: visible !important; }
+        .box__form, .box-searchInv {
+          max-width: 1180px !important;
+          margin: 25px auto !important;
+          padding: 24px !important;
+          background: #ffffff !important;
+          border-radius: 14px !important;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.06) !important;
+          border: 1px solid #e2e8f0 !important;
+        }
+        .table {
+          width: 100% !important;
+          border-collapse: separate !important;
+          border-spacing: 0 !important;
+          border: 1px solid #cbd5e1 !important;
+          border-radius: 10px !important;
+          overflow: hidden !important;
+          background: #fff !important;
+          margin-top: 15px !important;
+        }
+        .table th {
+          background: #f1f5f9 !important;
+          color: #1e293b !important;
+          font-weight: 700 !important;
+          font-size: 13px !important;
+          padding: 12px 10px !important;
+          border-bottom: 2px solid #cbd5e1 !important;
+          text-align: center !important;
+        }
+        .table td {
+          padding: 12px 10px !important;
+          border-bottom: 1px solid #e2e8f0 !important;
+          vertical-align: middle !important;
+          font-size: 13px !important;
+          color: #334155 !important;
+        }
+        .table tr:hover td { background: #f8fafc !important; }
+        .table tr:last-child td { border-bottom: none !important; }
+      </style>
+    `);
+    $("table tr").each((_, tr) => {
+      const $tr = $(tr);
+      const viewLink = $tr.find('a[onclick*="ajxCall4Portal"]');
+      const dlLink = $tr.find('a[href*="downloadPDF"]');
+      let rowCheckCode = "";
+      if (viewLink.length > 0) {
+        const m = (viewLink.attr("onclick") || "").match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (m) rowCheckCode = m[1];
+      }
+      if (!rowCheckCode && dlLink.length > 0) {
+        const m = (dlLink.attr("href") || "").match(/checkCode=([^&"']+)/);
+        if (m) rowCheckCode = decodeURIComponent(m[1]);
+      }
+      if (rowCheckCode) {
+        const targetTd = viewLink.closest("td").length > 0 ? viewLink.closest("td") : dlLink.closest("td");
+        if (targetTd.length > 0) {
+          targetTd.html(`
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center;">
+              <button type="button" onclick="openVnptInvoice('${rowCheckCode}', '${strFkey}')" style="background:#0284c7; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(2,132,199,0.3); transition:all 0.15s;" title="Xem chi ti\u1EBFt h\xF3a \u0111\u01A1n g\u1ED1c">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span>Xem</span>
+              </button>
+              <a href="${baseUrl}/api/vnpt/download-pdf?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download="HoaDon_VNPT_${strFkey}.pdf" style="background:#16a34a; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(22,163,74,0.3); transition:all 0.15s;" title="T\u1EA3i file PDF h\xF3a \u0111\u01A1n g\u1ED1c \u0111\xE3 k\xFD s\u1ED1">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>T\u1EA3i PDF</span>
+              </a>
+              <a href="${baseUrl}/api/vnpt/download-zip?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download="HoaDon_VNPT_${strFkey}.zip" style="background:#475569; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(71,85,105,0.3); transition:all 0.15s;" title="T\u1EA3i file ZIP g\u1ED3m XML ch\u1EEF k\xFD s\u1ED1 v\xE0 PDF">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                <span>ZIP</span>
+              </a>
+            </div>
+          `);
+        }
+      }
+    });
+    $("body").prepend(`
+      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 12px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 3px 12px rgba(0,0,0,0.25);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold;">\u2713</span>
+          <span><strong>Tra c\u1EE9u VNPT th\xE0nh c\xF4ng:</strong> \u0110\xE3 t\xECm th\u1EA5y k\u1EBFt qu\u1EA3 h\xF3a \u0111\u01A1n cho m\xE3 tra c\u1EE9u <strong>${strFkey}</strong>. Qu\xFD kh\xE1ch c\xF3 th\u1EC3 b\u1EA5m <strong>Xem</strong> ho\u1EB7c <strong>T\u1EA3i file PDF</strong> tr\u1EF1c ti\u1EBFp.</span>
+        </div>
+        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}'); alert('\u0110\xE3 sao ch\xE9p m\xE3 tra c\u1EE9u ${strFkey} v\xE0o b\u1ED9 nh\u1EDB t\u1EA1m! Khi m\u1EDF C\u1ED5ng VNPT, b\u1EA1n ch\u1EC9 c\u1EA7n nh\u1EA5n Ctrl+V v\xE0o \xF4 tra c\u1EE9u.');" style="color: #ffffff; text-decoration: none; font-size: 12px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(255,255,255,0.3); display: inline-flex; align-items: center; gap: 4px;">
+          <span>M\u1EDF web g\u1ED1c vnpt-invoice.com.vn</span> &rarr;
+        </a>
+      </div>
+    `);
+    $("body").append(`
+      <!-- Modal Backdrop -->
+      <div id="vnpt-modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999998; backdrop-filter:blur(2px);" onclick="closeVnptModal()"></div>
+
+      <!-- Loading Spinner -->
+      <div id="vnpt-modal-loading" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#0f172a; color:#f8fafc; padding:18px 28px; border-radius:10px; z-index:9999999; box-shadow:0 20px 40px rgba(0,0,0,0.4); font-family:sans-serif; font-size:14px; align-items:center; gap:12px;">
+        <span style="display:inline-block; width:22px; height:22px; border:3px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:vnpt-spin 0.8s linear infinite;"></span>
+        <span>\u0110ang t\u1EA3i n\u1ED9i dung h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB C\u1ED5ng VNPT...</span>
+      </div>
+
+      <!-- Invoice Viewer Modal -->
+      <div id="ViewInvoice" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#ffffff; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.5); padding:24px; width:940px; max-width:96vw; max-height:92vh; overflow-y:auto; z-index:9999999; border:1px solid #cbd5e1; font-family:Arial,sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">\u{1F4C4}</span>
+            <strong style="color:#005baa; font-size:16px;">Chi Ti\u1EBFt H\xF3a \u0110\u01A1n \u0110i\u1EC7n T\u1EED - VNPT Invoice</strong>
+          </div>
+          <button type="button" onclick="closeVnptModal()" style="border:none; background:#f1f5f9; border-radius:6px; cursor:pointer; font-size:18px; font-weight:bold; width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:#475569;" title="\u0110\xF3ng">\u2715</button>
+        </div>
+        <div id="bt" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;"></div>
+        <div id="container" style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:16px; overflow:auto;"></div>
+      </div>
+
+      <style>
+        @keyframes vnpt-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        #ViewInvoice table { width: 100% !important; border-collapse: collapse; }
+      </style>
+
+      <script>
+        // H\xE0m m\u1EDF xem h\xF3a \u0111\u01A1n tr\u1EF1c ti\u1EBFp
+        window.openVnptInvoice = function(checkCode, fkey) {
+          fkey = fkey || ${JSON.stringify(strFkey)};
+          $('#vnpt-modal-loading').css('display', 'flex');
+          $('#vnpt-modal-backdrop').show();
+          $('#ViewInvoice').hide();
+
+          $.ajax({
+            type: 'POST',
+            url: '${baseUrl}/api/vnpt/ajxPreview',
+            data: { checkCode: checkCode, fkey: fkey, sessionId: ${JSON.stringify(sessionId)} },
+            success: function(data) {
+              $('#vnpt-modal-loading').hide();
+              if (!data || !data.str) {
+                alert('Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c n\u1ED9i dung h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng VNPT. Vui l\xF2ng th\u1EED l\u1EA1i.');
+                $('#vnpt-modal-backdrop').hide();
+                return;
+              }
+              $('#container').html(data.str);
+
+              var btnHtml = '';
+              btnHtml += '<button type="button" onclick="window.printInvoiceDirect()" style="background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg> In H\xF3a \u0110\u01A1n</button>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-pdf?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> T\u1EA3i PDF H\xF3a \u0110\u01A1n</a>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-zip?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download style="background:#475569; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg> T\u1EA3i File Zip</a>';
+              btnHtml += '<button type="button" onclick="closeVnptModal()" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; margin-left:auto;">\u2715 \u0110\xF3ng</button>';
+
+              $('#bt').html(btnHtml);
+              $('#ViewInvoice').show();
+            },
+            error: function(xhr, status, err) {
+              $('#vnpt-modal-loading').hide();
+              $('#vnpt-modal-backdrop').hide();
+              alert('L\u1ED7i khi t\u1EA3i h\xF3a \u0111\u01A1n t\u1EEB C\u1ED5ng VNPT: ' + (err || status));
+            }
+          });
+          return false;
+        };
+
+        window.ajxCall4Portal = window.openVnptInvoice;
+
+        window.printInvoiceDirect = function() {
+          var printContent = document.getElementById('container').innerHTML;
+          var win = window.open('', '_blank', 'width=950,height=750');
+          win.document.write('<!DOCTYPE html><html><head><title>H\xF3a \u0111\u01A1n VNPT - ${strFkey}</title>');
+          win.document.write('<style>@page{size:A4;margin:8mm;}body{margin:0;padding:12px;font-family:Arial,sans-serif;}table{width:100% !important;border-collapse:collapse;}</style>');
+          win.document.write('</head><body>');
+          win.document.write(printContent);
+          win.document.write('</body></html>');
+          win.document.close();
+          win.focus();
+          setTimeout(function() { win.print(); win.close(); }, 600);
+        };
+
+        window.closeVnptModal = function() {
+          $('#ViewInvoice').hide();
+          $('#vnpt-modal-loading').hide();
+          $('#vnpt-modal-backdrop').hide();
+        };
+
+        $(document).ready(function() {
+          // Ng\u0103n m\u1ECDi th\u1EBB a c\xF3 href="#", "/" ho\u1EB7c r\u1ED7ng chuy\u1EC3n h\u01B0\u1EDBng trang ngo\xE0i \xFD mu\u1ED1n
+          $('a[href="#"], a[href="/"], a[href=""]').on('click', function(e) {
+            e.preventDefault();
+            return false;
+          });
+        });
+      </script>
+    `);
+    res.type("html").send($.html());
+  } catch (error) {
+    console.error("[VNPT Portal Submit] L\u1ED7i x\u1EED l\xFD form:", error.message);
+    res.redirect(`${session.portal}/HomeNoLogin/SearchByFkey`);
+  }
+});
+app.all("/api/viettel/download-pdf", async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode || req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ""
+    ).trim();
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode || req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ""
+    ).trim();
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+    if (!supplierTaxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (supplierTaxCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (!reservationCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 b\xED m\u1EADt (reservationCode / M\xE3 s\u1ED1 b\xED m\u1EADt) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalViettelPdf({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : void 0,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : void 0
+    });
+    if (req.query.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error) {
+    console.error("[Viettel] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/viettel/download-zip", async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode || req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ""
+    ).trim();
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode || req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ""
+    ).trim();
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    if (!supplierTaxCode || !reservationCode) {
+      return res.status(400).json({ success: false, error: "Thi\u1EBFu MST b\xEAn b\xE1n ho\u1EB7c M\xE3 b\xED m\u1EADt \u0111\u1EC3 t\u1EA3i ZIP" });
+    }
+    const result = await downloadOriginalViettelZip({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : void 0
+    });
+    if (req.query.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        zipBase64: result.zipBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.zipBuffer.length);
+    res.send(result.zipBuffer);
+  } catch (error) {
+    console.error("[Viettel] L\u1ED7i t\u1EA3i ZIP g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/vnpay/lookup", async (req, res) => {
+  try {
+    let lookupCode = String(req.body?.lookupCode || req.query?.lookupCode || "").trim();
+    const taxCode = String(req.body?.taxCode || req.body?.sellerTaxCode || req.query?.taxCode || "").trim();
+    const cqtCode = String(req.body?.cqtCode || req.body?.mhdon || req.query?.cqtCode || req.query?.mhdon || "").trim();
+    const captchaToken = req.body?.captchaToken || req.query?.captchaToken;
+    const isInvalidCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = "";
+    }
+    if (!lookupCode) {
+      const portalUrl = buildVnpayPortalUrl("", taxCode);
+      return res.status(400).json({
+        success: false,
+        directUrl: portalUrl,
+        error: "C\u1ED5ng VNPAY y\xEAu c\u1EA7u S\u1ED1 b\u1EA3o m\u1EADt in tr\xEAn h\xF3a \u0111\u01A1n. C\u1ED5ng kh\xF4ng h\u1ED7 tr\u1EE3 tra c\u1EE9u tr\u1EF1c ti\u1EBFp qua m\xE3 CQT c\u1EA5p (mhdon)."
+      });
+    }
+    if (!taxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await lookupVnpayInvoice({
+      lookupCode,
+      taxCode,
+      cqtCode: cqtCode || void 0,
+      captchaToken: captchaToken ? String(captchaToken) : void 0
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("[VNPAY] L\u1ED7i tra c\u1EE9u h\xF3a \u0111\u01A1n:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/vnpay/download-pdf", async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ""
+    ).trim();
+    let lookupCode = String(
+      req.query.lookupCode || req.query.code || req.body?.lookupCode || req.body?.code || ""
+    ).trim();
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon || req.body?.cqtCode || req.body?.mhdon || ""
+    ).trim();
+    const isInvalidCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = "";
+    }
+    const stringId = String(
+      req.query.stringId || req.query.id || req.body?.stringId || req.body?.id || ""
+    ).trim();
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+    const captchaToken = req.query.captchaToken || req.body?.captchaToken;
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({
+        success: false,
+        sourceUrl: buildVnpayPortalUrl("", sellerTaxCode),
+        error: "C\u1EA7n S\u1ED1 b\u1EA3o m\u1EADt (lookupCode) ho\u1EB7c stringId \u0111\u1EC3 t\u1EA3i file t\u1EEB C\u1ED5ng VNPAY."
+      });
+    }
+    const result = await downloadOriginalVnpayPdf({
+      sellerTaxCode,
+      lookupCode: lookupCode || void 0,
+      cqtCode: cqtCode || void 0,
+      stringId: stringId || void 0,
+      invoiceNo: invoiceNo ? String(invoiceNo) : void 0,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : void 0,
+      captchaToken: captchaToken ? String(captchaToken) : void 0
+    });
+    if (result.requiresCaptcha) {
+      return res.status(200).json({
+        success: false,
+        requiresCaptcha: true,
+        error: result.error,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error) {
+    console.error("[VNPAY] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/vnpay/download-xml", async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ""
+    ).trim();
+    let lookupCode = String(
+      req.query.lookupCode || req.query.code || req.body?.lookupCode || req.body?.code || ""
+    ).trim();
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon || req.body?.cqtCode || req.body?.mhdon || ""
+    ).trim();
+    const isInvalidCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = "";
+    }
+    const stringId = String(
+      req.query.stringId || req.query.id || req.body?.stringId || req.body?.id || ""
+    ).trim();
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({
+        success: false,
+        sourceUrl: buildVnpayPortalUrl("", sellerTaxCode),
+        error: "C\u1EA7n S\u1ED1 b\u1EA3o m\u1EADt (lookupCode) ho\u1EB7c stringId \u0111\u1EC3 t\u1EA3i file t\u1EEB C\u1ED5ng VNPAY."
+      });
+    }
+    const result = await downloadOriginalVnpayXml({
+      sellerTaxCode,
+      lookupCode: lookupCode || void 0,
+      cqtCode: cqtCode || void 0,
+      stringId: stringId || void 0,
+      invoiceNo: invoiceNo ? String(invoiceNo) : void 0,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : void 0
+    });
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        xmlContent: result.xmlContent,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error) {
+    console.error("[VNPAY] L\u1ED7i t\u1EA3i XML g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/foursi/render-pdf", async (req, res) => {
+  try {
+    const { xml, invoice } = req.body || {};
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || "Kh\xF4ng th\u1EC3 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n 4Si qua LCS Soft",
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+    res.json({
+      success: true,
+      filename: result.filename,
+      pdfBase64: result.pdfBase64,
+      sourceUrl: result.sourceUrl,
+      portalUrl: result.portalUrl,
+      isDisplayOnly: true,
+      message: "B\u1EA3n th\u1EC3 hi\u1EC7n 4Si t\u1EA1o b\u1EDFi dochoadon.lcssoft.com.vn (g\u1EA7n gi\u1ED1ng b\u1EA3n g\u1ED1c, kh\xF4ng ph\u1EA3i h\xF3a \u0111\u01A1n g\u1ED1c c\xF3 ch\u1EEF k\xFD s\u1ED1)"
+    });
+  } catch (error) {
+    console.error("[FourSi] L\u1ED7i render b\u1EA3n th\u1EC3 hi\u1EC7n:", error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+app.all("/api/foursi/download-pdf", async (req, res) => {
+  try {
+    const xml = req.body?.xml || req.query.xml ? String(req.body?.xml || req.query.xml) : "";
+    const invoice = req.body?.invoice || void 0;
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || "Kh\xF4ng th\u1EC3 t\u1EA1o PDF t\u1EEB c\u1ED5ng dochoadon.lcssoft.com.vn",
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        portalUrl: result.portalUrl,
+        isDisplayOnly: true
+      });
+    }
+    res.setHeader("Content-Type", result.contentType || "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error) {
+    console.error("[FourSi] L\u1ED7i t\u1EA3i PDF qua LCS Soft:", error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+app.all("/api/minvoice/download-pdf", async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue || req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ""
+    ).trim();
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.checkCode || req.body?.lookupCode || req.body?.sobaomat || req.body?.checkCode || ""
+    ).trim();
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || "1");
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || "");
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode / masothue) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "S\u1ED1 b\u1EA3o m\u1EADt (lookupCode / sobaomat) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const minvoiceUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+      sellerTaxCode
+    )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25e3);
+    const resp = await fetch(minvoiceUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "application/pdf, application/octet-stream, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": "https://tracuuhoadon.minvoice.com.vn/",
+        "Origin": "https://tracuuhoadon.minvoice.com.vn"
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    if (!resp.ok) {
+      throw new Error(`C\u1ED5ng M-Invoice ph\u1EA3n h\u1ED3i l\u1ED7i HTTP ${resp.status}: ${resp.statusText}`);
+    }
+    const arrayBuf = await resp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    if (buffer.length < 500 || !buffer.subarray(0, 10).toString("latin1").includes("%PDF")) {
+      throw new Error("D\u1EEF li\u1EC7u tr\u1EA3 v\u1EC1 t\u1EEB c\u1ED5ng M-Invoice kh\xF4ng ph\u1EA3i file PDF h\u1EE3p l\u1EC7");
+    }
+    const cleanShd = invoiceNo.padStart(7, "0");
+    const filename = `HoaDon_MInvoice_${sellerTaxCode}_${cleanShd}_${lookupCode}.pdf`;
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename,
+        pdfBase64: buffer.toString("base64"),
+        sourceUrl: minvoiceUrl
+      });
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
+  } catch (error) {
+    console.error("[M-Invoice] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/cyberbill/download-pdf", async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue || req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ""
+    ).trim();
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.maSoBiMat || req.query.checkCode || req.body?.lookupCode || req.body?.sobaomat || req.body?.maSoBiMat || req.body?.checkCode || ""
+    ).trim();
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || "1");
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || "");
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 b\xED m\u1EADt (lookupCode / maSoBiMat) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalCyberbillPdf({
+      sellerTaxCode,
+      lookupCode,
+      invoiceNo,
+      invoiceSeries
+    });
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        htmlContent: result.htmlContent
+      });
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error) {
+    console.error("[CyberBill] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/thaison/download-pdf", async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.sobaomat || req.query.code || req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.sobaomat || req.body?.code || ""
+    ).trim();
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue || req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ""
+    ).trim();
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || "1");
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || "");
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n (lookupCode / MaNhanHoaDon) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalThaiSonPdf({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || void 0,
+      invoiceNo,
+      invoiceSeries
+    });
+    if (req.query.format === "json" || req.body?.format === "json") {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader("Content-Length", result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error) {
+    console.error("[Th\xE1i S\u01A1n] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.all("/api/thaison/download-xml", async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.code || req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.code || ""
+    ).trim();
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.body?.sellerTaxCode || req.body?.taxCode || ""
+    ).trim();
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: "M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n (lookupCode) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    const result = await downloadOriginalThaiSonXml({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || void 0
+    });
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error) {
+    console.error("[Th\xE1i S\u01A1n] L\u1ED7i t\u1EA3i XML g\u1ED1c:", error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+var runtimeAuthTokenSecret = null;
 function getAuthTokenSecret() {
-  const secret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED || "gdt_web_auth_token_default_secret_key_2026";
-  return secret;
+  const envSecret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED;
+  if (envSecret) {
+    return envSecret;
+  }
+  if (!runtimeAuthTokenSecret) {
+    runtimeAuthTokenSecret = crypto2.randomBytes(32).toString("hex");
+    console.warn("[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.");
+  }
+  return runtimeAuthTokenSecret;
 }
 function getWebAppAuthUrl(req) {
   if (process.env.VERCEL) {
@@ -11583,15 +16215,23 @@ app.post("/api/auth/login", async (req, res) => {
     if (!dbInit.success) {
       return res.status(200).json({
         success: false,
-        message: dbInit.message || "H\u1EC7 th\u1ED1ng ch\u01B0a k\u1EBFt n\u1ED1i t\u1EDBi Neon Database. Vui l\xF2ng c\u1EA5u h\xECnh DATABASE_URL ho\u1EB7c POSTGRES_URL tr\xEAn Vercel."
+        message: dbInit.message || "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng ki\u1EC3m tra l\u1EA1i c\u1EA5u h\xECnh DATABASE_URL."
       });
     }
-    const user = await findUserByUsername(username);
+    let user;
+    try {
+      user = await findUserByUsername(username);
+    } catch (dbErr) {
+      return res.status(200).json({
+        success: false,
+        message: "L\u1ED7i truy v\u1EA5n c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng th\u1EED l\u1EA1i sau."
+      });
+    }
     if (!user) {
-      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp (M\xE3 s\u1ED1 thu\u1EBF) ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng \u0111\xFAng." });
+      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
     }
     if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: "M\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
+      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
     }
     if (!user.is_active) {
       return res.status(403).json({ success: false, message: "T\xE0i kho\u1EA3n n\xE0y \u0111ang b\u1ECB t\u1EA1m kh\xF3a. Vui l\xF2ng li\xEAn h\u1EC7 qu\u1EA3n tr\u1ECB vi\xEAn." });
@@ -11721,11 +16361,39 @@ app.get("/api/admin/db-status", async (req, res) => {
         success: true,
         connected: true,
         type: "remote_webapp",
-        message: "X\xE1c th\u1EF1c Neon \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp."
+        message: "X\xE1c th\u1EF1c t\xE0i kho\u1EA3n \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp.",
+        maskedUrl: ""
       });
     }
     const status = await getDatabaseStatus();
-    res.json({ success: true, ...status });
+    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.get("/api/neon/config", async (req, res) => {
+  try {
+    const status = await getDatabaseStatus();
+    res.json({
+      success: true,
+      ...status,
+      maskedUrl: getMaskedDatabaseUrl()
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+app.post("/api/neon/test-and-save", async (req, res) => {
+  try {
+    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
+    if (!databaseUrl || typeof databaseUrl !== "string") {
+      return res.status(400).json({ success: false, message: "Vui l\xF2ng cung c\u1EA5p chu\u1ED7i k\u1EBFt n\u1ED1i DATABASE_URL h\u1EE3p l\u1EC7." });
+    }
+    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
+      username: initialAdminUsername,
+      password: initialAdminPassword
+    });
+    return res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -11747,14 +16415,6 @@ app.use("/api", (err, req, res, next) => {
   });
 });
 async function startServer() {
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    initDatabase().then((dbInitResult) => {
-      console.log(`[Database Init] ${dbInitResult.message}`);
-    }).catch((dbErr) => {
-      console.warn("[Database Init] Warning:", dbErr.message);
-    });
-  });
   if (process.env.NODE_ENV !== "production") {
     try {
       const { createServer: createViteServer } = await import("vite");
@@ -11766,7 +16426,26 @@ async function startServer() {
         appType: "spa"
       });
       app.use(vite.middlewares);
-      console.log("[Vite] Vite middleware attached.");
+      app.use("*", async (req, res, next) => {
+        if (req.method !== "GET" || req.originalUrl.startsWith("/api")) {
+          return next();
+        }
+        try {
+          const fs2 = await import("fs");
+          const path3 = await import("path");
+          const indexPath = path3.resolve(process.cwd(), "index.html");
+          if (fs2.existsSync(indexPath)) {
+            let template = fs2.readFileSync(indexPath, "utf-8");
+            template = await vite.transformIndexHtml(req.originalUrl, template);
+            return res.status(200).set({ "Content-Type": "text/html" }).end(template);
+          }
+        } catch (e) {
+          vite.ssrFixStacktrace(e);
+          return next(e);
+        }
+        next();
+      });
+      console.log("[Vite] Vite middleware and SPA fallback attached.");
     } catch (viteErr) {
       console.error("[Vite Init Error]:", viteErr.message);
     }
@@ -11777,6 +16456,15 @@ async function startServer() {
       res.sendFile(path2.join(distPath, "index.html"));
     });
   }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    initDatabase().then((dbInitResult) => {
+      if (dbInitResult.success) {
+        console.log(`[Database Init] \u2713 ${dbInitResult.message}`);
+      }
+    }).catch(() => {
+    });
+  });
 }
 var server_default = app;
 if (!process.env.VERCEL) {
@@ -11785,4 +16473,3 @@ if (!process.env.VERCEL) {
 export {
   server_default as default
 };
-//# sourceMappingURL=index.js.map

@@ -1,6 +1,58 @@
 import { GDTInvoice } from '../types';
 
 export const SAMPLE_GDT_INVOICES: GDTInvoice[] = [
+  // Hóa đơn CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
+  {
+    id: 'HD_SUNTALENT_0000050',
+    khmshdon: '1',
+    khhdon: 'C26TST',
+    shdon: '0000050',
+    tdlap: '2026-03-22T08:30:00',
+    nbmst: '0402307168',
+    nbten: 'CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT',
+    nbdchi: '382 Nguyễn Hữu Thọ, Phường Cẩm Lệ, Thành Phố Đà Nẵng, Việt Nam',
+    nbsdt: '0905123456',
+    nmmst: '4000926165',
+    nmten: 'CÔNG TY TNHH MỘT THÀNH VIÊN VÀNG BẠC NGHĨA TÍN',
+    nmdchi: '448 Phan Chu Trinh, Phường Tam Kỳ, TP Đà Nẵng, Việt Nam',
+    tgtcthue: 9000000,
+    tgtthue: 720000,
+    tgtttbso: 9720000,
+    tgtttbchu: 'Chín triệu bảy trăm hai mươi nghìn đồng',
+    htttoan: '3',
+    dvtte: 'VND',
+    tygia: 1,
+    tthdon: 1,
+    tthdonLabel: 'Hóa đơn gốc',
+    ttxly: 1,
+    ttxlyLabel: 'Đã cấp mã CQT',
+    mhdon: '00562A6432556343EB9295EFE97405D58E',
+    hsgcma: true,
+    loaiHdon: 'purchase',
+    hasDigitalSignature: true,
+    signerName: 'CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT',
+    signedDate: '2026-03-22T08:35:00',
+    caProvider: 'VIETTEL-CA',
+    provider: 'VIETTEL',
+    msttcgp: '0100109106',
+    tentcgp: 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)',
+    lookupCode: '',
+    lookupUrl: 'https://vinvoice.viettel.vn/utilities/invoice-search',
+    items: [
+      {
+        lineNo: 1,
+        itemName: 'Chi phí tư vấn doanh nghiệp theo hợp đồng số 4000926165 kí ngày 23/03/2026',
+        unit: 'lần',
+        quantity: 1,
+        unitPrice: 9000000,
+        amount: 9000000,
+        taxRate: '8%',
+        taxRatePercent: 8,
+        taxAmount: 720000,
+        totalAmount: 9720000
+      }
+    ]
+  },
   {
     id: 'HD001_2025_0012480',
     khmshdon: '1',

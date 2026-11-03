@@ -21,6 +21,7 @@ import {
   renderTkjTemplate,
   renderNghiaSonTemplate,
   renderTanThanhDanhTemplate,
+  renderVnpayTemplate,
   renderDefaultTemplate as renderGDTDefaultTemplate,
   detectPartnerTemplate,
   PARTNER_METAS,
@@ -37,6 +38,7 @@ export type InvoiceProviderId =
   | 'TKJ'
   | 'NGHIA_SON'
   | 'TAN_THANH_DANH'
+  | 'VNPAY'
   | 'MISA' 
   | 'VIETTEL' 
   | 'VNPT' 
@@ -104,14 +106,31 @@ export function detectInvoiceProvider(
     }
   }
 
+  // Kiểm tra nhà cung cấp theo MST hoặc tên người bán:
+  // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (MST: 0402307168) sử dụng Viettel S-Invoice
+  const cleanNbmst = (invoice?.nbmst || '').replace(/\D/g, '');
+  const cleanRawStr = (raw || '').replace(/\s+/g, '');
+  if (
+    cleanNbmst === '0402307168' ||
+    (invoice?.nbten && /SUNTALENT/i.test(invoice.nbten)) ||
+    cleanRawStr.includes('0402307168') ||
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(raw || '') ||
+    (raw && /SUNTALENT/i.test(raw))
+  ) {
+    return 'VIETTEL';
+  }
+
   // --------------------------------------------------------------------------
   // BƯỚC 1: Quét toàn bộ XML để tìm domain trong link tra cứu hoặc nội dung
   // --------------------------------------------------------------------------
   if (raw && typeof raw === 'string') {
+    if (/vnpayinvoice|0102182292/i.test(raw)) {
+      return 'DEFAULT';
+    }
     if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
       return 'MISA';
     }
-    if (/sinvoice\.viettel|viettel\.vn|vietteltelecom/i.test(raw)) {
+    if (/sinvoice|vinvoice|viettel\.vn|vietteltelecom|viettel-invoice|0100109106/i.test(raw)) {
       return 'VIETTEL';
     }
     if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
@@ -131,6 +150,7 @@ export function detectInvoiceProvider(
     const msttcgpMatch = raw.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
     if (msttcgpMatch && msttcgpMatch[1]) {
       const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+      if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY -> Dùng mẫu GDT
       if (msttcgp === '0100684378') return 'VNPT';
       if (msttcgp === '0101243150') return 'MISA';
       if (msttcgp === '0100109106') return 'VIETTEL';
@@ -143,6 +163,7 @@ export function detectInvoiceProvider(
     const sigMatches = raw.match(/<(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)>/gi);
     if (sigMatches) {
       const sigText = sigMatches.join(' ').toUpperCase();
+      if (sigText.includes('VNPAY')) return 'DEFAULT';
       if (sigText.includes('VNPT')) return 'VNPT';
       if (sigText.includes('MISA')) return 'MISA';
       if (sigText.includes('VIETTEL')) return 'VIETTEL';
@@ -158,6 +179,7 @@ export function detectInvoiceProvider(
   if (invoice) {
     if (invoice.provider && invoice.provider !== 'DEFAULT' && invoice.provider !== 'UNKNOWN') {
       const p = String(invoice.provider).toUpperCase();
+      if (p.includes('VNPAY')) return 'DEFAULT';
       if (p.includes('VNPT')) return 'VNPT';
       if (p.includes('MISA')) return 'MISA';
       if (p.includes('VIETTEL')) return 'VIETTEL';
@@ -167,6 +189,8 @@ export function detectInvoiceProvider(
     }
 
     const msttcgp = (invoice.msttcgp || '').trim();
+    if (invoice.nbmst === '0402307168' || (invoice.nbten && /SUNTALENT/i.test(invoice.nbten))) return 'VIETTEL';
+    if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY -> Dùng mẫu GDT
     if (msttcgp === '0100684378') return 'VNPT';
     if (msttcgp === '0101243150') return 'MISA';
     if (msttcgp === '0105987432') return 'EASYINVOICE';
@@ -175,6 +199,7 @@ export function detectInvoiceProvider(
     if (msttcgp === '0101360697') return 'BKAV';
 
     const tentcgp = (invoice.tentcgp || '').toUpperCase();
+    if (tentcgp.includes('VNPAY') || tentcgp.includes('THANH TOÁN VIỆT NAM') || tentcgp.includes('THANH TOAN VIET NAM')) return 'DEFAULT';
     if (tentcgp.includes('VNPT')) return 'VNPT';
     if (tentcgp.includes('MISA')) return 'MISA';
     if (tentcgp.includes('EASY') || tentcgp.includes('SOFTDREAMS')) return 'EASYINVOICE';
@@ -183,14 +208,16 @@ export function detectInvoiceProvider(
     if (tentcgp.includes('BKAV')) return 'BKAV';
 
     const lookupUrl = (invoice.lookupUrl || '').toLowerCase();
+    if (lookupUrl.includes('vnpayinvoice') || lookupUrl.includes('vietcombank')) return 'DEFAULT';
     if (lookupUrl.includes('vnpt')) return 'VNPT';
     if (lookupUrl.includes('meinvoice') || lookupUrl.includes('misa')) return 'MISA';
     if (lookupUrl.includes('easyinvoice') || lookupUrl.includes('softdreams')) return 'EASYINVOICE';
-    if (lookupUrl.includes('4si')) return '4SI';
+    if (lookupUrl.includes('4si')) return 'DEFAULT';
     if (lookupUrl.includes('sinvoice') || lookupUrl.includes('viettel')) return 'VIETTEL';
     if (lookupUrl.includes('bkav') || lookupUrl.includes('ehoadon')) return 'BKAV';
 
     const ca = (invoice.caProvider || '').toUpperCase();
+    if (ca.includes('VNPAY')) return 'DEFAULT';
     if (ca.includes('VNPT')) return 'VNPT';
     if (ca.includes('MISA')) return 'MISA';
     if (ca.includes('VIETTEL')) return 'VIETTEL';
@@ -332,10 +359,10 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         id: 'VIETTEL',
         name: 'Viettel S-Invoice',
         shortName: 'Viettel',
-        domain: 'sinvoice.vn',
+        domain: 'vinvoice.viettel.vn',
         badge: '🔴 Viettel S-Invoice',
         color: '#dc2626',
-        portalUrl: 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html',
+        portalUrl: 'https://vinvoice.viettel.vn/utilities/invoice-search',
         description: 'Giải pháp HĐĐT S-Invoice Tập đoàn Công nghiệp - Viễn thông Quân đội (MST 0100109106)'
       };
     case 'VNPT':
@@ -365,11 +392,11 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         id: '4SI',
         name: 'Mẫu Chuẩn Tổng cục Thuế (4Si / LCS / PNJ)',
         shortName: '4Si / GDT',
-        domain: 'hoadondientu.gdt.gov.vn',
-        badge: '🏛️ Mẫu Tổng cục Thuế',
+        domain: 'dochoadon.lcssoft.com.vn',
+        badge: '🏛️ Mẫu GDT (4Si / LCS)',
         color: '#915715',
-        portalUrl: 'https://hoadondientu.gdt.gov.vn',
-        description: 'Sử dụng mẫu chuẩn Tổng cục Thuế (GDT) áp dụng cho hóa đơn 4Si / PNJ'
+        portalUrl: 'https://dochoadon.lcssoft.com.vn/',
+        description: 'Mẫu chuẩn Tổng cục Thuế (GDT) cho hóa đơn 4Si / LCS Soft; hỗ trợ đọc và xuất bản thể hiện qua dochoadon.lcssoft.com.vn'
       };
     case 'BKAV':
       return {
@@ -381,6 +408,17 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         color: '#ea580c',
         portalUrl: 'https://ehoadon.bkav.com/tra-cuu',
         description: 'Hóa đơn điện tử Bkav eHoadon (Tập đoàn Công nghệ Bkav - MST 0101360697)'
+      };
+    case 'VNPAY':
+      return {
+        id: 'VNPAY',
+        name: 'VNPAY Invoice',
+        shortName: 'VNPAY',
+        domain: 'portal.vnpayinvoice.vn',
+        badge: '💳 VNPAY Invoice',
+        color: '#005baa',
+        portalUrl: 'https://portal.vnpayinvoice.vn',
+        description: 'Giải pháp HĐĐT VNPAY Invoice (Công ty CP Giải pháp Thanh toán Việt Nam - MST 0102182292)'
       };
     case 'DEFAULT':
     default:
@@ -484,6 +522,10 @@ export function renderInvoiceHtml(
 
     case 'BKAV':
       html = renderBkavTemplate(invoice, rawXml, options);
+      break;
+
+    case 'VNPAY':
+      html = renderVnpayTemplate(invoice, rawXml, options);
       break;
 
     case 'DEFAULT':
@@ -1728,7 +1770,7 @@ export function renderViettelTemplate(
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
   const mCode = lookupCode || invoice.lookupCode || '';
-  const pUrl = lookupUrl || invoice.lookupUrl || 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html';
+  const pUrl = lookupUrl || invoice.lookupUrl || 'https://vinvoice.viettel.vn/utilities/invoice-search';
   const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, 'VIETTEL', invoice.nbmst);
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
   const maCqt = invoice.mhdon || '0024A998811234F9004B2C89';
@@ -2460,7 +2502,7 @@ export function renderVnptTemplate(
     <div class="vnpt-footer">
       <div style="font-style: italic; margin-bottom: 3px;">(Cần kiểm tra, đối chiếu khi lập, giao nhận hóa đơn)</div>
       <div>Khởi tạo từ Hệ thống Hóa đơn điện tử <b>VNPT Invoice</b> - Tập đoàn Bưu chính Viễn thông Việt Nam</div>
-      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
+      <div>Tra cứu trực tuyến tại: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color: #005baa; font-weight: bold;">${escapeHtml(mUrl)}</a> &nbsp;&nbsp; Mã tra cứu: <b style="color: #005baa;">${escapeHtml(mCode)}</b></div>
     </div>
   </div>
 </body>

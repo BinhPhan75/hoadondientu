@@ -54,15 +54,20 @@ export async function exportInvoiceToPdfFile(
         templateId: (templateId && templateId !== 'AUTO') ? templateId as any : undefined
       });
       
+      // Use DOMParser to safely parse HTML and strip any script elements before DOM insertion
+      const parser = new DOMParser();
+      const parsedDoc = parser.parseFromString(htmlString, 'text/html');
+      parsedDoc.querySelectorAll('script').forEach(s => s.remove());
+
       tempContainer = document.createElement('div');
       tempContainer.style.position = 'fixed';
       tempContainer.style.left = '-9999px';
       tempContainer.style.top = '0';
       tempContainer.style.width = '820px';
       tempContainer.style.background = '#ffffff';
-      tempContainer.innerHTML = htmlString;
+      tempContainer.innerHTML = parsedDoc.body.innerHTML;
       document.body.appendChild(tempContainer);
-      targetElement = tempContainer.querySelector('.invoice-container, .misa-invoice-page, .sinvoice-paper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card') as HTMLElement || tempContainer;
+      targetElement = tempContainer.querySelector('.main-page, .invoice-container, .misa-invoice-page, .sinvoice-paper, .viettel-wrapper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card, .print-page') as HTMLElement || tempContainer;
     }
 
     // High resolution canvas options for crisp text & borders
@@ -78,8 +83,6 @@ export async function exportInvoiceToPdfFile(
       document.body.removeChild(tempContainer);
     }
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.98);
-
     // Standard A4 dimensions in mm: 210 x 297
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -94,9 +97,52 @@ export async function exportInvoiceToPdfFile(
     // Standard page margins: 8mm
     const margin = 8;
     const contentWidth = pdfWidth - margin * 2;
-    const contentHeight = (canvas.height * contentWidth) / canvas.width;
+    const pageContentHeight = pdfHeight - margin * 2;
+    const pixelsPerMm = canvas.width / contentWidth;
+    const pageHeightPx = Math.max(1, Math.floor(pageContentHeight * pixelsPerMm));
+    const pageCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
 
-    pdf.addImage(imgData, 'JPEG', margin, margin, contentWidth, Math.min(contentHeight, pdfHeight - margin * 2));
+    // Slice the rendered invoice into A4 pages instead of shrinking a long
+    // table onto one page. This preserves readable text for invoices with
+    // many line items.
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      const sourceY = pageIndex * pageHeightPx;
+      const sourceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sourceHeight;
+      const pageContext = pageCanvas.getContext('2d');
+      if (!pageContext) {
+        throw new Error('Không thể tạo canvas phân trang PDF.');
+      }
+      pageContext.fillStyle = '#ffffff';
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(
+        canvas,
+        0,
+        sourceY,
+        canvas.width,
+        sourceHeight,
+        0,
+        0,
+        pageCanvas.width,
+        pageCanvas.height
+      );
+
+      if (pageIndex > 0) {
+        pdf.addPage();
+      }
+      const pageImageHeight = sourceHeight / pixelsPerMm;
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.98),
+        'JPEG',
+        margin,
+        margin,
+        contentWidth,
+        pageImageHeight
+      );
+    }
+
     pdf.save(defaultFileName);
 
     return true;

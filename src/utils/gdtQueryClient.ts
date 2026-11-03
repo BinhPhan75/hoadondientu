@@ -1,5 +1,5 @@
 import { GDTInvoice } from '../types';
-import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem } from './xmlParser';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
 
 export interface QueryInvoicesOptions {
@@ -81,6 +81,19 @@ const formatDateForGdt = (dateStr: string, isEnd = false) => {
 };
 
 export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', isPos = false): GDTInvoice {
+  const isViettel = isViettelSource(item);
+  const isVnpt = isVnptSource(item);
+  const isMisa = isMisaSource(item);
+  const resolvedProvider = isViettel ? 'VIETTEL' : isVnpt ? 'VNPT' : isMisa ? 'MISA' : (item.provider || undefined);
+  const resolvedMsttcgp = item.msttcgp || item.mst_tcgp || item.tvandnkntt || (isViettel ? '0100109106' : isVnpt ? '0100684378' : isMisa ? '0101243150' : '');
+  const resolvedTentcgp = item.tentcgp || item.ten_tcgp || item.tctchuc || (isViettel ? 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)' : isVnpt ? 'Tập đoàn Bưu chính Viễn thông Việt Nam (VNPT)' : isMisa ? 'Công ty Cổ phần MISA' : '');
+  const resolvedCaProvider = isViettel ? 'VIETTEL-CA' : isVnpt ? 'VNPT-CA' : isMisa ? 'MISA-CA' : 'Tổng cục Thuế CQT';
+  const defaultLookupUrl = isViettel
+    ? 'https://vinvoice.viettel.vn/utilities/invoice-search'
+    : isMisa
+      ? 'https://www.meinvoice.vn/tra-cuu'
+      : undefined;
+
   return {
     id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
     khmshdon: item.khmshdon || item.khmhd || '1',
@@ -108,11 +121,12 @@ export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', is
     hasDigitalSignature: true,
     signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
     signedDate: item.tdlap,
-    caProvider: 'Tổng cục Thuế CQT',
-    msttcgp: item.msttcgp || item.mst_tcgp || '',
-    tentcgp: item.tentcgp || item.ten_tcgp || item.tctchuc || '',
+    caProvider: resolvedCaProvider,
+    provider: resolvedProvider,
+    msttcgp: resolvedMsttcgp,
+    tentcgp: resolvedTentcgp,
     lookupCode: getLookupCodeFromPayload(item),
-    lookupUrl: getLookupUrlFromPayload(item),
+    lookupUrl: getLookupUrlFromPayload(item) || defaultLookupUrl,
     items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
     sourceCompleteness: 'summary',
     isPos

@@ -7,19 +7,21 @@ import {
   ShieldCheck, 
   ChevronLeft, 
   ChevronRight, 
-  Code2, 
   Sparkles, 
   RefreshCw, 
   ExternalLink,
-  FileText
+  FileText,
+  Loader2,
+  Eye,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { 
   generateInvoiceQrCode, 
   exportInvoiceToPdfFile, 
-  openInvoicePrintWindow, 
-  downloadStandaloneHtmlFile 
+  openInvoicePrintWindow
 } from '../utils/pdfExporter';
 import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
 import { 
@@ -29,7 +31,7 @@ import {
   InvoiceProviderId, 
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
-import { buildDirectLookupUrl } from '../templates/templateUtils';
+import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 
 interface InvoiceDetailModalProps {
@@ -37,7 +39,7 @@ interface InvoiceDetailModalProps {
   allInvoices?: GDTInvoice[];
   onSelectInvoice?: (invoice: GDTInvoice) => void;
   onClose: () => void;
-  onDownloadXml: (invoice: GDTInvoice) => void;
+  onDownloadXml?: (invoice: GDTInvoice) => void;
   onUpdateInvoice?: (invoice: GDTInvoice) => void;
   token?: string;
   cookieHeader?: string;
@@ -48,7 +50,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   allInvoices = [],
   onSelectInvoice,
   onClose,
-  onDownloadXml,
+  onDownloadXml: _onDownloadXml,
   onUpdateInvoice,
   token,
   cookieHeader
@@ -63,6 +65,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   useEffect(() => {
     setCurrentInvoice(invoice);
+    setOriginalEasyInvoiceHtml(null);
+    setOriginalVnptHtml(null);
+    setVnptCheckCode(null);
+    setVnptPortalUrl(null);
+    if (originalViettelPdfUrl) {
+      window.URL.revokeObjectURL(originalViettelPdfUrl);
+      setOriginalViettelPdfUrl(null);
+    }
+    if (originalFourSiPdfUrl) {
+      window.URL.revokeObjectURL(originalFourSiPdfUrl);
+      setOriginalFourSiPdfUrl(null);
+    }
     openInvoiceIdRef.current = invoice?.id ?? null;
   }, [invoice]);
 
@@ -71,6 +85,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     : null;
 
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
+  const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
+  const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
+  const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
+  const [isLoadingVnptOriginal, setIsLoadingVnptOriginal] = useState(false);
+  const [isDownloadingVnptPdf, setIsDownloadingVnptPdf] = useState(false);
+  const [originalViettelPdfUrl, setOriginalViettelPdfUrl] = useState<string | null>(null);
+  const [isLoadingViettelOriginal, setIsLoadingViettelOriginal] = useState(false);
+  const [isDownloadingViettelPdf, setIsDownloadingViettelPdf] = useState(false);
+  const [isDownloadingViettelZip, setIsDownloadingViettelZip] = useState(false);
+  const [originalFourSiPdfUrl, setOriginalFourSiPdfUrl] = useState<string | null>(null);
+  const [isLoadingFourSiOriginal, setIsLoadingFourSiOriginal] = useState(false);
+  const [isDownloadingFourSiPdf, setIsDownloadingFourSiPdf] = useState(false);
+  const [fourSiNotice, setFourSiNotice] = useState<string | null>(null);
+  const [fourSiError, setFourSiError] = useState<string | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const theme = 'red';
@@ -122,6 +151,403 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
+  const handleViewOriginalVnpt = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn VNPT không có mã tra cứu để tra cứu bản gốc.');
+      return;
+    }
+    setIsLoadingVnptOriginal(true);
+    try {
+      const resp = await fetch('/api/vnpt/view-original', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success || !data.htmlContent) {
+        throw new Error(data.error || 'Không nhận được bản thể hiện gốc từ VNPT.');
+      }
+      setOriginalVnptHtml(data.htmlContent);
+      if (data.checkCode) setVnptCheckCode(data.checkCode);
+      if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem VNPT gốc:', err);
+      alert(`Không thể hiển thị bản gốc VNPT: ${err.message}`);
+    } finally {
+      setIsLoadingVnptOriginal(false);
+    }
+  };
+
+  const handleDownloadVnptPdf = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn VNPT không có mã tra cứu để tải PDF gốc.');
+      return;
+    }
+    setIsDownloadingVnptPdf(true);
+    try {
+      const portal = vnptPortalUrl || lookupDetails.lookupUrl || currentProviderMeta.portalUrl;
+      const cleanCheckCode = (vnptCheckCode && vnptCheckCode !== 'undefined' && vnptCheckCode !== 'null') ? vnptCheckCode : undefined;
+      
+      const resp = await fetch('/api/vnpt/download-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          portalUrl: portal,
+          checkCode: cleanCheckCode,
+          invoiceNumber: effectiveInvoice.shdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errorMsg = 'Không thể tải file PDF gốc từ cổng VNPT.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errorMsg = errJson.error;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF nhận được từ cổng VNPT bị rỗng hoặc không hợp lệ.');
+      }
+
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : lookupCode.slice(0, 8);
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `HoaDon_VNPT_${cleanShd}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải PDF gốc VNPT:', err);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp file PDF từ cổng VNPT (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét từ bản thể hiện ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
+    } finally {
+      setIsDownloadingVnptPdf(false);
+    }
+  };
+
+  const handleDownloadViettelPdf = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật để tải PDF gốc.');
+      return;
+    }
+
+    setIsDownloadingViettelPdf(true);
+    try {
+      const resp = await fetch('/api/viettel/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon,
+          invoiceSeries: effectiveInvoice.khhdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải file PDF gốc từ cổng Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF nhận được từ Viettel bị rỗng.');
+      }
+
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const cleanKhhdon = (effectiveInvoice.khhdon || '').replace(/[^a-zA-Z0-9]/g, '');
+      const filename = `HoaDon_Viettel_${supplierTaxCode}_${cleanKhhdon ? cleanKhhdon + '_' : ''}${cleanShd}_${reservationCode}.pdf`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải PDF Viettel:', err);
+      const wantFallback = window.confirm(
+        `Không thể tải trực tiếp PDF từ cổng Viettel (${err.message}).\n\nBạn có muốn tự động xuất file PDF A4 sắc nét theo mẫu ngay bây giờ không?`
+      );
+      if (wantFallback) {
+        try {
+          await exportInvoiceToPdfFile(effectiveInvoice);
+        } catch (exportErr: any) {
+          alert(`Không thể xuất PDF: ${exportErr.message}`);
+        }
+      }
+    } finally {
+      setIsDownloadingViettelPdf(false);
+    }
+  };
+
+  const handleViewOriginalViettel = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
+      return;
+    }
+
+    setIsLoadingViettelOriginal(true);
+    try {
+      const resp = await fetch('/api/viettel/download-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon,
+          invoiceSeries: effectiveInvoice.khhdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải bản gốc từ Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      if (!blob || blob.size < 500) {
+        throw new Error('Dữ liệu PDF từ Viettel bị rỗng.');
+      }
+
+      const pdfBlob = new Blob([blob], { type: 'application/pdf' });
+      const blobUrl = window.URL.createObjectURL(pdfBlob);
+      if (originalViettelPdfUrl) {
+        window.URL.revokeObjectURL(originalViettelPdfUrl);
+      }
+      setOriginalViettelPdfUrl(blobUrl);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem PDF Viettel:', err);
+      alert(`Không thể hiển thị bản gốc Viettel: ${err.message}`);
+    } finally {
+      setIsLoadingViettelOriginal(false);
+    }
+  };
+
+  const handleDownloadViettelZip = async () => {
+    if (!effectiveInvoice) return;
+    const reservationCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const supplierTaxCode = effectiveInvoice.nbmst;
+
+    if (!supplierTaxCode || !reservationCode) {
+      alert('Hóa đơn Viettel thiếu Mã số thuế bên bán hoặc Mã bí mật.');
+      return;
+    }
+
+    setIsDownloadingViettelZip(true);
+    try {
+      const resp = await fetch('/api/viettel/download-zip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierTaxCode: supplierTaxCode.trim(),
+          reservationCode: reservationCode.trim(),
+          invoiceNo: effectiveInvoice.shdon
+        })
+      });
+
+      if (!resp.ok) {
+        let errMsg = 'Không thể tải tệp ZIP từ Viettel.';
+        try {
+          const errJson = await resp.json();
+          if (errJson.error) errMsg = errJson.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      const blob = await resp.blob();
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const filename = `HoaDon_Viettel_${supplierTaxCode}_${cleanShd}_${reservationCode}.zip`;
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err: any) {
+      alert(`Không thể tải ZIP Viettel: ${err.message}`);
+    } finally {
+      setIsDownloadingViettelZip(false);
+    }
+  };
+
+  const fetchFourSiPdfBlob = async (): Promise<Blob> => {
+    if (!effectiveInvoice) throw new Error('Không có dữ liệu hóa đơn.');
+    const xmlToUse = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
+    const resp = await fetch('/api/foursi/download-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        xml: xmlToUse,
+        invoice: effectiveInvoice
+      })
+    });
+
+    if (!resp.ok) {
+      let errMsg = 'Cổng LCS Soft chưa thể tạo được bản thể hiện PDF từ XML này.';
+      try {
+        const errJson = await resp.json();
+        if (errJson.error) errMsg = errJson.error;
+      } catch {}
+      throw new Error(errMsg);
+    }
+
+    const blob = await resp.blob();
+    if (!blob || blob.size < 100) {
+      throw new Error('Dữ liệu PDF nhận được từ cổng LCS Soft không hợp lệ.');
+    }
+    return blob;
+  };
+
+  const handleViewFourSiPdf = async () => {
+    if (!effectiveInvoice) return;
+    if (originalFourSiPdfUrl) {
+      // Đã nạp sẵn bản thể hiện đang hiển thị
+      return;
+    }
+    setIsLoadingFourSiOriginal(true);
+    setFourSiError(null);
+    try {
+      const blob = await fetchFourSiPdfBlob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      setOriginalFourSiPdfUrl(blobUrl);
+      setFourSiNotice('Đã nạp bản thể hiện 4Si từ cổng LCS Soft thành công.');
+      setTimeout(() => setFourSiNotice(null), 4000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem PDF 4Si qua LCS Soft:', err);
+      setFourSiError(`Không thể hiển thị bản thể hiện 4Si từ LCS Soft: ${err.message}`);
+    } finally {
+      setIsLoadingFourSiOriginal(false);
+    }
+  };
+
+  const handleDownloadFourSiPdf = async () => {
+    if (!effectiveInvoice) return;
+    setIsDownloadingFourSiPdf(true);
+    setFourSiError(null);
+    try {
+      const cleanShd = effectiveInvoice.shdon ? String(effectiveInvoice.shdon).padStart(7, '0') : '0000000';
+      const cleanKhh = effectiveInvoice.khhdon || '4SI';
+      const filename = `HoaDon_4SI_LCS_${cleanKhh}_${cleanShd}.pdf`;
+
+      let blobUrl = originalFourSiPdfUrl;
+
+      if (!blobUrl) {
+        const blob = await fetchFourSiPdfBlob();
+        blobUrl = window.URL.createObjectURL(blob);
+        // Lưu lại để có thể xem trực tiếp ngay mà không cần fetch lại
+        setOriginalFourSiPdfUrl(blobUrl);
+      }
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setFourSiNotice(`Đã tải tệp ${filename} thành công!`);
+      setTimeout(() => setFourSiNotice(null), 4000);
+    } catch (err: any) {
+      setFourSiError(`Không thể tải PDF 4Si từ LCS Soft: ${err.message}`);
+    } finally {
+      setIsDownloadingFourSiPdf(false);
+    }
+  };
+
+  const handleViewOriginalEasyInvoice = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tra cứu bản gốc.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang nhập mã tra cứu và giải Captcha...');
+    try {
+      const resp = await fetch('/api/easyinvoice/download?format=view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+          khhdon: effectiveInvoice.khhdon,
+          shdon: effectiveInvoice.shdon,
+          viewOnly: true
+        })
+      });
+      const responseText = await resp.text();
+      let data: { success?: boolean; htmlContent?: string; error?: string } = {};
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        throw new Error(
+          resp.status === 504
+            ? 'Máy chủ tra cứu hết thời gian chờ. Vui lòng thử lại sau vài giây.'
+            : `Máy chủ trả về lỗi không hợp lệ (HTTP ${resp.status}).`
+        );
+      }
+      if (!resp.ok || !data.success || !data.htmlContent) {
+        throw new Error(data.error || 'Không nhận được bản HTML gốc từ EasyInvoice.');
+      }
+      setOriginalEasyInvoiceHtml(data.htmlContent);
+      setEasyInvoiceDownloadStatus('Đã tải bản thể hiện gốc.');
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi xem EasyInvoice gốc:', err);
+      alert(`Không thể hiển thị bản gốc EasyInvoice: ${err.message}`);
+      setEasyInvoiceDownloadStatus(null);
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
+  };
+
   // Trigger automatic load immediately when an invoice without genuine items is opened
   useEffect(() => {
     if (invoice && (!hasGenuineItems(invoice.items) || invoice.sourceCompleteness !== 'detail')) {
@@ -156,6 +582,38 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       });
     }
   }, [effectiveInvoice]);
+
+  // Tự động nạp sẵn dữ liệu hóa đơn gốc VNPT trong nền (HTML + PDF) để khi người dùng bấm Xem hoặc Tải PDF thì có ngay lập tức
+  useEffect(() => {
+    if (!effectiveInvoice) return;
+    const isVnpt =
+      effectiveInvoice.provider === 'VNPT' ||
+      effectiveInvoice.msttcgp === '0100684378' ||
+      effectiveInvoice.nbmst === '4000344946' ||
+      /vnpt/i.test(effectiveInvoice.lookupUrl || '');
+
+    const code = effectiveInvoice.mhdon || effectiveInvoice.lookupCode;
+    if (isVnpt && code && !originalVnptHtml) {
+      const cleanCode = code.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
+      fetch('/api/vnpt/view-original', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: cleanCode,
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: effectiveInvoice.lookupUrl
+        })
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.success) {
+            if (data.checkCode) setVnptCheckCode(data.checkCode);
+            if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [effectiveInvoice?.id, effectiveInvoice?.shdon, effectiveInvoice?.mhdon, effectiveInvoice?.lookupCode]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -200,7 +658,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         }
       }
       if (!lookupDetails.lookupUrl) {
-        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${effectiveInvoice.nbmst || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+        const cleanTaxCode = (effectiveInvoice.nbmst || '').trim().replace(/[^0-9\-]/g, '');
+        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
       }
     }
 
@@ -236,6 +695,44 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       // Không gán mã CQT làm mã tra cứu cho 4SI, để trống nếu chưa có
     }
 
+    // Đối với hóa đơn Viettel S-Invoice / vInvoice (SUNTALENT: 0402307168...):
+    const cleanMstModal = (effectiveInvoice.nbmst || '').replace(/\D/g, '');
+    const isViettelModalCheck =
+      effectiveInvoice.provider === 'VIETTEL' ||
+      effectiveInvoice.msttcgp === '0100109106' ||
+      cleanMstModal === '0402307168' ||
+      (effectiveInvoice.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
+      autoDetectedProvider === 'VIETTEL';
+
+    if (isViettelModalCheck) {
+      if (!lookupDetails.lookupUrl) {
+        lookupDetails.lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
+      }
+    }
+
+    const isVnpayModalCheck =
+      effectiveInvoice.provider === 'VNPAY' ||
+      effectiveInvoice.msttcgp === '0102182292' ||
+      effectiveInvoice.nbmst === '0100112437' ||
+      autoDetectedProvider === 'VNPAY' ||
+      Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
+
+    if (isVnpayModalCheck) {
+      const isVcb = effectiveInvoice.nbmst === '0100112437' || Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
+      if (!lookupDetails.lookupUrl) {
+        lookupDetails.lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
+      }
+      const isInvalidCode = (code?: string) => !code || 
+        code.toLowerCase() === 'vietcombank' || 
+        /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+        (code.includes('0102182292') && code.length > 20);
+
+      if (isInvalidCode(lookupDetails.lookupCode)) {
+        lookupDetails.lookupCode = '';
+      }
+      // VNPAY chỉ tra cứu theo Số bảo mật in trên hóa đơn, không dùng mã CQT cấp (mhdon)
+    }
+
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
     console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);
@@ -243,9 +740,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   }
 
   // Template ID hiệu lực: Nếu người dùng chọn AUTO thì dùng kết quả dò tìm tự động
-  const effectiveTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
+  const resolvedTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
     ? (selectedTemplateId as InvoiceProviderId)
     : autoDetectedProvider;
+
+  // Hóa đơn VNPAY & Vietcombank: Không có mã tra cứu trong XML GDT,
+  // theo chỉ đạo của người dùng: Luôn sử dụng mẫu chuẩn Tổng cục Thuế (DEFAULT) để thông tin người bán và người mua chính xác 100%.
+  const effectiveTemplateId: InvoiceProviderId = (resolvedTemplateId === 'VNPAY')
+    ? 'DEFAULT'
+    : resolvedTemplateId;
 
   const currentProviderMeta: ProviderMeta = getProviderMeta(effectiveTemplateId);
 
@@ -263,9 +766,61 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId === 'TAN_THANH_DANH' ||
     effectiveInvoice?.nbmst === '0101243150';
 
-  const isViettelInvoice = /sinvoice/i.test(directLookupUrl) || 
+  const isVnptInvoice =
+    /vnpt-invoice|portaltool-miennam/i.test(directLookupUrl) ||
+    effectiveTemplateId === 'VNPT' ||
+    effectiveTemplateId === 'NGHIA_SON' ||
+    effectiveInvoice?.provider === 'VNPT' ||
+    effectiveInvoice?.msttcgp === '0100684378' ||
+    effectiveInvoice?.nbmst === '4000344946';
+
+  const isViettelInvoice = /vinvoice|sinvoice|viettel-invoice/i.test(directLookupUrl) || 
+    /vinvoice|sinvoice|viettel-invoice/i.test(lookupDetails.lookupUrl || '') ||
     effectiveTemplateId === 'VIETTEL' || 
-    Boolean(effectiveInvoice?.caProvider?.includes('VIETTEL'));
+    effectiveInvoice?.provider === 'VIETTEL' ||
+    effectiveInvoice?.msttcgp === '0100109106' ||
+    effectiveInvoice?.nbmst === '0402307168' ||
+    (effectiveInvoice?.nbmst && effectiveInvoice.nbmst.replace(/\D/g, '') === '0402307168') ||
+    Boolean(effectiveInvoice?.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('VIETTEL')) ||
+    (Boolean(lookupDetails.lookupCode) && (lookupDetails.lookupUrl?.includes('viettel') || effectiveInvoice?.nbmst === '049163008476'));
+
+  const isEasyInvoice = /easyinvoice/i.test(directLookupUrl) ||
+    /easyinvoice/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === 'EASYINVOICE' || 
+    effectiveTemplateId === 'BAO_DUY' || 
+    effectiveTemplateId === 'KIM_LOAN_TUAN' || 
+    effectiveTemplateId === 'TKJ' ||
+    effectiveInvoice?.provider === 'EASYINVOICE' ||
+    effectiveInvoice?.msttcgp === '0105987432' ||
+    effectiveInvoice?.nbmst === '0318391940';
+
+  const isVnpayInvoice = /vnpayinvoice/i.test(directLookupUrl) ||
+    /vnpayinvoice/i.test(lookupDetails.lookupUrl || '') ||
+    /vietcombank\.com\.vn/i.test(directLookupUrl) ||
+    /vietcombank\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === 'VNPAY' ||
+    effectiveInvoice?.provider === 'VNPAY' ||
+    effectiveInvoice?.msttcgp === '0102182292' ||
+    effectiveInvoice?.nbmst === '0100112437' ||
+    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
+
+  const isVietcombankInvoice = effectiveInvoice?.nbmst === '0100112437' ||
+    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
+
+  const is4SiInvoice =
+    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(directLookupUrl) ||
+    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
+    effectiveTemplateId === '4SI' ||
+    effectiveTemplateId === 'PNJ' ||
+    effectiveTemplateId === 'LCS_SOFT' ||
+    effectiveInvoice?.provider === '4SI' ||
+    effectiveInvoice?.provider === 'LCS_SOFT' ||
+    effectiveInvoice?.msttcgp === '0315744883' ||
+    effectiveInvoice?.msttcgp === '0302999571' ||
+    effectiveInvoice?.nbmst === '0315018466' ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('4SI')) ||
+    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('LCS'));
 
   if (!renderError) {
     try {
@@ -299,68 +854,130 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     );
   }
 
-  const handleDownloadPdfFile = async () => {
+  const handleDownloadPdfFile = async (targetTemplateId: InvoiceProviderId = 'DEFAULT') => {
     setIsExportingPdf(true);
     try {
-      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, effectiveTemplateId);
+      // Xuất tệp PDF A4 sắc nét theo template được chỉ định (Mặc định: 'DEFAULT' là mẫu chuẩn Tổng cục Thuế GDT, hoặc 'VIETTEL', v.v.)
+      await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, theme, targetTemplateId);
     } catch (err) {
       console.error('Lỗi khi xuất PDF:', err);
-      window.print();
+      alert(`Không thể xuất file PDF: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsExportingPdf(false);
     }
-  };
-
-  const handleDownloadHtmlFile = async () => {
-    await downloadStandaloneHtmlFile(effectiveInvoice, theme, effectiveTemplateId);
   };
 
   const handlePrint = () => {
     openInvoicePrintWindow(effectiveInvoice, theme, effectiveTemplateId);
   };
 
+  const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
+  const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
+
+  const handleDownloadEasyInvoice = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang giải mã Captcha & tải HĐ...');
+    try {
+      const resp = await fetch('/api/easyinvoice/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+          khhdon: effectiveInvoice.khhdon,
+          shdon: effectiveInvoice.shdon
+        })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Tải hóa đơn từ EasyInvoice thất bại.');
+      }
+
+      // Tải file về máy
+      const filename = data.filename || `HOADON_${effectiveInvoice.khhdon}_${effectiveInvoice.shdon}.pdf`;
+      const contentType = data.contentType || 'application/pdf';
+      const byteCharacters = atob(data.pdfBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: contentType });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+
+      setEasyInvoiceDownloadStatus('Đã tải thành công!');
+      setTimeout(() => setEasyInvoiceDownloadStatus(null), 3000);
+    } catch (err: any) {
+      console.error('[InvoiceDetailModal] Lỗi tải EasyInvoice:', err);
+      alert(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message}\nBạn có thể nhấn nút "Tra link gốc" để tra cứu trực tiếp.`);
+      setEasyInvoiceDownloadStatus(null);
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
+  };
+
   const isRed = theme === 'red';
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-[#1e293b] rounded-xl max-w-6xl w-full shadow-2xl border border-gray-700 overflow-hidden max-h-[96vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-slate-900 rounded-xl max-w-6xl w-full shadow-2xl border border-slate-800 overflow-hidden max-h-[96vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Top Bar */}
-        <div className="bg-[#0f172a] text-white px-4 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-gray-800">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs ${
-              isRed ? 'bg-red-500/20 border border-red-500/30 text-red-400' : 'bg-blue-500/20 border border-blue-500/30 text-blue-400'
-            }`}>
+        <div className="bg-slate-950 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs bg-blue-500/15 border border-blue-500/25 text-blue-400">
               <FileText className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-xs sm:text-sm font-mono uppercase tracking-wider text-white truncate">
-                  {effectiveInvoice.thdon || 'HÓA ĐƠN ĐIỆN TỬ'}: {effectiveInvoice.khhdon} - SỐ {effectiveInvoice.shdon}
+                <h3 className="font-semibold text-xs sm:text-sm text-slate-100 truncate">
+                  {effectiveInvoice.thdon || 'Hóa đơn điện tử'}: {effectiveInvoice.khhdon} - Số {effectiveInvoice.shdon}
                 </h3>
                 {effectiveInvoice.loaiHdon === 'purchase' ? (
-                  <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 text-[10px] font-bold border border-blue-700">
+                  <span className="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-300 text-[10px] font-semibold border border-blue-500/25">
                     MUA VÀO
                   </span>
                 ) : (
-                  <span className="px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 text-[10px] font-bold border border-emerald-700">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 text-[10px] font-semibold border border-emerald-500/25">
                     BÁN RA
                   </span>
                 )}
                 {effectiveInvoice.hsgcma && (
-                  <span className="px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 text-[10px] font-mono font-semibold border border-emerald-800 flex items-center gap-1">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 text-[10px] font-mono font-medium border border-emerald-800/80 flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
                     ĐÃ CẤP MÃ CQT
                   </span>
                 )}
                 {/* Provider Indicator Pill */}
-                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold border border-amber-500/40 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 text-[10px] font-medium border border-amber-500/30 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
                   NCC: {currentProviderMeta.shortName}
                 </span>
+                {is4SiInvoice && (
+                  <span className="px-2 py-0.5 rounded-md bg-purple-900/40 text-purple-300 text-[10px] font-mono font-medium border border-purple-700/50 flex items-center gap-1" title="Hóa đơn 4Si của Công ty L.C.S (lcssoft.com.vn) - Hỗ trợ đọc qua dochoadon.lcssoft.com.vn">
+                    <span>LCS Soft / 4Si</span>
+                  </span>
+                )}
               </div>
-              <p className="text-[11px] text-gray-400 font-mono truncate mt-0.5">
-                Bên bán: <span className="text-gray-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-amber-300 font-bold">{effectiveInvoice.nbmst}</span>)
+              <p className="text-xs text-slate-400 truncate mt-0.5">
+                Bên bán: <span className="text-slate-200 font-medium">{effectiveInvoice.nbten}</span> (MST: <span className="text-slate-200 font-mono font-semibold">{effectiveInvoice.nbmst}</span>)
               </p>
             </div>
           </div>
@@ -369,22 +986,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {/* Prev / Next buttons */}
             {allInvoices.length > 1 && (
-              <div className="flex items-center bg-gray-900 rounded-lg border border-gray-700 p-0.5 text-xs text-gray-300">
+              <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5 text-xs text-slate-300">
                 <button
                   onClick={handlePrev}
                   disabled={!hasPrev}
-                  className="p-1 hover:text-white hover:bg-gray-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                  className="p-1 hover:text-white hover:bg-slate-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                   title="Hóa đơn trước"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="px-2 text-[11px] font-mono text-gray-400">
+                <span className="px-2 text-[11px] font-mono text-slate-400">
                   {currentIndex + 1}/{allInvoices.length}
                 </span>
                 <button
                   onClick={handleNext}
                   disabled={!hasNext}
-                  className="p-1 hover:text-white hover:bg-gray-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+                  className="p-1 hover:text-white hover:bg-slate-800 rounded disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
                   title="Hóa đơn tiếp theo"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -395,7 +1012,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             {/* Close button */}
             <button
               onClick={onClose}
-              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors cursor-pointer"
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               title="Đóng cửa sổ"
             >
               <X className="w-5 h-5" />
@@ -406,28 +1023,110 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         {/* Modal Main Body */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-950 flex justify-center items-start">
           <div className="w-full flex flex-col items-center">
+            {/* 4Si Error Banner */}
+            {fourSiError && (
+              <div className="w-full max-w-[820px] mb-3 px-4 py-2.5 bg-red-950/90 border border-red-700/60 rounded-lg text-xs text-red-200 flex items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{fourSiError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFourSiError(null)}
+                  className="text-red-400 hover:text-white p-1 rounded cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* 4Si Notice Banner */}
+            {fourSiNotice && (
+              <div className="w-full max-w-[820px] mb-3 px-4 py-2 bg-amber-950/90 border border-amber-600/60 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>{fourSiNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFourSiNotice(null)}
+                  className="text-amber-400 hover:text-white p-1 rounded cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* 4Si Active Preview Banner */}
+            {originalFourSiPdfUrl && (
+              <div className="w-full max-w-[820px] mb-3 px-4 py-2 bg-amber-950/80 border border-amber-700/50 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span>
+                    Đang xem <strong>Bản thể hiện mẫu 4Si (LCS Soft)</strong> — tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc, dùng tham khảo).
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (originalFourSiPdfUrl) window.URL.revokeObjectURL(originalFourSiPdfUrl);
+                    setOriginalFourSiPdfUrl(null);
+                  }}
+                  className="px-2.5 py-1 text-xs font-semibold text-white bg-amber-800 hover:bg-amber-700 rounded transition-colors cursor-pointer shrink-0"
+                >
+                  Quay lại Mẫu chuẩn GDT
+                </button>
+              </div>
+            )}
+
             {/* Paper A4 container */}
             <div 
               className="flex justify-center"
               style={{
-                width: '820px',
+                width: originalVnptHtml ? '890px' : '820px',
                 minHeight: '1160px',
               }}
             >
-                <div className="w-[820px] min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
-                  <iframe
-                    ref={iframeRef}
-                    srcDoc={standaloneHtml}
-                    title="Bản Thể Hiện Hóa Đơn Điện Tử"
-                    className="w-full h-[1200px] border-0 bg-white"
-                    sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
-                  />
+                <div className={`${originalVnptHtml ? 'w-[890px]' : 'w-[820px]'} min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300`}>
+                  {originalViettelPdfUrl ? (
+                    <iframe
+                      src={originalViettelPdfUrl}
+                      title="Bản gốc PDF Viettel vInvoice"
+                      className="w-full h-[1200px] border-0 bg-white"
+                    />
+                  ) : originalFourSiPdfUrl ? (
+                    <iframe
+                      src={originalFourSiPdfUrl}
+                      title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
+                      className="w-full h-[1200px] border-0 bg-white"
+                    />
+                  ) : (
+                    <iframe
+                      ref={iframeRef}
+                      srcDoc={originalEasyInvoiceHtml || originalVnptHtml || standaloneHtml}
+                      title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
+                      className="w-full h-[1200px] border-0 bg-white"
+                      sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
+                    />
+                  )}
                 </div>
               </div>
 
               {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
-                Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • 
+                {originalEasyInvoiceHtml ? (
+                  <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ EasyInvoice</span> • </>
+                ) : originalVnptHtml ? (
+                  <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
+                ) : originalViettelPdfUrl ? (
+                  <>Bản thể hiện PDF <span className="text-red-400 font-bold">gốc từ Viettel vInvoice</span> • </>
+                ) : originalFourSiPdfUrl ? (
+                  <>Bản thể hiện <span className="text-amber-400 font-bold">mẫu 4Si từ dochoadon.lcssoft.com.vn (bản thể hiện hiển thị, chưa phải bản gốc có CKS)</span> • </>
+                ) : is4SiInvoice ? (
+                  <>Bản thể hiện mẫu <span className="text-amber-400 font-bold">chuẩn Tổng cục Thuế (GDT)</span> • </>
+                ) : (
+                  <>Bản thể hiện mẫu <span className="text-emerald-400 font-bold">{currentProviderMeta.name}</span> • </>
+                )}
                 Đã nạp <span className="text-white font-bold">{safeItems.length}</span> dòng hàng hóa • 
                 Ký hiệu: <span className="text-amber-400">{effectiveInvoice.khhdon}</span> • 
                 Số HĐ: <span className="text-cyan-400">{effectiveInvoice.shdon}</span>
@@ -436,14 +1135,234 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         </div>
 
         {/* Footer Actions Bar */}
-        <div className="bg-[#0f172a] border-t border-gray-800 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="text-[11px] text-gray-400 font-mono flex items-center gap-2">
+        <div className="bg-slate-950 border-t border-slate-800 px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>HĐĐT Chuẩn Tổng cục Thuế (NĐ 123/2020/NĐ-CP & TT 78/2021/TT-BTC)</span>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {directLookupUrl && (
+            {isEasyInvoice ? (
+              <div className="inline-flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleViewOriginalEasyInvoice}
+                  disabled={isDownloadingEasyInvoice}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title={`Tra cứu mã FKey và hiển thị bản thể hiện gốc EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
+                >
+                  {isDownloadingEasyInvoice ? (
+                    <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  )}
+                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tra cứu...') : 'Xem hóa đơn gốc'}</span>
+                </button>
+                {directLookupUrl && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                    title="Mở cổng tra cứu EasyInvoice (Đã dán sẵn mã FKey)"
+                  >
+                    <ExternalLink className="w-3 h-3 text-slate-400" />
+                    <span>Tra link gốc</span>
+                  </a>
+                )}
+              </div>
+            ) : isVnptInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* 1. Nút Xem hóa đơn gốc VNPT trong ứng dụng (tự động nạp bản thể hiện từ VNPT) */}
+                <button
+                  type="button"
+                  onClick={handleViewOriginalVnpt}
+                  disabled={isLoadingVnptOriginal}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalVnptHtml
+                      ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
+                      : 'text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600'
+                  }`}
+                  title={`Tự động nhập mã tra cứu, giải Captcha và hiển thị bản thể hiện gốc VNPT (${lookupDetails.lookupCode || ''})`}
+                >
+                  {isLoadingVnptOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isLoadingVnptOriginal ? 'Đang nạp HĐ gốc...' : originalVnptHtml ? 'Đang xem bản gốc VNPT' : 'Xem hóa đơn gốc VNPT'}</span>
+                </button>
+
+                {/* 2. Nút chuyển về xem mẫu nội bộ nếu đang xem bản thể hiện VNPT */}
+                {originalVnptHtml && (
+                  <button
+                    type="button"
+                    onClick={() => setOriginalVnptHtml(null)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu thể hiện nội bộ"
+                  >
+                    <span>Mẫu nội bộ</span>
+                  </button>
+                )}
+
+                {/* 3. Nút tải file PDF gốc VNPT */}
+                <button
+                  type="button"
+                  onClick={handleDownloadVnptPdf}
+                  disabled={isDownloadingVnptPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ cổng VNPT (mục Tải file)"
+                >
+                  {isDownloadingVnptPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-blue-400" />
+                  )}
+                  <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
+                </button>
+
+                {/* 4. Nút mở trực tiếp Cổng tra cứu VNPT và tự gán mã vào ô tra cứu */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const code = lookupDetails.lookupCode || effectiveInvoice?.mhdon || '';
+                    openVnptDirectPortal(effectiveInvoice?.nbmst, code, lookupDetails.lookupUrl);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-sky-300 bg-sky-950/70 hover:bg-sky-900 border-sky-700 hover:border-sky-600 transition-all cursor-pointer shadow-xs"
+                  title={`Mở trực tiếp Cổng tra cứu VNPT (${effectiveInvoice?.nbmst || ''}) trên tab mới và tự gán mã tra cứu vào ô tìm kiếm (chỉ cần gõ Captcha)`}
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Tra link gốc</span>
+                </button>
+
+                {/* 5. Tải PDF theo mẫu chuẩn GDT */}
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF mẫu GDT'}</span>
+                </button>
+              </div>
+            ) : isViettelInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* 1. Nút Xem PDF gốc Viettel */}
+                <button
+                  type="button"
+                  onClick={handleViewOriginalViettel}
+                  disabled={isLoadingViettelOriginal}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalViettelPdfUrl
+                      ? 'text-rose-200 bg-rose-950 border-rose-500 ring-1 ring-rose-500/40'
+                      : 'text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700'
+                  }`}
+                  title={`Tải và xem trực tiếp bản PDF gốc ký số từ Viettel (Mã bí mật: ${lookupDetails.lookupCode || ''})`}
+                >
+                  {isLoadingViettelOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 text-rose-400" />
+                  )}
+                  <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : originalViettelPdfUrl ? 'Đang xem PDF gốc Viettel' : 'Xem PDF gốc Viettel'}</span>
+                </button>
+
+                {originalViettelPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (originalViettelPdfUrl) window.URL.revokeObjectURL(originalViettelPdfUrl);
+                      setOriginalViettelPdfUrl(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu thể hiện nội bộ"
+                  >
+                    <span>Mẫu nội bộ</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleDownloadViettelPdf}
+                  disabled={isDownloadingViettelPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 hover:border-rose-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
+                >
+                  {isDownloadingViettelPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-rose-400" />
+                  )}
+                  <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadViettelZip}
+                  disabled={isDownloadingViettelZip}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-300 bg-amber-950/60 hover:bg-amber-900/80 rounded-lg border border-amber-700 transition-colors cursor-pointer disabled:opacity-60"
+                  title="Tải tệp ZIP gốc (chứa XML và chữ ký) từ Viettel"
+                >
+                  {isDownloadingViettelZip ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                  ) : (
+                    <FileCode2 className="w-3 h-3 text-amber-400" />
+                  )}
+                  <span>Tải ZIP</span>
+                </button>
+
+                {/* 5. Nút Mẫu GDT */}
+                <button
+                  type="button"
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Mẫu GDT</span>
+                </button>
+
+                {directLookupUrl && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                    title="Mở cổng tra cứu hóa đơn trực tiếp của Viettel (vinvoice.viettel.vn)"
+                  >
+                    <ExternalLink className="w-3 h-3 text-slate-400" />
+                    <span>Tra link gốc</span>
+                  </a>
+                )}
+              </div>
+            ) : isVietcombankInvoice ? (
+              <div className="inline-flex items-center gap-1.5">
+                <a
+                  href="https://einvoice.vietcombank.com.vn/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
+                  title="Mở tra cứu hóa đơn điện tử Vietcombank (einvoice.vietcombank.com.vn)"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Cổng Vietcombank</span>
+                </a>
+                {directLookupUrl && !directLookupUrl.includes('vietcombank.com.vn') && (
+                  <a
+                    href={directLookupUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30 transition-all cursor-pointer shadow-xs"
+                    title={`Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Cổng VNPAY</span>
+                  </a>
+                )}
+              </div>
+            ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
               <a
                 href={directLookupUrl}
                 target="_blank"
@@ -451,20 +1370,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
                   isMisaInvoice
                     ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
-                    : isViettelInvoice
-                    ? 'text-red-300 bg-red-950/70 hover:bg-red-900 border-red-600 hover:border-red-500 ring-1 ring-red-500/30'
+                    : isVnpayInvoice
+                    ? 'text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30'
                     : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
                 }`}
                 title={isMisaInvoice 
                   ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
-                  : isViettelInvoice
-                  ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${effectiveInvoice?.nbmst || ''} & Mã bí mật ${lookupDetails.lookupCode || ''})`
+                  : isVnpayInvoice
+                  ? `Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`
                   : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
               >
-                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isViettelInvoice ? 'text-red-400' : 'text-cyan-400'}`} />
-                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isViettelInvoice ? 'Tra cứu Viettel S-Invoice' : 'Tra cứu Cổng NCC'}</span>
+                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isVnpayInvoice ? 'text-indigo-400' : 'text-cyan-400'}`} />
+                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isVnpayInvoice ? 'Tra cứu VNPAY' : 'Tra cứu Cổng NCC'}</span>
               </a>
-            )}
+            ) : null}
 
             <button
               onClick={handlePrint}
@@ -475,33 +1394,101 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <span>In HĐ (Ctrl+P)</span>
             </button>
 
-            <button
-              onClick={handleDownloadHtmlFile}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-300 bg-emerald-950/60 hover:bg-emerald-900/80 rounded-md border border-emerald-700 transition-colors cursor-pointer"
-              title="Tải tệp HTML độc lập về máy tính"
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>Tải File HTML (.html)</span>
-            </button>
+            {is4SiInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* Nút Xem bản thể hiện 4Si từ LCS Soft */}
+                <button
+                  type="button"
+                  onClick={handleViewFourSiPdf}
+                  disabled={isLoadingFourSiOriginal}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
+                    originalFourSiPdfUrl
+                      ? 'text-amber-200 bg-amber-900 border-amber-400 ring-1 ring-amber-400/40'
+                      : 'text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600'
+                  }`}
+                  title="Tạo và xem trực tiếp bản thể hiện mẫu 4Si qua cổng Đọc hóa đơn XML của LCS Soft (dochoadon.lcssoft.com.vn)"
+                >
+                  {isLoadingFourSiOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>
+                    {isLoadingFourSiOriginal
+                      ? 'Đang nạp 4Si (LCS)...'
+                      : originalFourSiPdfUrl
+                      ? 'Đang xem bản thể hiện 4Si'
+                      : 'Xem bản thể hiện 4Si (LCS)'}
+                  </span>
+                </button>
 
-            <button
-              onClick={() => onDownloadXml(effectiveInvoice)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-gray-200 bg-gray-800 hover:bg-gray-700 rounded-md border border-gray-700 transition-colors cursor-pointer"
-              title="Tải tệp XML gốc để kê khai thuế hoặc lưu trữ"
-            >
-              <FileCode2 className="w-3.5 h-3.5 text-[#ef4444]" />
-              <span>Tải XML Gốc</span>
-            </button>
+                {/* Nút Chuyển về mẫu GDT nếu đang xem bản thể hiện 4Si */}
+                {originalFourSiPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (originalFourSiPdfUrl) window.URL.revokeObjectURL(originalFourSiPdfUrl);
+                      setOriginalFourSiPdfUrl(null);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 rounded-lg border border-emerald-700 transition-colors cursor-pointer"
+                    title="Chuyển về xem mẫu chuẩn Tổng cục Thuế (GDT)"
+                  >
+                    <span>Mẫu chuẩn GDT</span>
+                  </button>
+                )}
 
-            <button
-              onClick={handleDownloadPdfFile}
-              disabled={isExportingPdf}
-              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded-md transition-colors shadow-md disabled:opacity-50 cursor-pointer"
-              title={`Tải tệp PDF sắc nét theo mẫu ${currentProviderMeta.name}`}
-            >
-              <Download className="w-4 h-4" />
-              <span>{isExportingPdf ? 'Đang tạo PDF...' : `Tải File PDF (.pdf)`}</span>
-            </button>
+                {/* Nút Tải PDF qua LCS Soft */}
+                <button
+                  type="button"
+                  onClick={handleDownloadFourSiPdf}
+                  disabled={isDownloadingFourSiPdf}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-amber-300 bg-amber-950/70 hover:bg-amber-900 border-amber-600 hover:border-amber-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  title="Tải tệp PDF bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc)"
+                >
+                  {isDownloadingFourSiPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                  )}
+                  <span>{isDownloadingFourSiPdf ? 'Đang tải...' : 'Tải PDF qua LCS Soft (Bản thể hiện)'}</span>
+                </button>
+
+                {/* Nút tải PDF theo mẫu GDT chuẩn luôn luôn có mặt bên cạnh */}
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
+                </button>
+              </div>
+            ) : !isEasyInvoice && !isMisaInvoice && !isVnptInvoice && !isViettelInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {effectiveTemplateId !== 'DEFAULT' && (
+                  <button
+                    onClick={() => handleDownloadPdfFile(effectiveTemplateId)}
+                    disabled={isExportingPdf}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-amber-300 bg-amber-950/70 hover:bg-amber-900 border border-amber-600 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                    title={`Tải tệp PDF theo mẫu đặc thù ${currentProviderMeta.name}`}
+                  >
+                    <Download className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{isExportingPdf ? 'Đang tạo PDF...' : `Tải PDF mẫu ${currentProviderMeta.shortName}`}</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDownloadPdfFile('DEFAULT')}
+                  disabled={isExportingPdf}
+                  className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                  title="Tải tệp PDF theo đúng mẫu chuẩn Hóa đơn điện tử của Tổng cục Thuế (GDT)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF theo mẫu GDT'}</span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

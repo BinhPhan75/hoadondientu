@@ -1,19 +1,31 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { ProxyAgent } from 'undici';
-import Tesseract from 'tesseract.js';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, normalizeInvoiceItem, parseGDTInvoiceXml } from './src/utils/xmlParser';
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
+import { VNPT_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
+import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
+import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
+import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
+import { lookupVnpayInvoice, downloadOriginalVnpayPdf, downloadOriginalVnpayXml, buildVnpayPortalUrl } from './src/services/vnpayInvoiceService';
+import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFourSiInvoice } from './src/services/fourSiInvoiceService';
+import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceService';
+import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
   getDatabaseStatus,
+  getMaskedDatabaseUrl,
+  saveNeonDatabaseUrl,
   findUserByUsername,
   getAllUsers,
   createUser,
@@ -23,7 +35,24 @@ import {
 } from './src/db/neonDb';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+
+function resolvePort(): number {
+  const portIdx = process.argv.indexOf('--port');
+  if (portIdx !== -1 && process.argv[portIdx + 1]) {
+    const p = parseInt(process.argv[portIdx + 1], 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const p = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const p = parseInt(process.env.PORT, 10);
+    if (!isNaN(p) && p > 0) return p;
+  }
+  return 3000;
+}
+const PORT = resolvePort();
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -55,6 +84,11 @@ app.use((req, res, next) => {
       req.url.startsWith('/admin') ||
       req.url.startsWith('/gdt') ||
       req.url.startsWith('/invoice-downloader') ||
+      req.url.startsWith('/easyinvoice') ||
+      req.url.startsWith('/vnpt') ||
+      req.url.startsWith('/viettel') ||
+      req.url.startsWith('/vnpay') ||
+      req.url.startsWith('/foursi') ||
       req.url.startsWith('/health') ||
       req.url.startsWith('/selenium')
     ) {
@@ -298,7 +332,7 @@ interface OCRResult {
 // Multi-Tier Captcha OCR Engine for GDT Portal
 // Tier 1: SVG direct extraction (if text present)
 // Tier 2: Gemini Vision AI (if key available)
-// Tier 3: Local Tesseract.js OCR (offline/free fallback)
+// Tier 3: Không dùng OCR cục bộ; Gemini là bộ giải Captcha duy nhất
 async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
@@ -342,7 +376,7 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
   const activeAi = getGeminiClient(customApiKey);
   if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
     const candidateModels = [
-      'gemini-2.5-flash',
+      'gemini-3.5-flash-lite',
       'gemini-3.6-flash',
       'gemini-flash-latest'
     ];
@@ -402,24 +436,6 @@ ${svgSnippet}
           break;
         }
       }
-    }
-  }
-
-  // Tier 3: Local Tesseract.js OCR (Works offline, 0 cost, reliable on clean bitmaps)
-  if (isBitmap && bitmapBase64) {
-    try {
-      console.log('[Tesseract OCR] Running local fallback OCR on bitmap...');
-      const imageBuffer = Buffer.from(bitmapBase64, 'base64');
-      const { data } = await Tesseract.recognize(imageBuffer, 'eng');
-      if (data && data.text) {
-        const cleaned = data.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-        if (cleaned.length >= 4 && cleaned.length <= 6) {
-          console.log(`[Tesseract OCR] Recognized Captcha: "${cleaned}"`);
-          return { code: cleaned, modelUsed: 'tesseract-local' };
-        }
-      }
-    } catch (tessErr: any) {
-      console.warn('[Tesseract OCR] Recognition error:', tessErr?.message);
     }
   }
 
@@ -835,18 +851,17 @@ function splitDateRangeIntoFixedChunks(fromDateStr: string, toDateStr: string, d
 type GdtQueryCaptcha = { key: string; code: string; cookie: string };
 
 async function getCaptchaForGdtQuery(existingCookie: string, customProxy?: string): Promise<GdtQueryCaptcha> {
-  const captchaResponse = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {
+  const response = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {
     headers: existingCookie ? { Cookie: existingCookie } : {}
   }, 1, 8000, customProxy);
-  if (!captchaResponse.ok) throw new Error(`Không tải được Captcha (HTTP ${captchaResponse.status})`);
-  const captchaCookie = extractCookies(captchaResponse);
-  const data = await captchaResponse.json() as { key?: string; content?: string };
+  if (!response.ok) throw new Error(`Không tải được Captcha (HTTP ${response.status})`);
+  const cookie = extractCookies(response);
+  const data = await response.json() as { key?: string; content?: string };
   if (!data.key || !data.content) throw new Error('Captcha của Tổng cục Thuế không có dữ liệu hợp lệ');
-
   const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content));
   const code = (solved.code || '').trim();
   if (!code) throw new Error(solved.error || 'Không tự nhận diện được Captcha cho hóa đơn máy tính tiền');
-  return { key: data.key, code, cookie: captchaCookie };
+  return { key: data.key, code, cookie };
 }
 
 // Fetch one invoice detail without delaying the list endpoint.
@@ -899,7 +914,20 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  const { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body;
+  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy } = req.body || {};
+
+  // Validate and sanitize numeric parameters
+  const parsedSize = parseInt(String(size), 10);
+  const validSize = (!isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500) ? parsedSize : 50;
+
+  // Validate date format YYYY-MM-DD
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  if (fromDate && typeof fromDate === 'string' && !dateRegex.test(fromDate.trim())) {
+    fromDate = undefined;
+  }
+  if (toDate && typeof toDate === 'string' && !dateRegex.test(toDate.trim())) {
+    toDate = undefined;
+  }
 
   const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
   const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
@@ -966,16 +994,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     let hasNextPage = true;
 
     while (hasNextPage && page < 100) {
-      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${size}&search=${encodeURIComponent(searchParam)}`;
+      let url = `https://hoadondientu.gdt.gov.vn/api/${apiBase}/invoices/${type}?sort=tdlap:desc&size=${validSize}&search=${encodeURIComponent(searchParam)}`;
       if (queryCaptcha) {
-        const captchaParams = new URLSearchParams({
-          captchaKey: queryCaptcha.key,
-          captchaCode: queryCaptcha.code,
-          captcha: queryCaptcha.code,
-          ckey: queryCaptcha.key,
-          cvalue: queryCaptcha.code
-        });
-        url += `&${captchaParams.toString()}`;
+        url += `&${new URLSearchParams({ captchaKey: queryCaptcha.key, captchaCode: queryCaptcha.code, captcha: queryCaptcha.code, ckey: queryCaptcha.key, cvalue: queryCaptcha.code }).toString()}`;
       }
       if (currentState) {
         url += `&state=${encodeURIComponent(currentState)}`;
@@ -995,16 +1016,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
               'Accept': 'application/json, text/plain, */*',
               'End-Point': '/tra-cuu/tra-cuu-hoa-don',
               'Action': source === 'sco-query'
-                ? (type === 'sold'
-                  ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)'
-                  : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)')
+                ? (type === 'sold' ? 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20b%C3%A1n%20ra)' : 'Xem%20h%C3%B3a%20%C4%91%C6%A1n%20(h%C3%B3a%20%C4%91%C6%A1n%20m%C3%A1y%20t%C3%ADnh%20ti%E1%BB%81n%20mua%20v%C3%A0o)')
                 : '',
-              ...(queryCaptcha ? {
-                'Captcha-Key': queryCaptcha.key,
-                'Captcha-Code': queryCaptcha.code,
-                'X-Captcha-Key': queryCaptcha.key,
-                'X-Captcha-Code': queryCaptcha.code
-              } : {}),
+              ...(queryCaptcha ? { 'Captcha-Key': queryCaptcha.key, 'Captcha-Code': queryCaptcha.code, 'X-Captcha-Key': queryCaptcha.key, 'X-Captcha-Code': queryCaptcha.code } : {}),
               ...((sanitizedCookie || queryCaptcha?.cookie) ? { 'Cookie': [sanitizedCookie, queryCaptcha?.cookie].filter(Boolean).join('; ') } : {})
             }
           }, 1, 15000, vietnamProxy);
@@ -1172,7 +1186,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     return accumulated;
   };
 
-  const fetchAllChunksForType = async (type: 'purchase' | 'sold', source: 'query' | 'sco-query' = 'query', chunks = dateChunks) => {
+  const fetchAllChunksForType = async (type: 'purchase' | 'sold', source: 'query' | 'sco-query' = 'query', chunks = source === 'sco-query' ? posDateChunks : dateChunks) => {
     let allInvoices: any[] = [];
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
@@ -1182,11 +1196,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       }
       let chunkResult: any[] | { error: string } = [];
       for (let captchaAttempt = 0; captchaAttempt < (source === 'sco-query' ? 3 : 1); captchaAttempt++) {
-        let queryCaptcha: GdtQueryCaptcha | undefined;
-        if (source === 'sco-query') {
-          queryCaptcha = await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy);
-          console.info(`[GDT POS] Đã lấy và giải Captcha cho kỳ ${chunk.from}..${chunk.to} (lần ${captchaAttempt + 1})`);
-        }
+        const queryCaptcha = source === 'sco-query' ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy) : undefined;
         chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source, 2, queryCaptcha);
         if ((chunkResult as any)?.error !== 'CAPTCHA_INVALID') break;
         await sleep(500);
@@ -1241,19 +1251,10 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     // của GDT (/api/sco-query). Thử lấy nhưng KHÔNG BAO GIỜ được làm hỏng phiên hoặc báo lỗi toàn cục.
     try {
       if (!includePos && !posOnly) {
-        // Standard invoices are intentionally queried separately from POS invoices.
-        // This keeps the monthly request fast and avoids consuming a POS CAPTCHA here.
-        return res.json({
-          success: true,
-          isRealGDT: true,
-          invoices: results,
-          count: results.length,
-          chunksQueried: dateChunks.length,
-          message: `Đã truy xuất ${results.length} hóa đơn thường từ Cổng Tổng cục Thuế.`
-        });
+        return res.json({ success: true, isRealGDT: true, invoices: results, count: results.length, chunksQueried: dateChunks.length, message: `Đã truy xuất ${results.length} hóa đơn thường từ Cổng Tổng cục Thuế.` });
       }
       await sleep(250);
-      const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query', posOnly ? [ { from: rawFrom, to: rawTo } ] : posDateChunks);
+      const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query', posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
       if (Array.isArray(posPurchaseList)) {
         results = results.concat(posPurchaseList);
       }
@@ -1300,7 +1301,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       isRealGDT: true,
       invoices: dedupedResults,
       count: dedupedResults.length,
-      chunksQueried: dateChunks.length + posDateChunks.length,
+      chunksQueried: dateChunks.length,
       message: includeDetails
         ? `Đã truy xuất ${dedupedResults.length} hóa đơn và tải bổ sung dữ liệu chi tiết từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
         : `Đã truy xuất ${dedupedResults.length} hóa đơn từ Cổng Tổng cục Thuế (${dateChunks.length} kỳ con).`
@@ -1331,7 +1332,10 @@ app.get('/api/gdt/status', (req, res) => {
 // 6. Run Python Selenium Crawler
 app.post('/api/gdt/run-selenium', (req, res) => {
   const { taxCode, password, invoiceType, fromDate, toDate, headless } = req.body;
-  const mst = taxCode || currentSession?.taxCode || '0316892345';
+  const mst = (taxCode || currentSession?.taxCode || '').trim();
+  if (!mst) {
+    return res.status(400).json({ success: false, message: 'Vui lòng cung cấp Mã số thuế hợp lệ.' });
+  }
   const pwd = password || '';
 
   seleniumLogs = [];
@@ -1677,7 +1681,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
   }
 });
 
-// 15. Tesseract OCR Captcha Solver endpoint
+// 15. Gemini Vision Captcha Solver endpoint
 app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   try {
     const { image, whitelist } = req.body;
@@ -1701,6 +1705,1262 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   }
 });
 
+// 16. Softdreams EasyInvoice: Giải Captcha bằng Gemini & Tải hóa đơn gốc
+app.post('/api/easyinvoice/download', async (req, res) => {
+  try {
+    const { lookupCode, sellerTaxCode, lookupUrl, khhdon, shdon, viewOnly } = req.body;
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã tra cứu EasyInvoice (FKey) không được để trống' });
+    }
+
+    const result = await downloadOriginalEasyInvoice({
+      lookupCode: String(lookupCode).trim(),
+      sellerTaxCode: sellerTaxCode ? String(sellerTaxCode).trim() : undefined,
+      lookupUrl: lookupUrl ? String(lookupUrl).trim() : undefined,
+      khhdon: khhdon ? String(khhdon).trim() : undefined,
+      shdon: shdon ? String(shdon).trim() : undefined,
+      viewOnly: Boolean(viewOnly)
+    });
+
+    if (req.query.format === 'binary') {
+      res.setHeader('Content-Type', result.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+      return res.send(result.buffer);
+    }
+
+    res.json({
+      success: true,
+      filename: result.filename,
+      contentType: result.contentType,
+      pdfBase64: result.pdfBase64 || result.buffer.toString('base64'),
+      htmlContent: result.htmlContent || '',
+      message: 'Đã tự động vượt Captcha và tải về hóa đơn gốc thành công.'
+    });
+  } catch (error: any) {
+    console.error('[EasyInvoice] Lỗi tải hóa đơn gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 17. VNPT Invoice: Tra cứu và xem hóa đơn gốc trực tiếp qua API & Gemini AI Captcha
+app.post('/api/vnpt/view-original', async (req, res) => {
+  try {
+    const result = await lookupOriginalVnptInvoice({
+      lookupCode: String(req.body.lookupCode || ''),
+      sellerTaxCode: req.body.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined,
+      lookupUrl: req.body.lookupUrl ? String(req.body.lookupUrl) : undefined
+    });
+    res.json({
+      success: true,
+      htmlContent: result.htmlContent,
+      checkCode: result.checkCode,
+      pdfDownloadUrl: result.pdfDownloadUrl,
+      portalUrl: result.portalUrl,
+      invoiceInfo: result.invoiceInfo
+    });
+  } catch (error: any) {
+    console.error('[VNPT] Lỗi xem hóa đơn gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 18. VNPT Invoice: Tải trực tiếp file PDF gốc từ cổng VNPT
+app.all('/api/vnpt/download-pdf', async (req, res) => {
+  try {
+    const lookupCode = String(req.query.lookupCode || req.query.fkey || req.body?.lookupCode || req.body?.fkey || '').trim();
+    let checkCode = req.query.checkCode ? String(req.query.checkCode) : (req.body?.checkCode ? String(req.body.checkCode) : undefined);
+    if (checkCode === 'undefined' || checkCode === 'null' || !checkCode?.trim()) {
+      checkCode = undefined;
+    }
+    const sellerTaxCode = req.query.sellerTaxCode ? String(req.query.sellerTaxCode) : (req.body?.sellerTaxCode ? String(req.body.sellerTaxCode) : undefined);
+    const portalUrl = req.query.portalUrl || req.query.portal ? String(req.query.portalUrl || req.query.portal) : (req.body?.portalUrl ? String(req.body.portalUrl) : undefined);
+    const invoiceNumber = req.query.invoiceNumber ? String(req.query.invoiceNumber) : (req.body?.invoiceNumber ? String(req.body.invoiceNumber) : undefined);
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã tra cứu VNPT (fkey) không được để trống' });
+    }
+
+    const result = await downloadOriginalVnptPdf({
+      lookupCode,
+      checkCode,
+      sellerTaxCode,
+      portalUrl,
+      invoiceNumber
+    });
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.data.length);
+    res.send(result.data);
+  } catch (error: any) {
+    console.error('[VNPT] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 18.1. VNPT Invoice: Cổng tra cứu trực tiếp theo MST và tự động điền mã tra cứu (Fkey)
+interface VnptPortalSession {
+  portal: string;
+  cookies: string;
+  token: string;
+  lookupCode: string;
+  cleanMst: string;
+  expiresAt: number;
+}
+
+const vnptPortalSessions = new Map<string, VnptPortalSession>();
+let latestVnptSessionId = '';
+
+function parseRequestCookies(cookieHeader: string | undefined): Record<string, string> {
+  const result: Record<string, string> = {};
+  if (!cookieHeader) return result;
+  cookieHeader.split(';').forEach(item => {
+    const parts = item.split('=');
+    const name = parts[0]?.trim();
+    if (name) {
+      result[name] = parts.slice(1).join('=').trim();
+    }
+  });
+  return result;
+}
+
+function getVnptSession(req: express.Request): VnptPortalSession | undefined {
+  const cookies = parseRequestCookies(req.headers.cookie);
+  const sessionId = String(req.query.sessionId || req.body?.sessionId || cookies['vnpt_portal_session_id'] || '').trim();
+  if (sessionId && vnptPortalSessions.has(sessionId)) {
+    return vnptPortalSessions.get(sessionId);
+  }
+  if (latestVnptSessionId && vnptPortalSessions.has(latestVnptSessionId)) {
+    const s = vnptPortalSessions.get(latestVnptSessionId);
+    if (s && s.expiresAt > Date.now()) return s;
+  }
+  for (const session of vnptPortalSessions.values()) {
+    if (session.expiresAt > Date.now()) {
+      return session;
+    }
+  }
+  return undefined;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of vnptPortalSessions.entries()) {
+    if (session.expiresAt < now) {
+      vnptPortalSessions.delete(key);
+    }
+  }
+}, 10 * 60 * 1000);
+
+// Proxy cho AJAX xem hóa đơn VNPT (ajxPreview)
+app.all(['/api/vnpt/ajxPreview', '/api/vnpt/ajx-preview', '/HomeNoLogin/ajxPreview', '/HomeNoLogin/ajxPreview/'], express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.body.portalUrl || req.query.portalUrl || (req.body.sellerTaxCode ? `https://${req.body.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://1801660803-001-tt78.vnpt-invoice.com.vn'));
+    const cookies = session?.cookies || '';
+
+    const checkCode = String(req.body.checkCode || req.query.checkCode || '');
+    const fkey = String(req.body.fkey || req.body.lookupCode || req.query.fkey || req.query.lookupCode || session?.lookupCode || '');
+    const nameCus = String(req.body.nameCus || req.query.nameCus || '');
+
+    const params = new URLSearchParams({
+      checkCode,
+      fkey,
+      nameCus
+    });
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'X-Requested-With': 'XMLHttpRequest',
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+
+    console.log(`[VNPT Proxy ajxPreview] Tải bản thể hiện: portal=${portal}, fkey="${fkey}", checkCode="${checkCode}"...`);
+    const previewRes = await axios.post(`${portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
+      headers,
+      timeout: 25000
+    });
+
+    res.json(previewRes.data);
+  } catch (err: any) {
+    console.error('[VNPT Proxy ajxPreview] Lỗi:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Proxy cho tải file PDF hóa đơn VNPT
+app.all(['/api/vnpt/downloadPDF', '/HomeNoLogin/downloadPDF', '/HomeNoLogin/downloadPDF/'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://1801660803-001-tt78.vnpt-invoice.com.vn'));
+    const cookies = session?.cookies || '';
+
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || '');
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || '');
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || '');
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+
+    const targetUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    console.log(`[VNPT Proxy downloadPDF] Tải PDF từ: ${targetUrl}...`);
+
+    const pdfRes = await axios.get(targetUrl, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="HoaDon_VNPT_${fkey || 'DT'}.pdf"`);
+    res.send(Buffer.from(pdfRes.data));
+  } catch (err: any) {
+    console.error('[VNPT Proxy downloadPDF] Lỗi:', err.message);
+    res.status(500).send('Lỗi khi tải file PDF từ Cổng VNPT: ' + err.message);
+  }
+});
+
+// Proxy cho tải file Zip hóa đơn VNPT
+app.all(['/api/vnpt/downloadZip', '/api/vnpt/download-zip', '/HomeNoLogin/downloadZip', '/HomeNoLogin/downloadZip/'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    const portal = session?.portal || String(req.query.portalUrl || req.body?.portalUrl || (req.query.sellerTaxCode ? `https://${req.query.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://1801660803-001-tt78.vnpt-invoice.com.vn'));
+    const cookies = session?.cookies || '';
+
+    const checkCode = String(req.query.checkCode || req.body?.checkCode || '');
+    const fkey = String(req.query.fkey || req.query.lookupCode || req.body?.fkey || req.body?.lookupCode || session?.lookupCode || '');
+    const nameCus = String(req.query.nameCus || req.body?.nameCus || '');
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: cookies
+    };
+
+    const targetUrl = `${portal}/HomeNoLogin/downloadZip?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
+    const zipRes = await axios.get(targetUrl, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="HoaDon_VNPT_${fkey || 'DT'}.zip"`);
+    res.send(Buffer.from(zipRes.data));
+  } catch (err: any) {
+    console.error('[VNPT Proxy downloadZip] Lỗi:', err.message);
+    res.status(500).send('Lỗi khi tải file Zip: ' + err.message);
+  }
+});
+
+// Proxy cho tải đính kèm / bảng kê VNPT
+app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send('Phiên làm việc đã hết hạn.');
+    }
+    const targetUrl = `${session.portal}${req.originalUrl}`;
+    const fileRes = await axios.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+        Cookie: session.cookies
+      },
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+    res.setHeader('Content-Type', String(fileRes.headers['content-type'] || 'application/octet-stream'));
+    res.send(Buffer.from(fileRes.data));
+  } catch (err: any) {
+    res.status(500).send(err.message);
+  }
+});
+
+// Mở trực tiếp link của nhà cung cấp VNPT và tự gán mã tra cứu vào khung (bỏ qua bước giả lập trang)
+app.all('/api/vnpt/portal', (req, res) => {
+  const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || req.body?.mst || req.body?.sellerTaxCode || '').trim();
+  const code = String(req.query.code || req.query.fkey || req.query.lookupCode || req.body?.code || req.body?.fkey || '').trim();
+  const rawPortal = String(req.query.portal || req.query.portalUrl || req.body?.portal || req.body?.portalUrl || '').trim();
+
+  const cleanMst = rawMst.replace(/[^0-9\-]/g, '');
+  let portal = rawPortal.replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
+  if (!portal || !/vnpt-invoice/i.test(portal)) {
+    portal = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : 'https://4000344946-tt78.vnpt-invoice.com.vn';
+  }
+
+  const actionUrl = `${portal}/HomeNoLogin/SearchByFkey`;
+  const safeCode = code.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  res.type('html').send(`<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Đang mở Cổng tra cứu VNPT...</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc;">
+  <div style="text-align: center; color: #475569;">
+    <p style="font-size: 15px; font-weight: 500;">Đang mở Cổng tra cứu VNPT...</p>
+    <form id="vnptForm" method="POST" action="${actionUrl}">
+      <input type="hidden" name="strFkey" value="${safeCode}" />
+      <noscript>
+        <button type="submit" style="background: #0284c7; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+          Bấm vào đây để tiếp tục mở Cổng VNPT
+        </button>
+      </noscript>
+    </form>
+  </div>
+  <script>
+    document.getElementById('vnptForm').submit();
+  </script>
+</body>
+</html>`);
+});
+
+// Endpoint làm mới Captcha trong cùng session
+app.get('/api/vnpt/captcha', async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).send('Session expired');
+    }
+    const captchaRes = await axios.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        Cookie: session.cookies,
+        Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`
+      },
+      responseType: 'arraybuffer',
+      timeout: 10000
+    });
+    const captchaCookies = (captchaRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+    session.cookies = [...session.cookies.split('; '), ...captchaCookies]
+      .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+      .join('; ');
+    res.setHeader('Content-Type', 'image/png');
+    res.send(Buffer.from(captchaRes.data));
+  } catch (e: any) {
+    res.status(500).send('Error refreshing captcha');
+  }
+});
+
+// Endpoint tự động giải Captcha bằng Gemini AI cho phiên portal
+app.get('/api/vnpt/auto-solve-captcha', async (req, res) => {
+  try {
+    const session = getVnptSession(req);
+    if (!session) {
+      return res.status(404).json({ success: false, error: 'Phiên tra cứu đã hết hạn. Vui lòng tải lại trang.' });
+    }
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    const captchaRes = await axios.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+      headers,
+      responseType: 'arraybuffer',
+      timeout: 15000
+    });
+
+    const captchaCookies = (captchaRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+    session.cookies = [...session.cookies.split('; '), ...captchaCookies]
+      .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+      .join('; ');
+
+    const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaRes.data), {
+      prompt: VNPT_CAPTCHA_PROMPT
+    });
+
+    res.json({
+      success: true,
+      code: captchaResult.code,
+      base64: `data:image/png;base64,${Buffer.from(captchaRes.data).toString('base64')}`
+    });
+  } catch (err: any) {
+    console.error('[VNPT Auto Solve Captcha] Lỗi:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Xử lý gửi form tra cứu VNPT với Captcha người dùng đã nhập
+app.post('/api/vnpt/portal-submit', express.urlencoded({ extended: true }), async (req, res) => {
+  const sessionId = String(req.query.sessionId || '').trim();
+  const session = getVnptSession(req);
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  const baseUrl = `${proto}://${host}`;
+
+  if (!session) {
+    const mst = String(req.body.mst || '');
+    const code = String(req.body.strFkey || '');
+    return res.redirect(`/api/vnpt/portal?mst=${encodeURIComponent(mst)}&code=${encodeURIComponent(code)}`);
+  }
+
+  try {
+    const strFkey = String(req.body.strFkey || session.lookupCode || '').trim();
+    const captch = String(req.body.captch || '').trim();
+    const token = String(req.body.__RequestVerificationToken || session.token || '').trim();
+
+    console.log(`[VNPT Portal Submit] Gửi tìm kiếm: portal=${session.portal}, strFkey="${strFkey}", captcha="${captch}"...`);
+
+    const form = new URLSearchParams({
+      __RequestVerificationToken: token,
+      strFkey: strFkey,
+      captch: captch,
+      submit: ''
+    });
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
+      Cookie: session.cookies
+    };
+
+    const postRes = await axios.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+      headers,
+      responseType: 'text',
+      validateStatus: s => s >= 200 && s < 400
+    });
+
+    // Cập nhật cookies phiên sau khi submit
+    const postCookies = (postRes.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+    if (postCookies.length > 0) {
+      session.cookies = [...session.cookies.split('; '), ...postCookies]
+        .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+        .join('; ');
+    }
+
+    res.setHeader('Set-Cookie', `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
+
+    const html = String(postRes.data || '');
+    const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
+
+    const $ = cheerio.load(html);
+    $('head').prepend(`<base href="${session.portal}/">`);
+
+    if (isCaptchaError) {
+      // Captcha sai -> nạp ảnh Captcha mới cho phiên
+      try {
+        const freshCaptcha = await axios.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Cookie: session.cookies, Referer: `${session.portal}/HomeNoLogin/SearchByFkey/` },
+          responseType: 'arraybuffer',
+          timeout: 10000
+        });
+        const captchaCookies = (freshCaptcha.headers['set-cookie'] || []).map(c => c.split(';')[0]);
+        session.cookies = [...session.cookies.split('; '), ...captchaCookies]
+          .filter((c, idx, arr) => arr.findIndex(item => item.split('=')[0] === c.split('=')[0]) === idx)
+          .join('; ');
+        const freshBase64 = `data:image/png;base64,${Buffer.from(freshCaptcha.data).toString('base64')}`;
+        $('img[src*="/Captcha/Show"], img#imgCaptcha, img.captcha_img').attr('src', freshBase64);
+      } catch (err: any) {
+        console.warn('[VNPT Portal Submit] Lỗi làm mới captcha:', err.message);
+      }
+
+      $('#strFkey').attr('value', strFkey);
+      $('form[action*="/HomeNoLogin/SearchByFkey"]').attr('action', `${baseUrl}/api/vnpt/portal-submit?sessionId=${sessionId}`);
+
+      $('body').prepend(`
+        <div style="background: #dc2626; color: white; padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999;">
+          <span>⚠️ <strong>Mã xác thực không chính xác.</strong> Đã làm mới ảnh mã xác thực. Vui lòng nhìn hình và nhập lại (Mã tra cứu <strong>${strFkey}</strong> vẫn được giữ nguyên).</span>
+          <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}');" style="color: #fecaca; text-decoration: underline; font-size: 12px;">Mở link gốc trực tiếp tại Cổng VNPT &rarr;</a>
+        </div>
+      `);
+
+      $('body').append(`
+        <script>
+          $(document).ready(function() {
+            $('#strFkey').val(${JSON.stringify(strFkey)});
+            $('#captch').val('').focus();
+            $('img.captcha_img, img[src*="data:image"], img[src*="/Captcha/Show"]').css('cursor', 'pointer').on('click', function() {
+              var imgEl = this;
+              fetch('${baseUrl}/api/vnpt/captcha?sessionId=${sessionId}&t=' + Date.now())
+                .then(function(res) { return res.blob(); })
+                .then(function(blob) {
+                  imgEl.src = URL.createObjectURL(blob);
+                  $('#captch').val('').focus();
+                });
+            });
+          });
+        </script>
+      `);
+
+      return res.type('html').send($.html());
+    }
+
+    // Tra cứu thành công: Format toàn bộ bảng kết quả với giao diện sắc nét, nút bấm rõ ràng và liên kết trực tiếp
+    $('head').append(`
+      <style>
+        body { background: #f8fafc !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; }
+        #banner-vnptinvoice, #body, #bodyMain { height: auto !important; min-height: auto !important; overflow: visible !important; }
+        .box__form, .box-searchInv {
+          max-width: 1180px !important;
+          margin: 25px auto !important;
+          padding: 24px !important;
+          background: #ffffff !important;
+          border-radius: 14px !important;
+          box-shadow: 0 8px 30px rgba(0,0,0,0.06) !important;
+          border: 1px solid #e2e8f0 !important;
+        }
+        .table {
+          width: 100% !important;
+          border-collapse: separate !important;
+          border-spacing: 0 !important;
+          border: 1px solid #cbd5e1 !important;
+          border-radius: 10px !important;
+          overflow: hidden !important;
+          background: #fff !important;
+          margin-top: 15px !important;
+        }
+        .table th {
+          background: #f1f5f9 !important;
+          color: #1e293b !important;
+          font-weight: 700 !important;
+          font-size: 13px !important;
+          padding: 12px 10px !important;
+          border-bottom: 2px solid #cbd5e1 !important;
+          text-align: center !important;
+        }
+        .table td {
+          padding: 12px 10px !important;
+          border-bottom: 1px solid #e2e8f0 !important;
+          vertical-align: middle !important;
+          font-size: 13px !important;
+          color: #334155 !important;
+        }
+        .table tr:hover td { background: #f8fafc !important; }
+        .table tr:last-child td { border-bottom: none !important; }
+      </style>
+    `);
+
+    $('table tr').each((_, tr) => {
+      const $tr = $(tr);
+      const viewLink = $tr.find('a[onclick*="ajxCall4Portal"]');
+      const dlLink = $tr.find('a[href*="downloadPDF"]');
+      let rowCheckCode = '';
+      if (viewLink.length > 0) {
+        const m = (viewLink.attr('onclick') || '').match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (m) rowCheckCode = m[1];
+      }
+      if (!rowCheckCode && dlLink.length > 0) {
+        const m = (dlLink.attr('href') || '').match(/checkCode=([^&"']+)/);
+        if (m) rowCheckCode = decodeURIComponent(m[1]);
+      }
+      if (rowCheckCode) {
+        const targetTd = viewLink.closest('td').length > 0 ? viewLink.closest('td') : dlLink.closest('td');
+        if (targetTd.length > 0) {
+          targetTd.html(`
+            <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:center;">
+              <button type="button" onclick="openVnptInvoice('${rowCheckCode}', '${strFkey}')" style="background:#0284c7; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(2,132,199,0.3); transition:all 0.15s;" title="Xem chi tiết hóa đơn gốc">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <span>Xem</span>
+              </button>
+              <a href="${baseUrl}/api/vnpt/download-pdf?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download="HoaDon_VNPT_${strFkey}.pdf" style="background:#16a34a; color:#fff; border:none; padding:6px 13px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(22,163,74,0.3); transition:all 0.15s;" title="Tải file PDF hóa đơn gốc đã ký số">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Tải PDF</span>
+              </a>
+              <a href="${baseUrl}/api/vnpt/download-zip?checkCode=${encodeURIComponent(rowCheckCode)}&lookupCode=${encodeURIComponent(strFkey)}&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download="HoaDon_VNPT_${strFkey}.zip" style="background:#475569; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:5px; box-shadow:0 1px 3px rgba(71,85,105,0.3); transition:all 0.15s;" title="Tải file ZIP gồm XML chữ ký số và PDF">
+                <svg style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;" viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                <span>ZIP</span>
+              </a>
+            </div>
+          `);
+        }
+      }
+    });
+
+    // Thêm thanh thông báo tra cứu thành công
+    $('body').prepend(`
+      <div style="background: linear-gradient(135deg, #059669, #047857); color: white; padding: 12px 18px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 999999; box-shadow: 0 3px 12px rgba(0,0,0,0.25);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="background: #10b981; color: white; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: bold;">✓</span>
+          <span><strong>Tra cứu VNPT thành công:</strong> Đã tìm thấy kết quả hóa đơn cho mã tra cứu <strong>${strFkey}</strong>. Quý khách có thể bấm <strong>Xem</strong> hoặc <strong>Tải file PDF</strong> trực tiếp.</span>
+        </div>
+        <a href="${session.portal}/HomeNoLogin/SearchByFkey" target="_blank" rel="noopener noreferrer" onclick="navigator.clipboard && navigator.clipboard.writeText('${strFkey}'); alert('Đã sao chép mã tra cứu ${strFkey} vào bộ nhớ tạm! Khi mở Cổng VNPT, bạn chỉ cần nhấn Ctrl+V vào ô tra cứu.');" style="color: #ffffff; text-decoration: none; font-size: 12px; background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(255,255,255,0.3); display: inline-flex; align-items: center; gap: 4px;">
+          <span>Mở web gốc vnpt-invoice.com.vn</span> &rarr;
+        </a>
+      </div>
+    `);
+
+    // Nhúng Modal Popup xem hóa đơn chuyên nghiệp
+    $('body').append(`
+      <!-- Modal Backdrop -->
+      <div id="vnpt-modal-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:9999998; backdrop-filter:blur(2px);" onclick="closeVnptModal()"></div>
+
+      <!-- Loading Spinner -->
+      <div id="vnpt-modal-loading" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#0f172a; color:#f8fafc; padding:18px 28px; border-radius:10px; z-index:9999999; box-shadow:0 20px 40px rgba(0,0,0,0.4); font-family:sans-serif; font-size:14px; align-items:center; gap:12px;">
+        <span style="display:inline-block; width:22px; height:22px; border:3px solid #38bdf8; border-top-color:transparent; border-radius:50%; animation:vnpt-spin 0.8s linear infinite;"></span>
+        <span>Đang tải nội dung hóa đơn gốc từ Cổng VNPT...</span>
+      </div>
+
+      <!-- Invoice Viewer Modal -->
+      <div id="ViewInvoice" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#ffffff; border-radius:12px; box-shadow:0 25px 60px rgba(0,0,0,0.5); padding:24px; width:940px; max-width:96vw; max-height:92vh; overflow-y:auto; z-index:9999999; border:1px solid #cbd5e1; font-family:Arial,sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:20px;">📄</span>
+            <strong style="color:#005baa; font-size:16px;">Chi Tiết Hóa Đơn Điện Tử - VNPT Invoice</strong>
+          </div>
+          <button type="button" onclick="closeVnptModal()" style="border:none; background:#f1f5f9; border-radius:6px; cursor:pointer; font-size:18px; font-weight:bold; width:34px; height:34px; display:flex; align-items:center; justify-content:center; color:#475569;" title="Đóng">✕</button>
+        </div>
+        <div id="bt" style="margin-bottom:14px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;"></div>
+        <div id="container" style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:16px; overflow:auto;"></div>
+      </div>
+
+      <style>
+        @keyframes vnpt-spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        #ViewInvoice table { width: 100% !important; border-collapse: collapse; }
+      </style>
+
+      <script>
+        // Hàm mở xem hóa đơn trực tiếp
+        window.openVnptInvoice = function(checkCode, fkey) {
+          fkey = fkey || ${JSON.stringify(strFkey)};
+          $('#vnpt-modal-loading').css('display', 'flex');
+          $('#vnpt-modal-backdrop').show();
+          $('#ViewInvoice').hide();
+
+          $.ajax({
+            type: 'POST',
+            url: '${baseUrl}/api/vnpt/ajxPreview',
+            data: { checkCode: checkCode, fkey: fkey, sessionId: ${JSON.stringify(sessionId)} },
+            success: function(data) {
+              $('#vnpt-modal-loading').hide();
+              if (!data || !data.str) {
+                alert('Không tải được nội dung hóa đơn từ Cổng VNPT. Vui lòng thử lại.');
+                $('#vnpt-modal-backdrop').hide();
+                return;
+              }
+              $('#container').html(data.str);
+
+              var btnHtml = '';
+              btnHtml += '<button type="button" onclick="window.printInvoiceDirect()" style="background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style=\"width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;\" viewBox=\"0 0 24 24\"><polyline points=\"6 9 6 2 18 2 18 9\"/><path d=\"M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2\"/><rect x=\"6\" y=\"14\" width=\"12\" height=\"8\"/></svg> In Hóa Đơn</button>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-pdf?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" target="_blank" download style="background:#16a34a; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style=\"width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;\" viewBox=\"0 0 24 24\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/><polyline points=\"7 10 12 15 17 10\"/><line x1=\"12\" y1=\"15\" x2=\"12\" y2=\"3\"/></svg> Tải PDF Hóa Đơn</a>';
+              btnHtml += '<a href="${baseUrl}/api/vnpt/download-zip?checkCode=' + encodeURIComponent(checkCode) + '&lookupCode=' + encodeURIComponent(fkey) + '&sellerTaxCode=${encodeURIComponent(session.cleanMst)}&portalUrl=${encodeURIComponent(session.portal)}" download style="background:#475569; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.2);"><svg style=\"width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;\" viewBox=\"0 0 24 24\"><polyline points=\"21 8 21 21 3 21 3 8\"/><rect x=\"1\" y=\"3\" width=\"22\" height=\"5\"/><line x1=\"10\" y1=\"12\" x2=\"14\" y2=\"12\"/></svg> Tải File Zip</a>';
+              btnHtml += '<button type="button" onclick="closeVnptModal()" style="background:#f1f5f9; color:#334155; border:1px solid #cbd5e1; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; margin-left:auto;">✕ Đóng</button>';
+
+              $('#bt').html(btnHtml);
+              $('#ViewInvoice').show();
+            },
+            error: function(xhr, status, err) {
+              $('#vnpt-modal-loading').hide();
+              $('#vnpt-modal-backdrop').hide();
+              alert('Lỗi khi tải hóa đơn từ Cổng VNPT: ' + (err || status));
+            }
+          });
+          return false;
+        };
+
+        window.ajxCall4Portal = window.openVnptInvoice;
+
+        window.printInvoiceDirect = function() {
+          var printContent = document.getElementById('container').innerHTML;
+          var win = window.open('', '_blank', 'width=950,height=750');
+          win.document.write('<!DOCTYPE html><html><head><title>Hóa đơn VNPT - ${strFkey}</title>');
+          win.document.write('<style>@page{size:A4;margin:8mm;}body{margin:0;padding:12px;font-family:Arial,sans-serif;}table{width:100% !important;border-collapse:collapse;}</style>');
+          win.document.write('</head><body>');
+          win.document.write(printContent);
+          win.document.write('</body></html>');
+          win.document.close();
+          win.focus();
+          setTimeout(function() { win.print(); win.close(); }, 600);
+        };
+
+        window.closeVnptModal = function() {
+          $('#ViewInvoice').hide();
+          $('#vnpt-modal-loading').hide();
+          $('#vnpt-modal-backdrop').hide();
+        };
+
+        $(document).ready(function() {
+          // Ngăn mọi thẻ a có href="#", "/" hoặc rỗng chuyển hướng trang ngoài ý muốn
+          $('a[href="#"], a[href="/"], a[href=""]').on('click', function(e) {
+            e.preventDefault();
+            return false;
+          });
+        });
+      </script>
+    `);
+
+    res.type('html').send($.html());
+  } catch (error: any) {
+    console.error('[VNPT Portal Submit] Lỗi xử lý form:', error.message);
+    res.redirect(`${session.portal}/HomeNoLogin/SearchByFkey`);
+  }
+});
+
+// 19. Viettel Invoice: Tải trực tiếp file PDF gốc từ cổng Viettel vInvoice / S-Invoice
+app.all('/api/viettel/download-pdf', async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode ||
+      req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+
+    if (!supplierTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (supplierTaxCode) không được để trống' });
+    }
+    if (!reservationCode) {
+      return res.status(400).json({ success: false, error: 'Mã bí mật (reservationCode / Mã số bí mật) không được để trống' });
+    }
+
+    const result = await downloadOriginalViettelPdf({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined
+    });
+
+    if (req.query.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer!.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[Viettel] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 20. Viettel Invoice: Tải trực tiếp file ZIP gốc từ cổng Viettel
+app.all('/api/viettel/download-zip', async (req, res) => {
+  try {
+    const supplierTaxCode = String(
+      req.query.supplierTaxCode || req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.supplierTaxCode || req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    const reservationCode = String(
+      req.query.reservationCode || req.query.secretCode || req.query.lookupCode ||
+      req.body?.reservationCode || req.body?.secretCode || req.body?.lookupCode || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+
+    if (!supplierTaxCode || !reservationCode) {
+      return res.status(400).json({ success: false, error: 'Thiếu MST bên bán hoặc Mã bí mật để tải ZIP' });
+    }
+
+    const result = await downloadOriginalViettelZip({
+      supplierTaxCode,
+      reservationCode,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined
+    });
+
+    if (req.query.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        zipBase64: result.zipBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.zipBuffer!.length);
+    res.send(result.zipBuffer);
+  } catch (error: any) {
+    console.error('[Viettel] Lỗi tải ZIP gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 21. VNPAY Invoice: Tra cứu hóa đơn điện tử VNPAY (portal.vnpayinvoice.vn)
+app.post('/api/vnpay/lookup', async (req, res) => {
+  try {
+    let lookupCode = String(req.body?.lookupCode || req.query?.lookupCode || '').trim();
+    const taxCode = String(req.body?.taxCode || req.body?.sellerTaxCode || req.query?.taxCode || '').trim();
+    const cqtCode = String(req.body?.cqtCode || req.body?.mhdon || req.query?.cqtCode || req.query?.mhdon || '').trim();
+    const captchaToken = req.body?.captchaToken || req.query?.captchaToken;
+
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
+
+    if (!lookupCode) {
+      const portalUrl = buildVnpayPortalUrl('', taxCode);
+      return res.status(400).json({ 
+        success: false, 
+        directUrl: portalUrl,
+        error: 'Cổng VNPAY yêu cầu Số bảo mật in trên hóa đơn. Cổng không hỗ trợ tra cứu trực tiếp qua mã CQT cấp (mhdon).' 
+      });
+    }
+    if (!taxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán không được để trống' });
+    }
+
+    const result = await lookupVnpayInvoice({
+      lookupCode,
+      taxCode,
+      cqtCode: cqtCode || undefined,
+      captchaToken: captchaToken ? String(captchaToken) : undefined
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tra cứu hóa đơn:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 22. VNPAY Invoice: Tải trực tiếp file PDF gốc từ Cổng VNPAY Invoice
+app.all('/api/vnpay/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
+    ).trim();
+
+    let lookupCode = String(
+      req.query.lookupCode || req.query.code ||
+      req.body?.lookupCode || req.body?.code || ''
+    ).trim();
+
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon ||
+      req.body?.cqtCode || req.body?.mhdon || ''
+    ).trim();
+
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
+
+    const stringId = String(
+      req.query.stringId || req.query.id ||
+      req.body?.stringId || req.body?.id || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+    const captchaToken = req.query.captchaToken || req.body?.captchaToken;
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({ 
+        success: false, 
+        sourceUrl: buildVnpayPortalUrl('', sellerTaxCode),
+        error: 'Cần Số bảo mật (lookupCode) hoặc stringId để tải file từ Cổng VNPAY.' 
+      });
+    }
+
+    const result = await downloadOriginalVnpayPdf({
+      sellerTaxCode,
+      lookupCode: lookupCode || undefined,
+      cqtCode: cqtCode || undefined,
+      stringId: stringId || undefined,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined,
+      captchaToken: captchaToken ? String(captchaToken) : undefined
+    });
+
+    if (result.requiresCaptcha) {
+      return res.status(200).json({
+        success: false,
+        requiresCaptcha: true,
+        error: result.error,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer!.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 23. VNPAY Invoice: Tải trực tiếp file XML gốc từ Cổng VNPAY Invoice
+app.all('/api/vnpay/download-xml', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.supplierTaxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.supplierTaxCode || ''
+    ).trim();
+
+    let lookupCode = String(
+      req.query.lookupCode || req.query.code ||
+      req.body?.lookupCode || req.body?.code || ''
+    ).trim();
+
+    const cqtCode = String(
+      req.query.cqtCode || req.query.mhdon ||
+      req.body?.cqtCode || req.body?.mhdon || ''
+    ).trim();
+
+    const isInvalidCode = (code?: string) => !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+
+    if (isInvalidCode(lookupCode)) {
+      lookupCode = '';
+    }
+
+    const stringId = String(
+      req.query.stringId || req.query.id ||
+      req.body?.stringId || req.body?.id || ''
+    ).trim();
+
+    const invoiceNo = req.query.invoiceNo || req.query.invoiceNumber || req.body?.invoiceNo || req.body?.invoiceNumber;
+    const invoiceSeries = req.query.invoiceSeries || req.query.series || req.body?.invoiceSeries || req.body?.series;
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!stringId && !lookupCode) {
+      return res.status(400).json({ 
+        success: false, 
+        sourceUrl: buildVnpayPortalUrl('', sellerTaxCode),
+        error: 'Cần Số bảo mật (lookupCode) hoặc stringId để tải file từ Cổng VNPAY.' 
+      });
+    }
+
+    const result = await downloadOriginalVnpayXml({
+      sellerTaxCode,
+      lookupCode: lookupCode || undefined,
+      cqtCode: cqtCode || undefined,
+      stringId: stringId || undefined,
+      invoiceNo: invoiceNo ? String(invoiceNo) : undefined,
+      invoiceSeries: invoiceSeries ? String(invoiceSeries) : undefined
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        xmlContent: result.xmlContent,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error: any) {
+    console.error('[VNPAY] Lỗi tải XML gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 24. 4Si / LCS Soft: Render & Download bản thể hiện 4Si qua dochoadon.lcssoft.com.vn
+app.post('/api/foursi/render-pdf', async (req, res) => {
+  try {
+    const { xml, invoice } = req.body || {};
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Không thể tạo bản thể hiện 4Si qua LCS Soft',
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+
+    res.json({
+      success: true,
+      filename: result.filename,
+      pdfBase64: result.pdfBase64,
+      sourceUrl: result.sourceUrl,
+      portalUrl: result.portalUrl,
+      isDisplayOnly: true,
+      message: 'Bản thể hiện 4Si tạo bởi dochoadon.lcssoft.com.vn (gần giống bản gốc, không phải hóa đơn gốc có chữ ký số)'
+    });
+  } catch (error: any) {
+    console.error('[FourSi] Lỗi render bản thể hiện:', error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+
+app.all('/api/foursi/download-pdf', async (req, res) => {
+  try {
+    const xml = req.body?.xml || req.query.xml ? String(req.body?.xml || req.query.xml) : '';
+    const invoice = req.body?.invoice || undefined;
+
+    const result = await renderFourSiPdfViaLcs(xml, invoice);
+
+    if (!result.success || !result.pdfBuffer) {
+      return res.status(400).json({
+        success: false,
+        error: result.error || 'Không thể tạo PDF từ cổng dochoadon.lcssoft.com.vn',
+        portalUrl: FOUR_SI_LCS_READER_URL
+      });
+    }
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        portalUrl: result.portalUrl,
+        isDisplayOnly: true
+      });
+    }
+
+    res.setHeader('Content-Type', result.contentType || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[FourSi] Lỗi tải PDF qua LCS Soft:', error.message);
+    res.status(500).json({ success: false, error: error.message, portalUrl: FOUR_SI_LCS_READER_URL });
+  }
+});
+
+// 23. M-Invoice: Tải trực tiếp file PDF gốc từ cổng M-Invoice (tracuuhoadon.minvoice.com.vn)
+app.all('/api/minvoice/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.checkCode ||
+      req.body?.lookupCode || req.body?.sobaomat || req.body?.checkCode || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode / masothue) không được để trống' });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Số bảo mật (lookupCode / sobaomat) không được để trống' });
+    }
+
+    const minvoiceUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+      sellerTaxCode
+    )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const resp = await fetch(minvoiceUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/pdf, application/octet-stream, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://tracuuhoadon.minvoice.com.vn/',
+        'Origin': 'https://tracuuhoadon.minvoice.com.vn'
+      },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (!resp.ok) {
+      throw new Error(`Cổng M-Invoice phản hồi lỗi HTTP ${resp.status}: ${resp.statusText}`);
+    }
+
+    const arrayBuf = await resp.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+
+    if (buffer.length < 500 || !buffer.subarray(0, 10).toString('latin1').includes('%PDF')) {
+      throw new Error('Dữ liệu trả về từ cổng M-Invoice không phải file PDF hợp lệ');
+    }
+
+    const cleanShd = invoiceNo.padStart(7, '0');
+    const filename = `HoaDon_MInvoice_${sellerTaxCode}_${cleanShd}_${lookupCode}.pdf`;
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename,
+        pdfBase64: buffer.toString('base64'),
+        sourceUrl: minvoiceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  } catch (error: any) {
+    console.error('[M-Invoice] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 24. CyberBill: Tải trực tiếp file PDF gốc từ cổng CyberBill (bill1app.xcyber.vn)
+app.all('/api/cyberbill/download-pdf', async (req, res) => {
+  try {
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const lookupCode = String(
+      req.query.lookupCode || req.query.sobaomat || req.query.maSoBiMat || req.query.checkCode ||
+      req.body?.lookupCode || req.body?.sobaomat || req.body?.maSoBiMat || req.body?.checkCode || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!sellerTaxCode) {
+      return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode) không được để trống' });
+    }
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã số bí mật (lookupCode / maSoBiMat) không được để trống' });
+    }
+
+    const result = await downloadOriginalCyberbillPdf({
+      sellerTaxCode,
+      lookupCode,
+      invoiceNo,
+      invoiceSeries
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl,
+        htmlContent: result.htmlContent
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[CyberBill] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 25. Thái Sơn: Tải trực tiếp file PDF gốc từ cổng Thái Sơn (einvoice.vn)
+app.all('/api/thaison/download-pdf', async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.sobaomat || req.query.code ||
+      req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.sobaomat || req.body?.code || ''
+    ).trim();
+
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode || req.query.masothue ||
+      req.body?.sellerTaxCode || req.body?.taxCode || req.body?.masothue || ''
+    ).trim();
+
+    const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
+    const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã nhận hóa đơn Thái Sơn (lookupCode / MaNhanHoaDon) không được để trống' });
+    }
+
+    const result = await downloadOriginalThaiSonPdf({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || undefined,
+      invoiceNo,
+      invoiceSeries
+    });
+
+    if (req.query.format === 'json' || req.body?.format === 'json') {
+      return res.json({
+        success: true,
+        filename: result.filename,
+        pdfBase64: result.pdfBase64,
+        sourceUrl: result.sourceUrl
+      });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.setHeader('Content-Length', result.pdfBuffer.length);
+    res.send(result.pdfBuffer);
+  } catch (error: any) {
+    console.error('[Thái Sơn] Lỗi tải PDF gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 26. Thái Sơn: Tải trực tiếp file XML gốc từ cổng Thái Sơn
+app.all('/api/thaison/download-xml', async (req, res) => {
+  try {
+    const lookupCode = String(
+      req.query.lookupCode || req.query.maNhanHoaDon || req.query.code ||
+      req.body?.lookupCode || req.body?.maNhanHoaDon || req.body?.code || ''
+    ).trim();
+
+    const sellerTaxCode = String(
+      req.query.sellerTaxCode || req.query.taxCode ||
+      req.body?.sellerTaxCode || req.body?.taxCode || ''
+    ).trim();
+
+    if (!lookupCode) {
+      return res.status(400).json({ success: false, error: 'Mã nhận hóa đơn Thái Sơn (lookupCode) không được để trống' });
+    }
+
+    const result = await downloadOriginalThaiSonXml({
+      lookupCode,
+      sellerTaxCode: sellerTaxCode || undefined
+    });
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(result.filename)}"`);
+    res.send(result.xmlContent);
+  } catch (error: any) {
+    console.error('[Thái Sơn] Lỗi tải XML gốc:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ============================================================================
 // WEB AUTHENTICATION & NEON DATABASE MANAGEMENT ROUTES
 // ============================================================================
@@ -1711,16 +2971,27 @@ interface WebSessionInfo {
   role: 'admin' | 'user';
   createdAt: number;
 }
+let runtimeAuthTokenSecret: string | null = null;
+
 function getAuthTokenSecret(): string {
-  const secret = process.env.AUTH_TOKEN_SECRET ||
+  const envSecret = process.env.AUTH_TOKEN_SECRET ||
     process.env.POSTGRES_URL ||
     process.env.DATABASE_URL ||
     process.env.NEON_DATABASE_URL ||
     process.env.POSTGRES_PRISMA_URL ||
     process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.DATABASE_URL_UNPOOLED ||
-    'gdt_web_auth_token_default_secret_key_2026';
-  return secret;
+    process.env.DATABASE_URL_UNPOOLED;
+
+  if (envSecret) {
+    return envSecret;
+  }
+
+  if (!runtimeAuthTokenSecret) {
+    runtimeAuthTokenSecret = crypto.randomBytes(32).toString('hex');
+    console.warn('[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.');
+  }
+
+  return runtimeAuthTokenSecret;
 }
 
 function getWebAppAuthUrl(req?: express.Request): string {
@@ -1931,17 +3202,26 @@ app.post('/api/auth/login', async (req, res) => {
     if (!dbInit.success) {
       return res.status(200).json({
         success: false,
-        message: dbInit.message || 'Hệ thống chưa kết nối tới Neon Database. Vui lòng cấu hình DATABASE_URL hoặc POSTGRES_URL trên Vercel.'
+        message: dbInit.message || 'Không thể kết nối đến cơ sở dữ liệu. Vui lòng kiểm tra lại cấu hình DATABASE_URL.'
       });
     }
 
-    const user = await findUserByUsername(username);
+    let user;
+    try {
+      user = await findUserByUsername(username);
+    } catch (dbErr: any) {
+      return res.status(200).json({
+        success: false,
+        message: 'Lỗi truy vấn cơ sở dữ liệu. Vui lòng thử lại sau.'
+      });
+    }
+
     if (!user) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập (Mã số thuế) hoặc mật khẩu không đúng.' });
+      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
     }
 
     if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: 'Mật khẩu không chính xác.' });
+      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
     }
 
     if (!user.is_active) {
@@ -2093,11 +3373,43 @@ app.get('/api/admin/db-status', async (req, res) => {
         success: true,
         connected: true,
         type: 'remote_webapp',
-        message: 'Xác thực Neon được thực hiện bởi webapp.'
+        message: 'Xác thực tài khoản được thực hiện bởi webapp.',
+        maskedUrl: ''
       });
     }
     const status = await getDatabaseStatus();
-    res.json({ success: true, ...status });
+    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 9. Lấy cấu hình và trạng thái Neon (Dành cho hộp thoại thiết lập kết nối)
+app.get('/api/neon/config', async (req, res) => {
+  try {
+    const status = await getDatabaseStatus();
+    res.json({
+      success: true,
+      ...status,
+      maskedUrl: getMaskedDatabaseUrl()
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// 10. Kiểm tra và lưu chuỗi kết nối Neon mới
+app.post('/api/neon/test-and-save', async (req, res) => {
+  try {
+    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
+    if (!databaseUrl || typeof databaseUrl !== 'string') {
+      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp chuỗi kết nối DATABASE_URL hợp lệ.' });
+    }
+    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
+      username: initialAdminUsername,
+      password: initialAdminPassword
+    });
+    return res.json(result);
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -2125,18 +3437,7 @@ app.use('/api', (err: any, req: express.Request, res: express.Response, next: ex
 
 // Start Express Server with Vite integration
 async function startServer() {
-  // 1. Mở cổng lắng nghe 3000 NGAY LẬP TỨC để Nginx/Cloud Run không bao giờ trả về 502/Warmup
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    // Khởi tạo Database Neon bất đồng bộ trong nền
-    initDatabase().then(dbInitResult => {
-      console.log(`[Database Init] ${dbInitResult.message}`);
-    }).catch(dbErr => {
-      console.warn('[Database Init] Warning:', dbErr.message);
-    });
-  });
-
-  // 2. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
+  // 1. Tích hợp Vite middleware cho môi trường dev hoặc phục vụ static file khi production
   if (process.env.NODE_ENV !== 'production') {
     try {
       const { createServer: createViteServer } = await import('vite');
@@ -2148,7 +3449,29 @@ async function startServer() {
         appType: 'spa',
       });
       app.use(vite.middlewares);
-      console.log('[Vite] Vite middleware attached.');
+
+      // SPA HTML fallback
+      app.use('*', async (req, res, next) => {
+        if (req.method !== 'GET' || req.originalUrl.startsWith('/api')) {
+          return next();
+        }
+        try {
+          const fs = await import('fs');
+          const path = await import('path');
+          const indexPath = path.resolve(process.cwd(), 'index.html');
+          if (fs.existsSync(indexPath)) {
+            let template = fs.readFileSync(indexPath, 'utf-8');
+            template = await vite.transformIndexHtml(req.originalUrl, template);
+            return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+          }
+        } catch (e: any) {
+          vite.ssrFixStacktrace(e);
+          return next(e);
+        }
+        next();
+      });
+
+      console.log('[Vite] Vite middleware and SPA fallback attached.');
     } catch (viteErr: any) {
       console.error('[Vite Init Error]:', viteErr.message);
     }
@@ -2163,6 +3486,19 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // 2. Mở cổng lắng nghe PORT sau khi middleware đã sẵn sàng
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
+    // Khởi tạo Database Neon bất đồng bộ trong nền
+    initDatabase().then(dbInitResult => {
+      if (dbInitResult.success) {
+        console.log(`[Database Init] ✓ ${dbInitResult.message}`);
+      }
+    }).catch(() => {
+      // Silent catch
+    });
+  });
 }
 
 export default app;

@@ -7,5 +7,6 @@ desktop-test/
 coverage/
 .DS_Store
 *.log
+*.map
 .env*
 !.env.example

@@ -11,11 +11,13 @@ import {
   FileSpreadsheet,
   FolderArchive,
   ExternalLink,
-  Search
+  Search,
+  Download
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { detectPartnerTemplate, getPartnerMeta } from '../templates';
-import { buildDirectLookupUrl } from '../templates/templateUtils';
+import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
+import { getInvoiceProviderBadge } from '../utils/providerMapping';
 
 interface InvoiceTableProps {
   invoices: GDTInvoice[];
@@ -79,7 +81,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
   return (
     <div className="flex-1 flex flex-col min-w-0">
       {/* High Density Clean Table Container */}
-      <div className="overflow-x-auto w-full border-b border-[#d1d5db] bg-white">
+      <div className="overflow-x-auto w-full border-b border-slate-200 bg-white">
         <table className="data-table">
           {/* Table Header */}
           <thead>
@@ -87,16 +89,16 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
               <th className="w-8 text-center" style={{ width: '36px' }}>
                 <button
                   onClick={onToggleSelectAll}
-                  className="text-gray-500 hover:text-gray-900 transition-colors flex items-center justify-center mx-auto cursor-pointer"
+                  className="text-slate-400 hover:text-slate-700 transition-colors flex items-center justify-center mx-auto cursor-pointer"
                 >
                   {isAllSelected ? (
-                    <CheckSquare className="w-3.5 h-3.5 text-[#ef4444]" />
+                    <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
                   ) : isSomeSelected ? (
-                    <div className="w-3.5 h-3.5 rounded-2xs bg-[#ef4444] flex items-center justify-center text-white text-[9px] font-bold">
+                    <div className="w-3.5 h-3.5 rounded-2xs bg-blue-600 flex items-center justify-center text-white text-[9px] font-bold">
                       -
                     </div>
                   ) : (
-                    <Square className="w-3.5 h-3.5 text-gray-400" />
+                    <Square className="w-3.5 h-3.5 text-slate-300" />
                   )}
                 </button>
               </th>
@@ -118,19 +120,19 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <tbody>
             {invoices.length === 0 ? (
               <tr>
-                <td colSpan={12} className="p-12 text-center text-gray-600 bg-gray-50/40">
+                <td colSpan={12} className="p-12 text-center text-slate-600 bg-slate-50/40">
                   <div className="flex flex-col items-center justify-center max-w-lg mx-auto space-y-3.5">
                     {!hasSearched ? (
                       <>
-                        <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 shadow-2xs">
+                        <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200/80 flex items-center justify-center text-blue-600 shadow-2xs">
                           <FileText className="w-6 h-6" />
                         </div>
                         <div>
-                          <p className="text-base font-bold text-gray-900">
+                          <p className="text-base font-semibold text-slate-900">
                             Danh sách hóa đơn đang trống
                           </p>
-                          <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto leading-relaxed">
-                            Khi tải lại web, dữ liệu kết quả cũ đã được xóa sạch. Vui lòng nhập Mã số thuế, Mật khẩu, Captcha và nhấn nút <strong>"Tra cứu HĐ"</strong> ở menu bên trái để tải dữ liệu hóa đơn mua vào mới nhất từ Cổng Tổng cục Thuế.
+                          <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-relaxed">
+                            Khi tải lại web, dữ liệu kết quả cũ đã được xóa sạch. Vui lòng nhập Mã số thuế, Mật khẩu, Captcha và nhấn nút <strong>"Bắt đầu truy xuất"</strong> ở menu bên trái để tải dữ liệu hóa đơn mua vào mới nhất từ Cổng Tổng cục Thuế.
                           </p>
                         </div>
 
@@ -138,7 +140,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           <div className="pt-2">
                             <button
                               onClick={onQuickSyncPeriod}
-                              className="px-4 py-2 bg-[#ef4444] hover:bg-red-600 text-white rounded-md text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-all shadow-2xs flex items-center gap-2 cursor-pointer"
                             >
                               <Search className="w-3.5 h-3.5" />
                               <span>Tra cứu hóa đơn mua vào</span>
@@ -148,20 +150,20 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       </>
                     ) : (
                       <>
-                        <div className="w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                        <div className="w-11 h-11 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-amber-600">
                           <AlertCircle className="w-5 h-5" />
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-gray-900">
+                          <p className="text-sm font-semibold text-slate-900">
                             Không tìm thấy hóa đơn mua vào nào trong khoảng thời gian đã lọc
                           </p>
-                          <p className="text-xs text-gray-500 font-mono mt-1">
+                          <p className="text-xs text-slate-500 font-mono mt-1">
                             Kỳ tra cứu:{' '}
-                            <strong className="text-gray-800">
+                            <strong className="text-slate-800">
                               {currentDateRange ? `${currentDateRange.from} → ${currentDateRange.to}` : 'Tất cả'}
                             </strong>{' '}
                             | MST:{' '}
-                            <strong className="text-gray-800 font-mono">
+                            <strong className="text-slate-800 font-mono">
                               {currentMst || '(Chưa nhập)'}
                             </strong>
                           </p>
@@ -171,7 +173,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           {onQuickSyncPeriod && (
                             <button
                               onClick={onQuickSyncPeriod}
-                              className="px-3 py-1.5 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer"
                             >
                               <span>Tra cứu kỳ này</span>
                             </button>
@@ -180,7 +182,7 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           {onQuickResetPeriod && (
                             <button
                               onClick={onQuickResetPeriod}
-                              className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 rounded text-xs font-semibold transition-colors cursor-pointer"
+                              className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                             >
                               <span>Đặt lại bộ lọc</span>
                             </button>
@@ -224,40 +226,40 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                   <tr
                     key={inv.id}
                     onClick={() => onViewDetail(inv)}
-                    className={`hover:bg-red-50/40 transition-colors cursor-pointer group ${
-                      isSelected ? 'bg-red-50/60 font-medium' : idx % 2 === 1 ? 'bg-gray-50/30' : 'bg-white'
+                    className={`hover:bg-slate-50/80 transition-colors cursor-pointer group ${
+                      isSelected ? 'bg-blue-50/50 font-medium' : idx % 2 === 1 ? 'bg-slate-50/30' : 'bg-white'
                     }`}
                   >
                     {/* Checkbox */}
                     <td className="text-center" onClick={(e) => { e.stopPropagation(); onToggleSelect(inv); }}>
                       <button
                         onClick={(e) => { e.stopPropagation(); onToggleSelect(inv); }}
-                        className="text-gray-400 hover:text-[#ef4444] transition-colors flex items-center justify-center mx-auto cursor-pointer"
+                        className="text-slate-400 hover:text-blue-600 transition-colors flex items-center justify-center mx-auto cursor-pointer"
                       >
                         {isSelected ? (
-                          <CheckSquare className="w-3.5 h-3.5 text-[#ef4444]" />
+                          <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
                         ) : (
-                          <Square className="w-3.5 h-3.5 text-gray-300" />
+                          <Square className="w-3.5 h-3.5 text-slate-300" />
                         )}
                       </button>
                     </td>
 
                     {/* STT */}
-                    <td className="text-center text-gray-500 font-mono text-[11px]">{idx + 1}</td>
+                    <td className="text-center text-slate-500 font-mono text-[11px]">{idx + 1}</td>
 
                     {/* Mẫu số / Ký hiệu */}
-                    <td className="font-mono font-medium text-gray-900 text-xs">
-                      <span className="text-gray-400">{inv.khmshdon}/</span>
-                      <strong className="text-gray-900">{inv.khhdon}</strong>
+                    <td className="font-mono font-medium text-slate-900 text-xs">
+                      <span className="text-slate-400">{inv.khmshdon}/</span>
+                      <strong className="text-slate-900">{inv.khhdon}</strong>
                     </td>
 
                     {/* Số HĐ */}
-                    <td className="font-mono font-bold text-[#ef4444] text-xs">
-                      <span className="group-hover:underline">{inv.shdon}</span>
+                    <td className="font-mono font-semibold text-slate-900 group-hover:text-blue-600 text-xs transition-colors">
+                      <span>{inv.shdon}</span>
                     </td>
 
                     {/* Ngày lập */}
-                    <td className="text-gray-600 font-mono text-[11px]">
+                    <td className="text-slate-600 font-mono text-[11px]">
                       {formatDate(inv.tdlap)}
                     </td>
 
@@ -276,16 +278,14 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           </span>
                         )}
                         {(() => {
-                          const pId = detectPartnerTemplate(inv);
-                          const pMeta = getPartnerMeta(pId);
-                          if (pMeta.isCustomPartner) {
+                          const pBadge = getInvoiceProviderBadge(inv);
+                          if (!pBadge.isDefault) {
                             return (
                               <span 
-                                className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0"
-                                style={{ color: pMeta.color, backgroundColor: `${pMeta.color}15`, border: `1px solid ${pMeta.color}35` }}
-                                title={`Mẫu hóa đơn thiết kế chính xác riêng cho ${pMeta.shortName}`}
+                                className={`inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-bold shrink-0 border ${pBadge.badgeClass}`}
+                                title={pBadge.title}
                               >
-                                {pMeta.badge}
+                                {pBadge.label}
                               </span>
                             );
                           }
@@ -317,24 +317,42 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {/* Mã tra cứu trực tiếp */}
                       {inv.lookupCode && (
                         <div className="flex items-center gap-1 text-[10.5px] text-gray-500 font-mono mt-0.5">
-                          <span className="text-gray-400">
-                            {/viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) ? 'Mã bí mật:' : 'Mã TC:'}
-                          </span>
-                          <a
-                            href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
-                            title={/meinvoice/i.test(inv.lookupUrl || '') || inv.provider === 'MISA' || inv.nbmst === '0101243150'
-                              ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
-                              : /viettel/i.test(inv.provider || '') || Boolean(inv.caProvider?.includes('VIETTEL')) || /sinvoice/i.test(inv.lookupUrl || '')
-                              ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
-                              : `Mã tra cứu: ${inv.lookupCode}`}
-                          >
-                            <span>{inv.lookupCode}</span>
-                            <ExternalLink className="w-2.5 h-2.5 opacity-70" />
-                          </a>
+                          {(() => {
+                            const pBadge = getInvoiceProviderBadge(inv);
+                            const isViettel = pBadge.label === 'Viettel';
+                            const isMisa = pBadge.label === 'Misa';
+                            return (
+                              <>
+                                <span className="text-gray-400">
+                                  {isViettel ? 'Mã bí mật:' : 'Mã TC:'}
+                                </span>
+                                <a
+                                  href={buildDirectLookupUrl(inv.lookupUrl, inv.lookupCode, inv.provider, inv.nbmst)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const isVnptItem = inv.provider === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '') || inv.msttcgp === '0100684378';
+                                    if (isVnptItem) {
+                                      e.preventDefault();
+                                      openVnptDirectPortal(inv.nbmst, inv.lookupCode, inv.lookupUrl);
+                                    }
+                                  }}
+                                  className="text-emerald-700 hover:text-emerald-900 hover:underline font-bold inline-flex items-center gap-0.5"
+                                  title={isMisa
+                                    ? `Mã tra cứu MISA: ${inv.lookupCode} (Tự động gán & mở hóa đơn không cần captcha)`
+                                    : isViettel
+                                    ? `Mã số bí mật Viettel: ${inv.lookupCode} (Tự động điền MST người bán ${inv.nbmst} và mã bí mật vào cổng Viettel)`
+                                    : pBadge.label === 'VNPT' || /vnpt/i.test(inv.lookupUrl || '')
+                                    ? `Mã tra cứu VNPT: ${inv.lookupCode} (Tự động gán vào ô tìm kiếm Cổng VNPT, chỉ cần nhập Captcha)`
+                                    : `Mã tra cứu: ${inv.lookupCode}`}
+                                >
+                                  <span>{inv.lookupCode}</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                                </a>
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
 
@@ -398,46 +416,106 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => onViewDetail(inv)}
-                          className="px-2 py-1 bg-red-50 hover:bg-[#ef4444] text-[#ef4444] hover:text-white border border-red-200 hover:border-[#ef4444] rounded text-[11px] font-bold transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
+                          className="px-2.5 py-1 bg-white hover:bg-blue-600 text-slate-700 hover:text-white border border-slate-200 hover:border-blue-600 rounded-md text-[11px] font-medium transition-all flex items-center gap-1 shadow-2xs cursor-pointer group/btn"
                           title="Mở xem bản thể hiện PDF"
                         >
-                          <FileText className="w-3 h-3" />
+                          <FileText className="w-3 h-3 text-slate-500 group-hover/btn:text-white transition-colors" />
                           <span>Xem PDF</span>
                         </button>
 
                         {/* Tra cứu trực tiếp trên Cổng NCC */}
                         {(() => {
+                          const pBadge = getInvoiceProviderBadge(inv);
+                          const isVnpayInv = pBadge.label === 'VNPAY' || 
+                            (inv.provider || '').toUpperCase().includes('VNPAY') || 
+                            inv.nbmst === '0102182292' || 
+                            inv.nbmst === '0100112437' ||
+                            Boolean(inv.nbten && /vietcombank/i.test(inv.nbten));
+
+                          const isInvalidVnpayCode = (code?: string) => !code || 
+                            code.toLowerCase() === 'vietcombank' || 
+                            /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+                            (code.includes('0102182292') && code.length > 20);
+
+                          const sanitizedLookupCode = isVnpayInv
+                            ? (!isInvalidVnpayCode(inv.lookupCode) ? inv.lookupCode : '')
+                            : ((inv.lookupCode && inv.lookupCode.toLowerCase() !== 'vietcombank') 
+                                ? inv.lookupCode 
+                                : (inv.mhdon && inv.mhdon.toLowerCase() !== 'vietcombank' ? inv.mhdon : ''));
                           const directUrl = buildDirectLookupUrl(
                             inv.lookupUrl,
-                            inv.lookupCode,
+                            sanitizedLookupCode,
                             inv.provider,
                             inv.nbmst
                           );
-                          const isMisa = /meinvoice/i.test(directUrl) || 
-                            inv.provider === 'MISA' || 
-                            inv.provider === 'TAN_THANH_DANH' || 
-                            inv.provider === 'TAI_TRAM_ANH' || 
-                            inv.provider === 'XUAN_VINH' || 
-                            inv.nbmst === '0101243150';
-                          const isViettel = /sinvoice/i.test(directUrl) ||
-                            inv.provider === 'VIETTEL' ||
-                            Boolean(inv.caProvider?.includes('VIETTEL'));
+                          const isMisa = pBadge.label === 'Misa' || /meinvoice/i.test(directUrl);
+                          const isViettel = pBadge.label === 'Viettel' || /sinvoice/i.test(directUrl);
+                          const isVnpt = pBadge.label === 'VNPT' || /vnpt/i.test(directUrl);
+                          const isEasyInvoice = pBadge.label === 'EasyInvoice' || /easyinvoice/i.test(directUrl);
+                          const isMinvoice = pBadge.label === 'M-Invoice' || /minvoice/i.test(directUrl) || inv.msttcgp === '0106026495' || (inv.provider || '').toUpperCase().includes('MINVOICE');
+                          const isVnpay = pBadge.label === 'VNPAY' || /vnpay/i.test(directUrl) || /vietcombank\.com\.vn/i.test(directUrl);
+                          const is4Si = pBadge.label === '4Si' || /4si|lcssoft|dochoadon/i.test(directUrl) || inv.msttcgp === '0315744883' || inv.msttcgp === '0302999571' || (inv.provider || '').toUpperCase().includes('4SI');
+                          const isBkav = pBadge.label === 'Bkav' || /bkav|ehoadon/i.test(directUrl);
+                          const isThaiSon = pBadge.label === 'Thái Sơn' || /einvoice\.vn|thaison/i.test(directUrl);
+                          const isCyberBill = pBadge.label === 'CyberBill' || /cyberbill/i.test(directUrl);
+                          const isVcb = inv.nbmst === '0100112437' || /vietcombank/i.test(inv.nbten || '');
                           return (
                             <a
-                              href={directUrl}
+                              href={is4Si && !directUrl.includes('inv.4si.vn') ? 'https://dochoadon.lcssoft.com.vn/' : directUrl}
                               target="_blank"
                               rel="noopener noreferrer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (isVnpt) {
+                                  e.preventDefault();
+                                  openVnptDirectPortal(inv.nbmst, sanitizedLookupCode, inv.lookupUrl);
+                                }
+                              }}
                               className={`p-1 rounded transition-colors cursor-pointer ${
                                 isMisa 
-                                  ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50' 
+                                  ? 'text-blue-600 hover:text-blue-800 hover:bg-blue-50' 
                                   : isViettel
                                   ? 'text-red-600 hover:text-red-800 hover:bg-red-50'
+                                  : isVnpt
+                                  ? 'text-sky-600 hover:text-sky-800 hover:bg-sky-50'
+                                  : isEasyInvoice
+                                  ? 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50'
+                                  : isMinvoice
+                                  ? 'text-teal-600 hover:text-teal-800 hover:bg-teal-50'
+                                  : isVnpay
+                                  ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50'
+                                  : is4Si
+                                  ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                                  : isBkav
+                                  ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
+                                  : isThaiSon
+                                  ? 'text-rose-600 hover:text-rose-800 hover:bg-rose-50'
+                                  : isCyberBill
+                                  ? 'text-cyan-600 hover:text-cyan-800 hover:bg-cyan-50'
                                   : 'text-gray-500 hover:text-cyan-700 hover:bg-cyan-50'
                               }`}
                               title={isMisa 
-                                ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${inv.lookupCode || ''})` 
+                                ? `Tải hóa đơn gốc MISA meInvoice (Mã: ${sanitizedLookupCode || ''})` 
                                 : isViettel
-                                ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${inv.lookupCode || ''})`
+                                ? `Tra cứu Viettel S-Invoice (Tự động điền MST người bán ${inv.nbmst || ''} & Mã bí mật ${sanitizedLookupCode || ''})`
+                                : isVnpt
+                                ? `Tra cứu VNPT Invoice (Mã: ${sanitizedLookupCode || ''})`
+                                : isEasyInvoice
+                                ? `Tra cứu Softdreams EasyInvoice (Mã: ${sanitizedLookupCode || ''})`
+                                : isMinvoice
+                                ? `Tra cứu & tải hóa đơn gốc M-Invoice (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Số bảo mật: ${sanitizedLookupCode}` : ''})`
+                                : isVnpay
+                                ? (isVcb 
+                                    ? `Tra cứu hóa đơn Vietcombank / VNPAY (MST: ${inv.nbmst || ''}${sanitizedLookupCode ? `, Mã: ${sanitizedLookupCode}` : ''})`
+                                    : `Tra cứu VNPAY Invoice (Tự động điền MST ${inv.nbmst || ''} & Mã tra cứu ${sanitizedLookupCode || ''})`)
+                                : is4Si
+                                ? 'Đọc hóa đơn XML 4Si (LCS Soft - dochoadon.lcssoft.com.vn)'
+                                : isBkav
+                                ? `Tra cứu Bkav eHoadon (Mã: ${sanitizedLookupCode || ''})`
+                                : isThaiSon
+                                ? `Tra cứu Thái Sơn E-Invoice (Mã: ${sanitizedLookupCode || ''})`
+                                : isCyberBill
+                                ? `Tra cứu CyberLotus CyberBill (Mã: ${sanitizedLookupCode || ''})`
                                 : 'Mở cổng tra cứu hóa đơn'}
                             >
                               <ExternalLink className="w-3.5 h-3.5" />
@@ -446,8 +524,16 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                         })()}
 
                         <button
+                          onClick={() => onDownloadPdf(inv)}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          title="Tải nhanh tệp PDF A4 chuẩn mẫu"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
                           onClick={() => onDownloadXml(inv)}
-                          className="p-1 text-gray-500 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                          className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
                           title="Tải tệp XML gốc"
                         >
                           <FileCode2 className="w-3.5 h-3.5" />
@@ -464,16 +550,16 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
 
       {/* Floating Bottom Selection Toolbar */}
       {selectedInvoices.length > 0 && (
-        <div className="fixed bottom-5 right-6 z-40 bg-[#111827] text-white px-4 py-2.5 rounded shadow-2xl border border-gray-700 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 duration-150 text-xs">
+        <div className="fixed bottom-5 right-6 z-40 bg-slate-900/95 backdrop-blur-md text-white px-4 py-2.5 rounded-xl shadow-xl border border-slate-800 flex items-center gap-4 animate-in fade-in slide-in-from-bottom-2 duration-150 text-xs">
           <div className="flex items-center gap-2">
-            <span className="status-dot status-active"></span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
             <span>
-              Đã chọn: <strong className="text-emerald-400 font-mono font-bold">{selectedInvoices.length}</strong> HĐ mua vào
+              Đã chọn: <strong className="text-emerald-400 font-mono font-semibold">{selectedInvoices.length}</strong> HĐ mua vào
             </span>
-            <span className="text-gray-600">|</span>
+            <span className="text-slate-600">|</span>
             <span>
               Tổng:{' '}
-              <strong className="text-amber-300 font-mono font-bold">
+              <strong className="text-amber-300 font-mono font-semibold">
                 {formatVND(selectedInvoices.reduce((s, i) => s + i.tgtttbso, 0))}
               </strong>
             </span>
@@ -482,28 +568,21 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => onViewDetail(selectedInvoices[0])}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-white rounded text-xs font-bold transition-colors border border-gray-700 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium transition-colors border border-slate-700 cursor-pointer shadow-2xs"
               title="Mở xem bản PDF của hóa đơn đã chọn"
             >
-              <FileText className="w-3 h-3 text-[#ef4444]" />
+              <FileText className="w-3.5 h-3.5 text-blue-400" />
               <span>Mở PDF</span>
             </button>
 
             <button
               onClick={onExportExcelSelected}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-2xs"
             >
-              <FileSpreadsheet className="w-3 h-3" />
+              <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>Xuất Excel</span>
             </button>
 
-            <button
-              onClick={onBatchDownloadSelected}
-              className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#ef4444] hover:bg-red-600 text-white rounded text-xs font-bold transition-colors cursor-pointer"
-            >
-              <FolderArchive className="w-3 h-3" />
-              <span>Tải ZIP</span>
-            </button>
           </div>
         </div>
       )}

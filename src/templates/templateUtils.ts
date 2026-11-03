@@ -141,21 +141,18 @@ export function buildDirectLookupUrl(
   }
 
   // 2. VNPT Invoice
-  // Điền mã nhận hóa đơn vào ô name="strFkey"
+  // Mở trực tiếp link Cổng tra cứu của nhà cung cấp VNPT (SearchByFkey)
   const isVnpt = provider.includes('VNPT') ||
     provider.includes('NGHIA_SON') ||
     /vnpt-invoice\.com\.vn/i.test(url);
 
   if (isVnpt) {
-    let vnptUrl = url;
-    if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
-      vnptUrl = `https://${sellerTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+    const cleanTaxCode = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
+    let targetDomain = (url || '').trim().split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
+    if (!targetDomain || !/vnpt-invoice/i.test(targetDomain)) {
+      targetDomain = cleanTaxCode ? `https://${cleanTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://4000344946-tt78.vnpt-invoice.com.vn';
     }
-    const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
-    if (code) {
-      return `${cleanUrl}/?strFkey=${encodeURIComponent(code)}`;
-    }
-    return cleanUrl;
+    return `${targetDomain}/HomeNoLogin/SearchByFkey`;
   }
 
   // 3. Softdreams EasyInvoice
@@ -184,9 +181,45 @@ export function buildDirectLookupUrl(
     return cleanUrl;
   }
 
-  // 4. 4Si / LCS (PNJ)
-  // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
-  const is4Si = provider.includes('4SI') || provider.includes('PNJ') || /4si\.vn/i.test(url);
+  // 4. LCS Soft EIP (PNJ: 0315018466, LCS: 0302999571)
+  const isLcs = provider.includes('LCS') || provider.includes('PNJ') ||
+    sellerTaxCode === '0315018466' || sellerTaxCode === '0302999571' ||
+    /eip\.lcssoft\.com\.vn|lcssoft/i.test(url);
+  if (isLcs) {
+    return 'https://eip.lcssoft.com.vn/desktop/#/login';
+  }
+
+  // 4b. VNPAY Invoice (Vietcombank: 0100112437, VNPAY: 0102182292)
+  const isVnpay = provider.includes('VNPAY') ||
+    sellerTaxCode === '0100112437' ||
+    sellerTaxCode === '0102182292' ||
+    /vnpayinvoice/i.test(url);
+  if (isVnpay) {
+    const isVcb = sellerTaxCode === '0100112437';
+    const isInvalid = !code || 
+      code.toLowerCase() === 'vietcombank' || 
+      /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
+      (code.includes('0102182292') && code.length > 20);
+    const validCode = !isInvalid ? code.trim() : '';
+    const baseVnpayUrl = 'https://portal.vnpayinvoice.vn';
+    const params = new URLSearchParams();
+    if (validCode) params.set('lookupCode', validCode);
+    if (sellerTaxCode) params.set('taxCode', sellerTaxCode);
+    const qs = params.toString();
+    if (isVcb && !validCode) {
+      return 'https://einvoice.vietcombank.com.vn/';
+    }
+    return qs ? `${baseVnpayUrl}/?${qs}` : (isVcb ? 'https://einvoice.vietcombank.com.vn/' : `${baseVnpayUrl}/`);
+  }
+
+  // 4c. FPT Electronic Invoice
+  const isFpt = provider.includes('FPT') || /hoadon\.ftg\.vn|fpt\.com\.vn/i.test(url);
+  if (isFpt) {
+    return 'https://hoadon.ftg.vn/';
+  }
+
+  // 4d. 4Si
+  const is4Si = provider.includes('4SI') || /4si\.vn/i.test(url);
   if (is4Si) {
     return 'https://inv.4si.vn/tra-cuu-hoa-don';
   }
@@ -243,3 +276,76 @@ export function getPrintControlsHtml(title: string): string {
     </div>
   </div>`;
 }
+
+export function getRawVnptPortalUrl(sellerTaxCode?: string, url?: string): string {
+  let vnptUrl = url || '';
+  const cleanTaxCode = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
+  if (!vnptUrl || !/vnpt-invoice/i.test(vnptUrl)) {
+    vnptUrl = `https://${cleanTaxCode || '4000344946'}-tt78.vnpt-invoice.com.vn`;
+  }
+  const cleanUrl = vnptUrl.split('?')[0].replace(/\/+$/, '');
+  if (!/\/HomeNoLogin\/SearchByFkey$/i.test(cleanUrl)) {
+    return `${cleanUrl}/HomeNoLogin/SearchByFkey`;
+  }
+  return cleanUrl;
+}
+
+/**
+ * Mở trực tiếp link Cổng tra cứu của nhà cung cấp VNPT và tự gán mã tra cứu vào ô tìm kiếm.
+ * Bỏ qua bước giả lập trang của VNPT, người dùng chỉ cần nhập mã Captcha để tra cứu.
+ */
+export function openVnptDirectPortal(
+  sellerTaxCode?: string,
+  lookupCode?: string,
+  portalUrl?: string
+): void {
+  const cleanMst = (sellerTaxCode || '').trim().replace(/[^0-9\-]/g, '');
+  let code = (lookupCode || '').trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
+
+  let targetPortal = (portalUrl || '').trim().split('?')[0].replace(/\/+$/, '').replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, '');
+  if (!targetPortal || !/vnpt-invoice/i.test(targetPortal)) {
+    targetPortal = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : 'https://4000344946-tt78.vnpt-invoice.com.vn';
+  }
+
+  const actionUrl = `${targetPortal}/HomeNoLogin/SearchByFkey`;
+
+  // Sao chép mã tra cứu vào bộ nhớ tạm để phòng ngừa
+  if (code && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      navigator.clipboard.writeText(code).catch(() => {});
+    } catch {}
+  }
+
+  // Tự động gán mã tra cứu qua POST form trực tiếp tới cổng VNPT với target="_blank"
+  // ASP.NET MVC của VNPT tự động hiển thị mã trong ô id="strFkey"
+  if (typeof document !== 'undefined') {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = actionUrl;
+    form.target = '_blank';
+    form.rel = 'noopener noreferrer';
+    form.style.display = 'none';
+
+    if (code) {
+      const inputFkey = document.createElement('input');
+      inputFkey.type = 'hidden';
+      inputFkey.name = 'strFkey';
+      inputFkey.value = code;
+      form.appendChild(inputFkey);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+    setTimeout(() => {
+      try {
+        if (form.parentNode) {
+          form.parentNode.removeChild(form);
+        }
+      } catch {}
+    }, 1000);
+  } else if (typeof window !== 'undefined') {
+    window.open(actionUrl, '_blank', 'noopener,noreferrer');
+  }
+}
+
+

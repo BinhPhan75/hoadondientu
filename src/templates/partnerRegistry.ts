@@ -17,15 +17,54 @@ export const PARTNER_METAS: PartnerMeta[] = [
   },
   {
     id: 'PNJ',
-    name: 'Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ (4Si / LCS)',
+    name: 'Công ty TNHH MTV Chế Tác và Kinh Doanh Trang sức PNJ (LCS Soft)',
     shortName: 'Trang Sức PNJ (Mẫu GDT)',
     taxCode: '0315018466',
     defaultAddress: 'Số 23 Đường số 14, Phường An Nhơn, Thành Phố Hồ Chí Minh, Việt Nam',
-    portalUrl: 'https://inv.4si.vn/tra-cuu-hoa-don',
-    providerBrand: 'Tổng cục Thuế (GDT)',
-    badge: 'PNJ (GDT)',
-    color: '#915715',
-    description: 'Áp dụng mẫu chuẩn Tổng cục Thuế (GDT) theo quy định đối với hóa đơn 4SI',
+    portalUrl: 'https://eip.lcssoft.com.vn/desktop/#/login',
+    providerBrand: 'LCS Soft (eip.lcssoft.com.vn)',
+    badge: 'PNJ (LCS)',
+    color: '#0891b2',
+    description: 'Áp dụng mẫu chuẩn Tổng cục Thuế (GDT), tra cứu trực tiếp tại Cổng LCS Soft EIP',
+    isCustomPartner: true
+  },
+  {
+    id: 'LCS_SOFT',
+    name: 'CÔNG TY TNHH L.C.S (LCS SOFT)',
+    shortName: 'LCS Soft EIP',
+    taxCode: '0302999571',
+    defaultAddress: 'Thành phố Hồ Chí Minh, Việt Nam',
+    portalUrl: 'https://eip.lcssoft.com.vn/desktop/#/login',
+    providerBrand: 'LCS Soft',
+    badge: 'LCS Soft',
+    color: '#0891b2',
+    description: 'Cổng tra cứu hóa đơn điện tử LCS Soft EIP (eip.lcssoft.com.vn)',
+    isCustomPartner: true
+  },
+  {
+    id: 'VNPAY',
+    name: 'CÔNG TY CỔ PHẦN GIẢI PHÁP THANH TOÁN VIỆT NAM (VNPAY)',
+    shortName: 'VNPAY Invoice',
+    taxCode: '0102182292',
+    defaultAddress: 'Tầng 8, Số 22 Láng Hạ, Đống Đa, Hà Nội',
+    portalUrl: 'https://portal.vnpayinvoice.vn/',
+    providerBrand: 'VNPAY Invoice',
+    badge: 'VNPAY',
+    color: '#0284c7',
+    description: 'Cổng tra cứu hóa đơn điện tử VNPAY Invoice (Vietcombank...)',
+    isCustomPartner: true
+  },
+  {
+    id: 'FPT',
+    name: 'CÔNG TY TNHH HỆ THỐNG THÔNG TIN FPT (FPT IS)',
+    shortName: 'FPT Electronic Invoice',
+    taxCode: '0104128565',
+    defaultAddress: 'Tòa nhà FPT, Phố Duy Tân, Cầu Giấy, Hà Nội',
+    portalUrl: 'https://hoadon.ftg.vn/',
+    providerBrand: 'FPT Invoice',
+    badge: 'FPT',
+    color: '#ea580c',
+    description: 'Cổng tra cứu hóa đơn điện tử FPT Electronic Invoice',
     isCustomPartner: true
   },
   {
@@ -107,6 +146,30 @@ export const PARTNER_METAS: PartnerMeta[] = [
     isCustomPartner: true
   },
   {
+    id: 'VIETTEL',
+    name: 'Tập đoàn Công nghiệp - Viễn thông Quân đội',
+    shortName: 'Viettel S-Invoice',
+    taxCode: '0100109106',
+    portalUrl: 'https://sinvoice.viettel.vn',
+    providerBrand: 'Viettel S-Invoice',
+    badge: 'Viettel',
+    color: '#ee0033',
+    description: 'Hóa đơn điện tử Viettel S-Invoice, dùng Mã số bí mật trong ttkhac để tra cứu',
+    isCustomPartner: false
+  },
+  {
+    id: 'VNPAY',
+    name: 'CÔNG TY CỔ PHẦN GIẢI PHÁP THANH TOÁN VIỆT NAM',
+    shortName: 'VNPAY Invoice',
+    taxCode: '0102182292',
+    portalUrl: 'https://portal.vnpayinvoice.vn',
+    providerBrand: 'VNPAY Invoice',
+    badge: 'VNPAY',
+    color: '#005baa',
+    description: 'Hóa đơn điện tử phát hành qua giải pháp VNPAY Invoice (bao gồm Vietcombank, Cổng thanh toán VNPAY)',
+    isCustomPartner: false
+  },
+  {
     id: 'DEFAULT',
     name: 'Mẫu Hóa Đơn Điện Tử Chuẩn Tổng Cục Thuế (GDT)',
     shortName: 'Mẫu Tổng cục Thuế',
@@ -145,7 +208,8 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 1. Check Tax Codes (Highest Accuracy)
   if (nbmst === '0318657735') return 'BAO_DUY';
-  // PNJ và 4SI: Theo chỉ đạo của người dùng, sử dụng theo mẫu của GDT cung cấp (DEFAULT)
+  // PNJ, 4SI, VNPAY & Vietcombank: Không có mã tra cứu công khai trong XML GDT,
+  // theo chỉ đạo của người dùng: Sử dụng theo mẫu chuẩn của GDT cung cấp (DEFAULT) để đảm bảo thông tin bên bán chính xác 100%
   if (nbmst === '0315018466') return 'DEFAULT';
   if (nbmst === '0312105174') return 'TAI_TRAM_ANH';
   if (nbmst === '0400557356') return 'XUAN_VINH';
@@ -153,33 +217,46 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (nbmst === '0318443500') return 'TKJ';
   if (nbmst === '4000344946') return 'NGHIA_SON';
   if (nbmst === '0317978711') return 'TAN_THANH_DANH';
+  if (nbmst === '0402307168') return 'VIETTEL'; // CÔNG TY TNHH TƯ VẤN NHÂN SỰ DOANH NGHIỆP SUNTALENT (Viettel S-Invoice)
+  if (nbmst === '0102182292' || nbmst === '0100112437') return 'DEFAULT'; // VNPAY & Vietcombank -> Dùng mẫu chuẩn GDT
 
   // 1b. Nhà cung cấp phần mềm HĐĐT (msttcgp)
   const msttcgp = (invoice.msttcgp || '').replace(/[^0-9]/g, '');
+  if (msttcgp === '0100109106') return 'VIETTEL';
+  if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY T-VAN -> Dùng mẫu chuẩn GDT
   if (msttcgp === '0302999571' || msttcgp === '0315744883') return 'DEFAULT'; // 4SI / LCS -> Dùng mẫu GDT
   if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT Nghĩa Sơn)
 
   // 2. Check Seller Names
   if (nbten.includes('baoduy')) return 'BAO_DUY';
   if (nbten.includes('pnj') || (nbten.includes('chetac') && nbten.includes('trangsuc'))) return 'DEFAULT'; // PNJ -> Dùng mẫu GDT
+  if (nbten.includes('suntalent')) return 'VIETTEL';
   if (nbten.includes('taitramanh') || nbten.includes('tramanh')) return 'TAI_TRAM_ANH';
   if (nbten.includes('xuanvinh')) return 'XUAN_VINH';
   if (nbten.includes('kimloantuan')) return 'KIM_LOAN_TUAN';
   if (nbten.includes('tkj')) return 'TKJ';
   if (nbten.includes('nghiason')) return 'NGHIA_SON';
   if (nbten.includes('tanthanhdanh') || nbten.includes('thanhdanh')) return 'TAN_THANH_DANH';
+  if (nbten.includes('vnpay') || nbten.includes('vietcombank')) return 'DEFAULT'; // VNPAY / VCB -> Dùng mẫu GDT
 
   // 3. Check raw XML content if available
   if (xml) {
     if (xml.includes('0318657735') || xml.includes('bảo duy') || xml.includes('bao duy')) return 'BAO_DUY';
     if (xml.includes('0315018466') || xml.includes('4si.vn') || xml.includes('l.c.s') || xml.includes('pnj')) return 'DEFAULT'; // 4SI / PNJ -> Dùng mẫu GDT
+    if (xml.includes('0402307168') || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/.test(xml) || xml.includes('suntalent')) return 'VIETTEL';
     if (xml.includes('0312105174') || xml.includes('tài trâm anh') || xml.includes('tai tram anh')) return 'TAI_TRAM_ANH';
     if (xml.includes('0400557356') || xml.includes('xuân vinh') || xml.includes('xuan vinh')) return 'XUAN_VINH';
     if (xml.includes('0318391940') || xml.includes('kim loan tuấn') || xml.includes('kim loan tuan')) return 'KIM_LOAN_TUAN';
     if (xml.includes('0318443500') || xml.includes('tkj')) return 'TKJ';
     if (xml.includes('4000344946') || xml.includes('nghĩa sơn') || xml.includes('nghia son')) return 'NGHIA_SON';
     if (xml.includes('0317978711') || xml.includes('tân thanh danh') || xml.includes('tan thanh danh')) return 'TAN_THANH_DANH';
+    if (xml.includes('vnpayinvoice') || xml.includes('0102182292') || xml.includes('vietcombank')) return 'DEFAULT';
   }
+
+  // 3b. Check invoice provider string
+  const p = (invoice.provider || '').toUpperCase();
+  if (p === 'VIETTEL') return 'VIETTEL';
+  if (p.includes('VNPAY')) return 'DEFAULT';
 
   // 4. Mặc định: Tất cả các hóa đơn chưa nhận diện, viễn thông, điện lực, phí ngân hàng... đều dùng mẫu Tổng cục Thuế (DEFAULT)
   return 'DEFAULT';

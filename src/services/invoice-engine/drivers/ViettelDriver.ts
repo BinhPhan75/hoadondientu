@@ -1,29 +1,28 @@
 /**
- * ViettelDriver: Driver tra cứu & tải PDF Hóa đơn điện tử Viettel (S-Invoice)
- * Cổng tra cứu: https://sinvoice.viettel.vn
- * Hỗ trợ tự động giải Captcha bằng OCR qua CaptchaSolver
+ * ViettelDriver: Driver tra cứu & tải PDF Hóa đơn điện tử Viettel (vInvoice / S-Invoice)
+ * Cổng tra cứu chính thức: https://vinvoice.viettel.vn/utilities/invoice-search
+ * Cơ chế: Sử dụng API utility downloadPDF và generatePDF của Viettel với Mã số thuế và Mã số bí mật (ReservationCode)
  */
 
-import axios, { AxiosInstance } from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
-import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
+import { downloadOriginalViettelPdf } from '../../viettelInvoiceService';
 
 export class ViettelDriver extends BaseInvoiceProviderDriver {
-  readonly name = 'Viettel S-Invoice Driver';
+  readonly name = 'Viettel vInvoice / S-Invoice Driver';
   readonly providerCode = 'VIETTEL';
   readonly metadata: DriverMetadata = {
-    name: 'Viettel S-Invoice Driver',
+    name: 'Viettel vInvoice / S-Invoice Driver',
     providerCode: 'VIETTEL',
-    description: 'Tra cứu và tải PDF HĐĐT gốc từ cổng Viettel S-Invoice qua Số hóa đơn, Mã số bí mật và OCR Captcha',
-    sampleUrl: 'https://www.sinvoice.vn/p/tra-cuu-hoa-don.html',
-    supportsCaptcha: true,
-    requiredFields: ['sellerTaxCode', 'invoiceNo', 'secretCode']
+    description: 'Tra cứu và tải PDF HĐĐT gốc từ cổng Viettel vInvoice / S-Invoice qua Mã số thuế và Mã số bí mật (ReservationCode)',
+    sampleUrl: 'https://vinvoice.viettel.vn/utilities/invoice-search',
+    supportsCaptcha: false,
+    requiredFields: ['sellerTaxCode', 'secretCode']
   };
 
   /**
-   * Nhận diện hóa đơn Viettel S-Invoice theo đúng thứ tự ưu tiên nghiêm ngặt
+   * Nhận diện hóa đơn Viettel S-Invoice / vInvoice
    */
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
@@ -40,23 +39,56 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
     const sellerTaxCode = this.extractXmlTag(xmlData, 'MST') || this.extractXmlTag(xmlData, 'nbmst');
     const sellerName = this.extractXmlTag(xmlData, 'Ten') || this.extractXmlTag(xmlData, 'nbten');
     const invoiceNo = (this.extractXmlTag(xmlData, 'SHDon') || this.extractXmlTag(xmlData, 'shdon') || '1').padStart(7, '0');
-    const invoiceSeries = this.extractXmlTag(xmlData, 'KHHDon') || this.extractXmlTag(xmlData, 'khhdon') || '1C24TGT';
+    const invoiceSeries = this.extractXmlTag(xmlData, 'KHHDon') || this.extractXmlTag(xmlData, 'khhdon') || '1C26TGT';
     const templateCode = this.extractXmlTag(xmlData, 'KHMSHDon') || this.extractXmlTag(xmlData, 'khmshdon') || '1';
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    // Trích xuất Mã bí mật (SecretCode / ReservationCode)
+    // Trích xuất Mã bí mật (SecretCode / ReservationCode) của Viettel
     let secretCode = this.extractCustomField(xmlData, [
       'Mã số bí mật',
       'MaBiMat',
       'Mã bí mật',
       'ReservationCode',
       'SecretCode',
-      'MaSoBiMat'
+      'MaSoBiMat',
+      'Mã bảo mật',
+      'MaBaoMat'
     ]);
 
     if (!secretCode) {
-      secretCode = this.extractXmlTag(xmlData, 'ReservationCode') || this.extractXmlTag(xmlData, 'SecretCode');
+      secretCode = this.extractXmlTag(xmlData, 'ReservationCode') || 
+        this.extractXmlTag(xmlData, 'SecretCode') ||
+        this.extractXmlTag(xmlData, 'MaBiMat') ||
+        this.extractXmlTag(xmlData, 'MaSoBiMat');
+    }
+
+    // Nếu vẫn chưa thấy, quét khối TTin / TTKhac tìm DLieu có độ dài 10-25 ký tự chữ và số
+    if (!secretCode) {
+      const ttinBlocks = this.extractXmlBlocks(xmlData, 'TTin');
+      for (const block of ttinBlocks) {
+        const truong = (this.extractXmlTag(block, 'TTruong') || this.extractXmlTag(block, 'TenTruong')).toLowerCase();
+        if (truong.includes('bí mật') || truong.includes('bi mat') || truong.includes('secret') || truong.includes('reservation')) {
+          const val = this.extractXmlTag(block, 'DLieu') || this.extractXmlTag(block, 'Data');
+          if (val) {
+            secretCode = val.trim();
+            break;
+          }
+        }
+      }
+    }
+
+    // Dự phòng tìm kiếm bằng biểu thức chính quy chuỗi mã bí mật điển hình của Viettel (ví dụ S109R1TNGHTH3MN)
+    if (!secretCode) {
+      const match = xmlData.match(/\b([A-Z0-9]{12,20})\b/);
+      if (match && match[1] && !match[1].startsWith('0') && /[A-Z]/.test(match[1]) && /\d/.test(match[1])) {
+        // Chỉ nhận nếu gần từ khóa bí mật
+        const index = xmlData.indexOf(match[1]);
+        const snippet = xmlData.substring(Math.max(0, index - 80), Math.min(xmlData.length, index + 80)).toLowerCase();
+        if (snippet.includes('bí mật') || snippet.includes('bi mat') || snippet.includes('secret') || snippet.includes('reservation')) {
+          secretCode = match[1];
+        }
+      }
     }
 
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
@@ -64,7 +96,7 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
 
     return {
       provider: this.providerCode,
-      providerName: 'Viettel S-Invoice',
+      providerName: 'Viettel vInvoice / S-Invoice',
       sellerTaxCode,
       sellerName,
       invoiceNo,
@@ -72,7 +104,7 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
       templateCode,
       invoiceDate,
       secretCode: secretCode || undefined,
-      lookupUrl: 'https://sinvoice.viettel.vn/tra-cuu-hoa-don',
+      lookupUrl: 'https://vinvoice.viettel.vn/utilities/invoice-search',
       cqtCode: cqtCode || undefined,
       totalAmount,
       totalTaxAmount,
@@ -85,145 +117,56 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
   }
 
   /**
-   * Tải PDF Hóa đơn gốc Viettel với quy trình giải Captcha tự động bằng OCR
+   * Tải PDF Hóa đơn gốc Viettel trực tiếp từ máy chủ vinvoice.viettel.vn
    */
   async fetchPdf(info: ExtractedInvoiceInfo, options?: DownloadOptions): Promise<DownloadResult> {
     const logs: string[] = [];
-    this.createLog(`Khởi chạy Viettel S-Invoice Driver cho HĐ ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
+    this.createLog(`Khởi chạy Viettel vInvoice Driver cho HĐ ${info.invoiceSeries || ''} - ${info.invoiceNo || ''}`, logs);
 
-    if (!info.secretCode) {
-      this.createLog('Cảnh báo: Không tìm thấy Mã bí mật (SecretCode) trong XML. Viettel Sinvoice yêu cầu mã bí mật.', logs);
-    } else {
-      this.createLog(`Mã bí mật Viettel phát hiện: "${info.secretCode}"`, logs);
+    const supplierTaxCode = (info.sellerTaxCode || '').trim();
+    const reservationCode = (info.secretCode || '').trim();
+
+    if (!supplierTaxCode) {
+      this.createLog('LỖI: Thiếu Mã số thuế bên bán (sellerTaxCode).', logs);
+      throw new Error('[ViettelDriver] Thiếu Mã số thuế bên bán (sellerTaxCode) để tra cứu hóa đơn Viettel.');
     }
 
-    const timeoutMs = options?.timeoutMs || 15000;
-    let solvedCaptchaCode = '';
+    if (!reservationCode) {
+      this.createLog('LỖI: Không tìm thấy Mã số bí mật (reservationCode) trong XML.', logs);
+      throw new Error('[ViettelDriver] Không tìm thấy Mã số bí mật (Mã bí mật / ReservationCode) trong XML hóa đơn.');
+    }
 
-    // Tạo axios client với cookie jar giả lập phiên
-    let cookieHeader = '';
-    const client: AxiosInstance = axios.create({
-      baseURL: 'https://sinvoice.viettel.vn',
-      timeout: timeoutMs,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://sinvoice.viettel.vn/tra-cuu-hoa-don',
-        'Origin': 'https://sinvoice.viettel.vn',
-        ...(options?.customHeaders || {})
-      }
-    });
+    this.createLog(`Thông tin tra cứu: MST bên bán=${supplierTaxCode}, Mã bí mật=${reservationCode}`, logs);
+    this.createLog('Đang kết nối đến cổng dịch vụ Viettel vInvoice (vinvoice.viettel.vn)...', logs);
 
     try {
-      // 1. Tải ảnh Captcha từ Viettel Sinvoice
-      this.createLog('Đang kết nối đến cổng Viettel để lấy ảnh Captcha...', logs);
-      const captchaEndpoints = [
-        '/sinvoice-web/captcha',
-        '/sinvoice-web/api/captcha',
-        '/captcha'
-      ];
+      const result = await downloadOriginalViettelPdf({
+        supplierTaxCode,
+        reservationCode,
+        invoiceNo: info.invoiceNo,
+        invoiceSeries: info.invoiceSeries
+      });
 
-      let captchaBuffer: Buffer | null = null;
-
-      for (const ep of captchaEndpoints) {
-        try {
-          const capRes = await client.get(ep, {
-            responseType: 'arraybuffer',
-            validateStatus: (s) => s === 200
-          });
-
-          const contentType = String(capRes.headers['content-type'] || '');
-          if (capRes.data && capRes.data.byteLength > 100) {
-            const rawBuf = Buffer.from(capRes.data);
-            if (contentType.includes('image') || CaptchaSolver.isValidImageBuffer(rawBuf)) {
-              captchaBuffer = rawBuf;
-              
-              // Lưu Cookie phiên làm việc (JSESSIONID)
-              const setCookie = capRes.headers['set-cookie'];
-              if (setCookie && Array.isArray(setCookie)) {
-                cookieHeader = setCookie.map(c => c.split(';')[0]).join('; ');
-              }
-              this.createLog(`Đã tải ảnh Captcha (${(captchaBuffer.length / 1024).toFixed(1)} KB), Session Cookie đã được thiết lập`, logs);
-              break;
-            } else {
-              this.createLog(`Cổng Viettel trả về dữ liệu không phải ảnh (${contentType || 'HTML/Text'}), bỏ qua endpoint ${ep}`, logs);
-            }
-          }
-        } catch {
-          // Thử endpoint tiếp theo
-        }
-      }
-
-      // 2. Nếu có Captcha, tiến hành giải mã bằng CaptchaSolver OCR
-      if (captchaBuffer) {
-        this.createLog('Đang chuyển ảnh Captcha sang module OCR Tesseract để giải mã...', logs);
-        try {
-          const ocrResult = await CaptchaSolver.solveWithDetails(captchaBuffer, {
-            whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-            timeoutMs: 8000
-          });
-          solvedCaptchaCode = ocrResult.code;
-          this.createLog(`Giải Captcha Viettel thành công: "${solvedCaptchaCode}" (Độ tin cậy: ${ocrResult.confidence?.toFixed(0)}%)`, logs);
-        } catch (ocrErr: any) {
-          this.createLog(`Lỗi khi giải Captcha: ${ocrErr.message}`, logs);
-        }
-      }
-
-      // 3. Đóng gói Payload gửi POST Request tra cứu & tải PDF
-      const queryPayload = {
-        supplierTaxCode: (info.sellerTaxCode || '').trim(),
-        invoiceNo: (info.invoiceNo || '').trim(),
-        reservationCode: (info.secretCode || '').trim(),
-        secretCode: (info.secretCode || '').trim(),
-        templateCode: info.templateCode || '1',
-        series: info.invoiceSeries || '',
-        captcha: solvedCaptchaCode
-      };
-
-      this.createLog(`Gửi yêu cầu tra cứu Viettel với MST: ${queryPayload.supplierTaxCode}, Số HĐ: ${queryPayload.invoiceNo}...`, logs);
-
-      const downloadEndpoints = [
-        '/sinvoice-web/public/invoice/view-invoice-pdf',
-        '/sinvoice-web/public/invoice/get-invoice-pdf',
-        '/sinvoice-web/api/invoice/download-pdf'
-      ];
-
-      for (const dep of downloadEndpoints) {
-        try {
-          const resp = await client.post(dep, queryPayload, {
-            responseType: 'arraybuffer',
-            headers: {
-              ...(cookieHeader ? { 'Cookie': cookieHeader } : {})
-            }
-          });
-
-          if (resp.status === 200 && resp.data) {
-            const buf = Buffer.from(resp.data);
-            if (buf.length > 50 && buf.toString('utf-8', 0, 5).startsWith('%PDF')) {
-              this.createLog(`Tải thành công file PDF gốc từ Viettel S-Invoice (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString('base64'),
-                contentType: 'application/pdf',
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: `https://sinvoice.viettel.vn${dep}`,
-                captchaSolved: solvedCaptchaCode,
-                executionLogs: logs
-              };
-            }
-          }
-        } catch (postErr: any) {
-          this.createLog(`Endpoint ${dep} phản hồi cảnh báo: ${postErr.message}`, logs);
-        }
+      if (result.success && result.pdfBuffer) {
+        this.createLog(`Tải thành công file PDF gốc từ Viettel (${(result.pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: this.name,
+          pdfBuffer: result.pdfBuffer,
+          pdfBase64: result.pdfBase64 || result.pdfBuffer.toString('base64'),
+          contentType: 'application/pdf',
+          filename: this.buildPdfFilename(info),
+          isFallback: false,
+          sourceUrl: result.sourceUrl,
+          executionLogs: logs
+        };
       }
     } catch (err: any) {
-      this.createLog(`Lỗi xử lý Viettel S-Invoice: ${err.message}`, logs);
+      this.createLog(`Lỗi khi tải PDF từ Viettel: ${err.message}`, logs);
+      throw new Error(`[ViettelDriver] Không thể tải PDF gốc từ Viettel vInvoice: ${err.message}`);
     }
 
-    throw new Error(`[ViettelDriver] Không thể tải PDF gốc từ Viettel Sinvoice. Vui lòng kiểm tra Mã bí mật và kết nối.`);
+    throw new Error(`[ViettelDriver] Không thể tải PDF gốc từ Viettel vInvoice.`);
   }
 }

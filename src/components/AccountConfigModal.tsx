@@ -400,25 +400,25 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 type="checkbox"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-3.5 h-3.5 text-[#ef4444] rounded-2xs"
+                className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
               />
-              <span className="text-[11px] text-gray-600">Ghi nhớ cấu hình tài khoản trên trình duyệt</span>
+              <span className="text-xs text-slate-600 font-medium">Ghi nhớ cấu hình tài khoản trên trình duyệt</span>
             </label>
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#d1d5db]">
+          <div className="pt-4 flex items-center justify-end gap-2 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+              className="h-9 px-4 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 rounded-lg border border-slate-200 transition-colors shadow-xs"
             >
               Hủy bỏ
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-bold text-white bg-[#ef4444] hover:bg-red-600 rounded transition-colors shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              className="h-9 px-4 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:opacity-50 flex items-center gap-2 cursor-pointer"
             >
               {isSubmitting ? (
                 <>

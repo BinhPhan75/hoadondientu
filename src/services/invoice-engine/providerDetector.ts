@@ -23,11 +23,15 @@ export type DetectedInvoiceProvider =
   | 'MISA' 
   | 'VIETTEL' 
   | 'VNPT' 
+  | 'LCS'
   | '4SI' 
   | 'EASYINVOICE' 
+  | 'MINVOICE'
   | 'BKAV' 
   | 'THAISON'
   | 'CYBERBILL'
+  | 'VNPAY'
+  | 'FPT'
   | 'UNKNOWN';
 
 export interface DetectionResultDetails {
@@ -56,6 +60,21 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
       priority: 0,
       matchedPattern: '',
       sourceDescription: 'Dữ liệu XML rỗng hoặc không hợp lệ'
+    };
+  }
+
+  // =========================================================================
+  // ƯU TIÊN 0.5: Nhận diện đối tác cấu hình riêng
+  // =========================================================================
+  if (
+    /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(xmlString) ||
+    /SUNTALENT/i.test(xmlString)
+  ) {
+    return {
+      provider: 'VIETTEL',
+      priority: 1.5,
+      matchedPattern: 'SUNTALENT (MST: 0402307168) -> Viettel S-Invoice',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống Viettel S-Invoice / vInvoice (SUNTALENT)'
     };
   }
 
@@ -90,6 +109,36 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
       priority: 1,
       matchedPattern: 'vnpt-invoice',
       sourceDescription: 'Phát hiện Domain/Chuỗi tra cứu VNPT Invoice (vnpt-invoice)'
+    };
+  }
+
+  // 1.3b eip.lcssoft.com.vn / lcssoft -> 'LCS'
+  if (/eip\.lcssoft\.com\.vn|lcssoft/i.test(xmlString)) {
+    return {
+      provider: 'LCS',
+      priority: 1,
+      matchedPattern: 'eip.lcssoft.com.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu LCS Soft EIP (eip.lcssoft.com.vn)'
+    };
+  }
+
+  // 1.3c vnpayinvoice.vn / vnpay -> 'VNPAY'
+  if (/vnpayinvoice|vnpay\.vn/i.test(xmlString)) {
+    return {
+      provider: 'VNPAY',
+      priority: 1,
+      matchedPattern: 'vnpayinvoice.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu VNPAY Invoice (portal.vnpayinvoice.vn)'
+    };
+  }
+
+  // 1.3d hoadon.ftg.vn / fpt.com.vn -> 'FPT'
+  if (/hoadon\.ftg\.vn|hoadondientu\.fpt|fpt\.com\.vn/i.test(xmlString)) {
+    return {
+      provider: 'FPT',
+      priority: 1,
+      matchedPattern: 'hoadon.ftg.vn',
+      sourceDescription: 'Phát hiện Cổng tra cứu FPT Electronic Invoice'
     };
   }
 
@@ -143,6 +192,16 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     };
   }
 
+  // 1.9 minvoice.vn / minvoice.com.vn -> 'MINVOICE'
+  if (/minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice/i.test(xmlString)) {
+    return {
+      provider: 'MINVOICE',
+      priority: 1,
+      matchedPattern: 'minvoice.vn',
+      sourceDescription: 'Phát hiện Domain tra cứu M-Invoice (minvoice.vn / tracuuhoadon.minvoice.com.vn)'
+    };
+  }
+
   // =========================================================================
   // ƯU TIÊN 1.5: Thẻ <MSTTCGP> & <TenTCGP> (Mã số thuế & Tên Tổ chức giải pháp)
   // Chuẩn pháp lý Quyết định 1450/QĐ-TCT và 1510/QĐ-TCT của Tổng cục Thuế
@@ -150,6 +209,14 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
   const msttcgpMatch = xmlString.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
   if (msttcgpMatch && msttcgpMatch[1]) {
     const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    if (msttcgp === '0106026495') {
+      return {
+        provider: 'MINVOICE',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0106026495',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH Hóa đơn điện tử M-Invoice qua thẻ <MSTTCGP> (0106026495)'
+      };
+    }
     if (msttcgp === '0101243150') {
       return {
         provider: 'MISA',
@@ -188,6 +255,30 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
         priority: 1.5,
         matchedPattern: 'MSTTCGP: 0105987432',
         sourceDescription: 'Phát hiện Tổ chức giải pháp Softdreams EasyInvoice qua thẻ <MSTTCGP> (0105987432)'
+      };
+    }
+    if (msttcgp === '0302999571') {
+      return {
+        provider: 'LCS',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0302999571',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH L.C.S (LCS Soft) qua thẻ <MSTTCGP> (0302999571)'
+      };
+    }
+    if (msttcgp === '0102182292') {
+      return {
+        provider: 'VNPAY',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0102182292',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty Cổ phần Giải pháp Thanh toán Việt Nam (VNPAY) qua thẻ <MSTTCGP> (0102182292)'
+      };
+    }
+    if (msttcgp === '0104128565') {
+      return {
+        provider: 'FPT',
+        priority: 1.5,
+        matchedPattern: 'MSTTCGP: 0104128565',
+        sourceDescription: 'Phát hiện Tổ chức giải pháp Công ty TNHH Hệ thống Thông tin FPT qua thẻ <MSTTCGP> (0104128565)'
       };
     }
     if (msttcgp === '0315744883') {
@@ -235,6 +326,15 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     if (tentcgp.includes('SOFTDREAMS') || tentcgp.includes('EASYINVOICE')) {
       return { provider: 'EASYINVOICE', priority: 1.5, matchedPattern: 'TenTCGP: SOFTDREAMS', sourceDescription: 'Tổ chức giải pháp: Softdreams EasyInvoice' };
     }
+    if (tentcgp.includes('L.C.S') || tentcgp.includes('LCSSOFT')) {
+      return { provider: 'LCS', priority: 1.5, matchedPattern: 'TenTCGP: LCS', sourceDescription: 'Tổ chức giải pháp: Công ty TNHH L.C.S (LCS Soft)' };
+    }
+    if (tentcgp.includes('VNPAY') || tentcgp.includes('THANH TOÁN VIỆT NAM') || tentcgp.includes('THANH TOAN VIET NAM')) {
+      return { provider: 'VNPAY', priority: 1.5, matchedPattern: 'TenTCGP: VNPAY', sourceDescription: 'Tổ chức giải pháp: VNPAY Invoice' };
+    }
+    if (tentcgp.includes('FPT')) {
+      return { provider: 'FPT', priority: 1.5, matchedPattern: 'TenTCGP: FPT', sourceDescription: 'Tổ chức giải pháp: FPT Information System' };
+    }
     if (tentcgp.includes('4SI')) {
       return { provider: '4SI', priority: 1.5, matchedPattern: 'TenTCGP: 4SI', sourceDescription: 'Tổ chức giải pháp: 4Si' };
     }
@@ -243,6 +343,9 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
     }
     if (tentcgp.includes('CYBERLOTUS') || tentcgp.includes('CYBERBILL')) {
       return { provider: 'CYBERBILL', priority: 1.5, matchedPattern: 'TenTCGP: CYBERBILL', sourceDescription: 'Tổ chức giải pháp: CyberBill' };
+    }
+    if (tentcgp.includes('M-INVOICE') || tentcgp.includes('MINVOICE')) {
+      return { provider: 'MINVOICE', priority: 1.5, matchedPattern: 'TenTCGP: MINVOICE', sourceDescription: 'Tổ chức giải pháp: Công ty TNHH Hóa đơn điện tử M-Invoice' };
     }
   }
 
@@ -259,6 +362,43 @@ export function detectProviderWithDetails(xmlString: string | null | undefined):
       priority: 1.8,
       matchedPattern: 'MISA Partner (Tân Thanh Danh / Tài Trâm Anh / Xuân Vinh)',
       sourceDescription: 'Hóa đơn phát hành qua hệ thống MISA meInvoice'
+    };
+  }
+
+  // Quét bên bán PNJ (0315018466) sử dụng LCS Soft EIP
+  if (/0315018466/i.test(xmlString) || /TRANG SỨC PNJ|TRANG SUC PNJ/i.test(xmlString)) {
+    return {
+      provider: 'LCS',
+      priority: 1.8,
+      matchedPattern: 'PNJ (Công ty Cổ phần Vàng bạc Đá quý Phú Nhuận / LCS Soft)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống LCS Soft EIP (PNJ)'
+    };
+  }
+
+  // Quét bên bán Vietcombank (0100112437) sử dụng Cổng VNPAY Invoice
+  if (/0100112437/i.test(xmlString) || /VIETCOMBANK|NGOẠI THƯƠNG VIỆT NAM|NGOAI THUONG VIET NAM/i.test(xmlString)) {
+    return {
+      provider: 'VNPAY',
+      priority: 1.8,
+      matchedPattern: 'Vietcombank (VNPAY Invoice)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống VNPAY Invoice (Ngân hàng Vietcombank)'
+    };
+  }
+
+  // =========================================================================
+  // ƯU TIÊN 1.9: Nhận diện Viettel S-Invoice / vInvoice qua "Mã số bí mật" hoặc email Viettel
+  // =========================================================================
+  if (
+    /0402307168/i.test(xmlString) ||
+    /SUNTALENT/i.test(xmlString) ||
+    /Mã số bí mật|Ma so bi mat|ReservationCode/i.test(xmlString) ||
+    /vinvoice\.viettel\.vn|sinvoice\.viettel\.vn|viettel-invoice\.vn|viettel-ca|@viettel|@viettrel/i.test(xmlString)
+  ) {
+    return {
+      provider: 'VIETTEL',
+      priority: 1.8,
+      matchedPattern: 'Viettel vInvoice / S-Invoice (SUNTALENT / Mã số bí mật / ReservationCode)',
+      sourceDescription: 'Hóa đơn phát hành qua hệ thống Viettel vInvoice / S-Invoice'
     };
   }
 
@@ -364,12 +504,26 @@ function extractSignatureIssuers(xml: string): string[] {
   }
 
   // 4. Các thẻ CA độc lập ở cấp Root / TTin / TTKhac
-  for (const tag of ['CAProvider', 'TenToChucChungThuc', 'NhaCungCapChungThuSo', 'ToChucChungThuc']) {
+  for (const tag of ['CAProvider', 'TenToChucChungThuc', 'NhaCungCapChungThuSo', 'ToChucChungThuc', 'X509SubjectName']) {
     const vals = extractTags(xml, tag);
     for (const v of vals) {
       if (!issuers.includes(v)) {
         issuers.push(v);
       }
+    }
+  }
+
+  // 5. Giải mã thẻ <X509Certificate> (nếu có) để tìm chuỗi tên CA trong chứng thư số DER/X509
+  const certList = extractTags(xml, 'X509Certificate');
+  for (const certB64 of certList) {
+    try {
+      const cleanB64 = certB64.replace(/[\r\n\s]/g, '');
+      const decoded = Buffer.from(cleanB64, 'base64').toString('latin1');
+      if (decoded) {
+        issuers.push(decoded);
+      }
+    } catch {
+      // Bỏ qua nếu không parse được certificate
     }
   }
 

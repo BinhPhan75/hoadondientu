@@ -68,10 +68,11 @@ export function renderDefaultTemplate(
   // Người bán & Người mua
   const sellerName = invoice.nbten || '';
   const sellerTaxCode = invoice.nbmst || '';
-  const sellerStoreCode = (invoice as any).sellerStoreCode || '';
-  const sellerStoreName = (invoice as any).sellerStoreName || '';
+  const sellerStoreCode = (invoice as any).sellerStoreCode || (invoice as any).nbmchhang || '';
+  const sellerStoreName = (invoice as any).sellerStoreName || (invoice as any).nbtchhang || '';
   const sellerAddress = invoice.nbdchi || '';
   const sellerPhone = invoice.nbsdt || (invoice as any).sellerPhone || '';
+  const sellerEmail = (invoice as any).nbemail || (invoice as any).sellerEmail || '';
   const sellerBankAcc = invoice.nbstk || '';
   const sellerBankName = invoice.nbnhang || '';
 
@@ -529,31 +530,37 @@ ${printControls}
         <div class="di-value"><div style="font-weight: bold; font-family: monospace; font-size: 13pt;">${escapeHtml(sellerTaxCode)}</div></div>
       </div>
     </li>
-    <li>
+    ${sellerStoreCode ? `<li>
       <div class="data-item">
         <div class="di-label"><span>Mã cửa hàng:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerStoreCode)}</div></div>
       </div>
-    </li>
-    <li>
+    </li>` : ''}
+    ${sellerStoreName ? `<li>
       <div class="data-item">
         <div class="di-label"><span>Tên cửa hàng:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerStoreName)}</div></div>
       </div>
-    </li>
+    </li>` : ''}
     <li>
       <div class="data-item">
         <div class="di-label"><span>Địa chỉ:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerAddress)}</div></div>
       </div>
     </li>
-    <li>
+    ${sellerPhone ? `<li>
       <div class="data-item">
         <div class="di-label"><span>Điện thoại:</span></div>
         <div class="di-value"><div>${escapeHtml(sellerPhone)}</div></div>
       </div>
-    </li>
-    <li>
+    </li>` : ''}
+    ${sellerEmail ? `<li>
+      <div class="data-item">
+        <div class="di-label"><span>Email:</span></div>
+        <div class="di-value"><div>${escapeHtml(sellerEmail)}</div></div>
+      </div>
+    </li>` : ''}
+    ${(sellerBankAcc || sellerBankName) ? `<li>
       <div class="data-item">
         <div class="di-label"><span>Số tài khoản:</span></div>
         <div class="di-value">
@@ -564,7 +571,7 @@ ${printControls}
           </div>
         </div>
       </div>
-    </li>
+    </li>` : ''}
     <li>
       <div class="vip-divide" style="margin: 5px 0;"></div>
     </li>

@@ -42,6 +42,8 @@ export class BkavDriver extends BaseInvoiceProviderDriver {
                        this.extractXmlTag(xmlData, 'MTCuu') || 
                        this.extractXmlTag(xmlData, 'MaTraCuu');
 
+    const lookupUrl = lookupCode ? `https://tchd.ehoadon.vn/TCHD?MTC=${encodeURIComponent(lookupCode)}` : 'https://tchd.ehoadon.vn/TCHD';
+
     return {
       provider: this.providerCode,
       providerName: 'Bkav eHoadon',
@@ -53,7 +55,7 @@ export class BkavDriver extends BaseInvoiceProviderDriver {
       invoiceDate,
       cqtCode,
       lookupCode,
-      lookupUrl: 'https://ehoadon.bkav.com/tra-cuu',
+      lookupUrl,
       rawXml: xmlData
     };
   }
@@ -61,7 +63,11 @@ export class BkavDriver extends BaseInvoiceProviderDriver {
   async fetchPdf(info: ExtractedInvoiceInfo, options?: DownloadOptions): Promise<DownloadResult> {
     const logs: string[] = [];
     this.createLog(`Khởi động xử lý HĐĐT Bkav eHoadon: Số ${info.invoiceNo}, Ký hiệu ${info.invoiceSeries}`, logs);
-    this.createLog(`Chuyển sang bộ tạo bản thể hiện PDF & HTML/CSS chuẩn Nghị định 123 / Thông tư 78`, logs);
+    if (info.lookupCode) {
+      this.createLog(`Mã tra cứu Bkav: "${info.lookupCode}"`, logs);
+      this.createLog(`Cổng mở hóa đơn trực tiếp: ${info.lookupUrl || 'https://tchd.ehoadon.vn/TCHD'}`, logs);
+    }
+    this.createLog(`Tạo bản thể hiện PDF & HTML/CSS chuẩn Nghị định 123 / Quyết định 1450/TCT`, logs);
     
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {

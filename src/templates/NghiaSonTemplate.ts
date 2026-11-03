@@ -422,7 +422,7 @@ export function renderNghiaSonTemplate(
     <!-- FOOTER -->
     <div class="footer-area">
       <div style="font-style:italic;color:#64748b;">(Cần kiểm tra, đối chiếu khi lập, giao, nhận hóa đơn)</div>
-      <div style="margin-top:2px;">Tra cứu hóa đơn điện tử tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
+      <div style="margin-top:2px;">Tra cứu hóa đơn điện tử tại Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - Mã tra cứu: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
     </div>
   </div>
 </body>

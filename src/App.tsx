@@ -18,39 +18,44 @@ import { FloatingSyncBadge } from './components/FloatingSyncBadge';
 import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMonthSyncState, MonthSyncChunk } from './types';
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
+import { exportInvoiceToPdfFile } from './utils/pdfExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
+import { useNotification } from './context/NotificationContext';
 import { LoginForm } from './components/LoginForm';
 import { AdminUserModal } from './components/AdminUserModal';
 
 export default function App() {
   const { currentUser, isLoading: isAuthLoading, logout: logoutWeb } = useAuth();
+  const { toast, showAlert } = useNotification();
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [dismissExpiryWarning, setDismissExpiryWarning] = useState(false);
 
   // Account Configuration State (from localStorage or default)
   const [account, setAccount] = useState<GDTAccountConfig>(() => {
     const saved = localStorage.getItem('gdt_account_config');
+    let parsed: any = null;
     if (saved) {
       try {
-        return JSON.parse(saved);
+        parsed = JSON.parse(saved);
       } catch (e) {
         // Fallback
       }
     }
+    const hasActiveSession = Boolean(sessionStorage.getItem('gdt_session_tokens'));
     return {
-      taxCode: '',
-      password: '',
-      taxpayerName: 'Chưa đăng nhập CQT',
-      address: '',
-      rememberMe: true,
-      autoSaveSession: true,
-      useHeadlessBrowser: true,
-      isRealGDT: false
+      taxCode: parsed?.taxCode || '',
+      password: parsed?.password || '',
+      taxpayerName: parsed?.taxpayerName || 'Chưa đăng nhập CQT',
+      address: parsed?.address || '',
+      rememberMe: parsed?.rememberMe ?? true,
+      autoSaveSession: parsed?.autoSaveSession ?? true,
+      useHeadlessBrowser: parsed?.useHeadlessBrowser ?? true,
+      isRealGDT: hasActiveSession ? Boolean(parsed?.isRealGDT) : false
     };
   });
 
@@ -88,19 +93,11 @@ export default function App() {
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('gdt_sidebar_collapsed') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Khi khách hàng mở webapp, bắt buộc menu bên trái phải mở ra để nhập thông tin đăng nhập cổng thuế
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
   const collapseLeftMenu = () => {
     setIsSidebarCollapsed(true);
-    try {
-      localStorage.setItem('gdt_sidebar_collapsed', 'true');
-    } catch {}
     setIsMobileSidebarOpen(false);
   };
 
@@ -108,13 +105,7 @@ export default function App() {
     if (window.innerWidth < 1024) {
       setIsMobileSidebarOpen(prev => !prev);
     } else {
-      setIsSidebarCollapsed(prev => {
-        const next = !prev;
-        try {
-          localStorage.setItem('gdt_sidebar_collapsed', String(next));
-        } catch {}
-        return next;
-      });
+      setIsSidebarCollapsed(prev => !prev);
     }
   };
 
@@ -183,7 +174,7 @@ export default function App() {
       id: 'init-2',
       timestamp: new Date().toLocaleTimeString('vi-VN'),
       level: 'step',
-      message: `Đã nạp hồ sơ MST: ${account.taxCode || '0316892345'} - Tự động nhận diện chứng thư số CQT.`
+      message: account.taxCode ? `Đã nạp hồ sơ MST: ${account.taxCode} - Tự động nhận diện chứng thư số CQT.` : 'Hệ thống sẵn sàng tra cứu hóa đơn điện tử Cổng Tổng Cục Thuế.'
     }
   ]);
 
@@ -203,7 +194,13 @@ export default function App() {
     setHasSearched(false);
     try {
       localStorage.removeItem('gdt_saved_invoices');
+      localStorage.removeItem('gdt_sidebar_collapsed');
     } catch {}
+    // Bắt buộc mở menu bên trái khi khách hàng mở webapp để nhập thông tin đăng nhập
+    setIsSidebarCollapsed(false);
+    if (window.innerWidth < 1024 && !account.isRealGDT) {
+      setIsMobileSidebarOpen(true);
+    }
   }, []);
 
   // Tự động tắt thông báo "hoàn tất đồng bộ toàn kỳ" sau khi tải đủ hóa đơn về
@@ -312,16 +309,24 @@ export default function App() {
     ]);
   };
 
-  // Download / View PDF
-  const handleDownloadPdf = (invoice: GDTInvoice) => {
-    setSelectedInvoiceForDetail(invoice);
+  // Download / Export PDF directly
+  const handleDownloadPdf = async (invoice: GDTInvoice) => {
+    try {
+      toast.info(`Đang chuẩn bị tệp PDF cho hóa đơn số ${invoice.shdon}...`, 'Tải Hóa Đơn');
+      await exportInvoiceToPdfFile(invoice);
+      toast.success(`Đã tải thành công file PDF hóa đơn số ${invoice.shdon}!`, 'Tải Thành Công');
+    } catch (err: any) {
+      console.error('Lỗi khi xuất PDF trực tiếp:', err);
+      // Fallback: open detail modal for manual selection
+      setSelectedInvoiceForDetail(invoice);
+    }
   };
 
   // Export Excel
   const handleExportExcel = (targetInvoices?: GDTInvoice[]) => {
     const listToExport = targetInvoices && targetInvoices.length > 0 ? targetInvoices : filteredInvoices;
     if (listToExport.length === 0) {
-      alert('Không có dữ liệu hóa đơn nào để xuất Excel.');
+      toast.warning('Không có dữ liệu hóa đơn nào để xuất Excel.', 'Chưa Có Dữ Liệu');
       return;
     }
     exportInvoicesToExcel(listToExport, `Bang_Ke_Hoa_Don_GDT_${account.taxCode}`);
@@ -890,7 +895,7 @@ export default function App() {
     const pwd = credentials?.password?.trim() || account.password?.trim() || '';
 
     if (!mst) {
-      alert('Vui lòng nhập Mã số thuế để tra cứu.');
+      toast.warning('Vui lòng nhập Mã số thuế để tra cứu.', 'Thiếu Mã Số Thuế');
       setIsRefreshing(false);
       return { success: false, error: 'Chưa có Mã số thuế' };
     }
@@ -1227,7 +1232,11 @@ export default function App() {
       setHasSearched(false);
       try {
         localStorage.removeItem('gdt_saved_invoices');
+        sessionStorage.removeItem('gdt_session_tokens');
+        localStorage.removeItem('gdt_sidebar_collapsed');
       } catch {}
+      // Mở lại menu bên trái để người dùng đăng nhập tài khoản khác
+      setIsSidebarCollapsed(false);
       setIsConfigModalOpen(true);
     }
   };
@@ -1302,6 +1311,7 @@ export default function App() {
                 setIsConfigModalOpen(true);
                 setIsMobileSidebarOpen(false);
               }}
+              onCollapseSidebar={collapseLeftMenu}
               onCloseMobileSidebar={() => setIsMobileSidebarOpen(false)}
             />
           </div>
