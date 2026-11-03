@@ -43,14 +43,17 @@ export const FloatingSyncBadge: React.FC<FloatingSyncBadgeProps> = ({
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
             </div>
           )}
-          <span className="text-xs font-bold text-gray-200">
-            {syncState.isCompleted ? 'Hoàn tất đồng bộ toàn kỳ' : 'Đang lấy dữ liệu từng tháng...'}
+            <span className="text-xs font-bold text-gray-200">
+            {syncState.isCompleted ? 'Hoàn tất đồng bộ toàn kỳ' : syncState.isPosPhase ? 'Đang lấy hóa đơn máy tính tiền...' : 'Đang lấy dữ liệu từng tháng...'}
           </span>
         </div>
 
         <div className="flex items-center gap-1 text-[11px] font-mono text-gray-400">
-          <span className="text-white font-bold">{syncState.completedMonths}/{syncState.totalMonths}</span>
-          <span>tháng</span>
+          {syncState.isPosPhase ? (
+            <><span className="text-white font-bold">{syncState.posCompletedChunks || 0}/{syncState.posTotalChunks || 0}</span><span>đợt POS</span></>
+          ) : (
+            <><span className="text-white font-bold">{syncState.completedMonths}/{syncState.totalMonths}</span><span>tháng</span></>
+          )}
           {onDismiss && syncState.isCompleted && (
             <button
               onClick={(e) => {
@@ -80,7 +83,7 @@ export const FloatingSyncBadge: React.FC<FloatingSyncBadgeProps> = ({
           {syncState.isCompleted ? (
             <span className="text-emerald-400">Đã gộp {syncState.totalInvoicesFound} hóa đơn</span>
           ) : (
-            <span className="text-amber-300 truncate">Đang xử lý: {syncState.currentMonthLabel}</span>
+            <span className="text-amber-300 truncate">Đang xử lý: {syncState.isPosPhase ? `${syncState.posCurrentRange || ''} (${syncState.posInvoiceCount || 0} HĐ)` : syncState.currentMonthLabel}</span>
           )}
         </div>
 

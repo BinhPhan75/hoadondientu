@@ -19,6 +19,7 @@ export interface QueryInvoicesResult {
   status?: number;
   message?: string;
   source?: 'proxy' | 'direct_browser';
+  posDiagnostics?: Array<{ from: string; to: string; status: string; count?: number; attempts?: number }>;
 }
 
 export interface LoginOptions {
@@ -374,7 +375,8 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
         return {
           success: true,
           invoices: data.invoices,
-          source: 'proxy'
+          source: 'proxy',
+          posDiagnostics: data.posDiagnostics
         };
       }
     } else {

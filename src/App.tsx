@@ -146,7 +146,13 @@ export default function App() {
     totalSoldFound: 0,
     totalBeforeTax: 0,
     totalTax: 0,
-    totalPayment: 0
+    totalPayment: 0,
+    isPosPhase: false,
+    posTotalChunks: 0,
+    posCompletedChunks: 0,
+    posInvoiceCount: 0,
+    posCurrentRange: '',
+    posLastStatus: ''
   });
 
   const isSyncPausedRef = React.useRef(false);
@@ -443,9 +449,24 @@ export default function App() {
 
     let total = 0;
     let failed = 0;
+    setSyncState(prev => ({
+      ...prev,
+      isPosPhase: true,
+      posTotalChunks: posChunks.length,
+      posCompletedChunks: 0,
+      posInvoiceCount: 0,
+      posCurrentRange: `${posChunks[0].from} -> ${posChunks[0].to}`,
+      posLastStatus: 'Đang chuẩn bị CAPTCHA'
+    }));
     for (let i = 0; i < posChunks.length; i++) {
       if (isSyncCancelledRef.current) break;
       const chunk = posChunks[i];
+      setSyncState(prev => ({
+        ...prev,
+        isPosPhase: true,
+        posCurrentRange: `${chunk.from} -> ${chunk.to}`,
+        posLastStatus: `Đang lấy CAPTCHA lần lượt cho đợt ${i + 1}/${posChunks.length}`
+      }));
       const queryRes = await executeGdtInvoiceQuery({
         fromDate: chunk.from,
         toDate: chunk.to,
@@ -460,6 +481,7 @@ export default function App() {
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
         const posInvoices = queryRes.invoices;
         total += posInvoices.length;
+        const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
         setInvoices(prev => {
           const map = new Map<string, GDTInvoice>();
           prev.forEach(item => map.set(item.id, item));
@@ -470,17 +492,31 @@ export default function App() {
         setConsoleLogs(prev => [...prev, {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: 'success',
-          message: `✓ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: nhận ${posInvoices.length} hóa đơn.`
+          level: posInvoices.length > 0 ? 'success' : 'warning',
+          message: `${posInvoices.length > 0 ? '✓' : '⚠️'} [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: nhận ${posInvoices.length} hóa đơn${diagnostic?.status ? ` (${diagnostic.status})` : ''}.`
         }]);
+        setSyncState(prev => ({
+          ...prev,
+          posCompletedChunks: i + 1,
+          posInvoiceCount: total,
+          posLastStatus: `Đã nhận ${posInvoices.length} hóa đơn; CAPTCHA ${diagnostic?.attempts || 1} lần`
+        }));
       } else {
         failed++;
+        const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
+        const detail = diagnostic?.status || queryRes.message || 'Không lấy được dữ liệu';
         setConsoleLogs(prev => [...prev, {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: 'warning',
-          message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: ${queryRes.message || 'Không lấy được dữ liệu'}.`
+          message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${chunk.from} -> ${chunk.to}: ${detail}.`
         }]);
+        setSyncState(prev => ({
+          ...prev,
+          posCompletedChunks: i + 1,
+          posInvoiceCount: total,
+          posLastStatus: `Đợt lỗi: ${detail}`
+        }));
       }
       if (i < posChunks.length - 1) await new Promise(r => setTimeout(r, 400));
     }
@@ -515,7 +551,13 @@ export default function App() {
       totalSoldFound: 0,
       totalBeforeTax: 0,
       totalTax: 0,
-      totalPayment: 0
+      totalPayment: 0,
+      isPosPhase: false,
+      posTotalChunks: 0,
+      posCompletedChunks: 0,
+      posInvoiceCount: 0,
+      posCurrentRange: '',
+      posLastStatus: ''
     });
 
     setIsMultiMonthModalOpen(true);
@@ -741,7 +783,8 @@ export default function App() {
       ...prev,
       isActive: false,
       isCompleted: true,
-      hasErrors: hasEncounteredError
+      hasErrors: hasEncounteredError,
+      isPosPhase: false
     }));
 
     setConsoleLogs(prev => [

@@ -200,6 +200,12 @@ export interface MultiMonthSyncState {
   totalBeforeTax: number;
   totalTax: number;
   totalPayment: number;
+  isPosPhase?: boolean;
+  posTotalChunks?: number;
+  posCompletedChunks?: number;
+  posInvoiceCount?: number;
+  posCurrentRange?: string;
+  posLastStatus?: string;
 }
 
 export interface GDTConnectionStatus {

@@ -169,6 +169,29 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
             />
           </div>
 
+          {syncState.isPosPhase && (
+            <div className="mt-3 rounded-lg border border-cyan-900/70 bg-cyan-950/30 px-3 py-2.5 font-mono text-[11px]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-bold text-cyan-300">HÓA ĐƠN MÁY TÍNH TIỀN</span>
+                <span className="text-cyan-200">
+                  {syncState.posCompletedChunks || 0}/{syncState.posTotalChunks || 0} đợt · {syncState.posInvoiceCount || 0} HĐ
+                </span>
+              </div>
+              <div className="mt-1 text-gray-300">
+                Đang xử lý: <strong className="text-white">{syncState.posCurrentRange || 'Đang chuẩn bị'}</strong>
+              </div>
+              <div className="mt-1 text-cyan-200/80 truncate" title={syncState.posLastStatus || ''}>
+                {syncState.posLastStatus || 'Đang kết nối Cổng Thuế...'}
+              </div>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-800">
+                <div
+                  className="h-full rounded-full bg-cyan-400 transition-all duration-300"
+                  style={{ width: `${Math.min(100, Math.round(((syncState.posCompletedChunks || 0) / Math.max(1, syncState.posTotalChunks || 1)) * 100))}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Controls toolbar */}
           <div className="flex items-center justify-between mt-3 text-xs">
             <div className="flex items-center gap-2">
