@@ -12741,6 +12741,55 @@ async function downloadOriginalVnptPdf(params) {
   };
 }
 
+// src/services/bkavInvoiceService.ts
+async function downloadOriginalBkavPdf(params) {
+  const lookupCode = String(params.lookupCode || "").trim();
+  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u Bkav eHoadon kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), params.timeoutMs || 2e4);
+  try {
+    const pageUrl = `https://van.ehoadon.vn/TCHD?MTC=${encodeURIComponent(lookupCode)}`;
+    const page = await fetch(pageUrl, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+      },
+      signal: controller.signal
+    });
+    if (!page.ok) throw new Error(`C\u1ED5ng Bkav tr\u1EA3 v\u1EC1 HTTP ${page.status}.`);
+    const html = await page.text();
+    const candidates = [...html.matchAll(/(?:href|src)=["']([^"']*Invoice_View[^"']+\.pdf[^"']*)["']/gi)].map((match) => match[1].replace(/&amp;/g, "&"));
+    const relative = candidates[0];
+    if (!relative) {
+      if (/mã tra cứu.*không đúng|không tìm thấy|không tồn tại/i.test(html)) {
+        throw new Error("Bkav kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n v\u1EDBi m\xE3 tra c\u1EE9u n\xE0y.");
+      }
+      throw new Error("Bkav ch\u01B0a tr\u1EA3 v\u1EC1 li\xEAn k\u1EBFt PDF g\u1ED1c cho m\xE3 tra c\u1EE9u n\xE0y.");
+    }
+    const pdfUrl = new URL(relative, pageUrl).toString();
+    const pdf = await fetch(pdfUrl, {
+      headers: {
+        Accept: "application/pdf,application/octet-stream,*/*",
+        Referer: pageUrl,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+      },
+      signal: controller.signal
+    });
+    if (!pdf.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c PDF Bkav: HTTP ${pdf.status}.`);
+    const data = Buffer.from(await pdf.arrayBuffer());
+    if (data.length < 500 || !data.subarray(0, 10).toString("latin1").includes("%PDF")) {
+      throw new Error("Bkav kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7.");
+    }
+    return {
+      data,
+      filename: `HoaDon_Bkav_${lookupCode}.pdf`,
+      contentType: "application/pdf"
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // src/utils/gdtDetail.ts
 import JSZip3 from "jszip";
 var value = (source, keys) => {
@@ -14990,6 +15039,12 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
       const sellerTaxCode = String(customInfo?.sellerTaxCode || "").replace(/\D/g, "");
       if (/MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) || ["0317978711", "0312105174", "0400557356", "0101243150"].includes(sellerTaxCode)) {
         requestedProvider = "MISA";
+      } else if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
+        requestedProvider = "MINVOICE";
+      } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
+        requestedProvider = "THAISON";
+      } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
+        requestedProvider = "BKAV";
       }
     }
     if (!forceFallback && requestedProvider === "VNPT" && customInfo?.lookupCode) {
@@ -15034,6 +15089,25 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
         isFallback: false,
         pdfBase64: easy.pdfBase64 || easy.buffer.toString("base64"),
         htmlContent: easy.htmlContent || ""
+      });
+    }
+    if (!forceFallback && requestedProvider === "BKAV" && customInfo?.lookupCode) {
+      const bkav = await downloadOriginalBkavPdf({
+        lookupCode: String(customInfo.lookupCode).trim(),
+        timeoutMs: timeoutMs ? Number(timeoutMs) : void 0
+      });
+      if (req.query.format === "binary") {
+        res.setHeader("Content-Type", bkav.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(bkav.filename)}"`);
+        return res.send(bkav.data);
+      }
+      return res.json({
+        success: true,
+        provider: "BKAV",
+        driverName: "Bkav eHoadon portal",
+        filename: bkav.filename,
+        isFallback: false,
+        pdfBase64: bkav.data.toString("base64")
       });
     }
     const result = await invoiceManager.downloadInvoicePdf(xml, {
