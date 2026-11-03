@@ -354,10 +354,43 @@ export default function App() {
   const enrichQueueRef = React.useRef<GDTInvoice[]>([]);
   const isEnrichingRef = React.useRef<boolean>(false);
 
+  const getInvoiceCacheKey = (invoice: GDTInvoice) =>
+    `gdt_invoice_detail_${invoice.loaiHdon || 'purchase'}_${invoice.nbmst}_${invoice.khhdon}_${invoice.shdon}`;
+
+  const readCachedInvoice = (invoice: GDTInvoice): GDTInvoice | null => {
+    try {
+      const raw = localStorage.getItem(getInvoiceCacheKey(invoice));
+      if (!raw) return null;
+      const cached = JSON.parse(raw) as GDTInvoice;
+      return cached?.sourceCompleteness === 'detail' && hasGenuineItems(cached.items) ? cached : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeCachedInvoice = (invoice: GDTInvoice) => {
+    try {
+      localStorage.setItem(getInvoiceCacheKey(invoice), JSON.stringify(invoice));
+    } catch (error) {
+      console.warn('[Local invoice cache] Không lưu được dữ liệu chi tiết:', error);
+    }
+  };
+
   // Automated sequential queue to retrieve item names & goods from GDT
   // Uses polite delays and sequential requests so GDT portal never throttles (429)
   const enqueueInvoicesForEnrichment = (newInvoices: GDTInvoice[], token: string, cookie: string) => {
     const toAdd = newInvoices.filter(inv => {
+      const cached = readCachedInvoice(inv);
+      if (cached) {
+        setInvoices(prev => {
+          const index = prev.findIndex(item => item.id === inv.id);
+          if (index < 0) return prev;
+          const updated = [...prev];
+          updated[index] = cached;
+          return updated;
+        });
+        return false;
+      }
       const isAlreadyInQueue = enrichQueueRef.current.some(q => q.id === inv.id);
       return !isAlreadyInQueue && (!hasGenuineItems(inv.items) || inv.sourceCompleteness !== 'detail');
     });
@@ -392,6 +425,7 @@ export default function App() {
       try {
         const enriched = await executeGdtInvoiceDetail(invoice, token, cookie);
         if (enriched) {
+          writeCachedInvoice(enriched);
           setInvoices(prev => {
             const index = prev.findIndex(item => item.id === enriched.id);
             if (index === -1) return prev;

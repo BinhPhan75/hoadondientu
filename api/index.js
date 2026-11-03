@@ -2186,6 +2186,7 @@ function detectPartnerTemplate(invoice, rawXml) {
   const nbten = normalizeStr(invoice.nbten || "");
   const xml = rawXml ? rawXml.toLowerCase() : "";
   if (nbmst === "0318657735") return "BAO_DUY";
+  if (nbmst === "0314222123") return "BKAV";
   if (nbmst === "0315018466") return "DEFAULT";
   if (nbmst === "0312105174") return "TAI_TRAM_ANH";
   if (nbmst === "0400557356") return "XUAN_VINH";
@@ -2200,6 +2201,7 @@ function detectPartnerTemplate(invoice, rawXml) {
   if (msttcgp === "0102182292") return "DEFAULT";
   if (msttcgp === "0302999571" || msttcgp === "0315744883") return "DEFAULT";
   if (msttcgp === "0100684378") return "NGHIA_SON";
+  if (msttcgp === "0101360697") return "BKAV";
   if (nbten.includes("baoduy")) return "BAO_DUY";
   if (nbten.includes("pnj") || nbten.includes("chetac") && nbten.includes("trangsuc")) return "DEFAULT";
   if (nbten.includes("suntalent")) return "VIETTEL";

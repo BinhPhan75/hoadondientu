@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
-import { generateInvoiceQrCode } from '../utils/pdfExporter';
+import { generateInvoiceQrCode, exportInvoiceToPdfFile } from '../utils/pdfExporter';
 import { 
   detectInvoiceProvider, 
   getProviderMeta, 
@@ -52,6 +52,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 }) => {
   const [currentInvoice, setCurrentInvoice] = useState<GDTInvoice | null>(invoice);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   // Theo dõi hóa đơn đang thực sự được mở để bỏ qua kết quả tải chi tiết trả
   // về SAU KHI người dùng đã đóng modal hoặc chuyển sang xem hóa đơn khác -
@@ -289,6 +290,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       alert(`Không thể tải PDF gốc từ cổng Viettel: ${err.message}`);
     } finally {
       setIsDownloadingViettelPdf(false);
+    }
+  };
+
+  const handleDownloadPdfFile = async () => {
+    if (!effectiveInvoice) return;
+    setIsExportingPdf(true);
+    try {
+      await exportInvoiceToPdfFile(effectiveInvoice);
+    } catch (err: any) {
+      alert(`Không thể tạo bản PDF dự phòng: ${err?.message || String(err)}`);
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -708,6 +721,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       // VNPAY chỉ tra cứu theo Số bảo mật in trên hóa đơn, không dùng mã CQT cấp (mhdon)
     }
 
+    // BKAV eHoadon: nhận diện chắc chắn theo MST phát hành và dùng đúng cổng BKAV.
+    if (effectiveInvoice.nbmst === '0314222123' || effectiveInvoice.provider === 'BKAV' || autoDetectedProvider === 'BKAV') {
+      lookupDetails.lookupUrl = 'https://ehoadon.bkav.com/tra-cuu';
+      if (!lookupDetails.lookupCode) {
+        lookupDetails.lookupCode = effectiveInvoice.lookupCode || effectiveInvoice.mhdon || '';
+      }
+    }
+
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
     console.error('[InvoiceDetailModal] Lỗi khi xử lý dữ liệu hóa đơn:', err);
@@ -1053,17 +1074,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     />
                   ) : (
                     <div className="min-h-[1160px] bg-white p-6 text-slate-800">
-                      <div className="mx-auto max-w-3xl border border-amber-300 bg-amber-50 p-5 text-sm">
-                        <h3 className="font-semibold text-amber-900">Chưa có bản thể hiện gốc</h3>
-                        <p className="mt-2 text-amber-800">
-                          Ứng dụng không dựng lại hóa đơn bằng template vì bố cục có thể khác bản gốc. Hãy mở cổng tra cứu nhà cung cấp để xem hoặc tải bản gốc.
-                        </p>
-                        {directLookupUrl && (
-                          <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 font-semibold text-cyan-700 underline">
-                            <ExternalLink className="h-4 w-4" /> Mở cổng tra cứu bản gốc
-                          </a>
-                        )}
-                      </div>
                       <div className="mx-auto mt-6 max-w-3xl">
                         <h3 className="mb-3 text-base font-semibold">Dữ liệu hóa đơn từ Cổng Thuế</h3>
                         <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
@@ -1334,6 +1344,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             ) : null}
 
             {/* Không sinh bản thể hiện từ template nội bộ. Chỉ hiển thị bản gốc ở phía trên. */}
+            <button
+              type="button"
+              onClick={handleDownloadPdfFile}
+              disabled={isExportingPdf}
+              className="inline-flex items-center gap-1.5 rounded-md border border-blue-600 bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+              title="Tạo bản PDF dự phòng từ dữ liệu GDT"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {isExportingPdf ? 'Đang tạo PDF...' : 'Tải PDF mẫu GDT'}
+            </button>
           </div>
         </div>
       </div>

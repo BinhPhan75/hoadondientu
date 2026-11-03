@@ -208,6 +208,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
 
   // 1. Check Tax Codes (Highest Accuracy)
   if (nbmst === '0318657735') return 'BAO_DUY';
+  if (nbmst === '0314222123') return 'BKAV';
   // PNJ, 4SI, VNPAY & Vietcombank: Không có mã tra cứu công khai trong XML GDT,
   // theo chỉ đạo của người dùng: Sử dụng theo mẫu chuẩn của GDT cung cấp (DEFAULT) để đảm bảo thông tin bên bán chính xác 100%
   if (nbmst === '0315018466') return 'DEFAULT';
@@ -226,6 +227,7 @@ export function detectPartnerTemplate(invoice: GDTInvoice, rawXml?: string): Par
   if (msttcgp === '0102182292') return 'DEFAULT'; // VNPAY T-VAN -> Dùng mẫu chuẩn GDT
   if (msttcgp === '0302999571' || msttcgp === '0315744883') return 'DEFAULT'; // 4SI / LCS -> Dùng mẫu GDT
   if (msttcgp === '0100684378') return 'NGHIA_SON'; // VNPT Invoice (mẫu VNPT Nghĩa Sơn)
+  if (msttcgp === '0101360697') return 'BKAV';
 
   // 2. Check Seller Names
   if (nbten.includes('baoduy')) return 'BAO_DUY';
