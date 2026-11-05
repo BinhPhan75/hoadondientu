@@ -83,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-// AI & Local OCR Scanner helper qua API Backend
+// AI OCR Scanner helper với cơ chế ép buộc gán state trực tiếp vào ô input
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
@@ -108,7 +108,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       } catch {}
 
       if (data && data.success && data.captchaCode) {
-        setCaptchaCode(data.captchaCode.toUpperCase());
+        const detectedCode = String(data.captchaCode).trim().toUpperCase();
+        // Ép buộc cập nhật state đồng thời
+        setCaptchaCode(detectedCode);
         setOcrSuccess(true);
         setOcrNotice(null);
         if (authError) setAuthError(null);
@@ -123,7 +125,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setIsScanningOcr(false);
     }
   };
-
   // Load Real Captcha from GDT with Dual-Strategy (Server Proxy + Direct Browser Fallback)
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
