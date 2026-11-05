@@ -8598,6 +8598,43 @@ var BaseInvoiceProviderDriver = class {
 
 // src/services/invoice-engine/drivers/MisaDriver.ts
 import axios from "axios";
+
+// src/services/invoice-engine/OriginalInvoiceError.ts
+var OriginalInvoiceError = class extends Error {
+  constructor(message, provider, code = "ORIGINAL_DOWNLOAD_FAILED", status = 502, lookupUrl) {
+    super(message);
+    this.provider = provider;
+    this.code = code;
+    this.status = status;
+    this.lookupUrl = lookupUrl;
+    this.name = "OriginalInvoiceError";
+  }
+};
+
+// src/services/invoice-engine/drivers/MisaDriver.ts
+function findMisaPdfUrl(payload, seen = /* @__PURE__ */ new Set()) {
+  if (!payload || typeof payload !== "object" || seen.has(payload)) return void 0;
+  seen.add(payload);
+  if (Array.isArray(payload)) {
+    for (const value2 of payload) {
+      if (typeof value2 === "string" && /^https?:\/\//i.test(value2)) return value2;
+      const found = findMisaPdfUrl(value2, seen);
+      if (found) return found;
+    }
+    return void 0;
+  }
+  const record = payload;
+  for (const key of ["pdfUrl", "pdfURL", "fileUrl", "fileURL", "downloadUrl", "downloadURL", "url", "Url", "link", "Link"]) {
+    const value2 = record[key];
+    if (typeof value2 === "string" && /^https?:\/\//i.test(value2)) return value2;
+  }
+  for (const value2 of Object.values(record)) {
+    if (typeof value2 === "string" && /^https?:\/\//i.test(value2)) return value2;
+    const found = findMisaPdfUrl(value2, seen);
+    if (found) return found;
+  }
+  return void 0;
+}
 var MisaDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
@@ -8704,10 +8741,8 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
             }
           }
         );
-        const payload = linkResponse.data || {};
-        const linkValue = payload.Data || payload.data || payload.Url || payload.url;
-        const pdfUrl = Array.isArray(linkValue) ? linkValue[0] : linkValue;
-        if (typeof pdfUrl === "string" && /^https?:\/\//i.test(pdfUrl)) {
+        const pdfUrl = findMisaPdfUrl(linkResponse.data);
+        if (pdfUrl) {
           const pdfResponse = await axios.get(pdfUrl, {
             timeout: timeoutMs,
             responseType: "arraybuffer",
@@ -8844,7 +8879,13 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
         this.createLog(`C\u1ED5ng MISA ph\u1EA3n h\u1ED3i c\u1EA3nh b\xE1o: ${lastError}`, logs);
       }
     }
-    throw new Error(`[MisaDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB MISA (${lastError || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n ho\u1EB7c m\xE3 tra c\u1EE9u kh\xF4ng h\u1EE3p l\u1EC7"}).`);
+    throw new OriginalInvoiceError(
+      `Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB MISA (${lastError || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n ho\u1EB7c m\xE3 tra c\u1EE9u kh\xF4ng h\u1EE3p l\u1EC7"}).`,
+      this.providerCode,
+      "ORIGINAL_DOWNLOAD_FAILED",
+      502,
+      info.lookupUrl
+    );
   }
 };
 
@@ -11144,18 +11185,6 @@ var VnpayDriver = class extends BaseInvoiceProviderDriver {
       throw new Error(`[VnpayDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF tr\u1EF1c ti\u1EBFp t\u1EEB C\u1ED5ng VNPAY: ${err.message}`);
     }
     throw new Error("[VnpayDriver] Kh\xF4ng th\u1EC3 t\u1EA3i PDF g\u1ED1c t\u1EEB C\u1ED5ng VNPAY Invoice.");
-  }
-};
-
-// src/services/invoice-engine/OriginalInvoiceError.ts
-var OriginalInvoiceError = class extends Error {
-  constructor(message, provider, code = "ORIGINAL_DOWNLOAD_FAILED", status = 502, lookupUrl) {
-    super(message);
-    this.provider = provider;
-    this.code = code;
-    this.status = status;
-    this.lookupUrl = lookupUrl;
-    this.name = "OriginalInvoiceError";
   }
 };
 
@@ -14659,8 +14688,8 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
     if (!forceFallback && result.isFallback) {
       return res.status(502).json({
         success: false,
-        error: result.error || `Nh\xE0 cung c\u1EA5p ${result.provider || overrideProvider || "h\xF3a \u0111\u01A1n"} kh\xF4ng tr\u1EA3 v\u1EC1 \u0111\u01B0\u1EE3c PDF g\u1ED1c.`,
-        provider: result.provider,
+        error: result.error || `Nh\xE0 cung c\u1EA5p ${requestedProvider || result.provider || overrideProvider || "h\xF3a \u0111\u01A1n"} kh\xF4ng tr\u1EA3 v\u1EC1 \u0111\u01B0\u1EE3c PDF g\u1ED1c.`,
+        provider: requestedProvider || result.provider,
         executionLogs: result.executionLogs
       });
     }

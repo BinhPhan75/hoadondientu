@@ -1705,8 +1705,8 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
     if (!forceFallback && result.isFallback) {
       return res.status(502).json({
         success: false,
-        error: result.error || `Nhà cung cấp ${result.provider || overrideProvider || 'hóa đơn'} không trả về được PDF gốc.`,
-        provider: result.provider,
+        error: result.error || `Nhà cung cấp ${requestedProvider || result.provider || overrideProvider || 'hóa đơn'} không trả về được PDF gốc.`,
+        provider: requestedProvider || result.provider,
         executionLogs: result.executionLogs
       });
     }

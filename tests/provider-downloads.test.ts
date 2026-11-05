@@ -20,6 +20,13 @@ test('MISA and Thai Son domain boundaries do not overlap', () => {
   assert.equal(isThaiSonSource({ lookupUrl: 'https://www.meinvoice.vn/tra-cuu' }), false);
 });
 
+test('MISA portal metadata overrides a stale GENERIC provider label', () => {
+  assert.equal(resolveInvoiceProvider({
+    provider: 'GENERIC',
+    rawXml: '<HDon><MSTTCGP>0101243150</MSTTCGP></HDon>',
+  }), 'MISA');
+});
+
 test('XML solution evidence overrides stale MISA label and seller-based guesses', () => {
   const rawXml = '<HDon><MSTTCGP>0101300842</MSTTCGP><MST>0400557356</MST><Ten>XUAN VINH</Ten><MaNhanHoaDon>TS123456</MaNhanHoaDon></HDon>';
   const invoice = { rawXml, provider: 'MISA', lookupUrl: 'https://meinvoice.vn/tra-cuu' };

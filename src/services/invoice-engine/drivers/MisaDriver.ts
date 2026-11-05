@@ -8,6 +8,33 @@ import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
 import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
+import { OriginalInvoiceError } from '../OriginalInvoiceError';
+
+function findMisaPdfUrl(payload: unknown, seen = new Set<unknown>()): string | undefined {
+  if (!payload || typeof payload !== 'object' || seen.has(payload)) return undefined;
+  seen.add(payload);
+
+  if (Array.isArray(payload)) {
+    for (const value of payload) {
+      if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+      const found = findMisaPdfUrl(value, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ['pdfUrl', 'pdfURL', 'fileUrl', 'fileURL', 'downloadUrl', 'downloadURL', 'url', 'Url', 'link', 'Link']) {
+    const value = record[key];
+    if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+  }
+  for (const value of Object.values(record)) {
+    if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+    const found = findMisaPdfUrl(value, seen);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 export class MisaDriver extends BaseInvoiceProviderDriver {
   readonly name = 'MISA meInvoice Driver';
@@ -129,10 +156,8 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
             }
           }
         );
-        const payload = linkResponse.data || {};
-        const linkValue = payload.Data || payload.data || payload.Url || payload.url;
-        const pdfUrl = Array.isArray(linkValue) ? linkValue[0] : linkValue;
-        if (typeof pdfUrl === 'string' && /^https?:\/\//i.test(pdfUrl)) {
+        const pdfUrl = findMisaPdfUrl(linkResponse.data);
+        if (pdfUrl) {
           const pdfResponse = await axios.get(pdfUrl, {
             timeout: timeoutMs,
             responseType: 'arraybuffer',
@@ -280,6 +305,12 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
       }
     }
 
-    throw new Error(`[MisaDriver] Không thể tải PDF gốc từ MISA (${lastError || 'Không tìm thấy hóa đơn hoặc mã tra cứu không hợp lệ'}).`);
+    throw new OriginalInvoiceError(
+      `Không thể tải PDF gốc từ MISA (${lastError || 'Không tìm thấy hóa đơn hoặc mã tra cứu không hợp lệ'}).`,
+      this.providerCode,
+      'ORIGINAL_DOWNLOAD_FAILED',
+      502,
+      info.lookupUrl,
+    );
   }
 }
