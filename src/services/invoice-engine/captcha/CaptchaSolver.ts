@@ -1,13 +1,39 @@
 import { CaptchaSolveOptions, CaptchaSolveResult } from '../types';
 import { solveCaptchaWithGemini } from './geminiCaptchaSolver';
+import { solveCaptchaWithTesseract, terminateTesseract } from './tesseractCaptchaSolver';
 
 export class CaptchaSolver {
+  /**
+   * Cố gắng giải bằng Tesseract cục bộ trước (Miễn phí, không tốn quota),
+   * nếu lỗi hoặc không ra kết quả thì có thể fallback sang Gemini.
+   */
   public static async solveWithAI(
     imageInput: Buffer | string | Uint8Array,
     options?: CaptchaSolveOptions
   ): Promise<CaptchaSolveResult | null> {
+    const startTime = Date.now();
     try {
-      const startTime = Date.now();
+      // 1. Thử dùng Tesseract cục bộ trước
+      const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
+        digitsOnly: options?.alphanumeric !== true,
+        timeoutMs: options?.timeoutMs || 3000,
+        preprocessEasyInvoice: true,
+      });
+
+      if (tesseractRes && tesseractRes.code && tesseractRes.code.length >= 3) {
+        return {
+          code: tesseractRes.code,
+          confidence: tesseractRes.confidence,
+          engine: 'tesseract-local',
+          processingTimeMs: Date.now() - startTime,
+        };
+      }
+    } catch (e) {
+      // Bỏ qua lỗi Tesseract để chuyển sang fallback Gemini nếu cần
+    }
+
+    // 2. Fallback sang Gemini nếu Tesseract không đọc được
+    try {
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
       return {
         code,
@@ -44,29 +70,18 @@ export class CaptchaSolver {
     imageInput: Buffer | string | Uint8Array,
     options?: CaptchaSolveOptions
   ): Promise<CaptchaSolveResult> {
-    const startTime = Date.now();
-    if (!imageInput) {
-      throw new Error('[CaptchaSolver] Dữ liệu ảnh Captcha rỗng.');
+    const res = await this.solveWithAI(imageInput, options);
+    if (!res || !res.code) {
+      throw new Error('[CaptchaSolver] Không thể giải Captcha bằng cả Tesseract lẫn Gemini.');
     }
-
-    try {
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
-      return {
-        code,
-        confidence: 99,
-        engine: 'gemini',
-        processingTimeMs: Date.now() - startTime,
-      };
-    } catch (error: any) {
-      throw new Error(`Không thể giải Captcha bằng Gemini: ${error?.message || error}`);
-    }
+    return res;
   }
 
   public static async resetWorker(): Promise<void> {
-    // Kept for API compatibility. Gemini is request-based and has no local worker.
+    await terminateTesseract();
   }
 
   public static async terminate(): Promise<void> {
-    // Kept for API compatibility. Gemini is request-based and has no local worker.
+    await terminateTesseract();
   }
 }
