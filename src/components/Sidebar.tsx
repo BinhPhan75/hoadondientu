@@ -83,15 +83,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-// AI & Local OCR Scanner helper (Gọi qua API backend nội bộ để tận dụng sẵn bộ xử lý ảnh binarize/tesseract)
+// AI & Local OCR Scanner helper với cơ chế bắt lỗi an toàn
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
-    if (!rawImg && !targetKey) return;
+    if (!rawImg) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
-    setOcrNotice(null);
+    setOcrNotice('Đang nhận diện mã...');
 
     try {
       const targetImg = await convertSvgToSharpPng(rawImg);
@@ -116,11 +116,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setOcrSuccess(false);
         setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
       }
-    } catch {
+    } catch (error) {
       setOcrSuccess(false);
-      if (isManualClick) {
-        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
-      }
+      setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
     } finally {
       setIsScanningOcr(false);
     }
