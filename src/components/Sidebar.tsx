@@ -83,52 +83,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-  // AI & Local OCR Scanner helper (Ưu tiên Tesseract local -> Fallback API)
+// AI & Local OCR Scanner helper qua API Backend
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
-    if (!rawImg && !targetKey) return;
+    if (!rawImg) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
-    setOcrNotice(null);
+    setOcrNotice('Đang nhận diện mã...');
 
     try {
-      // 1. Thử giải nhanh bằng Tesseract Client-side
-      try {
-        const localResult = await solveCaptchaWithTesseract(rawImg, {
-          digitsOnly: false,
-          timeoutMs: 2500,
-          preprocessEasyInvoice: true
-        });
-
-        if (localResult && localResult.code && localResult.code.length >= 3) {
-          setCaptchaCode(localResult.code.toUpperCase());
-          setOcrSuccess(true);
-          setOcrNotice(null);
-          if (authError) setAuthError(null);
-          setIsScanningOcr(false);
-          return;
-        }
-      } catch (localErr) {
-        // Nếu Tesseract local không đọc được hoặc timeout thì bỏ qua để xuống API
-      }
-
-      // 2. Chuyển đổi SVG/Format ảnh và gọi API OCR Server
       const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
       });
-
+      
       const rawText = await res.text();
       let data: any = null;
       try {
         data = JSON.parse(rawText);
-      } catch {
-        // Safe JSON parse fallback
-      }
+      } catch {}
 
       if (data && data.success && data.captchaCode) {
         setCaptchaCode(data.captchaCode.toUpperCase());
@@ -137,11 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
-        if (data?.isSpendingCap) {
-          setOcrNotice('Hạn mức AI tạm dừng. Vui lòng nhập thủ công.');
-        } else {
-          setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
-        }
+        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
       }
     } catch {
       setOcrSuccess(false);
