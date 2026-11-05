@@ -12,6 +12,8 @@ export interface GDTAccountConfig {
   vietnamProxy?: string; // Proxy IP Việt Nam để truy cập Cổng Thuế không bị chặn
   customApiKey?: string; // API Key giải Captcha riêng (nếu có)
   manualToken?: string; // Token nạp trực tiếp từ Cổng Thuế
+  includeElectronicInvoices?: boolean;
+  includePosInvoices?: boolean;
 }
 
 export interface InvoiceItem {

@@ -159,6 +159,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
         });
 
         const updatedConfig: GDTAccountConfig = {
+          ...currentConfig,
           taxCode: taxCode.trim(),
           password: password,
           taxpayerName: loginResult.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,

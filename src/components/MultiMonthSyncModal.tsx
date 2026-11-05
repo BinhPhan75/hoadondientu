@@ -266,7 +266,7 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
               </thead>
               <tbody className="divide-y divide-gray-800/80">
                 {syncState.chunks.map((chunk, index) => {
-                  const isCurrent = syncState.isActive && syncState.currentMonthIndex === index && !syncState.isCompleted;
+                  const isCurrent = syncState.isActive && syncState.currentMonthIndex === index && !syncState.isCompleted && chunk.status !== 'skipped';
                   
                   return (
                     <tr 
@@ -322,6 +322,10 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
                               Thử lại
                             </button>
                           </div>
+                        ) : chunk.status === 'skipped' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-500 border border-gray-700/50">
+                            Đã bỏ qua
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-gray-800/80 text-gray-400 border border-gray-700/50">
                             <Clock className="w-3 h-3 text-gray-500" /> Chờ lượt

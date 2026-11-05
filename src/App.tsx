@@ -26,7 +26,7 @@ import { getInvoiceOriginalCacheKey } from './utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from './utils/providerRouting';
 import { loadOriginalInvoice } from './services/originalInvoiceLoader';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, executeGdtPosCaptcha, executeGdtPosCaptchaSolve } from './utils/gdtQueryClient';
-import type { PosCaptchaResult, PosCaptchaSolveResult } from './utils/gdtQueryClient';
+import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useNotification } from './context/NotificationContext';
@@ -60,6 +60,8 @@ export default function App() {
       rememberMe: parsed?.rememberMe ?? true,
       autoSaveSession: parsed?.autoSaveSession ?? true,
       useHeadlessBrowser: parsed?.useHeadlessBrowser ?? true,
+      includeElectronicInvoices: parsed?.includeElectronicInvoices ?? true,
+      includePosInvoices: parsed?.includePosInvoices ?? true,
       isRealGDT: hasActiveSession ? Boolean(parsed?.isRealGDT) : false
     };
   });
@@ -643,7 +645,13 @@ export default function App() {
     return { total, failed };
   };
 
-  const runMultiMonthQuery = async (activeToken: string, activeCookie: string, mst: string) => {
+  const runMultiMonthQuery = async (
+    activeToken: string,
+    activeCookie: string,
+    mst: string,
+    includeElectronicInvoices: boolean,
+    includePosInvoices: boolean,
+  ) => {
     const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
     if (chunks.length === 0) return { success: false, error: 'Khoảng thời gian không hợp lệ' };
 
@@ -725,6 +733,18 @@ export default function App() {
       if (isSyncCancelledRef.current) break;
 
       const chunk = chunks[i];
+
+      if (!includeElectronicInvoices) {
+        setSyncState(prev => ({
+          ...prev,
+          currentMonthIndex: i,
+          currentMonthLabel: chunk.label,
+          completedMonths: i + 1,
+          progressPercent: Math.round(((i + 1) / chunks.length) * 100),
+          chunks: prev.chunks.map((c, idx) => idx === i ? { ...c, status: 'skipped' as const } : c)
+        }));
+        continue;
+      }
 
       // Mark current chunk as running
       setSyncState(prev => ({
@@ -885,7 +905,7 @@ export default function App() {
     }
 
     // POS invoices use a separate GDT endpoint and a fresh CAPTCHA per 5-day window.
-    if (!isSyncCancelledRef.current && !hasEncounteredError) {
+    if (includePosInvoices && !isSyncCancelledRef.current && !hasEncounteredError) {
       setSyncState(prev => ({ ...prev, currentMonthLabel: 'Hóa đơn máy tính tiền (5 ngày/lần)' }));
       const posResult = await runPosPhase(activeToken, activeCookie);
       runningTotalInvoices += posResult.total;
@@ -1043,6 +1063,13 @@ export default function App() {
 
   // Run Crawler / Query real invoices from GDT
   const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
+    const includeElectronicInvoices = account.includeElectronicInvoices ?? true;
+    const includePosInvoices = account.includePosInvoices ?? true;
+    if (!includeElectronicInvoices && !includePosInvoices) {
+      toast.warning('Vui lòng chọn ít nhất một loại hóa đơn để tra cứu.', 'Chưa chọn loại hóa đơn');
+      return { success: false, error: 'Chưa chọn loại hóa đơn' };
+    }
+
     setIsRefreshing(true);
     if (consoleCollapseTimeoutRef.current) {
       clearTimeout(consoleCollapseTimeoutRef.current);
@@ -1191,7 +1218,7 @@ export default function App() {
 
     // Step 2: Check if multi-month range is requested (> 1 month)
     if (isMultiMonthRange(filters.fromDate, filters.toDate)) {
-      return await runMultiMonthQuery(activeToken, activeCookie, mst);
+      return await runMultiMonthQuery(activeToken, activeCookie, mst, includeElectronicInvoices, includePosInvoices);
     }
 
     // Step 3: Single-month Query from GDT
@@ -1201,12 +1228,15 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'step',
-        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu hóa đơn thực tế cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
+        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu ${[
+          includeElectronicInvoices ? 'hóa đơn điện tử' : '',
+          includePosInvoices ? 'hóa đơn máy tính tiền' : ''
+        ].filter(Boolean).join(' và ')} cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
       }
     ]);
 
     try {
-      const queryRes = await executeGdtInvoiceQuery({
+      const queryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
         fromDate: filters.fromDate,
         toDate: filters.toDate,
         invoiceType: 'purchase',
@@ -1215,7 +1245,7 @@ export default function App() {
         cookieHeader: activeCookie,
         includePos: false,
         posOnly: false
-      });
+      }) : { success: true, invoices: [] as GDTInvoice[] };
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
         // Tự động ẩn menu bên trái để gọn màn hình
@@ -1225,23 +1255,27 @@ export default function App() {
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
         enqueueInvoicesForEnrichment(queryRes.invoices, activeToken, activeCookie);
-        const posResult = await runPosPhase(activeToken, activeCookie);
-        setConsoleLogs(prev => [...prev, {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: 'success',
-          message: `Đã hoàn tất pha hóa đơn máy tính tiền: nhận thêm ${posResult.total} hóa đơn (${posResult.failed} đợt lỗi).`
-        }]);
-        const sourceNotice = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
-        setConsoleLogs(prev => [
-          ...prev,
-          {
+        if (includePosInvoices) {
+          const posResult = await runPosPhase(activeToken, activeCookie);
+          setConsoleLogs(prev => [...prev, {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'success',
-            message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${queryRes.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn${sourceNotice}!`
-          }
-        ]);
+            message: `Đã hoàn tất pha hóa đơn máy tính tiền: nhận thêm ${posResult.total} hóa đơn (${posResult.failed} đợt lỗi).`
+          }]);
+        }
+        const sourceNotice = queryRes.source === 'direct_browser' ? ' (kết nối trực tiếp)' : '';
+        if (includeElectronicInvoices) {
+          setConsoleLogs(prev => [
+            ...prev,
+            {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'success',
+              message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${queryRes.invoices.length} hóa đơn thực tế từ hoadondientu.gdt.gov.vn${sourceNotice}!`
+            }
+          ]);
+        }
         // Tự động thu gọn thanh LIVE SELENIUM CONSOLE xuống dưới sau khi chạy kết xuất thành công dữ liệu
         autoCollapseConsole(1200);
         return { success: true };

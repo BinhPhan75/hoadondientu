@@ -7,7 +7,7 @@ import {
   Calendar, 
   Play, 
   RefreshCw, 
-  Settings, 
+  Settings,
   Eye, 
   EyeOff,
   Sparkles,
@@ -596,12 +596,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-xs font-semibold text-blue-400">Hóa đơn mua vào</span>
           </div>
 
+          <div className="space-y-2 rounded-lg border border-slate-700/50 bg-slate-800/40 p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-200">
+              <input
+                type="checkbox"
+                checked={account.includeElectronicInvoices ?? true}
+                onChange={event => onUpdateAccount({ ...account, includeElectronicInvoices: event.target.checked })}
+                className="h-4 w-4 accent-blue-500"
+              />
+              <span>Hóa đơn điện tử</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-200">
+              <input
+                type="checkbox"
+                checked={account.includePosInvoices ?? true}
+                onChange={event => onUpdateAccount({ ...account, includePosInvoices: event.target.checked })}
+                className="h-4 w-4 accent-blue-500"
+              />
+              <span>Hóa đơn máy tính tiền</span>
+            </label>
+            {!(account.includeElectronicInvoices ?? true) && !(account.includePosInvoices ?? true) && (
+              <p className="text-[11px] text-amber-300">Chọn ít nhất một loại hóa đơn để bắt đầu tra cứu.</p>
+            )}
+          </div>
+
           {/* Primary Action Button */}
           <div className="pt-1">
             <button
               type="submit"
-              disabled={isLoading}
-              className="btn-primary-accent w-full flex items-center justify-center gap-2 cursor-pointer shadow-sm py-2.5 text-xs font-semibold rounded-lg"
+              disabled={isLoading || (!(account.includeElectronicInvoices ?? true) && !(account.includePosInvoices ?? true))}
+              className="btn-primary-accent w-full flex items-center justify-center gap-2 cursor-pointer shadow-sm py-2.5 text-xs font-semibold rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isLoading ? (
                 <>
@@ -617,35 +641,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         </form>
-
-        {/* Engine Status Specification */}
-        <div className="p-3 bg-slate-800/40 rounded-lg border border-slate-800/80 space-y-2 text-xs">
-          <div className="text-slate-400 font-medium text-xs pb-1.5 border-b border-slate-800 flex items-center justify-between">
-            <span>Trạng thái hệ thống</span>
-            <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-medium">
-              Hoạt động
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-slate-300 text-[11px]">
-            <span className="text-slate-400">Cổng Thuế:</span>
-            <span className="text-slate-200 font-medium font-mono">hoadondientu.gdt.gov.vn</span>
-          </div>
-          <div className="flex items-center justify-between text-slate-300 text-[11px]">
-            <span className="text-slate-400">Chứng thư số:</span>
-            <span className="text-blue-400 font-medium font-mono">CQT SHA-256</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer Utility Links */}
-      <div className="pt-3 border-t border-slate-800 space-y-1 text-xs">
-        <button
-          onClick={onOpenConfigModal}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors text-xs cursor-pointer"
-        >
-          <Settings className="w-4 h-4 text-slate-400" />
-          <span>Cấu hình tài khoản & Captcha</span>
-        </button>
       </div>
     </aside>
   );
