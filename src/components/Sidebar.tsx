@@ -83,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-  // AI & Local OCR Scanner helper (Ưu tiên Tesseract local trước)
+// AI & Local OCR Scanner helper (Gọi qua API backend nội bộ để tận dụng sẵn bộ xử lý ảnh binarize/tesseract)
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
@@ -94,29 +94,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setOcrNotice(null);
 
     try {
-      // 1. ƯU TIÊN SỐ 1: Giải mã trực tiếp bằng Tesseract cục bộ (Local OCR - Miễn phí 100%)
-      const localResult = await solveCaptchaWithTesseract(rawImg, {
-        digitsOnly: false,
-        timeoutMs: 3000,
-        preprocessEasyInvoice: true
-      });
-
-      if (localResult && localResult.code && localResult.code.length >= 3) {
-        setCaptchaCode(localResult.code.toUpperCase());
-        setOcrSuccess(true);
-        setOcrNotice(null);
-        if (authError) setAuthError(null);
-        setIsScanningOcr(false);
-        return; // Thành công bằng local, không cần gọi API ngoài!
-      }
-
-      // 2. NẾU LOCAL KHÔNG ĐỌC ĐƯỢC: Fallback gọi qua API server cũ
       const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
       });
+      
       const rawText = await res.text();
       let data: any = null;
       try {
