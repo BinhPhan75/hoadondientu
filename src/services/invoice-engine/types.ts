@@ -57,12 +57,14 @@ export interface CaptchaSolveOptions {
   preprocess?: boolean; // Tiền xử lý ảnh
   lang?: string; // 'eng' | 'vie'
   prompt?: string; // Tùy chỉnh prompt gửi cho Gemini AI
+  alphanumeric?: boolean;
+  customApiKey?: string;
 }
 
 export interface CaptchaSolveResult {
   code: string;
   confidence?: number;
-  engine: 'gemini' | 'regex' | 'tesseract';
+  engine: 'gemini' | 'regex' | 'tesseract' | 'tesseract-local';
   processingTimeMs: number;
 }
 

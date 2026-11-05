@@ -207,8 +207,8 @@ export async function solveCaptchaWithTesseract(
 
     let processBuf = buf;
 
-    // Nếu là Captcha EasyInvoice hoặc ảnh PNG, áp dụng tiền xử lý tăng độ tương phản
-    if (options?.preprocessEasyInvoice || (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47)) {
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    if (options?.preprocessEasyInvoice || (options?.preprocessEasyInvoice !== false && isPng)) {
       const decoded = decodePngRgba(buf);
       if (decoded) {
         const binarized = createBinarizedBmp(decoded, 3, 25, 145);

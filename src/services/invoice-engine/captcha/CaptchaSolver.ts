@@ -17,14 +17,20 @@ export class CaptchaSolver {
     try {
       const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
         digitsOnly: options?.alphanumeric !== true,
+        whitelist: options?.whitelist,
         timeoutMs: options?.timeoutMs || 2500,
-        preprocessEasyInvoice: true, // Tự động cắt và làm nét ảnh captcha trang thuế
+        preprocessEasyInvoice: options?.preprocess !== false,
       });
 
-      // Nếu đọc được kết quả hợp lệ (độ dài >= 3 ký tự)
-      if (tesseractRes && tesseractRes.code && tesseractRes.code.length >= 3) {
+      const localCode = options?.alphanumeric
+        ? (tesseractRes?.code || '').toUpperCase()
+        : tesseractRes?.code || '';
+      const validLocalCode = options?.alphanumeric
+        ? /^[a-z0-9]{4,6}$/i.test(localCode)
+        : localCode.length >= 3;
+      if (validLocalCode) {
         return {
-          code: tesseractRes.code,
+          code: localCode,
           confidence: tesseractRes.confidence,
           engine: 'tesseract-local',
           processingTimeMs: Date.now() - startTime,
@@ -36,7 +42,11 @@ export class CaptchaSolver {
 
     // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được
     try {
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, {
+        timeoutMs: options?.timeoutMs,
+        customApiKey: options?.customApiKey,
+        alphanumeric: options?.alphanumeric,
+      });
       return {
         code,
         confidence: 99,

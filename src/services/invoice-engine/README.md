@@ -33,6 +33,7 @@ Hệ thống Node.js/TypeScript hướng đối tượng theo mô hình **Adapte
    - `fetchPdf(info, options)`: Thực hiện tra cứu, giải Captcha (nếu có) và tải file PDF gốc.
 2. **`CaptchaSolver` (Module OCR)**:
    - Sử dụng `tesseract.js` cấu hình whitelist alphanumeric `[A-Za-z0-9]` và Page Segmentation Mode tối ưu cho Captcha.
+   - Ưu tiên giải cục bộ; chỉ chuyển sang Gemini khi OCR local không nhận diện được mã hợp lệ.
    - Tự động chuyển đổi Buffer, Stream, Base64 URI và xử lý ảnh.
 3. **`InvoiceDownloaderManager` (Factory / Singleton)**:
    - Quản lý danh sách các Driver đã đăng ký.
@@ -158,5 +159,5 @@ invoiceManager.registerDriver(new EasyInvoiceDriver());
 |---|---|---|---|
 | `POST` | `/api/invoice-downloader/download` | Tải PDF Hóa đơn tự động qua Adapter Engine | `{"xml": "<HDon>...</HDon>", "forceFallback": false}` |
 | `POST` | `/api/invoice-downloader/detect` | Nhận diện Driver và trích xuất Metadata từ XML | `{"xml": "<HDon>...</HDon>"}` |
-| `POST` | `/api/invoice-downloader/solve-captcha` | Giải mã ảnh Captcha dạng Base64/URL bằng Tesseract OCR | `{"image": "data:image/png;base64,..."}` |
+| `POST` | `/api/invoice-downloader/solve-captcha` | Giải mã CAPTCHA bằng Tesseract local trước, Gemini làm dự phòng | `{"image": "data:image/png;base64,..."}` |
 | `GET` | `/api/invoice-downloader/drivers` | Lấy danh sách Driver và trạng thái hỗ trợ Captcha | `{}` |

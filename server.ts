@@ -12,7 +12,8 @@ import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFr
 import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
-import { VNPT_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
+import type { CaptchaSolveResult } from './src/services/invoice-engine/types';
+import { ALPHANUMERIC_CAPTCHA_PROMPT, solveCaptchaWithGemini, VNPT_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
 import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
@@ -318,8 +319,6 @@ function cleanGdtSvgNoise(svg: string): string {
   if (!svg || typeof svg !== 'string') return svg;
   return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
 }
-
-import { solveCaptchaWithGemini, ALPHANUMERIC_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
 
 interface OCRResult {
   code: string;
@@ -1745,17 +1744,37 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
   }
 });
 
-// 15. Gemini Vision Captcha Solver endpoint
+// 15. Captcha solver endpoint: local Tesseract first, Gemini fallback
 app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   try {
-    const { image, whitelist } = req.body;
+    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Ảnh Captcha không được để trống' });
     }
 
-    const result = await CaptchaSolver.solveWithDetails(image, {
-      whitelist: whitelist || undefined
-    });
+    const prompt = alphanumeric ? ALPHANUMERIC_CAPTCHA_PROMPT : undefined;
+    let result: CaptchaSolveResult;
+    if (forceGemini) {
+      const startedAt = Date.now();
+      const code = await solveCaptchaWithGemini(image, prompt, {
+        customApiKey: customApiKey || undefined,
+        alphanumeric: Boolean(alphanumeric),
+      });
+      result = {
+        code,
+        confidence: 99,
+        engine: 'gemini' as const,
+        processingTimeMs: Date.now() - startedAt,
+      };
+    } else {
+      result = await CaptchaSolver.solveWithDetails(image, {
+        whitelist: whitelist || undefined,
+        alphanumeric: Boolean(alphanumeric),
+        preprocess: preprocess !== false,
+        prompt,
+        customApiKey: customApiKey || undefined,
+      });
+    }
 
     res.json({
       success: true,
