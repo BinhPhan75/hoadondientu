@@ -1747,7 +1747,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
 // 15. Captcha solver endpoint: local Tesseract first, Gemini fallback
 app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   try {
-    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess } = req.body;
+    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess, timeoutMs } = req.body;
     if (!image) {
       return res.status(400).json({ error: 'Ảnh Captcha không được để trống' });
     }
@@ -1757,6 +1757,7 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
     if (forceGemini) {
       const startedAt = Date.now();
       const code = await solveCaptchaWithGemini(image, prompt, {
+        timeoutMs,
         customApiKey: customApiKey || undefined,
         alphanumeric: Boolean(alphanumeric),
       });
@@ -1771,6 +1772,7 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
         whitelist: whitelist || undefined,
         alphanumeric: Boolean(alphanumeric),
         preprocess: preprocess !== false,
+        timeoutMs,
         prompt,
         customApiKey: customApiKey || undefined,
       });
