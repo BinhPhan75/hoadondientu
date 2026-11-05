@@ -390,7 +390,11 @@ export default function App() {
   };
 
   const prefetchOriginalPdf = async (invoice: GDTInvoice) => {
-    if (!invoice.rawXml || !resolveInvoiceProvider(invoice)) return;
+    const provider = resolveInvoiceProvider(invoice);
+    if (!invoice.rawXml || !provider) return;
+    // MISA accepts the buyer's browser session but rejects the cloud backend.
+    // Do not repeatedly prefetch an error for every table update.
+    if (provider === 'MISA') return;
     const cacheKey = getInvoiceOriginalCacheKey(invoice);
     if (originalPrefetchRef.current.has(cacheKey)) return;
     originalPrefetchRef.current.add(cacheKey);
