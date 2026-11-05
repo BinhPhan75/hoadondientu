@@ -1,6 +1,7 @@
 import { GDTInvoice } from '../types';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
+import { convertSvgToSharpPng } from './captchaOcrHelper';
 
 export interface QueryInvoicesOptions {
   fromDate: string;
@@ -68,6 +69,13 @@ export interface CaptchaResult {
 }
 
 export interface PosCaptchaResult extends CaptchaResult {}
+
+export interface PosCaptchaSolveResult {
+  success: boolean;
+  code?: string;
+  engine?: 'gemini' | 'tesseract-local';
+  error?: string;
+}
 
 function extractGdtInvoiceList(data: any): any[] {
   if (Array.isArray(data)) return data;
@@ -208,6 +216,34 @@ export async function executeGdtPosCaptcha(options: {
     return { success: false, captchaImage: '', captchaKey: '', error: data?.message || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
   } catch (error: any) {
     return { success: false, captchaImage: '', captchaKey: '', error: error?.message || 'Lỗi kết nối khi tải CAPTCHA hóa đơn máy tính tiền.' };
+  }
+}
+
+export async function executeGdtPosCaptchaSolve(options: {
+  captchaImage: string;
+  customApiKey?: string;
+  forceGemini?: boolean;
+}): Promise<PosCaptchaSolveResult> {
+  try {
+    const image = await convertSvgToSharpPng(options.captchaImage);
+    const response = await fetch('/api/invoice-downloader/solve-captcha', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image,
+        alphanumeric: true,
+        preprocess: false,
+        customApiKey: options.customApiKey,
+        forceGemini: options.forceGemini,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data?.success && data.code) {
+      return { success: true, code: data.code, engine: data.engine };
+    }
+    return { success: false, error: data?.error || 'Không thể tự nhận diện CAPTCHA.' };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA.' };
   }
 }
 
