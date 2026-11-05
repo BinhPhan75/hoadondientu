@@ -8473,11 +8473,219 @@ async function solveCaptchaWithGemini(input, customPrompt, options = {}) {
   return work;
 }
 
+// src/services/invoice-engine/captcha/tesseractCaptchaSolver.ts
+import { createWorker } from "tesseract.js";
+import zlib from "zlib";
+var isServerless = Boolean(
+  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
+);
+var tesseractWorker = null;
+var workerInitializing = null;
+async function getWorker(whitelist) {
+  if (tesseractWorker) {
+    if (whitelist) {
+      await tesseractWorker.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: "7"
+        // Single text line
+      });
+    }
+    return tesseractWorker;
+  }
+  if (workerInitializing) {
+    const w2 = await workerInitializing;
+    if (whitelist) {
+      await w2.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: "7"
+      });
+    }
+    return w2;
+  }
+  workerInitializing = (async () => {
+    try {
+      const cachePath = isServerless ? "/tmp" : ".";
+      const w2 = await createWorker("eng", 1, {
+        cachePath
+      });
+      await w2.setParameters({
+        tessedit_char_whitelist: whitelist || "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        tessedit_pageseg_mode: "7"
+      });
+      tesseractWorker = w2;
+      return w2;
+    } finally {
+      workerInitializing = null;
+    }
+  })();
+  const w = await workerInitializing;
+  return w;
+}
+function decodePngRgba(buf) {
+  try {
+    let offset = 8;
+    const idatChunks = [];
+    let width = 0;
+    let height = 0;
+    while (offset < buf.length) {
+      const len = buf.readUInt32BE(offset);
+      const type = buf.slice(offset + 4, offset + 8).toString("ascii");
+      if (type === "IHDR") {
+        width = buf.readUInt32BE(offset + 8);
+        height = buf.readUInt32BE(offset + 12);
+      } else if (type === "IDAT") {
+        idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
+      }
+      offset += 12 + len;
+    }
+    if (!width || !height || idatChunks.length === 0) return null;
+    const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
+    const rawRgba = Buffer.alloc(width * height * 4);
+    const stride = width * 4 + 1;
+    const prevRow = Buffer.alloc(width * 4);
+    for (let y = 0; y < height; y++) {
+      const filter = decompressed[y * stride];
+      const rowOffset = y * stride + 1;
+      const destOffset = y * width * 4;
+      for (let x = 0; x < width * 4; x++) {
+        const bpp = 4;
+        const raw = decompressed[rowOffset + x];
+        const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
+        const b = prevRow[x];
+        const c = x >= bpp ? prevRow[x - bpp] : 0;
+        let val = raw;
+        if (filter === 1) val = raw + a & 255;
+        else if (filter === 2) val = raw + b & 255;
+        else if (filter === 3) val = raw + Math.floor((a + b) / 2) & 255;
+        else if (filter === 4) {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
+        }
+        rawRgba[destOffset + x] = val;
+        prevRow[x] = val;
+      }
+    }
+    return { width, height, data: rawRgba };
+  } catch {
+    return null;
+  }
+}
+function createBinarizedBmp(decoded, scale = 3, cropLeft = 30, cropRight = 142) {
+  const { width, height, data } = decoded;
+  const cropX1 = Math.max(0, Math.min(cropLeft, width - 10));
+  const cropX2 = Math.min(cropRight, width);
+  const cropW = Math.max(1, cropX2 - cropX1);
+  const cropH = height;
+  const newW = cropW * scale;
+  const newH = cropH * scale;
+  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
+  const imageSize = rowSize * newH;
+  const fileSize = 54 + imageSize;
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write("BM", 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(newW, 18);
+  bmp.writeInt32LE(newH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+  for (let destY = 0; destY < newH; destY++) {
+    const srcY = Math.floor((newH - 1 - destY) / scale);
+    const rowStart = 54 + destY * rowSize;
+    for (let destX = 0; destX < newW; destX++) {
+      const srcX = cropX1 + Math.floor(destX / scale);
+      const srcIdx = (srcY * width + srcX) * 4;
+      const r = data[srcIdx] || 0;
+      const g = data[srcIdx + 1] || 0;
+      const b = data[srcIdx + 2] || 0;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+      const isText = lum > 140;
+      const val = isText ? 0 : 255;
+      const pxOffset = rowStart + destX * 3;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+  return bmp;
+}
+async function solveCaptchaWithTesseract(imageInput, options) {
+  const timeoutMs = options?.timeoutMs || 2500;
+  const recognitionPromise = (async () => {
+    let buf;
+    if (typeof imageInput === "string") {
+      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, "");
+      buf = Buffer.from(cleanB64, "base64");
+    } else {
+      buf = Buffer.from(imageInput);
+    }
+    const digitsOnly = options?.digitsOnly !== false;
+    const whitelist = options?.whitelist || (digitsOnly ? "0123456789" : "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+    let processBuf = buf;
+    if (options?.preprocessEasyInvoice || buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
+        processBuf = binarized;
+      }
+    }
+    const worker = await getWorker(whitelist);
+    const result = await worker.recognize(processBuf);
+    let text = result.data.text || "";
+    if (digitsOnly) {
+      text = text.replace(/[^0-9]/g, "");
+    } else {
+      text = text.replace(/[^a-zA-Z0-9]/g, "");
+    }
+    return {
+      code: text,
+      confidence: result.data.confidence || 0
+    };
+  })();
+  const timeoutPromise = new Promise(
+    (_, reject) => setTimeout(() => reject(new Error(`Tesseract timeout v\u01B0\u1EE3t qu\xE1 ${timeoutMs}ms`)), timeoutMs)
+  );
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+async function terminateTesseract() {
+  if (tesseractWorker) {
+    await tesseractWorker.terminate();
+    tesseractWorker = null;
+  }
+}
+
 // src/services/invoice-engine/captcha/CaptchaSolver.ts
 var CaptchaSolver = class {
+  /**
+   * Ưu tiên giải mã cục bộ bằng Tesseract (Miễn phí 100%, chạy offline),
+   * nếu thất bại mới tự động chuyển sang Gemini API làm phương án dự phòng.
+   */
   static async solveWithAI(imageInput, options) {
+    const startTime = Date.now();
     try {
-      const startTime = Date.now();
+      const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
+        digitsOnly: options?.alphanumeric !== true,
+        timeoutMs: options?.timeoutMs || 2500,
+        preprocessEasyInvoice: true
+        // Tự động cắt và làm nét ảnh captcha trang thuế
+      });
+      if (tesseractRes && tesseractRes.code && tesseractRes.code.length >= 3) {
+        return {
+          code: tesseractRes.code,
+          confidence: tesseractRes.confidence,
+          engine: "tesseract-local",
+          processingTimeMs: Date.now() - startTime
+        };
+      }
+    } catch (e) {
+    }
+    try {
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
       return {
         code,
@@ -8499,25 +8707,17 @@ var CaptchaSolver = class {
     return result.code;
   }
   static async solveWithDetails(imageInput, options) {
-    const startTime = Date.now();
-    if (!imageInput) {
-      throw new Error("[CaptchaSolver] D\u1EEF li\u1EC7u \u1EA3nh Captcha r\u1ED7ng.");
+    const res = await this.solveWithAI(imageInput, options);
+    if (!res || !res.code) {
+      throw new Error("[CaptchaSolver] Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha b\u1EB1ng c\u1EA3 Tesseract local l\u1EABn Gemini.");
     }
-    try {
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
-      return {
-        code,
-        confidence: 99,
-        engine: "gemini",
-        processingTimeMs: Date.now() - startTime
-      };
-    } catch (error) {
-      throw new Error(`Kh\xF4ng th\u1EC3 gi\u1EA3i Captcha b\u1EB1ng Gemini: ${error?.message || error}`);
-    }
+    return res;
   }
   static async resetWorker() {
+    await terminateTesseract();
   }
   static async terminate() {
+    await terminateTesseract();
   }
 };
 
@@ -8724,6 +8924,57 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
     const cleanLookupCode = (info.lookupCode || "").trim();
     const cleanMst = (info.sellerTaxCode || "").trim();
     let lastError = "";
+    const candidateEndpoints = [];
+    if (cleanLookupCode) {
+      try {
+        this.createLog("[MISA] M\u1EDF c\u1ED5ng tra c\u1EE9u \u0111\u1EC3 kh\u1EDFi t\u1EA1o phi\xEAn t\u1EA3i PDF c\xF4ng khai...", logs);
+        const portal = await axios.get("https://www.meinvoice.vn/tra-cuu/", {
+          timeout: timeoutMs,
+          headers: {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+          },
+          validateStatus: (status) => status < 500
+        });
+        const setCookie = portal.headers["set-cookie"];
+        const cookie = (Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : []).map((value2) => value2.split(";", 1)[0]).join("; ");
+        const direct = await axios.get(
+          `https://www.meinvoice.vn/tra-cuu/DownloadHandler.ashx?Type=pdf&Viewer=1&Code=${encodeURIComponent(cleanLookupCode)}`,
+          {
+            timeout: timeoutMs,
+            responseType: "arraybuffer",
+            headers: {
+              Accept: "application/pdf,application/octet-stream,*/*",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
+              Referer: "https://www.meinvoice.vn/tra-cuu/",
+              Origin: "https://www.meinvoice.vn",
+              ...cookie ? { Cookie: cookie } : {}
+            },
+            validateStatus: (status) => status < 500
+          }
+        );
+        const pdfBuffer = Buffer.from(direct.data || "");
+        if (direct.status === 200 && pdfBuffer.length > 50 && pdfBuffer.toString("latin1", 0, 5).startsWith("%PDF")) {
+          this.createLog(`[MISA] T\u1EA3i th\xE0nh c\xF4ng PDF qua DownloadHandler (${(pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer,
+            pdfBase64: pdfBuffer.toString("base64"),
+            contentType: "application/pdf",
+            filename: this.buildPdfFilename(info),
+            isFallback: false,
+            sourceUrl: direct.config.url,
+            executionLogs: logs
+          };
+        }
+        lastError = direct.status === 200 ? "MISA kh\xF4ng t\xECm th\u1EA5y PDF theo m\xE3 tra c\u1EE9u." : `HTTP ${direct.status}`;
+      } catch (error) {
+        lastError = error.message || String(error);
+        this.createLog(`[MISA] DownloadHandler ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c: ${lastError}`, logs);
+      }
+    }
     if (cleanLookupCode) {
       try {
         this.createLog("[MISA] Xin link PDF ch\xEDnh th\u1EE9c qua invoicepublished/linkview...", logs);
@@ -8775,7 +9026,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
         this.createLog(`[MISA] linkview ch\u01B0a d\xF9ng \u0111\u01B0\u1EE3c: ${lastError}`, logs);
       }
     }
-    const candidateEndpoints = [
+    candidateEndpoints.push(
       {
         url: "https://www.meinvoice.vn/api/viewer/download-pdf",
         method: "POST",
@@ -8812,7 +9063,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
         url: `https://meinvoice.vn/api/viewer/get-invoice-pdf-file?lookupCode=${encodeURIComponent(cleanLookupCode)}`,
         method: "GET"
       }
-    ];
+    );
     for (const endpoint of candidateEndpoints) {
       try {
         this.createLog(`\u0110ang g\u1EEDi y\xEAu c\u1EA7u \u0111\u1EBFn MISA: ${endpoint.url.substring(0, 70)}...`, logs);
@@ -8874,6 +9125,7 @@ var MisaDriver = class extends BaseInvoiceProviderDriver {
             }
           }
         }
+        lastError = `HTTP ${response.status}`;
       } catch (err) {
         lastError = err.message || String(err);
         this.createLog(`C\u1ED5ng MISA ph\u1EA3n h\u1ED3i c\u1EA3nh b\xE1o: ${lastError}`, logs);
@@ -10200,189 +10452,6 @@ import axios6 from "axios";
 import * as cheerio2 from "cheerio";
 import JSZip2 from "jszip";
 import https2 from "https";
-
-// src/services/invoice-engine/captcha/tesseractCaptchaSolver.ts
-import { createWorker } from "tesseract.js";
-import zlib from "zlib";
-var isServerless = Boolean(
-  process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
-);
-var tesseractWorker = null;
-var workerInitializing = null;
-async function getWorker(whitelist) {
-  if (tesseractWorker) {
-    if (whitelist) {
-      await tesseractWorker.setParameters({
-        tessedit_char_whitelist: whitelist,
-        tessedit_pageseg_mode: "7"
-        // Single text line
-      });
-    }
-    return tesseractWorker;
-  }
-  if (workerInitializing) {
-    const w2 = await workerInitializing;
-    if (whitelist) {
-      await w2.setParameters({
-        tessedit_char_whitelist: whitelist,
-        tessedit_pageseg_mode: "7"
-      });
-    }
-    return w2;
-  }
-  workerInitializing = (async () => {
-    try {
-      const cachePath = isServerless ? "/tmp" : ".";
-      const w2 = await createWorker("eng", 1, {
-        cachePath
-      });
-      await w2.setParameters({
-        tessedit_char_whitelist: whitelist || "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-        tessedit_pageseg_mode: "7"
-      });
-      tesseractWorker = w2;
-      return w2;
-    } finally {
-      workerInitializing = null;
-    }
-  })();
-  const w = await workerInitializing;
-  return w;
-}
-function decodePngRgba(buf) {
-  try {
-    let offset = 8;
-    const idatChunks = [];
-    let width = 0;
-    let height = 0;
-    while (offset < buf.length) {
-      const len = buf.readUInt32BE(offset);
-      const type = buf.slice(offset + 4, offset + 8).toString("ascii");
-      if (type === "IHDR") {
-        width = buf.readUInt32BE(offset + 8);
-        height = buf.readUInt32BE(offset + 12);
-      } else if (type === "IDAT") {
-        idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
-      }
-      offset += 12 + len;
-    }
-    if (!width || !height || idatChunks.length === 0) return null;
-    const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
-    const rawRgba = Buffer.alloc(width * height * 4);
-    const stride = width * 4 + 1;
-    const prevRow = Buffer.alloc(width * 4);
-    for (let y = 0; y < height; y++) {
-      const filter = decompressed[y * stride];
-      const rowOffset = y * stride + 1;
-      const destOffset = y * width * 4;
-      for (let x = 0; x < width * 4; x++) {
-        const bpp = 4;
-        const raw = decompressed[rowOffset + x];
-        const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
-        const b = prevRow[x];
-        const c = x >= bpp ? prevRow[x - bpp] : 0;
-        let val = raw;
-        if (filter === 1) val = raw + a & 255;
-        else if (filter === 2) val = raw + b & 255;
-        else if (filter === 3) val = raw + Math.floor((a + b) / 2) & 255;
-        else if (filter === 4) {
-          const p = a + b - c;
-          const pa = Math.abs(p - a);
-          const pb = Math.abs(p - b);
-          const pc = Math.abs(p - c);
-          val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
-        }
-        rawRgba[destOffset + x] = val;
-        prevRow[x] = val;
-      }
-    }
-    return { width, height, data: rawRgba };
-  } catch {
-    return null;
-  }
-}
-function createBinarizedBmp(decoded, scale = 3, cropLeft = 30, cropRight = 142) {
-  const { width, height, data } = decoded;
-  const cropX1 = Math.max(0, Math.min(cropLeft, width - 10));
-  const cropX2 = Math.min(cropRight, width);
-  const cropW = Math.max(1, cropX2 - cropX1);
-  const cropH = height;
-  const newW = cropW * scale;
-  const newH = cropH * scale;
-  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
-  const imageSize = rowSize * newH;
-  const fileSize = 54 + imageSize;
-  const bmp = Buffer.alloc(fileSize);
-  bmp.write("BM", 0);
-  bmp.writeUInt32LE(fileSize, 2);
-  bmp.writeUInt32LE(54, 10);
-  bmp.writeUInt32LE(40, 14);
-  bmp.writeInt32LE(newW, 18);
-  bmp.writeInt32LE(newH, 22);
-  bmp.writeUInt16LE(1, 26);
-  bmp.writeUInt16LE(24, 28);
-  bmp.writeUInt32LE(0, 30);
-  bmp.writeUInt32LE(imageSize, 34);
-  for (let destY = 0; destY < newH; destY++) {
-    const srcY = Math.floor((newH - 1 - destY) / scale);
-    const rowStart = 54 + destY * rowSize;
-    for (let destX = 0; destX < newW; destX++) {
-      const srcX = cropX1 + Math.floor(destX / scale);
-      const srcIdx = (srcY * width + srcX) * 4;
-      const r = data[srcIdx] || 0;
-      const g = data[srcIdx + 1] || 0;
-      const b = data[srcIdx + 2] || 0;
-      const lum = r * 0.299 + g * 0.587 + b * 0.114;
-      const isText = lum > 140;
-      const val = isText ? 0 : 255;
-      const pxOffset = rowStart + destX * 3;
-      bmp[pxOffset] = val;
-      bmp[pxOffset + 1] = val;
-      bmp[pxOffset + 2] = val;
-    }
-  }
-  return bmp;
-}
-async function solveCaptchaWithTesseract(imageInput, options) {
-  const timeoutMs = options?.timeoutMs || 2500;
-  const recognitionPromise = (async () => {
-    let buf;
-    if (typeof imageInput === "string") {
-      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, "");
-      buf = Buffer.from(cleanB64, "base64");
-    } else {
-      buf = Buffer.from(imageInput);
-    }
-    const digitsOnly = options?.digitsOnly !== false;
-    const whitelist = options?.whitelist || (digitsOnly ? "0123456789" : "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
-    let processBuf = buf;
-    if (options?.preprocessEasyInvoice || buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
-      const decoded = decodePngRgba(buf);
-      if (decoded) {
-        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
-        processBuf = binarized;
-      }
-    }
-    const worker = await getWorker(whitelist);
-    const result = await worker.recognize(processBuf);
-    let text = result.data.text || "";
-    if (digitsOnly) {
-      text = text.replace(/[^0-9]/g, "");
-    } else {
-      text = text.replace(/[^a-zA-Z0-9]/g, "");
-    }
-    return {
-      code: text,
-      confidence: result.data.confidence || 0
-    };
-  })();
-  const timeoutPromise = new Promise(
-    (_, reject) => setTimeout(() => reject(new Error(`Tesseract timeout v\u01B0\u1EE3t qu\xE1 ${timeoutMs}ms`)), timeoutMs)
-  );
-  return Promise.race([recognitionPromise, timeoutPromise]);
-}
-
-// src/services/easyInvoiceService.ts
 var httpsAgent2 = new https2.Agent({ rejectUnauthorized: false });
 var isServerless2 = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY

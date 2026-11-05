@@ -136,9 +136,69 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
     const cleanMst = (info.sellerTaxCode || '').trim();
     let lastError = '';
 
+    // Public MISA lookup links issue the original PDF directly from
+    // DownloadHandler.ashx. This is the current documented buyer-facing
+    // route; the older v3 linkview API is retained below only for older
+    // invoices whose lookup code needs resolving first.
+    const candidateEndpoints: Array<{ url: string; method: string; data?: any }> = [];
+
+    if (cleanLookupCode) {
+      try {
+        this.createLog('[MISA] Mở cổng tra cứu để khởi tạo phiên tải PDF công khai...', logs);
+        const portal = await axios.get('https://www.meinvoice.vn/tra-cuu/', {
+          timeout: timeoutMs,
+          headers: {
+            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
+          },
+          validateStatus: status => status < 500,
+        });
+        const setCookie = portal.headers['set-cookie'];
+        const cookie = (Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [])
+          .map(value => value.split(';', 1)[0])
+          .join('; ');
+        const direct = await axios.get(
+          `https://www.meinvoice.vn/tra-cuu/DownloadHandler.ashx?Type=pdf&Viewer=1&Code=${encodeURIComponent(cleanLookupCode)}`,
+          {
+            timeout: timeoutMs,
+            responseType: 'arraybuffer',
+            headers: {
+              Accept: 'application/pdf,application/octet-stream,*/*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
+              Referer: 'https://www.meinvoice.vn/tra-cuu/',
+              Origin: 'https://www.meinvoice.vn',
+              ...(cookie ? { Cookie: cookie } : {}),
+            },
+            validateStatus: status => status < 500,
+          },
+        );
+        const pdfBuffer = Buffer.from(direct.data || '');
+        if (direct.status === 200 && pdfBuffer.length > 50 && pdfBuffer.toString('latin1', 0, 5).startsWith('%PDF')) {
+          this.createLog(`[MISA] Tải thành công PDF qua DownloadHandler (${(pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer,
+            pdfBase64: pdfBuffer.toString('base64'),
+            contentType: 'application/pdf',
+            filename: this.buildPdfFilename(info),
+            isFallback: false,
+            sourceUrl: direct.config.url,
+            executionLogs: logs,
+          };
+        }
+        lastError = direct.status === 200
+          ? 'MISA không tìm thấy PDF theo mã tra cứu.'
+          : `HTTP ${direct.status}`;
+      } catch (error: any) {
+        lastError = error.message || String(error);
+        this.createLog(`[MISA] DownloadHandler chưa dùng được: ${lastError}`, logs);
+      }
+    }
+
     // Public meInvoice API: resolve the transaction ID to the provider's
-    // signed PDF URL before trying legacy viewer endpoints. This is the same
-    // link used by the portal's "Tải hóa đơn dạng PDF" action.
+    // signed PDF URL before trying legacy viewer endpoints.
     if (cleanLookupCode) {
       try {
         this.createLog('[MISA] Xin link PDF chính thức qua invoicepublished/linkview...', logs);
@@ -191,8 +251,8 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
       }
     }
 
-    // Danh sách các endpoints API chính thức & viewer của MISA
-    const candidateEndpoints: Array<{ url: string; method: string; data?: any }> = [
+    // Compatibility endpoints for legacy MISA invoices.
+    candidateEndpoints.push(
       {
         url: 'https://www.meinvoice.vn/api/viewer/download-pdf',
         method: 'POST',
@@ -229,7 +289,7 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
         url: `https://meinvoice.vn/api/viewer/get-invoice-pdf-file?lookupCode=${encodeURIComponent(cleanLookupCode)}`,
         method: 'GET'
       }
-    ];
+    );
 
     for (const endpoint of candidateEndpoints) {
       try {
@@ -299,6 +359,7 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
             }
           }
         }
+        lastError = `HTTP ${response.status}`;
       } catch (err: any) {
         lastError = err.message || String(err);
         this.createLog(`Cổng MISA phản hồi cảnh báo: ${lastError}`, logs);
