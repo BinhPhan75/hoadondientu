@@ -36,8 +36,8 @@ export class CaptchaSolver {
           processingTimeMs: Date.now() - startTime,
         };
       }
-    } catch (e) {
-      // Bỏ qua lỗi local để chuyển sang fallback dự phòng
+    } catch (error) {
+      console.warn('[CaptchaSolver] Local Tesseract OCR failed; trying Gemini fallback:', error);
     }
 
     // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được
@@ -53,7 +53,8 @@ export class CaptchaSolver {
         engine: 'gemini',
         processingTimeMs: Date.now() - startTime,
       };
-    } catch {
+    } catch (error) {
+      console.warn('[CaptchaSolver] Gemini CAPTCHA fallback failed:', error);
       return null;
     }
   }

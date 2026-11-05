@@ -233,6 +233,7 @@ export async function executeGdtPosCaptchaSolve(options: {
         image,
         alphanumeric: true,
         preprocess: false,
+        timeoutMs: 12000,
         customApiKey: options.customApiKey,
         forceGemini: options.forceGemini,
       }),
