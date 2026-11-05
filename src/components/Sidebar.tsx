@@ -21,7 +21,7 @@ import {
 import { GDTAccountConfig, FilterParams } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
 import { executeGdtCaptcha } from '../utils/gdtQueryClient';
-import { solveCaptchaWithTesseract } from '../utils/tesseractCaptchaSolver';
+import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
 
 export interface CrawlerCredentials {
   taxCode: string;
