@@ -13967,19 +13967,30 @@ function splitDateRangeIntoFixedChunks(fromDateStr, toDateStr, daysPerChunk) {
   }
   return chunks;
 }
-async function getCaptchaForGdtQuery(existingCookie, customProxy, customApiKey) {
-  const response = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
-    headers: existingCookie ? { Cookie: existingCookie } : {}
-  }, 1, 8e3, customProxy);
-  if (!response.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c Captcha (HTTP ${response.status})`);
-  const cookie = extractCookies(response);
-  const data = await response.json();
-  if (!data.key || !data.content) throw new Error("Captcha c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7");
-  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content), customApiKey);
-  const code = (solved.code || "").trim();
-  if (!code) throw new Error(solved.error || "Kh\xF4ng t\u1EF1 nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c Captcha cho h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n");
-  return { key: data.key, code, cookie };
-}
+app.post("/api/gdt/pos-captcha", async (req, res) => {
+  const existingCookie = req.headers["x-gdt-cookie"] || req.body?.cookieHeader || currentSession?.cookieHeader || "";
+  const customProxy = req.body?.vietnamProxy;
+  try {
+    const response = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/captcha", {
+      headers: existingCookie ? { Cookie: existingCookie } : {}
+    }, 1, 8e3, customProxy);
+    if (!response.ok) {
+      return res.status(response.status).json({ success: false, message: `Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c CAPTCHA h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n (HTTP ${response.status}).` });
+    }
+    const data = await response.json();
+    if (!data.key || !data.content) {
+      return res.status(502).json({ success: false, message: "CAPTCHA h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7." });
+    }
+    return res.json({
+      success: true,
+      captchaKey: data.key,
+      captchaCookie: extractCookies(response),
+      captchaImage: `data:image/svg+xml;base64,${Buffer.from(data.content, "utf-8").toString("base64")}`
+    });
+  } catch (error) {
+    return res.status(502).json({ success: false, message: error?.message || "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF \u0111\u1EC3 l\u1EA5y CAPTCHA." });
+  }
+});
 app.post("/api/gdt/invoice-detail", async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
   const rawAuth = req.headers.authorization || bodyToken || "";
@@ -14020,7 +14031,7 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   }
 });
 app.post("/api/gdt/query-invoices", async (req, res) => {
-  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey } = req.body || {};
+  let { fromDate, toDate, invoiceType = "both", size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey, posCaptcha } = req.body || {};
   const parsedSize = parseInt(String(size), 10);
   const validSize = !isNaN(parsedSize) && parsedSize > 0 && parsedSize <= 500 ? parsedSize : 50;
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
@@ -14062,6 +14073,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   }
   const sanitizedCookie = cleanCookies.join("; ");
   const posDiagnostics = [];
+  const suppliedPosCaptcha = posCaptcha?.key && posCaptcha?.code ? { key: String(posCaptcha.key), code: String(posCaptcha.code), cookie: String(posCaptcha.cookie || "") } : void 0;
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const fetchChunkWithRetry = async (type, chunkFrom, chunkTo, source = "query", maxRetries = 2, queryCaptcha) => {
     const gdtFrom = formatDateForGdt(chunkFrom, false);
@@ -14246,30 +14258,26 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       }
       let chunkResult = [];
       const diagnostic = source === "sco-query" ? { from: chunk.from, to: chunk.to, status: "\u0110ang g\u1ECDi C\u1ED5ng Thu\u1EBF", attempts: 0 } : null;
-      for (let captchaAttempt = 0; captchaAttempt < (source === "sco-query" ? 3 : 1); captchaAttempt++) {
-        let queryCaptcha;
-        try {
-          queryCaptcha = source === "sco-query" ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy, customApiKey) : void 0;
-          if (diagnostic) diagnostic.attempts = captchaAttempt + 1;
-        } catch (captchaError) {
-          if (diagnostic) {
-            diagnostic.status = `Kh\xF4ng l\u1EA5y/gi\u1EA3i \u0111\u01B0\u1EE3c CAPTCHA: ${captchaError?.message || "l\u1ED7i kh\xF4ng x\xE1c \u0111\u1ECBnh"}`;
-            diagnostic.attempts = captchaAttempt + 1;
-          }
-          if (captchaAttempt < 2) await sleep(500);
-          continue;
-        }
-        chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source, 2, queryCaptcha);
-        if (chunkResult?.error !== "CAPTCHA_INVALID") break;
-        if (diagnostic) diagnostic.status = "GDT t\u1EEB ch\u1ED1i CAPTCHA, \u0111ang th\u1EED m\xE3 m\u1EDBi";
-        await sleep(500);
+      if (source === "sco-query" && !suppliedPosCaptcha) {
+        chunkResult = { error: "CAPTCHA_REQUIRED" };
+        if (diagnostic) diagnostic.status = "C\u1EA7n nh\u1EADp CAPTCHA m\u1EDBi c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF";
+      } else {
+        if (diagnostic) diagnostic.attempts = source === "sco-query" ? 1 : 0;
+        chunkResult = await fetchChunkWithRetry(
+          type,
+          chunk.from,
+          chunk.to,
+          source,
+          2,
+          source === "sco-query" ? suppliedPosCaptcha : void 0
+        );
       }
       if (diagnostic) {
         if (Array.isArray(chunkResult)) {
           diagnostic.count = chunkResult.length;
           diagnostic.status = chunkResult.length > 0 ? "\u0110\xE3 nh\u1EADn d\u1EEF li\u1EC7u t\u1EEB GDT" : "GDT tr\u1EA3 v\u1EC1 0 h\xF3a \u0111\u01A1n";
         } else if (chunkResult?.error === "CAPTCHA_INVALID") {
-          diagnostic.status = "GDT t\u1EEB ch\u1ED1i CAPTCHA sau 3 l\u1EA7n th\u1EED";
+          diagnostic.status = "GDT t\u1EEB ch\u1ED1i CAPTCHA; c\u1EA7n l\u1EA5y \u1EA3nh m\u1EDBi v\xE0 nh\u1EADp l\u1EA1i";
         }
         posDiagnostics.push(diagnostic);
       }

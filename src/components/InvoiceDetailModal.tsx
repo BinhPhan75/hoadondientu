@@ -559,7 +559,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setEasyInvoiceDownloadStatus('Đã mở bản gốc lưu trên máy.');
     } catch (error: any) {
       if (!isCurrent()) return;
-      setOriginalLoadError(error.message || 'Không tải được hóa đơn gốc.');
+      const provider = resolveInvoiceProvider(target);
+      const isMisaCloudDenied = provider === 'MISA' && /(?:HTTP\s*403|MISA.*403)/i.test(error?.message || '');
+      setOriginalLoadError(isMisaCloudDenied
+        ? 'MISA từ chối yêu cầu tải từ máy chủ ứng dụng, nhưng mã tra cứu vẫn hợp lệ. Hãy mở cổng MISA bằng nút bên dưới để xem và tải bản gốc trực tiếp trong trình duyệt.'
+        : (error.message || 'Không tải được hóa đơn gốc.'));
       setEasyInvoiceDownloadStatus(null);
     } finally {
       if (isCurrent()) setIsDownloadingEasyInvoice(false);
@@ -1043,7 +1047,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {directLookupUrl && (
                   <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
                     <ExternalLink className="w-3 h-3" />
-                    <span>Tra link gốc</span>
+                    <span>Mở cổng MISA</span>
                   </a>
                 )}
               </div>

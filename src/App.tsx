@@ -19,12 +19,13 @@ import { GDTAccountConfig, GDTInvoice, FilterParams, SeleniumLogEntry, MultiMont
 import { generateGDTInvoiceXml } from './utils/xmlGenerator';
 import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './utils/excelExporter';
 import { ImportXmlModal } from './components/ImportXmlModal';
+import { PosCaptchaModal } from './components/PosCaptchaModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
 import { getInvoiceOriginalCacheKey } from './utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from './utils/providerRouting';
 import { loadOriginalInvoice } from './services/originalInvoiceLoader';
-import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
+import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, executeGdtPosCaptcha, PosCaptchaResult } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useNotification } from './context/NotificationContext';
@@ -92,6 +93,11 @@ export default function App() {
   const [isBatchDownloadModalOpen, setIsBatchDownloadModalOpen] = useState(false);
   const [isImportXmlModalOpen, setIsImportXmlModalOpen] = useState(false);
   const [isMultiMonthModalOpen, setIsMultiMonthModalOpen] = useState(false);
+  const [pendingPosCaptcha, setPendingPosCaptcha] = useState<{
+    captcha: PosCaptchaResult;
+    rangeLabel: string;
+    resolve: (code: string | null) => void;
+  } | null>(null);
   const [showFloatingBadge, setShowFloatingBadge] = useState(false);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<GDTInvoice | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -515,17 +521,45 @@ export default function App() {
         posCurrentRange: `${chunk.from} -> ${chunk.to}`,
         posLastStatus: `Đang lấy CAPTCHA lần lượt cho đợt ${i + 1}/${posChunks.length}`
       }));
-      const queryRes = await executeGdtInvoiceQuery({
-        fromDate: chunk.from,
-        toDate: chunk.to,
-        invoiceType: 'purchase',
-        size: 50,
-        token: activeToken,
-        cookieHeader: activeCookie,
-        includePos: true,
-        posOnly: true,
-        customApiKey: account.customApiKey
-      });
+      let queryRes: Awaited<ReturnType<typeof executeGdtInvoiceQuery>> | null = null;
+      for (let captchaAttempt = 0; captchaAttempt < 3; captchaAttempt++) {
+        const captcha = await executeGdtPosCaptcha({
+          token: activeToken,
+          cookieHeader: activeCookie,
+          vietnamProxy: account.vietnamProxy,
+        });
+        if (!captcha.success) {
+          queryRes = { success: false, invoices: [], message: captcha.error || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
+          break;
+        }
+        const captchaCode = await new Promise<string | null>(resolve => {
+          setPendingPosCaptcha({ captcha, rangeLabel: `${chunk.from} -> ${chunk.to}`, resolve });
+        });
+        if (!captchaCode) {
+          queryRes = { success: false, invoices: [], message: 'Người dùng đã bỏ qua CAPTCHA của đợt này.' };
+          break;
+        }
+        queryRes = await executeGdtInvoiceQuery({
+          fromDate: chunk.from,
+          toDate: chunk.to,
+          invoiceType: 'purchase',
+          size: 50,
+          token: activeToken,
+          cookieHeader: activeCookie,
+          includePos: true,
+          posOnly: true,
+          posCaptcha: { key: captcha.captchaKey, code: captchaCode, cookie: captcha.captchaCookie },
+        });
+        const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
+        if (!/từ chối CAPTCHA|tu choi CAPTCHA/i.test(diagnostic?.status || '')) break;
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'warning',
+          message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] CAPTCHA chưa đúng. Đang lấy ảnh mới để nhập lại (${captchaAttempt + 1}/3).`,
+        }]);
+      }
+      if (!queryRes) continue;
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
         const posInvoices = queryRes.invoices;
@@ -1525,6 +1559,20 @@ export default function App() {
       </div>
 
       {/* 3. Modals */}
+      <PosCaptchaModal
+        isOpen={Boolean(pendingPosCaptcha)}
+        captchaImage={pendingPosCaptcha?.captcha.captchaImage || ''}
+        rangeLabel={pendingPosCaptcha?.rangeLabel || ''}
+        onCancel={() => {
+          pendingPosCaptcha?.resolve(null);
+          setPendingPosCaptcha(null);
+        }}
+        onSubmit={(code) => {
+          pendingPosCaptcha?.resolve(code);
+          setPendingPosCaptcha(null);
+        }}
+      />
+
       {/* Account Configuration Modal */}
       <AccountConfigModal
         isOpen={isConfigModalOpen}

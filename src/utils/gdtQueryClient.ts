@@ -11,6 +11,12 @@ export interface QueryInvoicesOptions {
   cookieHeader?: string;
   includePos?: boolean;
   posOnly?: boolean;
+  customApiKey?: string;
+  posCaptcha?: {
+    key: string;
+    code: string;
+    cookie?: string;
+  };
 }
 
 export interface QueryInvoicesResult {
@@ -60,6 +66,8 @@ export interface CaptchaResult {
   source?: 'proxy' | 'direct_browser' | 'fallback';
   error?: string;
 }
+
+export interface PosCaptchaResult extends CaptchaResult {}
 
 function extractGdtInvoiceList(data: any): any[] {
   if (Array.isArray(data)) return data;
@@ -169,6 +177,38 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
     captchaKey: '',
     source: 'proxy'
   };
+}
+
+/** Fetch a fresh CAPTCHA bound to the authenticated GDT POS session. */
+export async function executeGdtPosCaptcha(options: {
+  token: string;
+  cookieHeader?: string;
+  vietnamProxy?: string;
+}): Promise<PosCaptchaResult> {
+  try {
+    const response = await fetch('/api/gdt/pos-captcha', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: options.token,
+        ...(options.cookieHeader ? { 'x-gdt-cookie': options.cookieHeader } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data?.success && data.captchaImage && data.captchaKey) {
+      return {
+        success: true,
+        captchaImage: data.captchaImage,
+        captchaKey: data.captchaKey,
+        captchaCookie: data.captchaCookie || '',
+        source: 'proxy',
+      };
+    }
+    return { success: false, captchaImage: '', captchaKey: '', error: data?.message || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
+  } catch (error: any) {
+    return { success: false, captchaImage: '', captchaKey: '', error: error?.message || 'Lỗi kết nối khi tải CAPTCHA hóa đơn máy tính tiền.' };
+  }
 }
 
 /**
@@ -316,7 +356,7 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
  *    uses the backend proxy only
  */
 export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
-  const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '', includePos = true, posOnly = false, customApiKey } = options;
+  const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '', includePos = true, posOnly = false, customApiKey, posCaptcha } = options;
 
   let proxyError: string | null = null;
   let proxyStatus: number | null = null;
@@ -342,7 +382,8 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
         cookieHeader,
         includePos,
         posOnly,
-        customApiKey
+        customApiKey,
+        posCaptcha
       }),
       signal: controller.signal
     });

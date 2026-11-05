@@ -788,19 +788,32 @@ function splitDateRangeIntoFixedChunks(fromDateStr: string, toDateStr: string, d
 
 type GdtQueryCaptcha = { key: string; code: string; cookie: string };
 
-async function getCaptchaForGdtQuery(existingCookie: string, customProxy?: string, customApiKey?: string): Promise<GdtQueryCaptcha> {
-  const response = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {
-    headers: existingCookie ? { Cookie: existingCookie } : {}
-  }, 1, 8000, customProxy);
-  if (!response.ok) throw new Error(`Không tải được Captcha (HTTP ${response.status})`);
-  const cookie = extractCookies(response);
-  const data = await response.json() as { key?: string; content?: string };
-  if (!data.key || !data.content) throw new Error('Captcha của Tổng cục Thuế không có dữ liệu hợp lệ');
-  const solved = await solveCaptchaOCR(cleanGdtSvgNoise(data.content), customApiKey);
-  const code = (solved.code || '').trim();
-  if (!code) throw new Error(solved.error || 'Không tự nhận diện được Captcha cho hóa đơn máy tính tiền');
-  return { key: data.key, code, cookie };
-}
+// POS queries require a new CAPTCHA for each five-day window. This endpoint
+// returns the challenge only; a person enters the code in the client.
+app.post('/api/gdt/pos-captcha', async (req, res) => {
+  const existingCookie = (req.headers['x-gdt-cookie'] as string) || req.body?.cookieHeader || currentSession?.cookieHeader || '';
+  const customProxy = req.body?.vietnamProxy;
+  try {
+    const response = await fetchGDT('https://hoadondientu.gdt.gov.vn/api/captcha', {
+      headers: existingCookie ? { Cookie: existingCookie } : {},
+    }, 1, 8000, customProxy);
+    if (!response.ok) {
+      return res.status(response.status).json({ success: false, message: `Không tải được CAPTCHA hóa đơn máy tính tiền (HTTP ${response.status}).` });
+    }
+    const data = await response.json() as { key?: string; content?: string };
+    if (!data.key || !data.content) {
+      return res.status(502).json({ success: false, message: 'CAPTCHA hóa đơn máy tính tiền không có dữ liệu hợp lệ.' });
+    }
+    return res.json({
+      success: true,
+      captchaKey: data.key,
+      captchaCookie: extractCookies(response),
+      captchaImage: `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`,
+    });
+  } catch (error: any) {
+    return res.status(502).json({ success: false, message: error?.message || 'Không thể kết nối Cổng Tổng cục Thuế để lấy CAPTCHA.' });
+  }
+});
 
 // Fetch one invoice detail without delaying the list endpoint.
 app.post('/api/gdt/invoice-detail', async (req, res) => {
@@ -852,7 +865,7 @@ app.post('/api/gdt/invoice-detail', async (req, res) => {
 
 // 4. Query Real Invoices from GDT API (Supports stateless tokens for Vercel)
 app.post('/api/gdt/query-invoices', async (req, res) => {
-  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey } = req.body || {};
+  let { fromDate, toDate, invoiceType = 'both', size = 50, includeDetails = false, includePos = true, posOnly = false, token: bodyToken, cookieHeader: bodyCookie, vietnamProxy, customApiKey, posCaptcha } = req.body || {};
 
   // Validate and sanitize numeric parameters
   const parsedSize = parseInt(String(size), 10);
@@ -910,6 +923,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
   }
   const sanitizedCookie = cleanCookies.join('; ');
   const posDiagnostics: Array<{ from: string; to: string; status: string; count?: number; attempts?: number }> = [];
+  const suppliedPosCaptcha: GdtQueryCaptcha | undefined = posCaptcha?.key && posCaptcha?.code
+    ? { key: String(posCaptcha.key), code: String(posCaptcha.code), cookie: String(posCaptcha.cookie || '') }
+    : undefined;
 
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1137,30 +1153,26 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       const diagnostic: { from: string; to: string; status: string; count?: number; attempts: number } | null = source === 'sco-query'
         ? { from: chunk.from, to: chunk.to, status: 'Đang gọi Cổng Thuế', attempts: 0 }
         : null;
-      for (let captchaAttempt = 0; captchaAttempt < (source === 'sco-query' ? 3 : 1); captchaAttempt++) {
-        let queryCaptcha: GdtQueryCaptcha | undefined;
-        try {
-          queryCaptcha = source === 'sco-query' ? await getCaptchaForGdtQuery(sanitizedCookie, vietnamProxy, customApiKey) : undefined;
-          if (diagnostic) diagnostic.attempts = captchaAttempt + 1;
-        } catch (captchaError: any) {
-          if (diagnostic) {
-            diagnostic.status = `Không lấy/giải được CAPTCHA: ${captchaError?.message || 'lỗi không xác định'}`;
-            diagnostic.attempts = captchaAttempt + 1;
-          }
-          if (captchaAttempt < 2) await sleep(500);
-          continue;
-        }
-        chunkResult = await fetchChunkWithRetry(type, chunk.from, chunk.to, source, 2, queryCaptcha);
-        if ((chunkResult as any)?.error !== 'CAPTCHA_INVALID') break;
-        if (diagnostic) diagnostic.status = 'GDT từ chối CAPTCHA, đang thử mã mới';
-        await sleep(500);
+      if (source === 'sco-query' && !suppliedPosCaptcha) {
+        chunkResult = { error: 'CAPTCHA_REQUIRED' };
+        if (diagnostic) diagnostic.status = 'Cần nhập CAPTCHA mới của Tổng cục Thuế';
+      } else {
+        if (diagnostic) diagnostic.attempts = source === 'sco-query' ? 1 : 0;
+        chunkResult = await fetchChunkWithRetry(
+          type,
+          chunk.from,
+          chunk.to,
+          source,
+          2,
+          source === 'sco-query' ? suppliedPosCaptcha : undefined,
+        );
       }
       if (diagnostic) {
         if (Array.isArray(chunkResult)) {
           diagnostic.count = chunkResult.length;
           diagnostic.status = chunkResult.length > 0 ? 'Đã nhận dữ liệu từ GDT' : 'GDT trả về 0 hóa đơn';
         } else if ((chunkResult as any)?.error === 'CAPTCHA_INVALID') {
-          diagnostic.status = 'GDT từ chối CAPTCHA sau 3 lần thử';
+          diagnostic.status = 'GDT từ chối CAPTCHA; cần lấy ảnh mới và nhập lại';
         }
         posDiagnostics.push(diagnostic);
       }
