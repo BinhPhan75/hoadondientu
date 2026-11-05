@@ -83,29 +83,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-// AI & Local OCR Scanner helper với cơ chế bắt lỗi an toàn
+  // AI & Local OCR Scanner helper (Ưu tiên Tesseract local -> Fallback API)
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
-    if (!rawImg) return;
+    if (!rawImg && !targetKey) return;
 
     setIsScanningOcr(true);
     setOcrSuccess(false);
-    setOcrNotice('Đang nhận diện mã...');
+    setOcrNotice(null);
 
     try {
+      // 1. Thử giải nhanh bằng Tesseract Client-side
+      try {
+        const localResult = await solveCaptchaWithTesseract(rawImg, {
+          digitsOnly: false,
+          timeoutMs: 2500,
+          preprocessEasyInvoice: true
+        });
+
+        if (localResult && localResult.code && localResult.code.length >= 3) {
+          setCaptchaCode(localResult.code.toUpperCase());
+          setOcrSuccess(true);
+          setOcrNotice(null);
+          if (authError) setAuthError(null);
+          setIsScanningOcr(false);
+          return;
+        }
+      } catch (localErr) {
+        // Nếu Tesseract local không đọc được hoặc timeout thì bỏ qua để xuống API
+      }
+
+      // 2. Chuyển đổi SVG/Format ảnh và gọi API OCR Server
       const targetImg = await convertSvgToSharpPng(rawImg);
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
       });
-      
+
       const rawText = await res.text();
       let data: any = null;
       try {
         data = JSON.parse(rawText);
-      } catch {}
+      } catch {
+        // Safe JSON parse fallback
+      }
 
       if (data && data.success && data.captchaCode) {
         setCaptchaCode(data.captchaCode.toUpperCase());
@@ -114,9 +137,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
-        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+        if (data?.isSpendingCap) {
+          setOcrNotice('Hạn mức AI tạm dừng. Vui lòng nhập thủ công.');
+        } else {
+          setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+        }
       }
-    } catch (error) {
+    } catch {
       setOcrSuccess(false);
       setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
     } finally {
@@ -124,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Load Real Captcha from GDT with Dual-Strategy & Auto OCR Trigger
+  // Load Real Captcha from GDT with Dual-Strategy (Server Proxy + Direct Browser Fallback)
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
     setAuthError(null);
@@ -141,11 +168,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setAuthError(null);
       setIsLoadingCaptcha(false);
 
-      // Tự động quét luôn bằng local OCR ngay khi có ảnh mới
+      // TỰ ĐỘNG KÍCH HOẠT NHẬN DIỆN NGAY KHI ẢNH VỪA TẢI XONG
       handleScanOcr(res.captchaImage, res.captchaKey || '');
       return;
     }
 
+    // If both failed:
     setCaptchaImg('');
     setCaptchaKey('');
     setCaptchaCookie('');
@@ -167,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ...account,
         taxCode: trimmed,
         taxpayerName: `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})`,
-        isRealGDT: false 
+        isRealGDT: false // Reset authenticated state on MST change
       });
     }
   };
@@ -199,6 +227,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     let activeCaptchaCode = captchaCode.trim();
 
+    // If user has not authenticated with real GDT yet, check credentials
     if (!account.isRealGDT) {
       if (!pwd) {
         setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
@@ -223,6 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     if (result && result.success) {
       setIsWafBlocked(false);
+      // Khi nhấn vào bắt đầu truy xuất, nếu kết nối thành công với cổng tổng cục thuế, menu trên trái sẽ tự động ẩn để gọn màn hình
       if (onCollapseSidebar) onCollapseSidebar();
       if (onCloseMobileSidebar) onCloseMobileSidebar();
     } else if (result && !result.success) {
@@ -235,6 +265,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (result.error) {
         setAuthError(result.error);
       }
+      // Auto refresh captcha on failure so user can retry immediately
       fetchCaptcha();
     }
   };
@@ -372,13 +403,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>Mã Captcha</span>
               </span>
 
-              {/* Nút đọc mã OCR thủ công */}
+              {/* Nút bấm đọc OCR và gán vào */}
               <button
                 type="button"
                 onClick={() => handleScanOcr(undefined, undefined, true)}
                 disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
                 className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
-                title="Quét lại ảnh Captcha và tự động gán ký tự vào ô bên dưới"
+                title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
               >
                 <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
                 <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
@@ -387,7 +418,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                {/* Khung ảnh Captcha */}
+                {/* Khung ảnh Captcha thật */}
                 <div 
                   className="h-10 bg-white rounded-md flex items-center justify-center p-1 overflow-hidden border border-slate-600 cursor-pointer shadow-xs min-w-[120px] flex-1 relative group"
                   onClick={fetchCaptcha}
@@ -428,7 +459,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               </div>
 
-              {/* Trạng thái quét */}
+              {/* Thông tin hỗ trợ */}
               <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
                 {ocrNotice ? (
                   <span className={ocrSuccess ? 'text-emerald-400 font-medium flex items-center gap-1' : 'text-amber-400'}>
@@ -438,10 +469,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ) : captchaCode ? (
                   <span className="text-emerald-400 flex items-center gap-1 font-medium">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Đã tự động điền: <strong className="font-mono">{captchaCode}</strong></span>
+                    <span>Đã nhập: <strong className="font-mono">{captchaCode}</strong></span>
                   </span>
                 ) : (
-                  <span className="text-slate-400">Đang chờ nhận diện...</span>
+                  <span className="text-slate-400">Nhập ký tự từ ảnh</span>
                 )}
 
                 <button
@@ -508,7 +539,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-[11px] text-slate-400">Chọn nhanh:</span>
             </div>
             
-            {/* Quick Period Buttons */}
+            {/* Quick Period Buttons: Modern Segmented Switch */}
             <div className="bg-slate-950/70 p-1 rounded-lg border border-slate-800 grid grid-cols-4 gap-1 mb-2.5">
               <button
                 type="button"
@@ -578,7 +609,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Invoice Type */}
+          {/* Invoice Type Fixed to Purchase */}
           <div className="flex items-center justify-between py-2 px-3 bg-slate-800/40 border border-slate-700/50 rounded-lg">
             <span className="text-xs text-slate-400 font-medium">Phạm vi tra cứu</span>
             <span className="text-xs font-semibold text-blue-400">Hóa đơn mua vào</span>
@@ -606,7 +637,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </form>
 
-        {/* Engine Status */}
+        {/* Engine Status Specification */}
         <div className="p-3 bg-slate-800/40 rounded-lg border border-slate-800/80 space-y-2 text-xs">
           <div className="text-slate-400 font-medium text-xs pb-1.5 border-b border-slate-800 flex items-center justify-between">
             <span>Trạng thái hệ thống</span>
