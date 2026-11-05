@@ -1,84 +1,35 @@
 import { GDTInvoice } from '../types';
 import { PartnerInvoiceTemplateId, RenderTemplateOptions } from './types';
 import { detectPartnerTemplate, PARTNER_METAS, getPartnerMeta } from './partnerRegistry';
-import { renderBaoDuyTemplate } from './BaoDuyTemplate';
-import { renderPnjTemplate } from './PnjTemplate';
-import { renderTaiTramAnhTemplate } from './TaiTramAnhTemplate';
-import { renderXuanVinhTemplate } from './XuanVinhTemplate';
-import { renderKimLoanTuanTemplate } from './KimLoanTuanTemplate';
-import { renderTkjTemplate } from './TkjTemplate';
-import { renderNghiaSonTemplate } from './NghiaSonTemplate';
-import { renderFourSiTemplate } from './FourSiTemplate';
-import { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
-import { renderVnpayTemplate } from './VnpayTemplate';
-import { renderViettelTemplate } from './ViettelTemplate';
 import { renderDefaultTemplate } from './DefaultTemplate';
 
 export * from './types';
 export * from './partnerRegistry';
 export * from './templateUtils';
-export { renderBaoDuyTemplate } from './BaoDuyTemplate';
-export { renderPnjTemplate } from './PnjTemplate';
-export { renderTaiTramAnhTemplate } from './TaiTramAnhTemplate';
-export { renderXuanVinhTemplate } from './XuanVinhTemplate';
-export { renderKimLoanTuanTemplate } from './KimLoanTuanTemplate';
-export { renderTkjTemplate } from './TkjTemplate';
-export { renderNghiaSonTemplate } from './NghiaSonTemplate';
-export { renderFourSiTemplate } from './FourSiTemplate';
-export { renderTanThanhDanhTemplate } from './TanThanhDanhTemplate';
-export { renderVnpayTemplate } from './VnpayTemplate';
-export { renderViettelTemplate } from './ViettelTemplate';
 export { renderDefaultTemplate } from './DefaultTemplate';
 
+// Tuyệt đối không giả lập hóa đơn: mọi đối tác khi không có bản gốc đều hiển thị đúng mẫu chuẩn Tổng cục Thuế (GDT)
+export const renderBaoDuyTemplate = renderDefaultTemplate;
+export const renderPnjTemplate = renderDefaultTemplate;
+export const renderTaiTramAnhTemplate = renderDefaultTemplate;
+export const renderXuanVinhTemplate = renderDefaultTemplate;
+export const renderKimLoanTuanTemplate = renderDefaultTemplate;
+export const renderTkjTemplate = renderDefaultTemplate;
+export const renderNghiaSonTemplate = renderDefaultTemplate;
+export const renderTanThanhDanhTemplate = renderDefaultTemplate;
+export const renderVnpayTemplate = renderDefaultTemplate;
+
 /**
- * Main dispatcher: Renders the appropriate invoice HTML for any partner
- * or defaults to the standard template.
+ * Hiển thị Hóa đơn điện tử:
+ * Theo yêu cầu người dùng, ĐÃ XÓA TOÀN BỘ các mẫu hóa đơn giả lập nội bộ.
+ * Khi không có bản gốc tải từ nhà cung cấp, ứng dụng LUÔN hiển thị và xuất
+ * CHÍNH XÁC MẪU CHUẨN TỔNG CỤC THUẾ (GDT / Nghị định 123 / Thông tư 78).
  */
 export function renderPartnerInvoiceHtml(
   invoice: GDTInvoice,
   rawXml?: string,
   options?: RenderTemplateOptions
 ): string {
-  // Determine template ID: explicit option, or auto-detected partner
-  const templateId: PartnerInvoiceTemplateId =
-    options?.templateId || options?.provider || detectPartnerTemplate(invoice, rawXml);
-
-  switch (templateId) {
-    case 'BAO_DUY':
-      return renderBaoDuyTemplate(invoice, rawXml, options);
-
-    case 'PNJ':
-      return renderPnjTemplate(invoice, rawXml, options);
-
-    case 'TAI_TRAM_ANH':
-      return renderTaiTramAnhTemplate(invoice, rawXml, options);
-
-    case 'XUAN_VINH':
-      return renderXuanVinhTemplate(invoice, rawXml, options);
-
-    case 'KIM_LOAN_TUAN':
-      return renderKimLoanTuanTemplate(invoice, rawXml, options);
-
-    case 'TKJ':
-      return renderTkjTemplate(invoice, rawXml, options);
-
-    case 'NGHIA_SON':
-      return renderNghiaSonTemplate(invoice, rawXml, options);
-
-    case 'TAN_THANH_DANH':
-      return renderTanThanhDanhTemplate(invoice, rawXml, options);
-
-    case '4SI':
-      return renderFourSiTemplate(invoice, rawXml, options);
-
-    case 'VNPAY':
-      return renderVnpayTemplate(invoice, rawXml, options);
-
-    case 'VIETTEL':
-      return renderViettelTemplate(invoice, rawXml, options);
-
-    case 'DEFAULT':
-    default:
-      return renderDefaultTemplate(invoice, rawXml, options);
-  }
+  // Luôn trả về Mẫu chuẩn chính xác của Tổng Cục Thuế (GDT)
+  return renderDefaultTemplate(invoice, rawXml, options);
 }

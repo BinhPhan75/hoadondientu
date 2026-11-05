@@ -93,12 +93,17 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
 
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTThue') || '0') || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, 'NMua') || this.extractXmlTag(xmlData, 'Buyer') || '';
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, 'MST') || this.extractXmlTag(xmlData, 'MSTNMua') || this.extractXmlTag(xmlData, 'nmmst') || '';
+    const buyerName = this.extractXmlTag(nmuaBlock, 'Ten') || this.extractXmlTag(xmlData, 'TenNMua') || this.extractXmlTag(xmlData, 'nmten') || '';
 
     return {
       provider: this.providerCode,
       providerName: 'Viettel vInvoice / S-Invoice',
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || undefined,
+      buyerName: buyerName || undefined,
       invoiceNo,
       invoiceSeries,
       templateCode,
@@ -123,8 +128,8 @@ export class ViettelDriver extends BaseInvoiceProviderDriver {
     const logs: string[] = [];
     this.createLog(`Khởi chạy Viettel vInvoice Driver cho HĐ ${info.invoiceSeries || ''} - ${info.invoiceNo || ''}`, logs);
 
-    const supplierTaxCode = (info.sellerTaxCode || '').trim();
-    const reservationCode = (info.secretCode || '').trim();
+    const supplierTaxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
+    const reservationCode = (options?.customInfo?.secretCode || options?.customInfo?.lookupCode || info.secretCode || info.lookupCode || '').trim();
 
     if (!supplierTaxCode) {
       this.createLog('LỖI: Thiếu Mã số thuế bên bán (sellerTaxCode).', logs);

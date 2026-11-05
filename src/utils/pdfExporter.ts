@@ -65,9 +65,10 @@ export async function exportInvoiceToPdfFile(
       tempContainer.style.top = '0';
       tempContainer.style.width = '820px';
       tempContainer.style.background = '#ffffff';
-      tempContainer.innerHTML = parsedDoc.body.innerHTML;
+      // Giữ nguyên toàn bộ mã CSS trong <head> để giao diện chuẩn xác 100% như mẫu Tổng cục Thuế
+      tempContainer.innerHTML = (parsedDoc.head ? parsedDoc.head.innerHTML : '') + parsedDoc.body.innerHTML;
       document.body.appendChild(tempContainer);
-      targetElement = tempContainer.querySelector('.main-page, .invoice-container, .misa-invoice-page, .sinvoice-paper, .viettel-wrapper, .easyinvoice-page, .pnj-invoice-page, .vnpt-page, .bkav-card, .print-page') as HTMLElement || tempContainer;
+      targetElement = tempContainer.querySelector('.main-page, .invoice-container, .print-page') as HTMLElement || tempContainer;
     }
 
     // High resolution canvas options for crisp text & borders
@@ -149,6 +150,112 @@ export async function exportInvoiceToPdfFile(
   } catch (error) {
     console.error('Error generating PDF with jsPDF:', error);
     return false;
+  }
+}
+
+/**
+ * Sinh trực tiếp mảng byte (Uint8Array) của tệp PDF Mẫu Chuẩn Tổng Cục Thuế
+ * phục vụ đóng gói tệp ZIP tải hàng loạt khi nhà cung cấp không hỗ trợ tải trực tiếp.
+ */
+export async function generateGdtPdfBytes(
+  invoice: GDTInvoice,
+  theme: 'red' | 'blue' = 'red'
+): Promise<Uint8Array | null> {
+  let tempContainer: HTMLDivElement | null = null;
+  try {
+    const qrCode = await generateInvoiceQrCode(invoice);
+    const htmlString = generateOfficialInvoiceHtml(invoice, {
+      theme,
+      qrCodeDataUrl: qrCode,
+      showPrintControls: false,
+      templateId: 'DEFAULT'
+    });
+
+    const parser = new DOMParser();
+    const parsedDoc = parser.parseFromString(htmlString, 'text/html');
+    parsedDoc.querySelectorAll('script').forEach(s => s.remove());
+
+    tempContainer = document.createElement('div');
+    tempContainer.style.position = 'fixed';
+    tempContainer.style.left = '-9999px';
+    tempContainer.style.top = '0';
+    tempContainer.style.width = '820px';
+    tempContainer.style.background = '#ffffff';
+    tempContainer.innerHTML = (parsedDoc.head ? parsedDoc.head.innerHTML : '') + parsedDoc.body.innerHTML;
+    document.body.appendChild(tempContainer);
+
+    const targetElement = (tempContainer.querySelector('.main-page, .invoice-container, .print-page') as HTMLElement) || tempContainer;
+
+    const canvas = await html2canvas(targetElement, {
+      scale: 2.5,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      windowWidth: 820
+    });
+
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
+
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const contentWidth = pdfWidth - margin * 2;
+    const pageContentHeight = pdfHeight - margin * 2;
+    const pixelsPerMm = canvas.width / contentWidth;
+    const pageHeightPx = Math.max(1, Math.floor(pageContentHeight * pixelsPerMm));
+    const pageCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
+
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      const sourceY = pageIndex * pageHeightPx;
+      const sourceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sourceHeight;
+      const pageContext = pageCanvas.getContext('2d');
+      if (!pageContext) continue;
+      
+      pageContext.fillStyle = '#ffffff';
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(
+        canvas,
+        0,
+        sourceY,
+        canvas.width,
+        sourceHeight,
+        0,
+        0,
+        pageCanvas.width,
+        pageCanvas.height
+      );
+
+      if (pageIndex > 0) {
+        pdf.addPage();
+      }
+      const pageImageHeight = sourceHeight / pixelsPerMm;
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.98),
+        'JPEG',
+        margin,
+        margin,
+        contentWidth,
+        pageImageHeight
+      );
+    }
+
+    const arrayBuffer = pdf.output('arraybuffer');
+    return new Uint8Array(arrayBuffer);
+  } catch (err) {
+    console.error('[generateGdtPdfBytes] Lỗi xuất PDF chuẩn GDT:', err);
+    return null;
+  } finally {
+    if (tempContainer && document.body.contains(tempContainer)) {
+      document.body.removeChild(tempContainer);
+    }
   }
 }
 

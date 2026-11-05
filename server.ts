@@ -376,7 +376,7 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
       ? 'data:' + bitmapMime + ';base64,' + bitmapBase64
       : 'data:image/svg+xml;base64,' + Buffer.from(rawSvg, 'utf8').toString('base64');
     const code = await solveCaptchaWithGemini(image, ALPHANUMERIC_CAPTCHA_PROMPT, { customApiKey, alphanumeric: true });
-    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || 'gemini-2.5-flash-lite' };
+    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || 'gemini-flash-latest' };
   } catch (error: any) {
     return { code: '', error: error.message || 'Không nhận diện được CAPTCHA. Vui lòng nhập thủ công.' };
   }
@@ -404,9 +404,10 @@ app.get('/api/gdt/captcha', async (req, res) => {
       
       if (data && data.key && data.content) {
         if (cookieStr) captchaCookieJar.set(data.key, cookieStr);
-        captchaContentMap.set(data.key, data.content);
+        const cleanedSvg = cleanGdtSvgNoise(data.content);
+        captchaContentMap.set(data.key, cleanedSvg);
 
-        const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`;
+        const base64Image = `data:image/svg+xml;base64,${Buffer.from(cleanedSvg, 'utf-8').toString('base64')}`;
 
         return res.json({
           success: true,
@@ -415,7 +416,7 @@ app.get('/api/gdt/captcha', async (req, res) => {
           captchaCookie: cookieStr,
           captchaCode: '',
           captchaImage: base64Image,
-          rawSvg: data.content,
+          rawSvg: cleanedSvg,
           source: 'hoadondientu.gdt.gov.vn'
         });
       }
@@ -803,11 +804,13 @@ app.post('/api/gdt/pos-captcha', async (req, res) => {
     if (!data.key || !data.content) {
       return res.status(502).json({ success: false, message: 'CAPTCHA hóa đơn máy tính tiền không có dữ liệu hợp lệ.' });
     }
+    const cleanedSvg = cleanGdtSvgNoise(data.content);
     return res.json({
       success: true,
       captchaKey: data.key,
       captchaCookie: extractCookies(response),
-      captchaImage: `data:image/svg+xml;base64,${Buffer.from(data.content, 'utf-8').toString('base64')}`,
+      captchaImage: `data:image/svg+xml;base64,${Buffer.from(cleanedSvg, 'utf-8').toString('base64')}`,
+      rawSvg: cleanedSvg,
     });
   } catch (error: any) {
     return res.status(502).json({ success: false, message: error?.message || 'Không thể kết nối Cổng Tổng cục Thuế để lấy CAPTCHA.' });
@@ -1749,44 +1752,36 @@ app.post('/api/invoice-downloader/solve-captcha', async (req, res) => {
   try {
     const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess, timeoutMs } = req.body;
     if (!image) {
-      return res.status(400).json({ error: 'Ảnh Captcha không được để trống' });
+      return res.status(400).json({ success: false, error: 'Ảnh Captcha không được để trống' });
     }
 
     const prompt = alphanumeric ? ALPHANUMERIC_CAPTCHA_PROMPT : undefined;
-    let result: CaptchaSolveResult;
-    if (forceGemini) {
-      const startedAt = Date.now();
-      const code = await solveCaptchaWithGemini(image, prompt, {
-        timeoutMs,
-        customApiKey: customApiKey || undefined,
-        alphanumeric: Boolean(alphanumeric),
-      });
-      result = {
-        code,
-        confidence: 99,
-        engine: 'gemini' as const,
-        processingTimeMs: Date.now() - startedAt,
-      };
-    } else {
-      result = await CaptchaSolver.solveWithDetails(image, {
-        whitelist: whitelist || undefined,
-        alphanumeric: Boolean(alphanumeric),
-        preprocess: preprocess !== false,
-        timeoutMs,
-        prompt,
-        customApiKey: customApiKey || undefined,
+    const result = await CaptchaSolver.solveWithAI(image, {
+      whitelist: whitelist || undefined,
+      alphanumeric: Boolean(alphanumeric),
+      forceGemini: Boolean(forceGemini),
+      preprocess: preprocess !== false,
+      timeoutMs,
+      prompt,
+      customApiKey: customApiKey || undefined,
+    });
+
+    if (result && result.code) {
+      return res.json({
+        success: true,
+        code: result.code,
+        confidence: result.confidence,
+        engine: result.engine,
+        processingTimeMs: result.processingTimeMs
       });
     }
 
-    res.json({
-      success: true,
-      code: result.code,
-      confidence: result.confidence,
-      engine: result.engine,
-      processingTimeMs: result.processingTimeMs
+    return res.json({
+      success: false,
+      error: 'Không thể tự nhận diện CAPTCHA bằng Tesseract local lẫn Gemini API. Vui lòng nhập mã thủ công.'
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: false, error: error.message || 'Lỗi khi nhận diện CAPTCHA.' });
   }
 });
 

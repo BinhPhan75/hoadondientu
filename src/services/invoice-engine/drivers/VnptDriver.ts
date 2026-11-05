@@ -7,8 +7,8 @@ import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
-import { CaptchaSolver } from '../captcha/CaptchaSolver';
 import { GenericFallbackDriver } from './GenericFallbackDriver';
+import { downloadOriginalVnptPdf } from '../../vnptInvoiceService';
 
 export class VnptDriver extends BaseInvoiceProviderDriver {
   readonly name = 'VNPT Invoice Driver';
@@ -44,26 +44,33 @@ export class VnptDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    // Trích xuất mã tra cứu của VNPT (Đối với hóa đơn VNPT: mã tra cứu có thể là Fkey hoặc mã CQT)
-    let lookupCode = cqtCode || this.extractCustomField(xmlData, ['Fkey', 'Mã Fkey', 'Mã tra cứu', 'MaTraCuu']);
+    // Trích xuất mã tra cứu của VNPT (Ưu tiên Fkey / Mã tra cứu)
+    let lookupCode = this.extractCustomField(xmlData, ['Fkey', 'Mã Fkey', 'Mã tra cứu', 'MaTraCuu', 'MTCuu', 'MTC']) ||
+      this.extractXmlTag(xmlData, 'Fkey') ||
+      this.extractXmlTag(xmlData, 'MTCuu');
     if (!lookupCode) {
-      lookupCode = this.extractXmlTag(xmlData, 'Fkey') || this.extractXmlTag(xmlData, 'MTCuu');
+      lookupCode = cqtCode;
     }
 
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTThue') || '0') || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, 'NMua') || this.extractXmlTag(xmlData, 'Buyer') || '';
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, 'MST') || this.extractXmlTag(xmlData, 'MSTNMua') || this.extractXmlTag(xmlData, 'nmmst') || '';
+    const buyerName = this.extractXmlTag(nmuaBlock, 'Ten') || this.extractXmlTag(xmlData, 'TenNMua') || this.extractXmlTag(xmlData, 'nmten') || '';
 
     return {
       provider: this.providerCode,
       providerName: 'VNPT Invoice',
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || undefined,
+      buyerName: buyerName || undefined,
       invoiceNo,
       invoiceSeries,
       templateCode,
       invoiceDate,
       lookupCode: lookupCode || undefined,
-      lookupUrl: 'https://tracuu.vnpt-invoice.com.vn',
+      lookupUrl: sellerTaxCode ? `https://${sellerTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://4000344946-tt78.vnpt-invoice.com.vn',
       cqtCode: cqtCode || undefined,
       totalAmount,
       totalTaxAmount,
@@ -79,136 +86,46 @@ export class VnptDriver extends BaseInvoiceProviderDriver {
     const logs: string[] = [];
     this.createLog(`Khởi chạy VNPT Invoice Driver cho HĐ ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
 
-    const fkey = (info.lookupCode || '').trim();
-    const cleanMst = (info.sellerTaxCode || '').trim();
+    const fkey = (options?.customInfo?.lookupCode || info.lookupCode || '').trim();
+    const cleanMst = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
     this.createLog(`Fkey VNPT: "${fkey}", MST: "${cleanMst}"`, logs);
 
-    const timeoutMs = options?.timeoutMs || 15000;
-    let lastError = '';
-
-    // 1. Thử các cổng tải trực tiếp (không yêu cầu Captcha)
-    const directEndpoints = [
-      `https://tracuu.vnpt-invoice.com.vn/api/invoices/download-pdf?fkey=${encodeURIComponent(fkey)}&taxCode=${encodeURIComponent(cleanMst)}`,
-      `https://portal.vnpt-invoice.com.vn/api/download-pdf?fkey=${encodeURIComponent(fkey)}`
-    ];
-
-    for (const url of directEndpoints) {
+    // 1. Thử tải trực tiếp hóa đơn gốc qua Cổng VNPT với Gemini AI Captcha Solver
+    if (fkey) {
       try {
-        this.createLog(`Đang thử tải trực tiếp từ VNPT: ${url.substring(0, 65)}...`, logs);
-        const resp = await axios.get(url, {
-          timeout: timeoutMs,
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Accept': 'application/pdf, application/json, */*',
-            ...(options?.customHeaders || {})
-          },
-          validateStatus: (s) => s === 200
+        this.createLog(`Đang kết nối cổng VNPT và tự động giải Captcha bằng AI...`, logs);
+        const vnptRes = await downloadOriginalVnptPdf({
+          lookupCode: fkey,
+          sellerTaxCode: cleanMst,
+          portalUrl: options?.customInfo?.lookupUrl || info.lookupUrl,
+          invoiceNumber: options?.customInfo?.invoiceNo || info.invoiceNo
         });
 
-        if (resp.data && resp.data.byteLength > 50) {
-          const buf = Buffer.from(resp.data);
-          if (buf.toString('utf-8', 0, 5).startsWith('%PDF')) {
-            this.createLog(`Tải thành công file PDF gốc từ VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-            return {
-              success: true,
-              provider: this.providerCode,
-              driverName: this.name,
-              pdfBuffer: buf,
-              pdfBase64: buf.toString('base64'),
-              contentType: 'application/pdf',
-              filename: this.buildPdfFilename(info),
-              isFallback: false,
-              sourceUrl: url,
-              executionLogs: logs
-            };
-          }
+        if (vnptRes.data && vnptRes.data.length > 500) {
+          const buf = vnptRes.data;
+          const captchaMsg = vnptRes.captchaSolved ? ` (Đã vượt Captcha: ${vnptRes.captchaSolved})` : '';
+          this.createLog(`Vượt Captcha và tải thành công file PDF gốc từ VNPT (${(buf.length / 1024).toFixed(1)} KB)${captchaMsg}`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: buf,
+            pdfBase64: buf.toString('base64'),
+            contentType: 'application/pdf',
+            filename: vnptRes.filename || this.buildPdfFilename(info),
+            isFallback: false,
+            captchaSolved: vnptRes.captchaSolved,
+            sourceUrl: info.lookupUrl || `https://${cleanMst}-tt78.vnpt-invoice.com.vn`,
+            executionLogs: logs
+          };
         }
       } catch (err: any) {
-        lastError = err.message || String(err);
+        this.createLog(`Cổng VNPT chưa trả về PDF: ${err.message}`, logs);
       }
     }
 
-    // 2. Thử cơ chế vượt Captcha trên cổng Portal VNPT Invoice
-    const portalCandidates = [
-      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, '') : null,
-      cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : null,
-      'https://tracuu.vnpt-invoice.com.vn',
-      'https://portal.vnpt-invoice.com.vn'
-    ].filter(Boolean) as string[];
-
-    for (const portal of portalCandidates) {
-      try {
-        const captchaUrl = `${portal}/Captcha.ashx`;
-        this.createLog(`Yêu cầu ảnh Captcha từ cổng VNPT: ${captchaUrl}`, logs);
-
-        const captchaResp = await axios.get(captchaUrl, {
-          timeout: 8000,
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            'Referer': portal
-          },
-          validateStatus: (s) => s === 200
-        });
-
-        const cookieHeader = captchaResp.headers['set-cookie'] 
-          ? (Array.isArray(captchaResp.headers['set-cookie']) ? captchaResp.headers['set-cookie'].join('; ') : captchaResp.headers['set-cookie'])
-          : '';
-
-        if (captchaResp.data && captchaResp.data.byteLength > 20) {
-          this.createLog('Đã nhận ảnh Captcha từ VNPT. Đang trích xuất mã Captcha...', logs);
-          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
-          const captchaCode = captchaResult.code;
-          this.createLog(`Đã giải Captcha VNPT thành công: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
-
-          // Gửi yêu cầu xác thực tải hóa đơn kèm Captcha
-          const queryUrl = `${portal}/TraCuu/TraCuuHoaDon`;
-          const queryResp = await axios.post(queryUrl, {
-            fkey,
-            mst: cleanMst,
-            captcha: captchaCode,
-            sohd: info.invoiceNo,
-            khhdon: info.invoiceSeries
-          }, {
-            timeout: timeoutMs,
-            responseType: 'arraybuffer',
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-              'Referer': portal,
-              'Cookie': cookieHeader,
-              ...(options?.customHeaders || {})
-            },
-            validateStatus: (s) => s < 500
-          });
-
-          if (queryResp.data && queryResp.data.byteLength > 50) {
-            const buf = Buffer.from(queryResp.data);
-            if (buf.toString('utf-8', 0, 5).startsWith('%PDF')) {
-              this.createLog(`Vượt Captcha và tải thành công file PDF gốc từ VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString('base64'),
-                contentType: 'application/pdf',
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: queryUrl,
-                captchaSolved: captchaCode,
-                executionLogs: logs
-              };
-            }
-          }
-        }
-      } catch (portalErr: any) {
-        this.createLog(`Cổng VNPT ${portal} chưa hoàn tất: ${portalErr.message}`, logs);
-      }
-    }
-
-    // 3. Nếu các cổng trực tuyến không phản hồi hoặc bị hạn chế IP, kích hoạt Fallback chuẩn Nghị định 123
-    this.createLog(`Kích hoạt Fallback chuẩn Nghị định 123 / Thông tư 78 cho HĐ VNPT`, logs);
+    // 2. Nếu không tải được từ cổng hoặc không có fkey, lấy mẫu chuẩn Tổng cục Thuế (GDT)
+    this.createLog(`Kích hoạt Fallback mẫu chuẩn Tổng cục Thuế (GDT) cho HĐ VNPT`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,

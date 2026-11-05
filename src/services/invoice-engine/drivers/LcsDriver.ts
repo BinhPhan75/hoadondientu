@@ -61,12 +61,17 @@ export class LcsDriver extends BaseInvoiceProviderDriver {
 
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTTTBSo') || '0') || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, 'TgTThue') || '0') || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, 'NMua') || this.extractXmlTag(xmlData, 'Buyer') || '';
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, 'MST') || this.extractXmlTag(xmlData, 'MSTNMua') || this.extractXmlTag(xmlData, 'nmmst') || '';
+    const buyerName = this.extractXmlTag(nmuaBlock, 'Ten') || this.extractXmlTag(xmlData, 'TenNMua') || this.extractXmlTag(xmlData, 'nmten') || '';
 
     return {
       provider: this.providerCode,
       providerName: 'LCS Soft EIP (Công ty TNHH L.C.S)',
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || undefined,
+      buyerName: buyerName || undefined,
       invoiceNo,
       invoiceSeries,
       templateCode,

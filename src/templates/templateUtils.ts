@@ -144,6 +144,10 @@ export function buildDirectLookupUrl(
     if (!targetDomain || !/vnpt-invoice/i.test(targetDomain)) {
       targetDomain = cleanTaxCode ? `https://${cleanTaxCode}-tt78.vnpt-invoice.com.vn` : 'https://4000344946-tt78.vnpt-invoice.com.vn';
     }
+    const cleanCode = (code || '').trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
+    if (cleanCode) {
+      return `/api/vnpt/redirect-to-portal?mst=${encodeURIComponent(cleanTaxCode)}&code=${encodeURIComponent(cleanCode)}&portal=${encodeURIComponent(targetDomain)}`;
+    }
     return `${targetDomain}/HomeNoLogin/SearchByFkey`;
   }
 
@@ -250,8 +254,9 @@ export function buildDirectLookupUrl(
 }
 
 export function generateDefaultQrSvg(dataText: string = 'HOADON'): string {
-  // Return an inline SVG QR placeholder if no dataUrl is provided
-  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="8" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="16" width="12" height="12" fill="black"/><rect x="64" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="72" y="16" width="12" height="12" fill="black"/><rect x="8" y="64" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="72" width="12" height="12" fill="black"/><rect x="42" y="10" width="14" height="8" fill="black"/><rect x="40" y="24" width="8" height="16" fill="black"/><rect x="10" y="44" width="24" height="8" fill="black"/><rect x="44" y="42" width="16" height="16" fill="black"/><rect x="68" y="44" width="22" height="8" fill="black"/><rect x="42" y="66" width="12" height="24" fill="black"/><rect x="64" y="60" width="14" height="12" fill="black"/><rect x="82" y="66" width="10" height="24" fill="black"/></svg>`;
+  // Return an inline SVG QR data URI with full URI encoding to prevent breaking HTML src attributes
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="8" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="16" width="12" height="12" fill="black"/><rect x="64" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="72" y="16" width="12" height="12" fill="black"/><rect x="8" y="64" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="72" width="12" height="12" fill="black"/><rect x="42" y="10" width="14" height="8" fill="black"/><rect x="40" y="24" width="8" height="16" fill="black"/><rect x="10" y="44" width="24" height="8" fill="black"/><rect x="44" y="42" width="16" height="16" fill="black"/><rect x="68" y="44" width="22" height="8" fill="black"/><rect x="42" y="66" width="12" height="24" fill="black"/><rect x="64" y="60" width="14" height="12" fill="black"/><rect x="82" y="66" width="10" height="24" fill="black"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 export function getPrintControlsHtml(title: string): string {

@@ -4,6 +4,11 @@
  * instead of parsing raw SVG markup, increasing OCR accuracy to 99%+.
  */
 
+export function cleanGdtSvgString(svg: string): string {
+  if (!svg || typeof svg !== 'string') return svg;
+  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
+}
+
 export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string> {
   if (typeof window === 'undefined' || !svgOrDataUri) return svgOrDataUri;
 
@@ -13,11 +18,19 @@ export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string
   }
 
   let src = svgOrDataUri;
-  if (!src.startsWith('data:image/svg+xml')) {
+  if (src.startsWith('data:image/svg+xml;base64,')) {
+    try {
+      const decoded = atob(src.replace('data:image/svg+xml;base64,', ''));
+      const cleaned = cleanGdtSvgString(decoded);
+      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
+    } catch {
+      // keep original
+    }
+  } else if (!src.startsWith('data:image/svg+xml')) {
     if (src.includes('<svg')) {
-      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(src)}`;
+      const cleaned = cleanGdtSvgString(src);
+      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
     } else {
-      // Might be plain text or unsupported format
       return svgOrDataUri;
     }
   }

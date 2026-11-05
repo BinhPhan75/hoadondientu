@@ -21,6 +21,26 @@ import { RenderTemplateOptions } from './types';
  * - Hóa đơn chưa có mẫu chuyên biệt như 4SI của PNJ, hóa đơn viễn thông,
  *   hóa đơn điện lực (EVN), hóa đơn thu phí ngân hàng...
  */
+function formatTaxRateDisplay(rate: any): string {
+  if (rate === undefined || rate === null || rate === '') return '\\';
+  let str = String(rate).trim();
+  str = str.replace(/<[^>]+>/g, '').trim();
+  if (str === '0.1' || str === '0,1') return '10%';
+  if (str === '0.08' || str === '0,08') return '8%';
+  if (str === '0.05' || str === '0,05') return '5%';
+  if (str === '0.00' || str === '0' || str === '0%') return '0%';
+  if (str === '-1' || str === '-2' || /kct|khong/i.test(str)) return 'KCT';
+  if (str === '-3' || /knt|khong_nop/i.test(str)) return 'KNT';
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const num = parseFloat(str);
+    if (num > 0 && num <= 1) {
+      return `${Math.round(num * 100)}%`;
+    }
+    return `${num}%`;
+  }
+  return str;
+}
+
 export function renderDefaultTemplate(
   invoice: GDTInvoice,
   rawXml?: string,
@@ -39,31 +59,42 @@ export function renderDefaultTemplate(
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
   const showControls = options?.showPrintControls !== false;
 
-  const mauSo = (invoice as any).khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : '1');
+  const rawMauSo = (invoice as any).khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : '1');
+  const cleanMauSo = String(rawMauSo).trim();
+  const mauSo = cleanMauSo;
   const kyHieu = invoice.khhdon || '';
   const soHdon = invoice.shdon || '';
   const maCqt = invoice.mhdon || '';
 
-  // Xác định tiêu đề hóa đơn theo chuẩn GDT
-  let invoiceTitle = invoice.thdon || '';
-  if (!invoiceTitle) {
-    if (kyHieu.startsWith('2')) {
-      invoiceTitle = 'HOÁ ĐƠN BÁN HÀNG';
-    } else {
-      invoiceTitle = 'HOÁ ĐƠN GIÁ TRỊ GIA TĂNG';
-    }
-  } else {
-    invoiceTitle = invoiceTitle.toUpperCase();
+  // Xác định tiêu đề hóa đơn theo chuẩn Nghị định 123/2020/NĐ-CP
+  // Mẫu số 1: Hóa đơn GTGT
+  // Mẫu số 2: Hóa đơn bán hàng
+  // Mẫu số 5: Tem, vé, thẻ
+  const isMauSo2 = cleanMauSo === '2' || kyHieu.startsWith('2') || /^2[A-Z]/i.test(kyHieu);
+  const isMauSo5 = cleanMauSo === '5' || kyHieu.startsWith('5');
+
+  let invoiceTitle = (invoice.thdon || '').trim().toUpperCase();
+  if (isMauSo2) {
+    invoiceTitle = invoiceTitle && invoiceTitle.includes('BÁN HÀNG') ? invoiceTitle : 'HOÁ ĐƠN BÁN HÀNG';
+  } else if (isMauSo5) {
+    invoiceTitle = invoiceTitle && (invoiceTitle.includes('VÉ') || invoiceTitle.includes('TEM') || invoiceTitle.includes('THẺ')) ? invoiceTitle : 'TEM / VÉ / THẺ ĐIỆN TỬ';
+  } else if (!invoiceTitle || invoiceTitle.includes('BÁN HÀNG')) {
+    invoiceTitle = 'HOÁ ĐƠN GIÁ TRỊ GIA TĂNG';
   }
 
-  const isVatInvoice = !kyHieu.startsWith('2') && (vatAmount > 0 || invoiceTitle.includes('GIÁ TRỊ GIA TĂNG'));
+  const isVatInvoice = !isMauSo2 && !isMauSo5 && (vatAmount > 0 || invoiceTitle.includes('GIÁ TRỊ GIA TĂNG'));
 
-  // QR Code chuẩn
+  // QR Code chuẩn an toàn HTML
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(
     maCqt 
       ? `https://hoadondientu.gdt.gov.vn/tra-cuu?cqt=${encodeURIComponent(maCqt)}`
       : `MST:${invoice.nbmst};KH:${kyHieu};SHD:${soHdon};TONG:${totalAmount}${mCode ? `;MTC:${mCode}` : ''}`
   );
+  const isSvgTag = typeof qrImg === 'string' && qrImg.trim().startsWith('<svg');
+  const safeQrSrc = isSvgTag ? '' : (qrImg.startsWith('data:') ? qrImg : escapeHtml(qrImg));
+  const qrHtml = isSvgTag
+    ? `<div style="width: 76px; height: 76px; overflow: hidden; display: flex; align-items: center; justify-content: center;">${qrImg}</div>`
+    : `<img src="${safeQrSrc}" style="width: 76px; height: 76px; display: block; border: 0;" alt="QR Code">`;
 
   // Người bán & Người mua
   const sellerName = invoice.nbten || '';
@@ -105,7 +136,7 @@ export function renderDefaultTemplate(
         const qty = it.quantity ? formatNum(it.quantity) : (it.sluong ? formatNum(it.sluong) : '');
         const price = (it.unitPrice || it.dgia) ? formatVND(it.unitPrice || it.dgia) : '';
         const discount = (it.discount || it.stckhau) ? formatVND(it.discount || it.stckhau) : '0';
-        const taxRate = it.taxRate || it.tsuat || (isVatInvoice ? '8%' : '\\');
+        const taxRate = formatTaxRateDisplay(it.taxRate || it.tsuat || (isVatInvoice ? '8%' : '\\'));
         const itemAmount = formatVND(it.amount || it.thtien || 0);
 
         return `<tr>
@@ -117,7 +148,7 @@ export function renderDefaultTemplate(
   <td class="tx-center">${qty}</td>
   <td class="tx-center">${price}</td>
   <td class="tx-center">${discount}</td>
-  <td class="tx-center"><HHDVu>${escapeHtml(taxRate)}</HHDVu></td>
+  <td class="tx-center">${escapeHtml(taxRate)}</td>
   <td class="tx-center">${itemAmount}</td>
 </tr>`;
       }).join('\n')
@@ -130,7 +161,7 @@ export function renderDefaultTemplate(
   <td class="tx-center">1</td>
   <td class="tx-center">${formatVND(subTotal)}</td>
   <td class="tx-center">0</td>
-  <td class="tx-center"><HHDVu>${isVatInvoice ? '8%' : '\\'}</HHDVu></td>
+  <td class="tx-center">${isVatInvoice ? '8%' : '\\'}</td>
   <td class="tx-center">${formatVND(subTotal)}</td>
 </tr>`;
 
@@ -142,7 +173,7 @@ export function renderDefaultTemplate(
         : [{ taxRate: '\\', amount: subTotal, taxAmount: 0 }]);
 
   const vatRowsHtml = vatRows.map(row => `<tr>
-  <td class="tx-center"><LTSuat>${escapeHtml(row.taxRate)}</LTSuat></td>
+  <td class="tx-center">${escapeHtml(formatTaxRateDisplay(row.taxRate))}</td>
   <td class="tx-center">${formatVND(row.amount)}</td>
   <td class="tx-center">${formatVND(row.taxAmount)}</td>
 </tr>`).join('\n');
@@ -496,7 +527,7 @@ ${printControls}
   <div class="top-content">
     <div style="width: 80px; min-height: 20px">
       <div id="qrcodeTable">
-        <img src="${qrImg}" style="width: 76px; height: 76px; display: block;" alt="QR Code">
+        ${qrHtml}
       </div>
     </div>
     <div class="code-content">
@@ -659,7 +690,7 @@ ${printControls}
         <th class="tb-dg">Đơn giá</th>
         <th class="tb-dg">Chiết khấu</th>
         <th class="tb-ts">Thuế suất</th>
-        <th class="tb-ttct">Thành tiền chưa có thuế GTGT</th>
+        <th class="tb-ttct">${isMauSo2 ? 'Thành tiền' : 'Thành tiền chưa có thuế GTGT'}</th>
       </tr>
     </thead>
     <tbody>
@@ -667,7 +698,8 @@ ${printControls}
     </tbody>
   </table>
 
-  <div class="table-horizontal-wrapper">
+  <div class="table-horizontal-wrapper" style="${!isVatInvoice ? 'display: block;' : ''}">
+    ${isVatInvoice ? `
     <div style="margin-right: 10px; min-width: 270px;">
       <table class="res-tb">
         <thead style="text-align: center">
@@ -681,10 +713,11 @@ ${printControls}
           ${vatRowsHtml}
         </tbody>
       </table>
-    </div>
-    <div style="flex: 1">
+    </div>` : ''}
+    <div style="${isVatInvoice ? 'flex: 1;' : 'max-width: 520px; margin-left: auto;'}">
       <table class="res-tb">
         <tbody>
+          ${isVatInvoice ? `
           <tr>
             <td class="tx-center">
               Tổng tiền chưa thuế<br>
@@ -699,7 +732,15 @@ ${printControls}
             <td class="tx-center" style="min-width: 180px; max-width: 300px; font-weight: bold;">
               ${formatVND(vatAmount)}
             </td>
-          </tr>
+          </tr>` : `
+          <tr>
+            <td class="tx-center">
+              Tổng cộng tiền hàng (Thành tiền)
+            </td>
+            <td class="tx-center" style="min-width: 180px; max-width: 300px; font-weight: bold;">
+              ${formatVND(totalAmount)}
+            </td>
+          </tr>`}
           <tr>
             <td class="tx-center">Tổng tiền phí</td>
             <td class="tx-center" style="min-width: 180px; max-width: 300px;">0</td>

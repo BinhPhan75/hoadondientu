@@ -301,6 +301,30 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
     };
   }
 
+  // Sacombank (Ngân hàng TMCP Sài Gòn Thương Tín)
+  if (nbmst.startsWith('0301103908') || nbten.includes('SACOMBANK') || nbten.includes('SÀI GÒN THƯƠNG TÍN') || nbten.includes('SAI GON THUONG TIN')) {
+    return {
+      mst: '0301103908',
+      name: 'Ngân hàng TMCP Sài Gòn Thương Tín (Sacombank)',
+      fullDisplay: '0301103908 - Ngân hàng TMCP Sài Gòn Thương Tín (Sacombank)',
+      portalUrl: rawLookupUrl || 'https://hoadondientu.sacombank.com.vn',
+      lookupCode: rawLookupCode || '',
+      shortBrand: 'Sacombank'
+    };
+  }
+
+  // EVN (Tổng Công ty Điện lực Miền Trung / Điện lực Đà Nẵng)
+  if (nbmst.startsWith('0400101394') || nbten.includes('ĐIỆN LỰC') || nbten.includes('DIEN LUC') || nbten.includes('EVN')) {
+    return {
+      mst: '0400101394',
+      name: 'Tổng Công ty Điện lực Miền Trung (EVN CPC)',
+      fullDisplay: '0400101394 - Tổng Công ty Điện lực Miền Trung (EVN CPC)',
+      portalUrl: rawLookupUrl || 'https://cskh.cpc.vn',
+      lookupCode: rawLookupCode || '',
+      shortBrand: 'EVN'
+    };
+  }
+
   // 11. Check known registry by msttcgp
   if (msttcgp && KNOWN_SOLUTION_PROVIDERS[msttcgp]) {
     const known = KNOWN_SOLUTION_PROVIDERS[msttcgp];
@@ -885,6 +909,38 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
       color: '#0d9488',
       badgeClass: 'text-teal-700 bg-teal-50 border-teal-200',
       title: 'Hóa đơn phát hành qua giải pháp M-Invoice (minvoice.vn) - Tra cứu bằng Số bảo mật',
+      isDefault: false
+    };
+  }
+
+  // 12b. Sacombank
+  if (
+    nbmst.startsWith('0301103908') ||
+    nbten.includes('SACOMBANK') ||
+    nbten.includes('SÀI GÒN THƯƠNG TÍN') ||
+    nbten.includes('SAI GON THUONG TIN')
+  ) {
+    return {
+      label: 'Sacombank',
+      color: '#0284c7',
+      badgeClass: 'text-sky-700 bg-sky-50 border-sky-200',
+      title: 'Hóa đơn dịch vụ Ngân hàng Sacombank (hoadondientu.sacombank.com.vn)',
+      isDefault: false
+    };
+  }
+
+  // 12c. EVN / Điện lực
+  if (
+    nbmst.startsWith('0400101394') ||
+    nbten.includes('ĐIỆN LỰC') ||
+    nbten.includes('DIEN LUC') ||
+    nbten.includes('EVN')
+  ) {
+    return {
+      label: 'EVN',
+      color: '#ea580c',
+      badgeClass: 'text-amber-700 bg-amber-50 border-amber-200',
+      title: 'Hóa đơn tiền điện Tập đoàn Điện lực Việt Nam (cskh.cpc.vn)',
       isDefault: false
     };
   }

@@ -547,21 +547,20 @@ export default function App() {
         forceGeminiFallback = false;
         let captchaCode = solverResult.success ? solverResult.code || null : null;
         if (captchaCode) {
+          const engineLabel = solverResult.engine === 'tesseract-local' ? 'Tesseract local' : 'Gemini API';
           setConsoleLogs(prev => [...prev, {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'step',
-            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] CAPTCHA được nhận diện bằng ${solverResult.engine === 'tesseract-local' ? 'Tesseract local' : 'Gemini API'}.`,
+            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] CAPTCHA được nhận diện bằng ${engineLabel}: "${captchaCode}".`,
           }]);
         } else {
-          if (solverResult.error) {
-            setConsoleLogs(prev => [...prev, {
-              id: Math.random().toString(36).substring(2, 9),
-              timestamp: new Date().toLocaleTimeString('vi-VN'),
-              level: 'warning',
-              message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] ${solverResult.error} Vui lòng nhập mã thủ công.`,
-            }]);
-          }
+          setConsoleLogs(prev => [...prev, {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] OCR không nhận diện được CAPTCHA. Chuyển sang luồng nhập tay.`,
+          }]);
           captchaCode = await new Promise<string | null>(resolve => {
             setPendingPosCaptcha({ captcha, rangeLabel: `${chunk.from} -> ${chunk.to}`, resolve });
           });
@@ -583,14 +582,23 @@ export default function App() {
         });
         const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
         if (!/từ chối CAPTCHA|tu choi CAPTCHA/i.test(diagnostic?.status || '')) break;
-        if (solverResult.engine === 'tesseract-local') forceGeminiFallback = true;
-        else forceManualCaptcha = true;
-        setConsoleLogs(prev => [...prev, {
-          id: Math.random().toString(36).substring(2, 9),
-          timestamp: new Date().toLocaleTimeString('vi-VN'),
-          level: 'warning',
-          message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] CAPTCHA chưa đúng. ${forceGeminiFallback ? 'Sẽ thử Gemini API trên ảnh mới.' : 'Vui lòng nhập thủ công trên ảnh mới.'} (${captchaAttempt + 1}/3).`,
-        }]);
+        if (solverResult.engine === 'tesseract-local') {
+          forceGeminiFallback = true;
+          setConsoleLogs(prev => [...prev, {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Cổng Thuế từ chối mã do OCR local nhận diện. Lấy CAPTCHA mới và thử lại bằng Gemini API (${captchaAttempt + 1}/3)...`,
+          }]);
+        } else {
+          forceManualCaptcha = true;
+          setConsoleLogs(prev => [...prev, {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'warning',
+            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Cổng Thuế từ chối CAPTCHA. Lấy mã mới và chuyển sang nhập thủ công (${captchaAttempt + 1}/3)...`,
+          }]);
+        }
       }
       if (!queryRes) continue;
 

@@ -41,10 +41,13 @@ export async function solveCaptchaWithGemini(
   customPrompt?: string,
   options: CaptchaRequestOptions = {},
 ): Promise<string> {
-  const apiKey = options.customApiKey || process.env.GEMINI_API_KEY;
+  const apiKey = options.customApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY chưa được cấu hình.');
   if (process.env.CAPTCHA_AI_ENABLED === 'false') throw new Error('OCR AI đã tắt. Vui lòng nhập CAPTCHA thủ công.');
-  const model = process.env.CAPTCHA_AI_MODEL || 'gemini-2.5-flash-lite';
+  let model = process.env.CAPTCHA_AI_MODEL || 'gemini-flash-latest';
+  if (model === 'gemini-2.5-flash-lite' || model.includes('1.5-flash') || model.includes('2.0-flash')) {
+    model = 'gemini-flash-latest';
+  }
   const keyHash = createHash('sha256').update(apiKey).digest('hex');
   if ((blockedKeys.get(keyHash) || 0) > Date.now()) {
     throw new Error('OCR AI đang tạm dừng sau lỗi hạn mức/cấu hình. Vui lòng nhập CAPTCHA thủ công.');
@@ -63,31 +66,45 @@ export async function solveCaptchaWithGemini(
   const timeoutMs = Math.min(Math.max(options.timeoutMs || 8000, 1000), 12000);
   const work = (async () => {
     try {
-      const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+          timeout: timeoutMs,
+        },
+      });
       usage.requests++;
       const response = await ai.models.generateContent({
         model,
         contents: [{ inlineData: image }, { text: prompt }],
         config: {
-          temperature: 0, maxOutputTokens: 32,
-          ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          maxOutputTokens: 32,
           abortSignal: AbortSignal.timeout(timeoutMs),
-          httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
         },
       });
       usage.inputTokens += response.usageMetadata?.promptTokenCount || 0;
       usage.outputTokens += response.usageMetadata?.candidatesTokenCount || 0;
       usage.thinkingTokens += response.usageMetadata?.thoughtsTokenCount || 0;
       console.info('[CAPTCHA usage]', JSON.stringify({ model, ...usage }));
-      const text = (response.text || '').trim().replace(/\s/g, '');
-      if (!(alphanumeric ? /^[a-z0-9]{4,6}$/i : /^\d{4}$/).test(text)) {
-        throw new Error('OCR trả về mã không hợp lệ. Không tự cắt hoặc đoán thêm ký tự.');
+      const rawText = (response.text || '').trim();
+      const cleanChars = rawText.replace(/[^a-zA-Z0-9]/g, '');
+      if (alphanumeric) {
+        if (/^[a-zA-Z0-9]{4,6}$/.test(cleanChars)) {
+          return cleanChars.toUpperCase();
+        }
+        const match = rawText.match(/[a-zA-Z0-9]{4,6}/);
+        if (match) return match[0].toUpperCase();
+      } else {
+        const digits = rawText.replace(/[^0-9]/g, '');
+        if (/^\d{4}$/.test(digits)) return digits;
       }
-      return alphanumeric ? text.toUpperCase() : text;
+      throw new Error(`OCR trả về mã không hợp lệ: "${rawText}".`);
     } catch (error: any) {
       usage.failures++;
       const message = String(error?.message || error);
-      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY|404|not found/i.test(message)) {
+      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY/i.test(message)) {
         if (blockedKeys.size >= 128) blockedKeys.delete(blockedKeys.keys().next().value!);
         blockedKeys.set(keyHash, Date.now() + 60000);
       }

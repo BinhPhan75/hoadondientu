@@ -196,6 +196,7 @@ export interface EasyInvoiceDownloadResult {
   pdfBase64?: string;
   htmlContent?: string;
   message?: string;
+  captchaSolved?: string;
 }
 
 /**
@@ -398,6 +399,7 @@ export async function downloadOriginalEasyInvoice(
                     buffer: pdfBuf,
                     pdfBase64: pdfBuf.toString('base64'),
                     htmlContent: invoiceHtml,
+                    captchaSolved: code
                   };
                 }
               } catch (zipErr: any) {
@@ -412,6 +414,7 @@ export async function downloadOriginalEasyInvoice(
                 buffer: downloadedBuf,
                 pdfBase64: downloadedBuf.toString('base64'),
                 htmlContent: invoiceHtml,
+                captchaSolved: code
               };
             } else if (downloadedBuf.toString('utf-8', 0, 5).startsWith('%PDF')) {
               // Là file PDF trực tiếp
@@ -422,6 +425,7 @@ export async function downloadOriginalEasyInvoice(
                 buffer: downloadedBuf,
                 pdfBase64: downloadedBuf.toString('base64'),
                 htmlContent: invoiceHtml,
+                captchaSolved: code
               };
             }
           }
@@ -439,6 +443,7 @@ export async function downloadOriginalEasyInvoice(
           contentType: 'text/html',
           buffer: Buffer.from(invoiceHtml, 'utf-8'),
           htmlContent: invoiceHtml,
+          captchaSolved: code
         };
       }
     } catch (err: any) {
