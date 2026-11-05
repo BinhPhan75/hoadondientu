@@ -1,90 +1,100 @@
 import { GoogleGenAI } from '@google/genai';
+import { createHash } from 'node:crypto';
 
 export const VNPT_CAPTCHA_PROMPT =
-  'This is a 4-digit captcha image with a noisy gray background. Please ignore the background noise and strike-through lines, and focus only on identifying the 4 main numbers. Output ONLY the 4 digits, nothing else.';
-
-export const EASYINVOICE_CAPTCHA_PROMPT =
-  'This is a 4-digit EasyInvoice captcha image. Identify and extract the 4 digits clearly visible in the image. Ignore any gradient shading, noise, or background artifacts. Output ONLY the 4 digits, nothing else.';
-
+  'Read the 4 digits in this captcha image. Ignore background noise. Output ONLY the 4 digits.';
+export const EASYINVOICE_CAPTCHA_PROMPT = VNPT_CAPTCHA_PROMPT;
 export const CAPTCHA_PROMPT = VNPT_CAPTCHA_PROMPT;
+export const ALPHANUMERIC_CAPTCHA_PROMPT =
+  'Read the 4 to 6 alphanumeric characters in this captcha image. Output ONLY those characters, no explanation.';
 
-const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
-
-function getGenAI() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY chưa được cấu hình.');
-  }
-  return new GoogleGenAI({ apiKey });
+export interface CaptchaRequestOptions {
+  customApiKey?: string;
+  alphanumeric?: boolean;
+  timeoutMs?: number;
 }
 
-function toImagePart(image: Buffer | Uint8Array | string): { data: string; mimeType: string } {
-  if (Buffer.isBuffer(image) || image instanceof Uint8Array) {
-    return { data: Buffer.from(image).toString('base64'), mimeType: 'image/png' };
-  }
+type CacheEntry = { expires: number; promise: Promise<string> };
+const attempts = new Map<string, CacheEntry>();
+const blockedKeys = new Map<string, number>();
+const usage = { requests: 0, cacheHits: 0, failures: 0, inputTokens: 0, outputTokens: 0, thinkingTokens: 0 };
 
-  const source = image.trim();
-  const dataUri = source.match(/^data:(image\/[^;]+);base64,(.+)$/s);
-  if (dataUri) {
-    return { data: dataUri[2], mimeType: dataUri[1] };
-  }
+export function getCaptchaUsage() { return { ...usage }; }
 
-  return { data: source, mimeType: 'image/png' };
+function imagePart(input: Buffer | Uint8Array | string) {
+  if (typeof input === 'string') {
+    const dataUri = input.trim().match(/^data:(image\/[^;]+);base64,([\s\S]+)$/);
+    if (dataUri) return { mimeType: dataUri[1], data: dataUri[2] };
+    if (input.trim().startsWith('<svg')) return { mimeType: 'image/svg+xml', data: Buffer.from(input).toString('base64') };
+  }
+  const bytes = typeof input === 'string' ? Buffer.from(input, 'base64') : Buffer.from(input);
+  const signature = bytes.subarray(0, 12).toString('latin1');
+  const mimeType = signature.startsWith('GIF') ? 'image/gif'
+    : bytes[0] === 0xff && bytes[1] === 0xd8 ? 'image/jpeg'
+    : signature.startsWith('RIFF') ? 'image/webp'
+    : signature.startsWith('BM') ? 'image/bmp' : 'image/png';
+  return { mimeType, data: bytes.toString('base64') };
 }
 
 export async function solveCaptchaWithGemini(
-  base64Image: string | Buffer | Uint8Array,
-  customPrompt?: string
+  input: string | Buffer | Uint8Array,
+  customPrompt?: string,
+  options: CaptchaRequestOptions = {},
 ): Promise<string> {
-  const promptToUse = customPrompt || VNPT_CAPTCHA_PROMPT;
-  const image = toImagePart(base64Image);
-  const ai = getGenAI();
-
-  let lastError: any = null;
-
-  for (const modelName of CANDIDATE_MODELS) {
+  const apiKey = options.customApiKey || process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY chưa được cấu hình.');
+  if (process.env.CAPTCHA_AI_ENABLED === 'false') throw new Error('OCR AI đã tắt. Vui lòng nhập CAPTCHA thủ công.');
+  const model = process.env.CAPTCHA_AI_MODEL || 'gemini-2.5-flash-lite';
+  const keyHash = createHash('sha256').update(apiKey).digest('hex');
+  if ((blockedKeys.get(keyHash) || 0) > Date.now()) {
+    throw new Error('OCR AI đang tạm dừng sau lỗi hạn mức/cấu hình. Vui lòng nhập CAPTCHA thủ công.');
+  }
+  const image = imagePart(input);
+  const prompt = customPrompt || VNPT_CAPTCHA_PROMPT;
+  const alphanumeric = options.alphanumeric ?? /alphanumeric/i.test(prompt);
+  const fingerprint = createHash('sha256').update(JSON.stringify([keyHash, model, image, prompt, alphanumeric])).digest('hex');
+  for (const [key, entry] of attempts) {
+    if (entry.expires <= Date.now()) attempts.delete(key);
+  }
+  const existing = attempts.get(fingerprint);
+  if (existing) { usage.cacheHits++; return existing.promise; }
+  // Bound memory; refuse additional work instead of evicting an in-flight call.
+  if (attempts.size >= 512) throw new Error('OCR đang bận. Vui lòng thử lại sau.');
+  const timeoutMs = Math.min(Math.max(options.timeoutMs || 8000, 1000), 12000);
+  const work = (async () => {
     try {
+      const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } });
+      usage.requests++;
       const response = await ai.models.generateContent({
-        model: modelName,
-        contents: [
-          {
-            inlineData: {
-              data: image.data,
-              mimeType: image.mimeType,
-            },
-          },
-          promptToUse,
-        ],
+        model,
+        contents: [{ inlineData: image }, { text: prompt }],
         config: {
-          temperature: 0,
-          maxOutputTokens: 8,
+          temperature: 0, maxOutputTokens: 32,
+          ...(model.startsWith('gemini-2.5-') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+          abortSignal: AbortSignal.timeout(timeoutMs),
+          httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } },
         },
       });
-
-      const rawText = response.text || '';
-      const digits = rawText.replace(/\D/g, '');
-
-      if (digits.length === 4) {
-        return digits;
+      usage.inputTokens += response.usageMetadata?.promptTokenCount || 0;
+      usage.outputTokens += response.usageMetadata?.candidatesTokenCount || 0;
+      usage.thinkingTokens += response.usageMetadata?.thoughtsTokenCount || 0;
+      console.info('[CAPTCHA usage]', JSON.stringify({ model, ...usage }));
+      const text = (response.text || '').trim().replace(/\s/g, '');
+      if (!(alphanumeric ? /^[a-z0-9]{4,6}$/i : /^\d{4}$/).test(text)) {
+        throw new Error('OCR trả về mã không hợp lệ. Không tự cắt hoặc đoán thêm ký tự.');
       }
-
-      // If the model returned full text containing 4 digits, extract the 4-digit group
-      const match = rawText.match(/\b\d{4}\b/);
-      if (match) {
-        return match[0];
-      }
-
-      if (digits.length > 4) {
-        return digits.slice(0, 4);
-      }
-
-      throw new Error(`Gemini (${modelName}) trả về mã Captcha không hợp lệ: "${rawText.trim()}"`);
+      return alphanumeric ? text.toUpperCase() : text;
     } catch (error: any) {
-      lastError = error;
-      console.warn(`[Gemini CAPTCHA] Model ${modelName} thất bại:`, error?.message || error);
+      usage.failures++;
+      const message = String(error?.message || error);
+      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY|404|not found/i.test(message)) {
+        if (blockedKeys.size >= 128) blockedKeys.delete(blockedKeys.keys().next().value!);
+        blockedKeys.set(keyHash, Date.now() + 60000);
+      }
+      // Retain failed attempts briefly too: callers must not bill the same image again.
+      throw error;
     }
-  }
-
-  console.error('[Gemini CAPTCHA] Tất cả các model giải Captcha thất bại:', lastError?.message || lastError);
-  throw lastError || new Error('Không thể giải Captcha bằng Gemini.');
+  })();
+  attempts.set(fingerprint, { expires: Date.now() + 120000, promise: work });
+  return work;
 }

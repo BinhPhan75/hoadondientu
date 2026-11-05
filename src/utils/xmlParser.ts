@@ -1,5 +1,6 @@
 import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
+import { providerFromPortal } from './providerIdentity';
 import { detectProvider } from '../services/invoice-engine/providerDetector';
 
 /**
@@ -629,8 +630,7 @@ export function isThaiSonSource(source: any): boolean {
     tentcgp.includes('THÁI SƠN') ||
     tentcgp.includes('THAISON') ||
     provider === 'THAISON' ||
-    lookupUrl.includes('einvoice.vn') ||
-    lookupUrl.includes('thaison.vn')
+    providerFromPortal(lookupUrl) === 'THAISON'
   );
 }
 
@@ -661,28 +661,10 @@ export function isMisaSource(source: any): boolean {
   const msttcgp = String(getPayloadValue(source, ['msttcgp', 'mst_tcgp', 'tvandnkntt', 'MSTTCGP']) || '');
   const tentcgp = String(getPayloadValue(source, ['tentcgp', 'ten_tcgp', 'TCGP', 'TenTCGP']) || '').toUpperCase();
   const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
-  const nbmst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan', 'MST']) || '');
-  const nbten = String(getPayloadValue(source, ['nbten', 'nbtnnt', 'sellerName', 'supplierName', 'Ten']) || '').toUpperCase();
-  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
-
-  return (
-    msttcgp === '0101243150' || // MISA
-    tentcgp.includes('MISA') ||
-    provider.includes('MISA') ||
-    nbmst === '0317978711' || // TÂN THANH DANH
-    nbmst === '0312105174' || // TÀI TRÂM ANH
-    nbmst === '0400557356' || // XUÂN VINH
-    nbmst === '0101243150' ||
-    nbten.includes('TÂN THANH DANH') ||
-    nbten.includes('TAN THANH DANH') ||
-    nbten.includes('TÀI TRÂM ANH') ||
-    nbten.includes('TAI TRAM ANH') ||
-    nbten.includes('XUÂN VINH') ||
-    nbten.includes('XUAN VINH') ||
-    nbten.includes('ĐẠI ĐOÀN KẾT') ||
-    nbten.includes('DAI DOAN KET') ||
-    lookupUrl.includes('meinvoice.vn')
-  );
+  const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '');
+  const portalProvider = providerFromPortal(lookupUrl);
+  if (portalProvider) return portalProvider === 'MISA';
+  return msttcgp === '0101243150' || tentcgp.includes('MISA') || provider === 'MISA';
 }
 
 /** Lấy mã tra cứu từ payload JSON của Cổng Thuế/API. */
@@ -1087,16 +1069,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
 
   // Chuẩn hóa đường dẫn tra cứu cho từng nhà cung cấp:
   // 6a. MISA meInvoice: Cổng tra cứu luôn là https://www.meinvoice.vn/tra-cuu
-  const isMisa = /meinvoice\.vn|misa\.vn/i.test(rawXml) || 
-    /0101243150/i.test(rawXml) || 
-    /MISA meInvoice/i.test(rawXml) ||
-    /0317978711/i.test(rawXml) || // Tân Thanh Danh
-    /0312105174/i.test(rawXml) || // Tài Trâm Anh
-    /0400557356/i.test(rawXml) || // Xuân Vinh
-    /TÂN THANH DANH|TAN THANH DANH/i.test(rawXml) ||
-    /TÀI TRÂM ANH|TAI TRAM ANH/i.test(rawXml) ||
-    /XUÂN VINH|XUAN VINH/i.test(rawXml) ||
-    /BÁO ĐẠI ĐOÀN KẾT|BAO DAI DOAN KET|daidoanket\.vn/i.test(rawXml);
+  const isMisa = detectProvider(rawXml) === 'MISA';
 
   if (isMisa) {
     lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
@@ -1177,7 +1150,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   // 6j. Thái Sơn E-Invoice
-  const isThaiSon = /einvoice\.vn|thaison\.vn|0101300842/i.test(rawXml);
+  const isThaiSon = detectProvider(rawXml) === 'THAISON';
   if (isThaiSon) {
     if (!lookupUrl) lookupUrl = 'https://einvoice.vn/tra-cuu';
   }

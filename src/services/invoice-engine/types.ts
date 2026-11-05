@@ -41,6 +41,7 @@ export interface DownloadResult {
 }
 
 export interface DownloadOptions {
+  recaptchaToken?: string;
   timeoutMs?: number; // Thời gian chờ tối đa (ms)
   maxRetries?: number; // Số lần thử lại
   forceFallback?: boolean; // Ép dùng GenericFallbackDriver

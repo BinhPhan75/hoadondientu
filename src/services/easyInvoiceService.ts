@@ -3,7 +3,6 @@ import * as cheerio from 'cheerio';
 import zlib from 'zlib';
 import JSZip from 'jszip';
 import https from 'https';
-import { GoogleGenAI } from '@google/genai';
 import { solveCaptchaWithGemini, EASYINVOICE_CAPTCHA_PROMPT } from './invoice-engine/captcha/geminiCaptchaSolver';
 import { solveCaptchaWithTesseract } from './invoice-engine/captcha/tesseractCaptchaSolver';
 
@@ -15,16 +14,6 @@ const isServerless = Boolean(
   process.env.LAMBDA_TASK_ROOT ||
   process.env.NETLIFY
 );
-
-let aiClient: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient) {
-    aiClient = new GoogleGenAI({ apiKey });
-  }
-  return aiClient;
-}
 
 /**
  * Giải mã ảnh PNG RGBA chuẩn từ ASP.NET Captcha
@@ -162,7 +151,7 @@ export async function solveEasyInvoiceCaptcha(captchaBuf: Buffer): Promise<{ cod
         return { code: digits, confidence: 99, engine: 'gemini' };
       }
     } catch (geminiErr: any) {
-      console.warn(`[EasyInvoice] Gemini trên Vercel gặp lỗi: ${geminiErr.message}, thử phương án tiếp theo...`);
+      throw geminiErr;
     }
   }
 

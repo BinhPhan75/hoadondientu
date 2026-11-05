@@ -1,4 +1,5 @@
 import { GDTInvoice } from '../types';
+import { providerFromPortal } from '../utils/providerIdentity';
 import { extractLookupDetailsFromXml, numberToVietnameseWords } from '../utils/xmlParser';
 
 export { numberToVietnameseWords };
@@ -113,19 +114,10 @@ export function buildDirectLookupUrl(
     }
   }
 
-  // 1. MISA meInvoice
-  // Nếu thuộc MISA (hoặc các mẫu đối tác dùng MISA: Tài Trâm Anh, Xuân Vinh, Tân Thanh Danh),
-  // hoặc URL chứa meinvoice.vn, hoặc URL bị gán nhầm domain người bán (như daidoanket.vn)
-  const isMisa = provider.includes('MISA') ||
-    provider.includes('TAI_TRAM_ANH') ||
-    provider.includes('XUAN_VINH') ||
-    provider.includes('TAN_THANH_DANH') ||
-    sellerTaxCode === '0317978711' || // Tân Thanh Danh
-    sellerTaxCode === '0312105174' || // Tài Trâm Anh
-    sellerTaxCode === '0400557356' || // Xuân Vinh
-    sellerTaxCode === '0101243150' || // MISA
-    /meinvoice\.vn/i.test(url) ||
-    /daidoanket\.vn/i.test(url);
+  const portalProvider = providerFromPortal(url);
+  if (portalProvider === 'THAISON' || provider === 'THAISON') return 'https://einvoice.vn/tra-cuu';
+  if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') return 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
+  const isMisa = portalProvider ? portalProvider === 'MISA' : provider === 'MISA';
 
   if (isMisa) {
     const baseMisaUrl = 'https://www.meinvoice.vn/tra-cuu';

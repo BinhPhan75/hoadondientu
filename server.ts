@@ -21,6 +21,7 @@ import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFo
 import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceService';
 import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
+import { resolveInvoiceProvider } from './src/utils/providerRouting';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 import {
   initDatabase,
@@ -318,26 +319,7 @@ function cleanGdtSvgNoise(svg: string): string {
   return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
 }
 
-// Gemini AI OCR Client Lazy Initializer
-import { GoogleGenAI } from '@google/genai';
-
-let geminiAiClient: GoogleGenAI | null = null;
-let geminiSpendingCapBlockedUntil = 0;
-let geminiRateLimitBlockedUntil = 0;
-
-function getGeminiClient(customKey?: string): GoogleGenAI | null {
-  const apiKey = customKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!geminiAiClient || customKey) {
-    const client = new GoogleGenAI({
-      apiKey,
-      httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-    });
-    if (!customKey) geminiAiClient = client;
-    return client;
-  }
-  return geminiAiClient;
-}
+import { solveCaptchaWithGemini, ALPHANUMERIC_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
 
 interface OCRResult {
   code: string;
@@ -390,80 +372,15 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
     }
   }
 
-  // Tier 2: Gemini Vision AI (if key provided or available)
-  const activeAi = getGeminiClient(customApiKey);
-  if (activeAi && (customApiKey || Date.now() > geminiSpendingCapBlockedUntil && Date.now() > geminiRateLimitBlockedUntil)) {
-    const candidateModels = [
-      'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-flash-latest'
-    ];
-
-    const svgBase64 = !isBitmap ? Buffer.from(rawSvg, 'utf-8').toString('base64') : '';
-    const contentsPayload: any[] = isBitmap && bitmapBase64
-      ? [
-          {
-            inlineData: {
-              mimeType: bitmapMime,
-              data: bitmapBase64
-            }
-          },
-          {
-            text: 'This is a captcha image from Vietnamese tax portal. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation.'
-          }
-        ]
-      : [
-          {
-            inlineData: {
-              mimeType: 'image/svg+xml',
-              data: svgBase64
-            }
-          },
-          {
-            text: `This is a Vietnamese GDT tax portal captcha image (noise lines removed).
-Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the SVG image. Return only the exact characters without spaces, markdown, or punctuation.
-Do not infer a code from metadata or source text; read the rendered image itself.`
-          }
-        ];
-
-    for (const modelName of candidateModels) {
-      try {
-        const ocrPromise = activeAi.models.generateContent({
-          model: modelName,
-          contents: contentsPayload
-        });
-
-        const timeoutPromise = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), 7000)
-        );
-
-        const aiResp = await Promise.race([ocrPromise, timeoutPromise]) as any;
-        if (aiResp && aiResp.text) {
-          const extracted = aiResp.text.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-          if (extracted && extracted.length >= 4 && extracted.length <= 6) {
-            console.log(`[Gemini OCR (${modelName})] Successfully recognized Captcha: "${extracted}"`);
-            return { code: extracted, modelUsed: modelName };
-          }
-        }
-        break;
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        if (msg.includes('spending cap')) {
-          if (!customApiKey) geminiSpendingCapBlockedUntil = Date.now() + 15 * 60 * 1000;
-          break;
-        }
-        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
-          if (!customApiKey) geminiRateLimitBlockedUntil = Date.now() + 60 * 1000;
-          break;
-        }
-      }
-    }
+  try {
+    const image = isBitmap
+      ? 'data:' + bitmapMime + ';base64,' + bitmapBase64
+      : 'data:image/svg+xml;base64,' + Buffer.from(rawSvg, 'utf8').toString('base64');
+    const code = await solveCaptchaWithGemini(image, ALPHANUMERIC_CAPTCHA_PROMPT, { customApiKey, alphanumeric: true });
+    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || 'gemini-2.5-flash-lite' };
+  } catch (error: any) {
+    return { code: '', error: error.message || 'Không nhận diện được CAPTCHA. Vui lòng nhập thủ công.' };
   }
-
-  return {
-    code: '',
-    error: 'Không tự động nhận diện được mã Captcha. Vui lòng nhìn hình và nhập mã thủ công.'
-  };
 }
 
 // 1. Health check
@@ -1694,28 +1611,16 @@ app.post('/api/invoice-downloader/detect', async (req, res) => {
 // 14. Multi-provider Invoice Downloader API: Download Original PDF / Fallback
 app.post('/api/invoice-downloader/download', async (req, res) => {
   try {
-    const { xml, forceFallback, timeoutMs, overrideProvider, customInfo } = req.body;
+    const { xml, forceFallback, timeoutMs, overrideProvider, customInfo, recaptchaToken } = req.body;
     if (!xml) {
       return res.status(400).json({ error: 'Nội dung XML không được để trống' });
     }
 
-    let requestedProvider = String(overrideProvider || customInfo?.provider || '').trim().toUpperCase();
-    // Provider markers in the XML are authoritative. This prevents a stale
-    // provider badge from routing Thai Son/M-Invoice invoices through MISA.
-    const upperXml = String(xml).toUpperCase();
-    const sellerTaxCode = String(customInfo?.sellerTaxCode || '').replace(/\D/g, '');
-    if (/MINVOICE|TRACUUHOADON\.MINVOICE|MINVOICE\.COM\.VN|0106026495/.test(upperXml)) {
-      requestedProvider = 'MINVOICE';
-    } else if (/EINVOICE\.VN|THAISON|0101300842/.test(upperXml)) {
-      requestedProvider = 'THAISON';
-    } else if (/EHOADON\.VN|BKAV|0101360697/.test(upperXml)) {
-      requestedProvider = 'BKAV';
-    } else if ((!requestedProvider || requestedProvider === 'UNKNOWN' || requestedProvider === 'GENERIC') && (
-      /MSTTCGP[^0-9]{0,20}0101243150|MEINVOICE|MISA(?:-CA| CA)?/.test(upperXml) ||
-      ['0317978711', '0312105174', '0400557356', '0101243150'].includes(sellerTaxCode)
-    )) {
-      requestedProvider = 'MISA';
-    }
+    const requestedProvider = resolveInvoiceProvider({
+      rawXml: xml, lookupUrl: customInfo?.lookupUrl,
+      msttcgp: customInfo?.msttcgp, tentcgp: customInfo?.tentcgp,
+      provider: overrideProvider || customInfo?.provider,
+    });
 
     // VNPT has a legacy portal flow with its own cookie/check-code session.
     // It is more reliable than the generic driver and must be used for both
@@ -1789,6 +1694,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
     }
 
     const result = await invoiceManager.downloadInvoicePdf(xml, {
+      recaptchaToken,
       forceFallback: Boolean(forceFallback),
       timeoutMs: timeoutMs ? Number(timeoutMs) : undefined,
       overrideProvider: requestedProvider || overrideProvider,
@@ -1799,7 +1705,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
     if (!forceFallback && result.isFallback) {
       return res.status(502).json({
         success: false,
-        error: `Nhà cung cấp ${result.provider || overrideProvider || 'hóa đơn'} không trả về được PDF gốc.`,
+        error: result.error || `Nhà cung cấp ${result.provider || overrideProvider || 'hóa đơn'} không trả về được PDF gốc.`,
         provider: result.provider,
         executionLogs: result.executionLogs
       });
@@ -1823,7 +1729,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
       pdfBase64: result.pdfBase64
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(error.status || 502).json({ success: false, error: error.message, code: error.code, provider: error.provider, requiresCaptcha: error.code === 'RECAPTCHA_REQUIRED', lookupUrl: error.lookupUrl });
   }
 });
 

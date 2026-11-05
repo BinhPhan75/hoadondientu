@@ -6,14 +6,14 @@
  * Cơ chế tra cứu:
  * - Tham số 1: Mã số thuế bên bán (masothue / sellerTaxCode)
  * - Tham số 2: Số bảo mật (sobaomat / lookupCode / checkCode)
- * - Endpoint tải PDF: GET /api/Search/SearchInvoice?masothue=...&sobaomat=...&type=PDF&inchuyendoi=false
+ * - PDF: GET /api/Search/SearchInvoiceCaptcha + X-Recaptcha-Token from the official portal
  * - Endpoint tải XML: GET /api/Search/DownloadXml?masothue=...&sobaomat=...
  */
 
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
-import { GenericFallbackDriver } from './GenericFallbackDriver';
+import { OriginalInvoiceError } from '../OriginalInvoiceError';
 import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
 
 export class MinvoiceDriver extends BaseInvoiceProviderDriver {
@@ -24,11 +24,9 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     providerCode: 'MINVOICE',
     description: 'Tra cứu & tải hóa đơn điện tử gốc M-Invoice (minvoice.vn) qua Mã số thuế bên bán và Số bảo mật',
     sampleUrl: 'https://tracuuhoadon.minvoice.com.vn',
-    supportsCaptcha: false,
+    supportsCaptcha: true,
     requiredFields: ['sellerTaxCode', 'lookupCode']
   };
-
-  private fallback = new GenericFallbackDriver();
 
   canHandle(xmlData: string | ExtractedInvoiceInfo): boolean {
     if (typeof xmlData !== 'string') {
@@ -110,149 +108,43 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
   }
 
   async fetchPdf(info: ExtractedInvoiceInfo, options?: DownloadOptions): Promise<DownloadResult> {
-    const logs: string[] = [];
-    const timeoutMs = options?.timeoutMs || 25000;
-
-    this.createLog(`[M-Invoice] Bắt đầu tra cứu hóa đơn: Ký hiệu ${info.invoiceSeries}, Số ${info.invoiceNo}`, logs);
-
-    const sellerTaxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
+    const portal = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
+    const taxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
     const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || '').trim();
-
-    if (!sellerTaxCode) {
-      this.createLog(`[M-Invoice] Thiếu Mã số thuế bên bán (sellerTaxCode). Chuyển sang Render PDF chuẩn GDT.`, logs);
-      const fallbackRes = await this.fallback.fetchPdf(info, options);
+    if (!taxCode || !lookupCode || lookupCode === info.cqtCode) {
+      throw new OriginalInvoiceError('MINVOICE thiếu MST bên bán hoặc Số bảo mật. Mã cơ quan thuế không thay thế Số bảo mật.', this.providerCode, 'LOOKUP_DATA_MISSING', 422, portal);
+    }
+    // The public portal now uses reCAPTCHA v3, not an OCR image challenge.
+    if (!options?.recaptchaToken) {
+      throw new OriginalInvoiceError('MINVOICE yêu cầu xác thực Google reCAPTCHA trên cổng tra cứu. Hãy mở cổng MINVOICE để tải PDF gốc.', this.providerCode, 'RECAPTCHA_REQUIRED', 428, portal);
+    }
+    const url = new URL('/api/Search/SearchInvoiceCaptcha', portal);
+    url.search = new URLSearchParams({ masothue: taxCode, sobaomat: lookupCode, type: 'PDF', inchuyendoi: 'false' }).toString();
+    const response = await fetch(url, {
+      headers: { Accept: 'application/pdf', Referer: portal, 'X-Recaptcha-Token': options.recaptchaToken },
+      signal: AbortSignal.timeout(Math.min(options.timeoutMs || 20000, 30000)),
+    }).catch((error: Error) => {
+      throw new OriginalInvoiceError('MINVOICE: ' + error.message, this.providerCode, 'PROVIDER_CONNECTION_FAILED', 502, portal);
+    });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (response.ok && buffer.subarray(0, 5).toString() === '%PDF-') {
       return {
-        ...fallbackRes,
-        provider: this.providerCode,
-        driverName: this.name,
-        executionLogs: [...logs, ...fallbackRes.executionLogs]
+        success: true, provider: this.providerCode, driverName: this.name,
+        pdfBuffer: buffer, pdfBase64: buffer.toString('base64'), contentType: 'application/pdf',
+        filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: url.href, executionLogs: [],
       };
     }
-
-    if (!lookupCode) {
-      this.createLog(`[M-Invoice] Hóa đơn không có Số bảo mật (lookupCode / checkCode). Chuyển sang Render PDF chuẩn GDT.`, logs);
-      const fallbackRes = await this.fallback.fetchPdf(info, options);
-      return {
-        ...fallbackRes,
-        provider: this.providerCode,
-        driverName: this.name,
-        executionLogs: [...logs, ...fallbackRes.executionLogs]
-      };
-    }
-
-    this.createLog(`[M-Invoice] Gửi yêu cầu tải PDF gốc: MST ${sellerTaxCode}, Số bảo mật: ${lookupCode}`, logs);
-
+    let message = '';
     try {
-      // Endpoint chính thức của Cổng M-Invoice (tracuuhoadon.minvoice.com.vn)
-      const targetUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
-        sellerTaxCode
-      )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-      const resp = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/pdf, application/octet-stream, */*',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Referer': 'https://tracuuhoadon.minvoice.com.vn/',
-          'Origin': 'https://tracuuhoadon.minvoice.com.vn'
-        },
-        signal: controller.signal
-      });
-
-      clearTimeout(timer);
-
-      if (resp.ok) {
-        const arrayBuf = await resp.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-
-        // Kiểm tra chữ ký file PDF (%PDF)
-        if (buffer.length >= 500 && buffer.subarray(0, 10).toString('latin1').includes('%PDF')) {
-          this.createLog(`[M-Invoice] Đã tải thành công file PDF gốc từ server M-Invoice (${(buffer.length / 1024).toFixed(1)} KB)`, logs);
-          const filename = this.buildPdfFilename(info);
-          return {
-            success: true,
-            provider: this.providerCode,
-            driverName: this.name,
-            pdfBuffer: buffer,
-            pdfBase64: buffer.toString('base64'),
-            contentType: 'application/pdf',
-            filename,
-            isFallback: false,
-            sourceUrl: targetUrl,
-            executionLogs: logs
-          };
-        } else {
-          this.createLog(`[M-Invoice] Phản hồi từ server không phải định dạng PDF hợp lệ (Size: ${buffer.length} bytes)`, logs);
-
-          // Newer M-Invoice deployments may wrap the PDF/link in JSON instead
-          // of returning application/pdf directly.
-          const bodyText = buffer.toString('utf8').trim();
-          try {
-            const payload = JSON.parse(bodyText);
-            const findPdfCandidate = (value: any, depth = 0): string | undefined => {
-              if (depth > 4 || value == null) return undefined;
-              if (typeof value === 'string') return value;
-              if (Array.isArray(value)) {
-                for (const item of value) {
-                  const found = findPdfCandidate(item, depth + 1);
-                  if (found) return found;
-                }
-                return undefined;
-              }
-              if (typeof value === 'object') {
-                for (const key of ['data', 'Data', 'pdfBase64', 'fileData', 'pdf', 'PDF', 'url', 'Url', 'downloadUrl', 'fileUrl']) {
-                  const found = findPdfCandidate(value[key], depth + 1);
-                  if (found) return found;
-                }
-              }
-              return undefined;
-            };
-            const candidate = findPdfCandidate(payload);
-            if (typeof candidate === 'string' && candidate.length > 100) {
-              const base64 = candidate.replace(/^data:application\/pdf;base64,/i, '');
-              const jsonPdf = /^[A-Za-z0-9+/=]+$/.test(base64) ? Buffer.from(base64, 'base64') : null;
-              if (jsonPdf && jsonPdf.length > 500 && jsonPdf.toString('latin1', 0, 5).startsWith('%PDF')) {
-                return {
-                  success: true, provider: this.providerCode, driverName: this.name,
-                  pdfBuffer: jsonPdf, pdfBase64: jsonPdf.toString('base64'), contentType: 'application/pdf',
-                  filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: targetUrl, executionLogs: logs
-                };
-              }
-              if (/^https?:\/\//i.test(candidate)) {
-                const linked = await fetch(candidate, { headers: { Accept: 'application/pdf,*/*', Referer: targetUrl }, signal: AbortSignal.timeout(timeoutMs) });
-                const linkedBuffer = Buffer.from(await linked.arrayBuffer());
-                if (linked.ok && linkedBuffer.toString('latin1', 0, 5).startsWith('%PDF')) {
-                  return {
-                    success: true, provider: this.providerCode, driverName: this.name,
-                    pdfBuffer: linkedBuffer, pdfBase64: linkedBuffer.toString('base64'), contentType: 'application/pdf',
-                    filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: candidate, executionLogs: logs
-                  };
-                }
-              }
-            }
-          } catch {
-            // The response may be an HTML error page; continue to the fallback.
-          }
-        }
-      } else {
-        this.createLog(`[M-Invoice] Server phản hồi mã trạng thái HTTP ${resp.status} ${resp.statusText}`, logs);
-      }
-    } catch (err: any) {
-      this.createLog(`[M-Invoice] Lỗi kết nối tới server M-Invoice: ${err.message}`, logs);
-    }
-
-    // Nếu không tải được trực tiếp từ API server M-Invoice (hoặc server yêu cầu xác thực thêm)
-    this.createLog(`[M-Invoice] Chuyển đổi sang bộ tạo PDF vector chất lượng cao chuẩn NĐ 123/2020/NĐ-CP`, logs);
-    const fallbackRes = await this.fallback.fetchPdf(info, options);
-    return {
-      ...fallbackRes,
-      provider: this.providerCode,
-      driverName: this.name,
-      executionLogs: [...logs, ...fallbackRes.executionLogs]
-    };
+      const body = JSON.parse(buffer.toString('utf8'));
+      message = String(body.message || body.Message || body.error || '').slice(0, 300);
+    } catch { /* HTML error pages are not PDF documents. */ }
+    const captchaRequired = /captcha/i.test(message) || [401, 403, 428].includes(response.status);
+    throw new OriginalInvoiceError(
+      captchaRequired ? 'MINVOICE yêu cầu xác thực lại Google reCAPTCHA trên cổng tra cứu.' : ('MINVOICE: ' + (message || 'Không nhận được PDF hợp lệ (HTTP ' + response.status + ').')),
+      this.providerCode, captchaRequired ? 'RECAPTCHA_REQUIRED' : 'ORIGINAL_DOWNLOAD_FAILED',
+      captchaRequired ? 428 : 502, portal,
+    );
   }
 
   /**

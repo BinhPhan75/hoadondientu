@@ -1,56 +1,39 @@
-import { GDTInvoice } from '../types';
+import type { GDTInvoice } from '../types';
+import { extractTagValue } from './xmlParser';
+import { providerFromPortal, providerFromXmlPortal, SOLUTION_PROVIDERS } from './providerIdentity';
 
 const KNOWN_PROVIDERS = new Set([
   'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', '4SI', 'LCS', 'MINVOICE', 'THAISON',
-  'BKAV', 'THAISON', 'CYBERBILL', 'VNPAY', 'FPT', 'LCS_SOFT'
+  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT',
 ]);
 
-/** Resolve the provider from the strongest identifiers available on the invoice. */
+/** Use invoice portal/solution metadata before older inferred provider labels. */
 export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | undefined): string | undefined {
   if (!invoice) return undefined;
-  const rawXml = String((invoice as any).rawXml || '').toLowerCase();
-  const lookupUrl = String(invoice.lookupUrl || '').toLowerCase();
-  const providerText = `${String(invoice.tentcgp || '')} ${String(invoice.caProvider || '')}`.toLowerCase();
-
-  // Portal URL/solution-provider markers are stronger than a stale UI badge
-  // copied from a previous detector result.
-  if (lookupUrl.includes('einvoice.vn') || lookupUrl.includes('thaison') || rawXml.includes('einvoice.vn') || rawXml.includes('0101300842') || providerText.includes('thái sơn') || providerText.includes('thaison')) return 'THAISON';
-  if (lookupUrl.includes('minvoice') || rawXml.includes('minvoice') || rawXml.includes('0106026495') || providerText.includes('minvoice')) return 'MINVOICE';
-  if (lookupUrl.includes('ehoadon') || lookupUrl.includes('bkav') || rawXml.includes('ehoadon.vn') || rawXml.includes('0101360697')) return 'BKAV';
-
-  const provider = String(invoice.provider || '').trim().toUpperCase();
-  if (KNOWN_PROVIDERS.has(provider)) return provider === 'LCS_SOFT' ? 'LCS' : provider;
-  if (provider.includes('VNPT')) return 'VNPT';
-  if (provider.includes('MISA')) return 'MISA';
-  if (provider.includes('EASY') || provider.includes('SOFTDREAMS')) return 'EASYINVOICE';
-  if (provider.includes('VIETTEL')) return 'VIETTEL';
-  if (provider.includes('MINVOICE') || provider.includes('M-INVOICE')) return 'MINVOICE';
-  if (provider.includes('THAISON') || provider.includes('THÁI SƠN')) return 'THAISON';
-
-  const msttcgp = String(invoice.msttcgp || '').replace(/\D/g, '');
-  if (msttcgp === '0101243150') return 'MISA';
-  if (msttcgp === '0100684378' || msttcgp === '0100686209') return 'VNPT';
-  if (msttcgp === '0100109106') return 'VIETTEL';
-  if (msttcgp === '0105987432') return 'EASYINVOICE';
-  if (msttcgp === '0315744883' || msttcgp === '0302999571') return '4SI';
-  if (msttcgp === '0106026495') return 'MINVOICE';
-  if (msttcgp === '0101300842') return 'THAISON';
-  if (msttcgp === '0101360697') return 'BKAV';
-
-  const sellerTaxCode = String(invoice.nbmst || '').replace(/\D/g, '');
-  if (['0317978711', '0312105174', '0400557356', '0101243150'].includes(sellerTaxCode)) return 'MISA';
-
-  if (lookupUrl.includes('vnpt')) return 'VNPT';
-  if (lookupUrl.includes('easyinvoice') || lookupUrl.includes('softdreams')) return 'EASYINVOICE';
-  if (lookupUrl.includes('meinvoice') || lookupUrl.includes('misa')) return 'MISA';
-  if (lookupUrl.includes('viettel')) return 'VIETTEL';
-  if (lookupUrl.includes('minvoice')) return 'MINVOICE';
-  if (lookupUrl.includes('einvoice.vn') || lookupUrl.includes('thaison')) return 'THAISON';
-  if (lookupUrl.includes('ehoadon') || lookupUrl.includes('bkav')) return 'BKAV';
-  if (providerText.includes('vnpt')) return 'VNPT';
-  if (providerText.includes('misa')) return 'MISA';
-  if (providerText.includes('easy') || providerText.includes('softdreams')) return 'EASYINVOICE';
-  if (providerText.includes('viettel')) return 'VIETTEL';
-  if (rawXml.includes('meinvoice') || rawXml.includes('0101243150') || rawXml.includes('misa-ca')) return 'MISA';
-  return undefined;
+  const xml = String(invoice.rawXml || '');
+  const xmlPortal = providerFromXmlPortal(xml);
+  if (xmlPortal) return xmlPortal;
+  for (const tag of ['Website', 'Wsite', 'DLTCuu', 'URLTraCuu', 'LinkTraCuu', 'lookupUrl']) {
+    const provider = providerFromPortal(extractTagValue(xml, tag));
+    if (provider) return provider;
+  }
+  const xmlTax = extractTagValue(xml, 'MSTTCGP').replace(/\D/g, '');
+  if (SOLUTION_PROVIDERS[xmlTax]) return SOLUTION_PROVIDERS[xmlTax];
+  const tax = String(invoice.msttcgp || '').replace(/\D/g, '');
+  if (SOLUTION_PROVIDERS[tax]) return SOLUTION_PROVIDERS[tax];
+  const portal = providerFromPortal(String(invoice.lookupUrl || ''));
+  if (portal) return portal;
+  const name = ([extractTagValue(xml, 'TenTCGP'), extractTagValue(xml, 'TCGP'), extractTagValue(xml, 'ToChucGiaiPhap'), invoice.tentcgp || ''].join(' '))
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  for (const [pattern, provider] of [
+    [/THAI\s*SON/, 'THAISON'], [/M-?INVOICE/, 'MINVOICE'], [/MISA/, 'MISA'],
+    [/VNPT/, 'VNPT'], [/VIETTEL/, 'VIETTEL'], [/SOFTDREAMS|EASYINVOICE/, 'EASYINVOICE'],
+    [/BKAV/, 'BKAV'],
+    [/L\.?C\.?S\b|LCSSOFT/, 'LCS'], [/VNPAY|THANH TOAN VIET NAM/, 'VNPAY'],
+    [/FPT/, 'FPT'], [/4SI/, '4SI'], [/CYBERLOTUS|CYBERBILL/, 'CYBERBILL'],
+  ] as const) {
+    if (pattern.test(name)) return provider;
+  }
+  const provider = String(invoice.provider || '').trim().toUpperCase().replace('LCS_SOFT', 'LCS');
+  return KNOWN_PROVIDERS.has(provider) ? provider : undefined;
 }

@@ -8,7 +8,7 @@ export class CaptchaSolver {
   ): Promise<CaptchaSolveResult | null> {
     try {
       const startTime = Date.now();
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
       return {
         code,
         confidence: 99,
@@ -50,7 +50,7 @@ export class CaptchaSolver {
     }
 
     try {
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt);
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
       return {
         code,
         confidence: 99,

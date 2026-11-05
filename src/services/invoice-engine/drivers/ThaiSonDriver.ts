@@ -8,6 +8,8 @@ import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata }
 import { detectProvider } from '../providerDetector';
 import { GenericFallbackDriver } from './GenericFallbackDriver';
 import { downloadOriginalThaiSonPdf } from '../../thaiSonInvoiceService';
+import { OriginalInvoiceError } from '../OriginalInvoiceError';
+import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
 
 export class ThaiSonDriver extends BaseInvoiceProviderDriver {
   readonly name = 'Thái Sơn E-Invoice Driver';
@@ -39,9 +41,12 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    let lookupCode = this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'Mã nhận hóa đơn']) || 
+    const lookupCode = this.extractXmlTag(xmlData, 'MaNhanHoaDon') ||
+                     this.extractXmlTag(xmlData, 'MaNhanHDon') ||
+                     this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'Mã nhận hóa đơn']) ||
                      this.extractXmlTag(xmlData, 'MTCuu') || 
-                     this.extractXmlTag(xmlData, 'MaTraCuu');
+                     this.extractXmlTag(xmlData, 'MaTraCuu') ||
+                     extractLookupDetailsFromXml(xmlData).lookupCode;
 
     return {
       provider: this.providerCode,
@@ -66,16 +71,17 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     const logs: string[] = [];
     this.createLog(`Khởi động xử lý HĐĐT Thái Sơn E-Invoice: Số ${info.invoiceNo}, Ký hiệu ${info.invoiceSeries}`, logs);
 
-    if (info.lookupCode && !options?.forceFallback) {
+    if (info.lookupCode && info.lookupCode !== info.cqtCode && !options?.forceFallback) {
       try {
-        this.createLog(`Tìm thấy mã nhận hóa đơn Thái Sơn: "${info.lookupCode}"`, logs);
+        this.createLog('Đã có Mã nhận hóa đơn Thái Sơn.', logs);
         this.createLog(`Đang gửi yêu cầu giải Captcha & tải PDF gốc từ cổng Thái Sơn (einvoice.vn)...`, logs);
 
         const result = await downloadOriginalThaiSonPdf({
           lookupCode: info.lookupCode,
           sellerTaxCode: info.sellerTaxCode,
           invoiceNo: info.invoiceNo,
-          invoiceSeries: info.invoiceSeries
+          invoiceSeries: info.invoiceSeries,
+          timeoutMs: options?.timeoutMs
         });
 
         this.createLog(`Đã tải thành công tệp PDF gốc từ cổng Thái Sơn: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
@@ -94,10 +100,10 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
           executionLogs: logs
         };
       } catch (err: any) {
-        this.createLog(`Tải PDF gốc Thái Sơn chưa thành công: ${err.message}. Tự động chuyển sang bộ tạo bản thể hiện vector chuẩn QĐ 1450.`, logs);
+        throw err instanceof OriginalInvoiceError ? err : new OriginalInvoiceError(err.message, this.providerCode);
       }
-    } else if (!info.lookupCode) {
-      this.createLog(`Hóa đơn XML không chứa mã nhận hóa đơn Thái Sơn. Chuyển sang bộ tạo bản thể hiện vector QĐ 1450.`, logs);
+    } else if (!options?.forceFallback && (!info.lookupCode || info.lookupCode === info.cqtCode)) {
+      throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn. Mã cơ quan thuế không thay thế mã này.', this.providerCode, 'LOOKUP_DATA_MISSING', 422);
     }
 
     const fallbackRes = await this.fallback.fetchPdf(info, options);

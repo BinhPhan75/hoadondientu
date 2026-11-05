@@ -3,9 +3,7 @@
  * Tự động giải Captcha bằng Gemini AI & Tải file PDF hóa đơn gốc từ cổng CyberBill.
  */
 
-import { GoogleGenAI } from '@google/genai';
 import { solveCaptchaWithGemini } from './invoice-engine/captcha/geminiCaptchaSolver';
-import { solveCaptchaWithTesseract } from './invoice-engine/captcha/tesseractCaptchaSolver';
 
 export const CYBERBILL_PORTAL_URL = 'https://cyberbill.vn/tra-cuu';
 const CYBERBILL_API_BASE = 'https://bill1app.xcyber.vn/api/services/hddt/TraCuuHoaDon';
@@ -29,78 +27,8 @@ export interface CyberBillDownloadResult {
   error?: string;
 }
 
-let aiClient: GoogleGenAI | null = null;
-function getGenAI(customApiKey?: string): GoogleGenAI | null {
-  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
-  if (!aiClient || customApiKey) {
-    aiClient = new GoogleGenAI({ apiKey });
-  }
-  return aiClient;
-}
-
-/**
- * Giải captcha CyberBill bằng Gemini AI hoặc Tesseract OCR
- */
 async function solveCyberBillCaptcha(imageDataUri: string, customApiKey?: string): Promise<string> {
-  const ai = getGenAI(customApiKey);
-  if (ai) {
-    try {
-      const match = imageDataUri.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
-      const mimeType = match ? match[1] : 'image/jpeg';
-      const base64Data = match ? match[2] : imageDataUri;
-
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
-      for (const modelName of candidateModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Data
-                }
-              },
-              {
-                text: 'This is a captcha image from CyberBill e-invoice portal. Extract and return ONLY the 4 to 6 uppercase alphanumeric characters shown in the image. Return only the exact characters without spaces, markdown, or punctuation.'
-              }
-            ]
-          });
-          const text = (response.text || '').replace(/[^A-Za-z0-9]/g, '').trim().toUpperCase();
-          if (text.length >= 4) {
-            return text;
-          }
-        } catch {
-          // try next model
-        }
-      }
-    } catch {
-      // Fallback
-    }
-  }
-
-  // Cố gắng giải bằng geminiCaptchaSolver hoặc tesseract
-  try {
-    const code = await solveCaptchaWithGemini(
-      imageDataUri,
-      'This is a captcha image. Extract and return ONLY the 4 to 6 alphanumeric characters without spaces.'
-    );
-    const cleaned = code.replace(/[^A-Za-z0-9]/g, '').trim().toUpperCase();
-    if (cleaned.length >= 4) return cleaned;
-  } catch {
-    // try tesseract
-  }
-
-  try {
-    const tResult = await solveCaptchaWithTesseract(imageDataUri);
-    const cleaned = tResult.code.replace(/[^A-Za-z0-9]/g, '').trim().toUpperCase();
-    if (cleaned.length >= 4) return cleaned;
-  } catch {
-    // ignore
-  }
-
-  return '';
+  return solveCaptchaWithGemini(imageDataUri, 'Read the 4 to 6 alphanumeric characters in this captcha. Output ONLY those characters.', { customApiKey, alphanumeric: true });
 }
 
 /**

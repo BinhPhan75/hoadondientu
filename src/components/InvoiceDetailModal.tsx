@@ -20,7 +20,6 @@ import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { generateInvoiceQrCode, exportInvoiceToPdfFile } from '../utils/pdfExporter';
 import { 
-  detectInvoiceProvider, 
   getProviderMeta, 
   extractLookupDetails, 
   InvoiceProviderId, 
@@ -28,8 +27,8 @@ import {
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
-import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
+import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -78,9 +77,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // về SAU KHI người dùng đã đóng modal hoặc chuyển sang xem hóa đơn khác -
   // tránh việc áp dữ liệu cũ/không khớp vào state và làm crash giao diện.
   const openInvoiceIdRef = useRef<string | null>(invoice?.id ?? null);
+  const originalLoadSequence = useRef(0);
+  openInvoiceIdRef.current = invoice?.id ?? null;
+
+  useEffect(() => { setCurrentInvoice(invoice); }, [invoice]);
 
   useEffect(() => {
+    originalLoadSequence.current++;
     setCurrentInvoice(invoice);
+    setOriginalLoadError(null);
+    setIsDownloadingEasyInvoice(false);
     setOriginalEasyInvoiceHtml(null);
     if (originalProviderPdfUrl) {
       window.URL.revokeObjectURL(originalProviderPdfUrl);
@@ -99,7 +105,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setOriginalFourSiPdfUrl(null);
     }
     openInvoiceIdRef.current = invoice?.id ?? null;
-  }, [invoice]);
+  }, [invoice?.id]);
 
   const effectiveInvoice = invoice
     ? (currentInvoice && currentInvoice.id === invoice.id ? currentInvoice : invoice)
@@ -108,6 +114,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
   const [originalMisaPdfUrl, setOriginalMisaPdfUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
+  const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
+  const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
+  const [originalLoadError, setOriginalLoadError] = useState<string | null>(null);
+  useEffect(() => () => {
+    if (originalProviderPdfUrl) URL.revokeObjectURL(originalProviderPdfUrl);
+  }, [originalProviderPdfUrl]);
+  useEffect(() => () => {
+    openInvoiceIdRef.current = null;
+    originalLoadSequence.current++;
+  }, []);
   const [originalVnptHtml, setOriginalVnptHtml] = useState<string | null>(null);
   const [vnptCheckCode, setVnptCheckCode] = useState<string | null>(null);
   const [vnptPortalUrl, setVnptPortalUrl] = useState<string | null>(null);
@@ -518,115 +534,35 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const handleViewOriginalEasyInvoice = async () => {
-    if (!effectiveInvoice) return;
-    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
-    if (!lookupCode) {
-      alert('Hóa đơn này không có mã tra cứu (FKey) để tra cứu bản gốc.');
-      return;
-    }
+  const handleViewOriginalEasyInvoice = async () => handleViewOriginalProvider();
 
+  const handleViewOriginalProvider = async () => {
+    if (!effectiveInvoice) return;
+    const target = effectiveInvoice;
+    const sequence = ++originalLoadSequence.current;
+    const isCurrent = () => openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence;
+    setOriginalLoadError(null);
     setIsDownloadingEasyInvoice(true);
-    setEasyInvoiceDownloadStatus('Đang nhập mã tra cứu và giải Captcha...');
+    setEasyInvoiceDownloadStatus('Đang tải hóa đơn gốc...');
     try {
-      const resp = await fetch('/api/easyinvoice/download?format=view', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lookupCode: lookupCode.trim(),
-          sellerTaxCode: effectiveInvoice.nbmst,
-          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
-          khhdon: effectiveInvoice.khhdon,
-          shdon: effectiveInvoice.shdon,
-          viewOnly: true
-        })
-      });
-      const responseText = await resp.text();
-      let data: { success?: boolean; htmlContent?: string; error?: string } = {};
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        throw new Error(
-          resp.status === 504
-            ? 'Máy chủ tra cứu hết thời gian chờ. Vui lòng thử lại sau vài giây.'
-            : `Máy chủ trả về lỗi không hợp lệ (HTTP ${resp.status}).`
-        );
+      const blob = await loadOriginalInvoice(target);
+      if (!isCurrent()) return;
+      if (blob.type.includes('text/html')) {
+        const html = await blob.text();
+        if (!isCurrent()) return;
+        setOriginalEasyInvoiceHtml(html);
+      } else {
+        const url = window.URL.createObjectURL(blob);
+        setOriginalProviderPdfUrl(url);
+        if (resolveInvoiceProvider(target) === 'MISA') setOriginalMisaPdfUrl(url);
       }
-      if (!resp.ok || !data.success || !data.htmlContent) {
-        throw new Error(data.error || 'Không nhận được bản HTML gốc từ EasyInvoice.');
-      }
-      setOriginalEasyInvoiceHtml(data.htmlContent);
-      setEasyInvoiceDownloadStatus('Đã tải bản thể hiện gốc.');
-    } catch (err: any) {
-      console.error('[InvoiceDetailModal] Lỗi xem EasyInvoice gốc:', err);
-      alert(`Không thể hiển thị bản gốc EasyInvoice: ${err.message}`);
+      setEasyInvoiceDownloadStatus('Đã mở bản gốc lưu trên máy.');
+    } catch (error: any) {
+      if (!isCurrent()) return;
+      setOriginalLoadError(error.message || 'Không tải được hóa đơn gốc.');
       setEasyInvoiceDownloadStatus(null);
     } finally {
-      setIsDownloadingEasyInvoice(false);
-    }
-  };
-
-  const handleViewOriginalMisa = async () => {
-    if (!effectiveInvoice) return;
-    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
-    if (!lookupCode || !effectiveInvoice.rawXml) {
-      alert('Hóa đơn chưa có mã tra cứu hoặc XML chi tiết để tải bản gốc.');
-      return;
-    }
-
-    const cacheKey = getInvoiceOriginalCacheKey(effectiveInvoice);
-    try {
-      const cached = await readCachedOriginalPdf(cacheKey);
-      if (cached) {
-        const cachedUrl = window.URL.createObjectURL(cached);
-        setOriginalProviderPdfUrl(cachedUrl);
-        if (isMisaInvoice) setOriginalMisaPdfUrl(cachedUrl);
-        setEasyInvoiceDownloadStatus('Đã mở PDF gốc đã lưu trên máy này.');
-        return;
-      }
-    } catch (cacheError) {
-      console.warn('[InvoiceDetailModal] Không đọc được cache PDF MISA:', cacheError);
-    }
-
-    setIsDownloadingEasyInvoice(true);
-    setEasyInvoiceDownloadStatus('Đang tải PDF gốc từ nhà cung cấp...');
-    try {
-      const resp = await fetch('/api/invoice-downloader/download?format=binary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          xml: effectiveInvoice.rawXml,
-          timeoutMs: 20000,
-          overrideProvider: resolveInvoiceProvider(effectiveInvoice),
-          customInfo: {
-            lookupCode: lookupCode.trim(),
-            sellerTaxCode: effectiveInvoice.nbmst,
-            lookupUrl: lookupDetails.lookupUrl || effectiveInvoice.lookupUrl,
-            invoiceNo: effectiveInvoice.shdon,
-            invoiceSeries: effectiveInvoice.khhdon
-          }
-        })
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || `Máy chủ MISA trả về HTTP ${resp.status}.`);
-      }
-      const blob = await resp.blob();
-      if (!blob.size || (blob.type && !blob.type.includes('pdf'))) {
-        throw new Error('Nhà cung cấp không trả về file PDF hợp lệ.');
-      }
-      await writeCachedOriginalPdf(cacheKey, blob);
-      const pdfUrl = window.URL.createObjectURL(blob);
-      if (originalProviderPdfUrl) window.URL.revokeObjectURL(originalProviderPdfUrl);
-      setOriginalProviderPdfUrl(pdfUrl);
-      if (isMisaInvoice) setOriginalMisaPdfUrl(pdfUrl);
-      setEasyInvoiceDownloadStatus('Đã tải bản PDF gốc từ nhà cung cấp.');
-    } catch (err: any) {
-      console.error('[InvoiceDetailModal] Lỗi xem bản gốc nhà cung cấp:', err);
-      alert(`Không thể hiển thị bản gốc nhà cung cấp: ${err.message}`);
-      setEasyInvoiceDownloadStatus(null);
-    } finally {
-      setIsDownloadingEasyInvoice(false);
+      if (isCurrent()) setIsDownloadingEasyInvoice(false);
     }
   };
 
@@ -665,56 +601,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [effectiveInvoice]);
 
-  // Tự động nạp sẵn dữ liệu hóa đơn gốc VNPT trong nền (HTML + PDF) để khi người dùng bấm Xem hoặc Tải PDF thì có ngay lập tức
+  // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
-    if (!effectiveInvoice) return;
-    const isVnpt =
-      effectiveInvoice.provider === 'VNPT' ||
-      effectiveInvoice.msttcgp === '0100684378' ||
-      effectiveInvoice.nbmst === '4000344946' ||
-      /vnpt/i.test(effectiveInvoice.lookupUrl || '');
-
-    const code = effectiveInvoice.mhdon || effectiveInvoice.lookupCode;
-    if (isVnpt && code && !originalVnptHtml) {
-      const cleanCode = code.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
-      fetch('/api/vnpt/view-original', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lookupCode: cleanCode,
-          sellerTaxCode: effectiveInvoice.nbmst,
-          lookupUrl: effectiveInvoice.lookupUrl
-        })
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.success) {
-            if (data.checkCode) setVnptCheckCode(data.checkCode);
-            if (data.portalUrl) setVnptPortalUrl(data.portalUrl);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [effectiveInvoice?.id, effectiveInvoice?.shdon, effectiveInvoice?.mhdon, effectiveInvoice?.lookupCode]);
-
-  // Tự tải bản gốc cho mọi nhà cung cấp đã có driver và mã tra cứu.
-  useEffect(() => {
-    if (!effectiveInvoice || originalEasyInvoiceHtml || originalProviderPdfUrl || isDownloadingEasyInvoice) return;
-    const provider = resolveInvoiceProvider(effectiveInvoice);
-    const hasProviderDriver = Boolean(
-      (provider && provider !== 'DEFAULT' && provider !== 'UNKNOWN' && provider !== 'GENERIC') ||
-      effectiveInvoice.msttcgp ||
-      effectiveInvoice.lookupUrl
-    );
-    const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
-    if (hasProviderDriver && code) {
-      if (provider === 'EASYINVOICE') {
-        void handleViewOriginalEasyInvoice();
-      } else {
-        void handleViewOriginalMisa();
-      }
-    }
-  }, [effectiveInvoice?.id, effectiveInvoice?.lookupCode, effectiveInvoice?.provider, effectiveInvoice?.msttcgp]);
+    if (!effectiveInvoice?.rawXml || !resolveInvoiceProvider(effectiveInvoice)) return;
+    void handleViewOriginalProvider();
+  }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -730,7 +621,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   try {
     xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
-    const detectedProvider = detectInvoiceProvider(xmlContent, effectiveInvoice);
+    const detectedProvider = (resolveInvoiceProvider(effectiveInvoice)?.replace(/^LCS$/, 'LCS_SOFT') || 'DEFAULT') as InvoiceProviderId;
     // Never expose partner-specific template names. The provider badge is
     // based only on the actual invoice solution provider, otherwise a seller
     // can be mislabeled as a different partner template.
@@ -751,105 +642,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       lookupDetails.lookupUrl = effectiveInvoice.lookupUrl;
     }
 
-    // Đối với hóa đơn VNPT như Nghĩa Sơn: nếu chưa có mã tra cứu thì dùng mã CQT cấp cho từng hóa đơn
-    const isVnptInvoice = 
-      effectiveInvoice.provider === 'VNPT' ||
-      effectiveInvoice.nbmst === '4000344946' ||
-      effectiveInvoice.msttcgp === '0100684378' ||
-      (effectiveInvoice.nbten && /NGHĨA SƠN|NGHIA SON/i.test(effectiveInvoice.nbten)) ||
-      autoDetectedProvider === 'NGHIA_SON' ||
-      autoDetectedProvider === 'VNPT';
-
-    if (isVnptInvoice) {
-      if (!lookupDetails.lookupCode) {
-        const cqt = effectiveInvoice.mhdon || extractTagValue(xmlContent, 'MCCQT') || extractTagValue(xmlContent, 'mhdon');
-        if (cqt) {
-          lookupDetails.lookupCode = cqt;
-        }
-      }
-      if (!lookupDetails.lookupUrl) {
-        const cleanTaxCode = (effectiveInvoice.nbmst || '').trim().replace(/[^0-9\-]/g, '');
-        lookupDetails.lookupUrl = effectiveInvoice.lookupUrl || `https://${cleanTaxCode || '1801660803-001'}-tt78.vnpt-invoice.com.vn`;
-      }
+    // Only solution metadata/portal evidence selects a provider, never the seller.
+    if (autoDetectedProvider === 'VNPT' && !lookupDetails.lookupUrl) {
+      const tax = String(effectiveInvoice.nbmst || '').replace(/[^0-9-]/g, '');
+      if (tax) lookupDetails.lookupUrl = `https://${tax}-tt78.vnpt-invoice.com.vn`;
     }
-
-    // Đối với hóa đơn MISA meInvoice (Xuân Vinh, Tài Trâm Anh, Tân Thanh Danh, Báo Đại Đoàn Kết...):
-    // Cổng tra cứu chuẩn luôn là https://www.meinvoice.vn/tra-cuu (không lấy website người bán như daidoanket.vn)
-    const isMisaInvoice =
-      effectiveInvoice.provider === 'MISA' ||
-      effectiveInvoice.msttcgp === '0101243150' ||
-      effectiveInvoice.nbmst === '0317978711' || // Tân Thanh Danh
-      effectiveInvoice.nbmst === '0312105174' || // Tài Trâm Anh
-      effectiveInvoice.nbmst === '0400557356' || // Xuân Vinh
-      autoDetectedProvider === 'MISA' ||
-      autoDetectedProvider === 'TAN_THANH_DANH' ||
-      autoDetectedProvider === 'TAI_TRAM_ANH' ||
-      autoDetectedProvider === 'XUAN_VINH' ||
-      (effectiveInvoice.nbten && /TÂN THANH DANH|XUÂN VINH|TÀI TRÂM ANH|ĐẠI ĐOÀN KẾT/i.test(effectiveInvoice.nbten));
-
-    if (isMisaInvoice) {
-      lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
-    }
-
-    // Đối với nhà cung cấp 4si và 1 số nhà cung cấp chưa lấy được mã tra cứu thì để trống mã tra cứu
-    const is4SiInvoice =
-      effectiveInvoice.provider === '4SI' ||
-      effectiveInvoice.msttcgp === '0302999571' ||
-      effectiveInvoice.msttcgp === '0315744883' ||
-      effectiveInvoice.nbmst === '0315018466' || // PNJ
-      autoDetectedProvider === 'PNJ' ||
-      autoDetectedProvider === '4SI';
-
-    if (is4SiInvoice) {
-      lookupDetails.lookupUrl = 'https://inv.4si.vn/tra-cuu-hoa-don';
-      // Không gán mã CQT làm mã tra cứu cho 4SI, để trống nếu chưa có
-    }
-
-    // Đối với hóa đơn Viettel S-Invoice / vInvoice (SUNTALENT: 0402307168...):
-    const cleanMstModal = (effectiveInvoice.nbmst || '').replace(/\D/g, '');
-    const isViettelModalCheck =
-      effectiveInvoice.provider === 'VIETTEL' ||
-      effectiveInvoice.msttcgp === '0100109106' ||
-      cleanMstModal === '0402307168' ||
-      (effectiveInvoice.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
-      autoDetectedProvider === 'VIETTEL';
-
-    if (isViettelModalCheck) {
-      if (!lookupDetails.lookupUrl) {
-        lookupDetails.lookupUrl = 'https://vinvoice.viettel.vn/utilities/invoice-search';
-      }
-    }
-
-    const isVnpayModalCheck =
-      effectiveInvoice.provider === 'VNPAY' ||
-      effectiveInvoice.msttcgp === '0102182292' ||
-      effectiveInvoice.nbmst === '0100112437' ||
-      autoDetectedProvider === 'VNPAY' ||
-      Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
-
-    if (isVnpayModalCheck) {
-      const isVcb = effectiveInvoice.nbmst === '0100112437' || Boolean(effectiveInvoice.nbten && /VIETCOMBANK/i.test(effectiveInvoice.nbten));
-      if (!lookupDetails.lookupUrl) {
-        lookupDetails.lookupUrl = isVcb ? 'https://einvoice.vietcombank.com.vn/' : 'https://portal.vnpayinvoice.vn/';
-      }
-      const isInvalidCode = (code?: string) => !code || 
-        code.toLowerCase() === 'vietcombank' || 
-        /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) ||
-        (code.includes('0102182292') && code.length > 20);
-
-      if (isInvalidCode(lookupDetails.lookupCode)) {
-        lookupDetails.lookupCode = '';
-      }
-      // VNPAY chỉ tra cứu theo Số bảo mật in trên hóa đơn, không dùng mã CQT cấp (mhdon)
-    }
-
-    // BKAV eHoadon: nhận diện chắc chắn theo MST phát hành và dùng đúng cổng BKAV.
-    if (effectiveInvoice.nbmst === '0314222123' || effectiveInvoice.provider === 'BKAV' || autoDetectedProvider === 'BKAV') {
-      lookupDetails.lookupUrl = 'https://ehoadon.bkav.com/tra-cuu';
-      if (!lookupDetails.lookupCode) {
-        lookupDetails.lookupCode = effectiveInvoice.lookupCode || effectiveInvoice.mhdon || '';
-      }
-    }
+    if (autoDetectedProvider === 'MISA') lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
+    if (autoDetectedProvider === 'THAISON') lookupDetails.lookupUrl = 'https://einvoice.vn/tra-cuu';
+    if (autoDetectedProvider === 'MINVOICE') lookupDetails.lookupUrl = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
 
     safeItems = ensureInvoiceItems(effectiveInvoice);
   } catch (err: any) {
@@ -884,68 +684,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveInvoice.nbmst
   ) : '';
 
-  const isMisaInvoice = /meinvoice\.vn/i.test(directLookupUrl) || 
-    effectiveTemplateId === 'MISA' || 
-    effectiveTemplateId === 'TAI_TRAM_ANH' || 
-    effectiveTemplateId === 'XUAN_VINH' || 
-    effectiveTemplateId === 'TAN_THANH_DANH' ||
-    effectiveInvoice?.nbmst === '0101243150';
-
-  const isVnptInvoice =
-    /vnpt-invoice|portaltool-miennam/i.test(directLookupUrl) ||
-    effectiveTemplateId === 'VNPT' ||
-    effectiveTemplateId === 'NGHIA_SON' ||
-    effectiveInvoice?.provider === 'VNPT' ||
-    effectiveInvoice?.msttcgp === '0100684378' ||
-    effectiveInvoice?.nbmst === '4000344946';
-
-  const isViettelInvoice = /vinvoice|sinvoice|viettel-invoice/i.test(directLookupUrl) || 
-    /vinvoice|sinvoice|viettel-invoice/i.test(lookupDetails.lookupUrl || '') ||
-    effectiveTemplateId === 'VIETTEL' || 
-    effectiveInvoice?.provider === 'VIETTEL' ||
-    effectiveInvoice?.msttcgp === '0100109106' ||
-    effectiveInvoice?.nbmst === '0402307168' ||
-    (effectiveInvoice?.nbmst && effectiveInvoice.nbmst.replace(/\D/g, '') === '0402307168') ||
-    Boolean(effectiveInvoice?.nbten && /SUNTALENT/i.test(effectiveInvoice.nbten)) ||
-    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('VIETTEL')) ||
-    (Boolean(lookupDetails.lookupCode) && (lookupDetails.lookupUrl?.includes('viettel') || effectiveInvoice?.nbmst === '049163008476'));
-
-  const isEasyInvoice = /easyinvoice/i.test(directLookupUrl) ||
-    /easyinvoice/i.test(lookupDetails.lookupUrl || '') ||
-    effectiveTemplateId === 'EASYINVOICE' || 
-    effectiveTemplateId === 'BAO_DUY' || 
-    effectiveTemplateId === 'KIM_LOAN_TUAN' || 
-    effectiveTemplateId === 'TKJ' ||
-    effectiveInvoice?.provider === 'EASYINVOICE' ||
-    effectiveInvoice?.msttcgp === '0105987432' ||
-    effectiveInvoice?.nbmst === '0318391940';
-
-  const isVnpayInvoice = /vnpayinvoice/i.test(directLookupUrl) ||
-    /vnpayinvoice/i.test(lookupDetails.lookupUrl || '') ||
-    /vietcombank\.com\.vn/i.test(directLookupUrl) ||
-    /vietcombank\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
-    effectiveTemplateId === 'VNPAY' ||
-    effectiveInvoice?.provider === 'VNPAY' ||
-    effectiveInvoice?.msttcgp === '0102182292' ||
-    effectiveInvoice?.nbmst === '0100112437' ||
-    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
-
-  const isVietcombankInvoice = effectiveInvoice?.nbmst === '0100112437' ||
-    Boolean(effectiveInvoice?.nbten && /VIETCOMBANK/i.test(effectiveInvoice?.nbten || ''));
-
-  const is4SiInvoice =
-    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(directLookupUrl) ||
-    /4si\.vn|lcssoft\.com\.vn|dochoadon\.lcssoft\.com\.vn/i.test(lookupDetails.lookupUrl || '') ||
-    effectiveTemplateId === '4SI' ||
-    effectiveTemplateId === 'PNJ' ||
-    effectiveTemplateId === 'LCS_SOFT' ||
-    effectiveInvoice?.provider === '4SI' ||
-    effectiveInvoice?.provider === 'LCS_SOFT' ||
-    effectiveInvoice?.msttcgp === '0315744883' ||
-    effectiveInvoice?.msttcgp === '0302999571' ||
-    effectiveInvoice?.nbmst === '0315018466' ||
-    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('4SI')) ||
-    Boolean(effectiveInvoice?.caProvider?.toUpperCase().includes('LCS'));
+  const isMisaInvoice = autoDetectedProvider === 'MISA';
+  const isVnptInvoice = autoDetectedProvider === 'VNPT';
+  const isViettelInvoice = autoDetectedProvider === 'VIETTEL';
+  const isEasyInvoice = autoDetectedProvider === 'EASYINVOICE';
+  const isVnpayInvoice = autoDetectedProvider === 'VNPAY';
+  const isVietcombankInvoice = isVnpayInvoice && /vietcombank\.com\.vn/i.test(directLookupUrl);
+  const is4SiInvoice = autoDetectedProvider === '4SI' || autoDetectedProvider === 'LCS_SOFT';
 
   if (renderError) {
     return (
@@ -964,8 +709,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     );
   }
 
-  const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
-  const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
+
 
   const handleDownloadEasyInvoice = async () => {
     if (!effectiveInvoice) return;
@@ -1030,7 +774,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-slate-900 rounded-xl max-w-6xl w-full shadow-2xl border border-slate-800 overflow-hidden max-h-[96vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-slate-900 rounded-xl max-w-6xl w-full shadow-2xl border border-slate-800 overflow-hidden h-[96dvh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Top Bar */}
         <div className="bg-slate-950 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-slate-800">
@@ -1150,6 +894,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
+            {originalLoadError && !originalProviderPdfUrl && (
+              <div role="alert" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-amber-950 border border-amber-700 rounded text-sm text-amber-100">
+                {originalLoadError}
+              </div>
+            )}
             {isDownloadingEasyInvoice && !originalProviderPdfUrl && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-3 bg-emerald-950/80 border border-emerald-600/60 rounded-lg text-sm text-emerald-200 flex items-center gap-3 shadow-md">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
@@ -1183,11 +932,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             <div 
               className="flex justify-center"
               style={{
-                width: originalVnptHtml ? '890px' : '820px',
+                width: '100%',
+                maxWidth: originalVnptHtml ? '890px' : '820px',
                 minHeight: '1160px',
               }}
             >
-                <div className={`${originalVnptHtml ? 'w-[890px]' : 'w-[820px]'} min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300`}>
+                <div className="w-full min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
                   {originalViettelPdfUrl ? (
                     <iframe
                       src={originalViettelPdfUrl}
@@ -1210,7 +960,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     <iframe
                       ref={iframeRef}
                       srcDoc={prepareOriginalInvoiceHtml(originalEasyInvoiceHtml || originalVnptHtml || '')}
-                      title={originalEasyInvoiceHtml ? 'Bản gốc EasyInvoice' : originalVnptHtml ? 'Bản gốc VNPT' : 'Bản Thể Hiện Hóa Đơn Điện Tử'}
+                      title={`Bản gốc ${currentProviderMeta.name}`}
                       className="w-full h-[1200px] border-0 bg-white"
                       sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                     />
@@ -1242,7 +992,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
                 {originalEasyInvoiceHtml ? (
-                  <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ EasyInvoice</span> • </>
+                  <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ {currentProviderMeta.name}</span> • </>
                 ) : originalVnptHtml ? (
                   <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
                 ) : originalViettelPdfUrl ? (
@@ -1269,11 +1019,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {isMisaInvoice ? (
+            {originalProviderPdfUrl ? (
+              <a
+                href={originalProviderPdfUrl}
+                download={`HoaDon_${effectiveInvoice.khhdon}_${effectiveInvoice.shdon}.pdf`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600 bg-emerald-950 px-3 py-1.5 text-xs font-semibold text-emerald-200"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Tải PDF gốc đã lưu
+              </a>
+            ) : isMisaInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
-                  onClick={handleViewOriginalMisa}
+                  onClick={handleViewOriginalProvider}
                   disabled={isDownloadingEasyInvoice}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 disabled:opacity-60"
                   title={`Tải PDF gốc MISA bằng FKey/TransactionID: ${lookupDetails.lookupCode || ''}`}
@@ -1322,8 +1081,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {/* 1. Nút Xem hóa đơn gốc VNPT trong ứng dụng (tự động nạp bản thể hiện từ VNPT) */}
                 <button
                   type="button"
-                  onClick={handleViewOriginalVnpt}
-                  disabled={isLoadingVnptOriginal}
+                  onClick={handleViewOriginalProvider}
+                  disabled={isDownloadingEasyInvoice}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalVnptHtml
                       ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
@@ -1354,8 +1113,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {/* 3. Nút tải file PDF gốc VNPT */}
                 <button
                   type="button"
-                  onClick={handleDownloadVnptPdf}
-                  disabled={isDownloadingVnptPdf}
+                  onClick={handleViewOriginalProvider}
+                  disabled={isDownloadingEasyInvoice}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ cổng VNPT (mục Tải file)"
                 >
@@ -1387,8 +1146,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {/* 1. Nút Xem PDF gốc Viettel */}
                 <button
                   type="button"
-                  onClick={handleViewOriginalViettel}
-                  disabled={isLoadingViettelOriginal}
+                  onClick={handleViewOriginalProvider}
+                  disabled={isDownloadingEasyInvoice}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
                     originalViettelPdfUrl
                       ? 'text-rose-200 bg-rose-950 border-rose-500 ring-1 ring-rose-500/40'
@@ -1406,8 +1165,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={handleDownloadViettelPdf}
-                  disabled={isDownloadingViettelPdf}
+                  onClick={handleViewOriginalProvider}
+                  disabled={isDownloadingEasyInvoice}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 hover:border-rose-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
                   title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
                 >

@@ -255,6 +255,20 @@ export interface ProviderMeta {
 export function getProviderMeta(providerId?: string): ProviderMeta {
   const normalized = (providerId || 'DEFAULT').toUpperCase();
   switch (normalized) {
+    case 'MINVOICE':
+      return {
+        id: 'MINVOICE', name: 'M-Invoice', shortName: 'MINVOICE',
+        domain: 'tracuuhoadon.minvoice.com.vn', badge: 'MINVOICE', color: '#2563eb',
+        portalUrl: 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don',
+        description: 'Cổng tra cứu hóa đơn M-Invoice'
+      };
+    case 'THAISON':
+      return {
+        id: 'THAISON', name: 'Thái Sơn E-Invoice', shortName: 'Thái Sơn',
+        domain: 'einvoice.vn', badge: 'E-Invoice', color: '#2563eb',
+        portalUrl: 'https://einvoice.vn/tra-cuu',
+        description: 'Cổng tra cứu hóa đơn Thái Sơn E-Invoice'
+      };
     case 'BAO_DUY':
       return {
         id: 'BAO_DUY',

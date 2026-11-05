@@ -6,10 +6,11 @@ export function getInvoiceOriginalCacheKey(invoice: {
   nbmst?: string;
   khhdon?: string;
   shdon?: string | number;
+  khmshdon?: string | number;
 }): string {
-  return [invoice.nbmst || '', invoice.khhdon || '', String(invoice.shdon || '')]
-    .join('|')
-    .replace(/[^a-zA-Z0-9|_-]/g, '_');
+  return [String(invoice.nbmst || '').replace(/\D/g, ''),
+    String(invoice.khmshdon || ''), String(invoice.khhdon || '').trim().toUpperCase(),
+    String(invoice.shdon ?? '').trim().replace(/^0+(?=\d)/, '')].join('|');
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -32,16 +33,18 @@ export async function readCachedOriginalPdf(key: string): Promise<Blob | null> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
+    request.onerror = () => { db.close(); reject(request.error); };
+    request.onsuccess = () => { db.close(); resolve(request.result instanceof Blob ? request.result : null); };
   });
 }
 
 export async function writeCachedOriginalPdf(key: string, blob: Blob): Promise<void> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(blob, key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    transaction.objectStore(STORE_NAME).put(blob, key);
+    transaction.onerror = () => { db.close(); reject(transaction.error); };
+    transaction.onabort = () => { db.close(); reject(transaction.error); };
+    transaction.oncomplete = () => { db.close(); resolve(); };
   });
 }

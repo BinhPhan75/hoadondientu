@@ -21,8 +21,9 @@ import { exportInvoicesToExcel, exportComprehensiveMultiMonthReport } from './ut
 import { ImportXmlModal } from './components/ImportXmlModal';
 import { isMultiMonthRange, generateMonthChunks, generateDayChunks } from './utils/dateChunker';
 import { ensureInvoiceItems, hasGenuineItems } from './utils/xmlParser';
-import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from './utils/invoiceOriginalCache';
+import { getInvoiceOriginalCacheKey } from './utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from './utils/providerRouting';
+import { loadOriginalInvoice } from './services/originalInvoiceLoader';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail } from './utils/gdtQueryClient';
 import { RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
@@ -380,38 +381,12 @@ export default function App() {
   };
 
   const prefetchOriginalPdf = async (invoice: GDTInvoice) => {
-    const hasProviderHint = Boolean(invoice.provider || invoice.msttcgp || invoice.lookupUrl);
-    const code = (invoice.lookupCode || invoice.mhdon)?.trim();
-    if (!hasProviderHint || !code || !invoice.rawXml) return;
+    if (!invoice.rawXml || !resolveInvoiceProvider(invoice)) return;
     const cacheKey = getInvoiceOriginalCacheKey(invoice);
     if (originalPrefetchRef.current.has(cacheKey)) return;
     originalPrefetchRef.current.add(cacheKey);
-    try {
-      if (await readCachedOriginalPdf(cacheKey)) return;
-      const response = await fetch('/api/invoice-downloader/download?format=binary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          xml: invoice.rawXml,
-          timeoutMs: 20000,
-          overrideProvider: resolveInvoiceProvider(invoice),
-          customInfo: {
-            lookupCode: code,
-            sellerTaxCode: invoice.nbmst,
-            lookupUrl: invoice.lookupUrl,
-            invoiceNo: invoice.shdon,
-            invoiceSeries: invoice.khhdon
-          }
-        })
-      });
-      if (!response.ok) return;
-      const blob = await response.blob();
-      if (blob.size && (!blob.type || blob.type.includes('pdf'))) {
-        await writeCachedOriginalPdf(cacheKey, blob);
-      }
-    } catch (error) {
-      console.info('[Original invoice prefetch] Bỏ qua hóa đơn:', error);
-    }
+    try { await loadOriginalInvoice(invoice); }
+    catch (error) { console.info('[Original invoice prefetch]', error); }
   };
 
   // Automated sequential queue to retrieve item names & goods from GDT
@@ -420,6 +395,7 @@ export default function App() {
     const toAdd = newInvoices.filter(inv => {
       const cached = readCachedInvoice(inv);
       if (cached) {
+        void prefetchOriginalPdf(cached);
         setInvoices(prev => {
           const index = prev.findIndex(item => item.id === inv.id);
           if (index < 0) return prev;

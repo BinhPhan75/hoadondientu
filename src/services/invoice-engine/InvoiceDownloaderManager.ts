@@ -14,6 +14,7 @@ import {
   DriverMetadata
 } from './types';
 import { CaptchaSolver } from './captcha/CaptchaSolver';
+import { OriginalInvoiceError } from './OriginalInvoiceError';
 import { MisaDriver } from './drivers/MisaDriver';
 import { ViettelDriver } from './drivers/ViettelDriver';
 import { FourSiDriver } from './drivers/FourSiDriver';
@@ -229,6 +230,7 @@ export class InvoiceDownloaderManager {
         this.log(`[HOÀN TẤT] Tải PDF gốc thành công trong ${Date.now() - startTime}ms`, result.executionLogs);
         return result;
       } catch (crawlError: any) {
+        if (crawlError instanceof OriginalInvoiceError) throw crawlError;
         this.log(`[CẢNH BÁO CRAWL THẤT BẠI]: ${crawlError.message}`, overallLogs);
         this.log(`TỰ ĐỘNG CHUYỂN SANG GENERIC FALLBACK DRIVER ĐỂ ĐẢM BẢO HỆ THỐNG KHÔNG BỊ GIÁN ĐOẠN...`, overallLogs);
       }
