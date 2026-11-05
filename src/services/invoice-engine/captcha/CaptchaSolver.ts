@@ -4,22 +4,24 @@ import { solveCaptchaWithTesseract, terminateTesseract } from './tesseractCaptch
 
 export class CaptchaSolver {
   /**
-   * Cố gắng giải bằng Tesseract cục bộ trước (Miễn phí, không tốn quota),
-   * nếu lỗi hoặc không ra kết quả thì có thể fallback sang Gemini.
+   * Ưu tiên giải mã cục bộ bằng Tesseract (Miễn phí 100%, chạy offline),
+   * nếu thất bại mới tự động chuyển sang Gemini API làm phương án dự phòng.
    */
   public static async solveWithAI(
     imageInput: Buffer | string | Uint8Array,
     options?: CaptchaSolveOptions
   ): Promise<CaptchaSolveResult | null> {
     const startTime = Date.now();
+    
+    // 1. ƯU TIÊN SỐ 1: Chạy Tesseract local trước
     try {
-      // 1. Thử dùng Tesseract cục bộ trước
       const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
         digitsOnly: options?.alphanumeric !== true,
-        timeoutMs: options?.timeoutMs || 3000,
-        preprocessEasyInvoice: true,
+        timeoutMs: options?.timeoutMs || 2500,
+        preprocessEasyInvoice: true, // Tự động cắt và làm nét ảnh captcha trang thuế
       });
 
+      // Nếu đọc được kết quả hợp lệ (độ dài >= 3 ký tự)
       if (tesseractRes && tesseractRes.code && tesseractRes.code.length >= 3) {
         return {
           code: tesseractRes.code,
@@ -29,10 +31,10 @@ export class CaptchaSolver {
         };
       }
     } catch (e) {
-      // Bỏ qua lỗi Tesseract để chuyển sang fallback Gemini nếu cần
+      // Bỏ qua lỗi local để chuyển sang fallback dự phòng
     }
 
-    // 2. Fallback sang Gemini nếu Tesseract không đọc được
+    // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được
     try {
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
       return {
@@ -72,7 +74,7 @@ export class CaptchaSolver {
   ): Promise<CaptchaSolveResult> {
     const res = await this.solveWithAI(imageInput, options);
     if (!res || !res.code) {
-      throw new Error('[CaptchaSolver] Không thể giải Captcha bằng cả Tesseract lẫn Gemini.');
+      throw new Error('[CaptchaSolver] Không thể giải Captcha bằng cả Tesseract local lẫn Gemini.');
     }
     return res;
   }
