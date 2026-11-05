@@ -83,7 +83,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-// AI OCR Scanner helper với cơ chế ép buộc gán state trực tiếp vào ô input
+  // AI OCR Scanner helper với cơ chế ép buộc gán state trực tiếp vào ô input và cập nhật giao diện
   const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
     const rawImg = imgToScan || captchaImg;
     const targetKey = keyToScan || captchaKey;
@@ -94,11 +94,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setOcrNotice('Đang nhận diện mã...');
 
     try {
-      const targetImg = await convertSvgToSharpPng(rawImg);
+      let payloadImg = rawImg;
+      try {
+        payloadImg = await convertSvgToSharpPng(rawImg);
+      } catch {
+        payloadImg = rawImg;
+      }
+
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ captchaImage: targetImg, captchaKey: targetKey })
+        body: JSON.stringify({ captchaImage: payloadImg, captchaKey: targetKey })
       });
       
       const rawText = await res.text();
@@ -109,7 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       if (data && data.success && data.captchaCode) {
         const detectedCode = String(data.captchaCode).trim().toUpperCase();
-        // Ép buộc cập nhật state đồng thời
+        // Ép buộc cập nhật đồng thời state Captcha và trạng thái hiển thị thành công
         setCaptchaCode(detectedCode);
         setOcrSuccess(true);
         setOcrNotice(null);
@@ -125,6 +131,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setIsScanningOcr(false);
     }
   };
+
   // Load Real Captcha from GDT with Dual-Strategy (Server Proxy + Direct Browser Fallback)
   const fetchCaptcha = async () => {
     setIsLoadingCaptcha(true);
@@ -142,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setAuthError(null);
       setIsLoadingCaptcha(false);
 
-      // TỰ ĐỘNG KÍCH HOẠT NHẬN DIỆN NGAY KHI ẢNH VỪA TẢI XONG
+      // TỰ ĐỘNG KÍCH HOẠT NHẬN DIỆN VÀ GÁN KẾT QUẢ NGAY KHI ẢNH VỪA TẢI XONG
       handleScanOcr(res.captchaImage, res.captchaKey || '');
       return;
     }
@@ -443,7 +450,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ) : captchaCode ? (
                   <span className="text-emerald-400 flex items-center gap-1 font-medium">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Đã nhập: <strong className="font-mono">{captchaCode}</strong></span>
+                    <span>Đã nhận diện: <strong className="font-mono">{captchaCode}</strong></span>
                   </span>
                 ) : (
                   <span className="text-slate-400">Nhập ký tự từ ảnh</span>
