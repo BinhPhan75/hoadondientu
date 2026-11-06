@@ -689,6 +689,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   ) : '';
 
   const isMisaInvoice = autoDetectedProvider === 'MISA';
+  const misaLookupCode = String(lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
+  const misaPdfViewerUrl = isMisaInvoice && misaLookupCode
+    ? `https://www.meinvoice.vn/tra-cuu/DownloadHandler.ashx?Type=pdf&Viewer=1&Code=${encodeURIComponent(misaLookupCode)}`
+    : '';
+  const isMisaPdfViewer = Boolean(misaPortalUrl && misaPortalUrl === misaPdfViewerUrl);
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
   const isViettelInvoice = autoDetectedProvider === 'VIETTEL';
   const isEasyInvoice = autoDetectedProvider === 'EASYINVOICE';
@@ -945,7 +950,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   {misaPortalUrl ? (
                     <iframe
                       src={misaPortalUrl}
-                      title="Hóa đơn gốc MISA meInvoice"
+                      title={isMisaPdfViewer ? 'PDF hóa đơn gốc MISA meInvoice' : 'Cổng tra cứu MISA meInvoice'}
                       className="w-full h-[1200px] border-0 bg-white"
                       allow="clipboard-read; clipboard-write"
                     />
@@ -1003,7 +1008,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
                 {misaPortalUrl ? (
-                  <>Đang xem <span className="text-emerald-400 font-bold">bản gốc MISA meInvoice</span> trong ứng dụng • </>
+                  <>Đang xem <span className="text-emerald-400 font-bold">{isMisaPdfViewer ? 'PDF gốc MISA meInvoice' : 'cổng MISA meInvoice'}</span> trong ứng dụng • </>
                 ) : originalEasyInvoiceHtml ? (
                   <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ {currentProviderMeta.name}</span> • </>
                 ) : originalVnptHtml ? (
@@ -1046,14 +1051,24 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {directLookupUrl && (
                   <button
                     type="button"
-                    onClick={() => setMisaPortalUrl(directLookupUrl)}
+                    onClick={() => setMisaPortalUrl(misaPdfViewerUrl || directLookupUrl)}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>{misaPortalUrl ? 'Đang xem hóa đơn gốc MISA' : 'Xem hóa đơn gốc MISA'}</span>
+                    <span>{isMisaPdfViewer ? 'Đang xem PDF gốc MISA' : 'Xem PDF gốc MISA'}</span>
                   </button>
                 )}
-                {directLookupUrl && misaPortalUrl && (
+                {directLookupUrl && misaPortalUrl && isMisaPdfViewer && (
+                  <button
+                    type="button"
+                    onClick={() => setMisaPortalUrl(directLookupUrl)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Mở cổng MISA</span>
+                  </button>
+                )}
+                {directLookupUrl && misaPortalUrl && !isMisaPdfViewer && (
                   <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
                     <ExternalLink className="w-3 h-3" />
                     <span>Mở cửa sổ riêng</span>
