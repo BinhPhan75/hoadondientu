@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, RefreshCw } from 'lucide-react';
-import { preprocessPosCaptchaImage } from '../utils/captchaOcrHelper';
-import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
 
 interface PosCaptchaModalProps {
   captchaImage: string;
@@ -11,7 +9,6 @@ interface PosCaptchaModalProps {
   onSubmit: (code: string) => void;
 }
 
-/** Human verification for a single GDT POS query with Local OCR Auto-solve. */
 export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
   captchaImage,
   rangeLabel,
@@ -23,57 +20,89 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
   const [isSolving, setIsSolving] = useState(false);
   const [statusText, setStatusText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const submittedRef = useRef(false);
 
-  // Tự động kích hoạt nhận diện OCR ngay khi mở modal hoặc có ảnh CAPTCHA mới
   useEffect(() => {
     if (!isOpen || !captchaImage) return;
     setCode('');
+    submittedRef.current = false;
     setStatusText('Đang tự động đọc mã CAPTCHA...');
     setIsSolving(true);
 
     let isMounted = true;
 
-    const runAutoOcr = async () => {
+    const fetchOcrAndSubmit = async () => {
       try {
-        // 1. Tiền xử lý ảnh (khử nhiễu, làm sắc nét ký tự)
-        const cleanImage = await preprocessPosCaptchaImage(captchaImage);
-
-        // 2. Chạy Tesseract local OCR trên trình duyệt
-        const result = await solveCaptchaWithTesseract(cleanImage, {
-          digitsOnly: false,
-          timeoutMs: 8000
+        // Gọi thẳng về API OCR sẵn có trên server (hoặc qua helper xử lý ảnh)
+        const response = await fetch('/api/invoice-downloader/solve-captcha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: captchaImage,
+            alphanumeric: true,
+            timeoutMs: 8000
+          }),
         });
 
+        const data = await response.json().catch(() => ({}));
+
         if (isMounted) {
-          if (result && result.code) {
-            const detectedCode = result.code.trim().toUpperCase();
+          if (response.ok && data?.success && data.code) {
+            const detectedCode = String(data.code).trim().toUpperCase();
             setCode(detectedCode);
-            setStatusText(`Đã nhận diện thành công: ${detectedCode}`);
-            
-            // Tự động điền xong và submit luôn sau 300ms để không gián đoạn luồng 10 tháng
-            window.setTimeout(() => {
-              if (isMounted && detectedCode) {
-                onSubmit(detectedCode);
-              }
-            }, 300);
+            setStatusText(`Đã đọc thành công: ${detectedCode}`);
+            setIsSolving(false);
+
+            // Tự động gán và submit luôn để tiếp tục chuỗi tải 10 tháng
+            if (!submittedRef.current) {
+              submittedRef.current = true;
+              window.setTimeout(() => {
+                if (isMounted) {
+                  onSubmit(detectedCode);
+                }
+              }, 400);
+            }
           } else {
-            setStatusText('Không tự đọc được, vui lòng nhập tay.');
+            // Fallback sang endpoint ocr-captcha nếu endpoint trên lỗi
+            const resFallback = await fetch('/api/gdt/ocr-captcha', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ captchaImage }),
+            });
+            const dataFallback = await resFallback.json().catch(() => ({}));
+            
+            if (resFallback.ok && dataFallback?.success && dataFallback?.captchaCode) {
+              const detectedCode = String(dataFallback.captchaCode).trim().toUpperCase();
+              setCode(detectedCode);
+              setStatusText(`Đã đọc thành công: ${detectedCode}`);
+              setIsSolving(false);
+
+              if (!submittedRef.current) {
+                submittedRef.current = true;
+                window.setTimeout(() => {
+                  if (isMounted) {
+                    onSubmit(detectedCode);
+                  }
+                }, 400);
+              }
+              return;
+            }
+
+            setStatusText('Vui lòng nhập tay nếu cần.');
+            setIsSolving(false);
             window.setTimeout(() => inputRef.current?.focus(), 0);
           }
         }
       } catch (err) {
         if (isMounted) {
-          setStatusText('Lỗi OCR tự động, vui lòng nhập tay.');
-          window.setTimeout(() => inputRef.current?.focus(), 0);
-        }
-      } finally {
-        if (isMounted) {
+          setStatusText('Chuyển sang luồng nhập tay.');
           setIsSolving(false);
+          window.setTimeout(() => inputRef.current?.focus(), 0);
         }
       }
     };
 
-    runAutoOcr();
+    fetchOcrAndSubmit();
 
     return () => {
       isMounted = false;
@@ -97,18 +126,16 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
           Tổng cục Thuế yêu cầu mã mới cho từng đợt. Hệ thống đang tự động nhận diện mã CAPTCHA để tiếp tục tải.
         </p>
 
-        {/* Khung hiển thị ảnh CAPTCHA */}
         <div className="mt-4 flex min-h-20 items-center justify-center rounded border border-slate-700 bg-white p-2 relative">
           <img src={captchaImage} alt="CAPTCHA Tổng cục Thuế" className="max-h-20 max-w-full select-none" />
           {isSolving && (
-            <div className="absolute inset-0 bg-white/80 flex items-center justify-center gap-2 text-xs font-medium text-blue-600">
+            <div className="absolute inset-0 bg-white/90 flex items-center justify-center gap-2 text-xs font-semibold text-blue-600">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Đang giải mã AI...</span>
+              <span>Đang đọc mã CAPTCHA tự động...</span>
             </div>
           )}
         </div>
 
-        {/* Trạng thái OCR */}
         <div className="mt-2 text-[11px] text-cyan-400 font-mono flex items-center gap-1">
           <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
           <span>{statusText || 'Sẵn sàng'}</span>
@@ -122,7 +149,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
           onChange={event => setCode(event.target.value.toUpperCase())}
           autoComplete="off"
           maxLength={12}
-          className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 font-mono tracking-[0.2em] text-white outline-none focus:border-cyan-400 text-center font-bold text-base"
+          className="mt-1 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2 font-mono tracking-[0.2em] text-white outline-none focus:border-cyan-400 text-center font-bold text-base uppercase"
         />
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onCancel} className="rounded border border-slate-600 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800 cursor-pointer">Hủy đợt này</button>
