@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, RefreshCw } from 'lucide-react';
-import { executeGdtPosCaptchaSolve } from '../utils/gdtQueryClient';
 
 interface PosCaptchaModalProps {
   captchaImage: string;
@@ -27,27 +26,32 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
     if (!isOpen || !captchaImage) return;
     setCode('');
     submittedRef.current = false;
-    setStatusText('Đang tự động đọc mã CAPTCHA bằng AI...');
+    setStatusText('Đang tự động đọc mã CAPTCHA qua AI Server...');
     setIsSolving(true);
 
     let isMounted = true;
 
-    const runAutoSolve = async () => {
+    const solveCaptchaAutomatically = async () => {
       try {
-        // Gọi hàm giải mã POS Captcha chuẩn đã được cấu hình sẵn trong gdtQueryClient
-        const result = await executeGdtPosCaptchaSolve({
-          captchaImage,
-          forceGemini: true // Bật cờ ưu tiên AI nhận diện chính xác các ký tự chữ và số như K8H6WK, CGKRER
+        // Gọi thẳng tới endpoint /api/gdt/ocr-captcha sẵn có trong server.ts
+        const response = await fetch('/api/gdt/ocr-captcha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            captchaImage: captchaImage,
+          }),
         });
 
+        const data = await response.json().catch(() => ({}));
+
         if (isMounted) {
-          if (result && result.success && result.code) {
-            const detectedCode = String(result.code).trim().toUpperCase();
+          if (response.ok && data?.success && (data.captchaCode || data.code)) {
+            const detectedCode = String(data.captchaCode || data.code).trim().toUpperCase();
             setCode(detectedCode);
             setStatusText(`Đã đọc thành công: ${detectedCode}`);
             setIsSolving(false);
 
-            // Tự động gán kết quả và gọi xác nhận luôn để tiếp tục chuỗi tải 10 tháng
+            // Tự động gán kết quả và kích hoạt submit luôn để tiếp tục tải đợt 5 ngày
             if (!submittedRef.current) {
               submittedRef.current = true;
               window.setTimeout(() => {
@@ -71,7 +75,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
       }
     };
 
-    runAutoSolve();
+    solveCaptchaAutomatically();
 
     return () => {
       isMounted = false;
@@ -100,7 +104,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
           {isSolving && (
             <div className="absolute inset-0 bg-white/90 flex items-center justify-center gap-2 text-xs font-semibold text-blue-600">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Đang giải mã CAPTCHA tự động...</span>
+              <span>Đang đọc mã CAPTCHA tự động...</span>
             </div>
           )}
         </div>
