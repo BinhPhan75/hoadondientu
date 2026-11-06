@@ -151,9 +151,6 @@ export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', is
   };
 }
 
-/**
- * Fetch Captcha with Backend proxy only
- */
 export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   try {
     const controller = new AbortController();
@@ -187,7 +184,6 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   };
 }
 
-/** Fetch a fresh CAPTCHA bound to the authenticated GDT POS session. */
 export async function executeGdtPosCaptcha(options: {
   token: string;
   cookieHeader?: string;
@@ -219,9 +215,6 @@ export async function executeGdtPosCaptcha(options: {
   }
 }
 
-/**
- * Giải mã CAPTCHA hóa đơn máy tính tiền (POS) bằng Tesseract Local trực tiếp trên Client
- */
 export async function executeGdtPosCaptchaSolve(options: {
   captchaImage: string;
   customApiKey?: string;
@@ -258,9 +251,6 @@ export async function executeGdtPosCaptchaSolve(options: {
   }
 }
 
-/**
- * Auto-Login with Zero-Click Captcha and auto-retry
- */
 export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<LoginResult> {
   const { taxCode, password, vietnamProxy, customApiKey } = options;
 
@@ -322,7 +312,7 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
 
   if (!captchaCode || !captchaCode.trim()) {
     return executeGdtAutoLogin({
-      taxCode: password ? taxCode : taxCode,
+      taxCode,
       password: password || '',
       vietnamProxy,
       customApiKey
