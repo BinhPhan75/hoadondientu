@@ -49,7 +49,7 @@ export class CaptchaSolver {
         console.log('[CaptchaSolver] Kích hoạt ưu tiên Gemini API cho CAPTCHA mới...');
       }
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, {
-        timeoutMs: options?.timeoutMs || 8000,
+        timeoutMs: Math.max(options?.timeoutMs || 12000, 10000),
         customApiKey: options?.customApiKey,
         alphanumeric: options?.alphanumeric,
       });

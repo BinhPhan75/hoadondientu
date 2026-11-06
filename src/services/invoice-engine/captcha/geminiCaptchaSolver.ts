@@ -63,7 +63,8 @@ export async function solveCaptchaWithGemini(
   if (existing) { usage.cacheHits++; return existing.promise; }
   // Bound memory; refuse additional work instead of evicting an in-flight call.
   if (attempts.size >= 512) throw new Error('OCR đang bận. Vui lòng thử lại sau.');
-  const timeoutMs = Math.min(Math.max(options.timeoutMs || 8000, 1000), 12000);
+  // Gemini rejects explicitly configured deadlines below 10 seconds.
+  const timeoutMs = Math.min(Math.max(options.timeoutMs || 12000, 10000), 12000);
   const work = (async () => {
     try {
       const ai = new GoogleGenAI({

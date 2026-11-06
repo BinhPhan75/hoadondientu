@@ -8434,7 +8434,7 @@ async function solveCaptchaWithGemini(input, customPrompt, options = {}) {
     return existing.promise;
   }
   if (attempts.size >= 512) throw new Error("OCR \u0111ang b\u1EADn. Vui l\xF2ng th\u1EED l\u1EA1i sau.");
-  const timeoutMs = Math.min(Math.max(options.timeoutMs || 8e3, 1e3), 12e3);
+  const timeoutMs = Math.min(Math.max(options.timeoutMs || 12e3, 1e4), 12e3);
   const work = (async () => {
     try {
       const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } });
