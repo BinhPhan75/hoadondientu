@@ -1,29 +1,36 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldCheck, 
-  ShieldAlert,
-  KeyRound, 
-  Building2, 
-  Calendar, 
-  Play, 
-  RefreshCw, 
-  Settings, 
-  Eye, 
-  EyeOff,
-  Sparkles,
-  CheckCircle2,
-  AlertTriangle,
-  X,
-  Globe2,
-  Database,
-  PanelLeftClose
-} from 'lucide-react';
-import { GDTAccountConfig, FilterParams } from '../types';
-import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
-import { executeGdtCaptcha } from '../utils/gdtQueryClient';
+import { GDTInvoice } from '../types';
+import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
+import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
+import { convertSvgToSharpPng } from './captchaOcrHelper';
 import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
 
-export interface CrawlerCredentials {
+export interface QueryInvoicesOptions {
+  fromDate: string;
+  toDate: string;
+  invoiceType?: 'purchase' | 'sold' | 'both';
+  size?: number;
+  token: string;
+  cookieHeader?: string;
+  includePos?: boolean;
+  posOnly?: boolean;
+  customApiKey?: string;
+  posCaptcha?: {
+    key: string;
+    code: string;
+    cookie?: string;
+  };
+}
+
+export interface QueryInvoicesResult {
+  success: boolean;
+  invoices: GDTInvoice[];
+  status?: number;
+  message?: string;
+  source?: 'proxy' | 'direct_browser';
+  posDiagnostics?: Array<{ from: string; to: string; status: string; count?: number; attempts?: number }>;
+}
+
+export interface LoginOptions {
   taxCode: string;
   password?: string;
   captchaKey?: string;
@@ -33,591 +40,439 @@ export interface CrawlerCredentials {
   customApiKey?: string;
 }
 
-interface SidebarProps {
-  account: GDTAccountConfig;
-  filters: FilterParams;
-  onFilterChange: (filters: FilterParams) => void;
-  onUpdateAccount: (account: GDTAccountConfig) => void;
-  onRunCrawler: (credentials?: CrawlerCredentials) => Promise<{ success: boolean; error?: string; isWafBlocked?: boolean; needManualCaptcha?: boolean } | void>;
-  isLoading: boolean;
-  onOpenConfigModal: () => void;
-  onCloseMobileSidebar?: () => void;
-  onCollapseSidebar?: () => void;
+export interface LoginResult {
+  success: boolean;
+  token?: string;
+  taxpayerName?: string;
+  address?: string;
+  cookieHeader?: string;
+  error?: string;
+  source?: 'proxy' | 'direct_browser';
+  isWafBlocked?: boolean;
+  needManualCaptcha?: boolean;
+  attemptsUsed?: number;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  account,
-  filters,
-  onFilterChange,
-  onUpdateAccount,
-  onRunCrawler,
-  isLoading,
-  onOpenConfigModal,
-  onCloseMobileSidebar,
-  onCollapseSidebar
-}) => {
-  const [showPassword, setShowPassword] = useState(false);
-  const [localMst, setLocalMst] = useState(account.taxCode || '');
-  const [localPassword, setLocalPassword] = useState(account.password || '');
-  
-  const [captchaCode, setCaptchaCode] = useState('');
-  const [captchaKey, setCaptchaKey] = useState('');
-  const [captchaCookie, setCaptchaCookie] = useState('');
-  const [captchaImg, setCaptchaImg] = useState<string>('');
-  const [isRealGdtCaptcha, setIsRealGdtCaptcha] = useState(true);
-  const [isLoadingCaptcha, setIsLoadingCaptcha] = useState(false);
-  const [isScanningOcr, setIsScanningOcr] = useState(false);
-  const [ocrSuccess, setOcrSuccess] = useState(false);
-  const [ocrNotice, setOcrNotice] = useState<string | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [isWafBlocked, setIsWafBlocked] = useState<boolean>(false);
+export interface AutoLoginOptions {
+  taxCode: string;
+  password: string;
+  vietnamProxy?: string;
+  customApiKey?: string;
+}
 
-  useEffect(() => {
-    if (account.taxCode && account.taxCode !== localMst) {
-      setLocalMst(account.taxCode);
-    }
-    if (account.password && account.password !== localPassword) {
-      setLocalPassword(account.password);
-    }
-  }, [account.taxCode, account.password]);
+export interface CaptchaResult {
+  success: boolean;
+  captchaImage: string;
+  captchaKey: string;
+  captchaCookie?: string;
+  source?: 'proxy' | 'direct_browser' | 'fallback';
+  error?: string;
+}
 
-  const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
-    const rawImg = imgToScan || captchaImg;
-    const targetKey = keyToScan || captchaKey;
-    if (!rawImg) return;
+export interface PosCaptchaResult extends CaptchaResult {}
 
-    setIsScanningOcr(true);
-    setOcrSuccess(false);
-    setOcrNotice('Đang nhận diện mã...');
+export interface PosCaptchaSolveResult {
+  success: boolean;
+  code?: string;
+  engine?: 'gemini' | 'tesseract-local';
+  error?: string;
+}
 
-    try {
-      let payloadImg = rawImg;
-      try {
-        payloadImg = await convertSvgToSharpPng(rawImg);
-      } catch {
-        payloadImg = rawImg;
-      }
+function extractGdtInvoiceList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  const candidates = [
+    data?.datas, data?.rows, data?.content, data?.items, data?.results, data?.result, data?.dshdon,
+    data?.data?.datas, data?.data?.rows, data?.data?.content, data?.data?.items,
+    data?.data?.results, data?.data?.result, data?.data?.dshdon, data?.data
+  ];
+  return candidates.find(Array.isArray) || [];
+}
 
-      const res = await fetch('/api/gdt/ocr-captcha', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ captchaImage: payloadImg, captchaKey: targetKey })
-      });
-      
+const formatDateForGdt = (dateStr: string, isEnd = false) => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const [year, month, day] = parts;
+    return `${day}/${month}/${year}${isEnd ? 'T23:59:59' : 'T00:00:00'}`;
+  }
+  return dateStr;
+};
+
+export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', isPos = false): GDTInvoice {
+  const isViettel = isViettelSource(item);
+  const isVnpt = isVnptSource(item);
+  const isMisa = isMisaSource(item);
+  const resolvedProvider = isViettel ? 'VIETTEL' : isVnpt ? 'VNPT' : isMisa ? 'MISA' : (item.provider || undefined);
+  const resolvedMsttcgp = item.msttcgp || item.mst_tcgp || item.tvandnkntt || (isViettel ? '0100109106' : isVnpt ? '0100684378' : isMisa ? '0101243150' : '');
+  const resolvedTentcgp = item.tentcgp || item.ten_tcgp || item.tctchuc || (isViettel ? 'Tập đoàn Công nghiệp - Viễn thông Quân đội (Viettel)' : isVnpt ? 'Tập đoàn Bưu chính Viễn thông Việt Nam (VNPT)' : isMisa ? 'Công ty Cổ phần MISA' : '');
+  const resolvedCaProvider = isViettel ? 'VIETTEL-CA' : isVnpt ? 'VNPT-CA' : isMisa ? 'MISA-CA' : 'Tổng cục Thuế CQT';
+  const defaultLookupUrl = isViettel
+    ? 'https://vinvoice.viettel.vn/utilities/invoice-search'
+    : isMisa
+      ? 'https://www.meinvoice.vn/tra-cuu'
+      : undefined;
+
+  return {
+    id: item.id || `GDT_${item.khhdon}_${item.shdon}_${item.nbmst || item.nmmst}`,
+    khmshdon: item.khmshdon || item.khmhd || '1',
+    khhdon: item.khhdon || '',
+    shdon: String(item.shdon || item.shd || '').padStart(7, '0'),
+    tdlap: item.tdlap ? item.tdlap.replace(' ', 'T') : new Date().toISOString(),
+    nbmst: String(item.nbmst || item.nbMst || getSellerFromPayload(item).taxCode || ''),
+    nbten: String(item.nbten || item.nbtnnt || item.nbtlhdon || getSellerFromPayload(item).name || 'Người bán'),
+    nbdchi: String(item.nbdchi || item.nbDchi || getSellerFromPayload(item).address || ''),
+    nmmst: item.nmmst || '',
+    nmten: item.nmten || item.nmtnnt || item.nmtlhdon || 'Người mua',
+    nmdchi: item.nmdchi || '',
+    tgtcthue: Number(item.tgtcthue ?? item.thtien ?? item.tgtphi ?? 0),
+    tgtthue: Number(item.tgtthue ?? item.tthue ?? 0),
+    tgtttbso: Number(item.tgtttbso ?? item.tgtttoan ?? item.tongtien ?? ((Number(item.tgtcthue ?? item.thtien ?? 0)) + (Number(item.tgtthue ?? item.tthue ?? 0)))),
+    tgtttbchu: item.tgtttbchu || '',
+    htttoan: item.htttoan || 'TM/CK',
+    tthdon: Number(item.tthdon || 1),
+    tthdonLabel: item.tthdon === 1 ? 'Hóa đơn gốc' : item.tthdon === 2 ? 'Hóa đơn thay thế' : item.tthdon === 3 ? 'Hóa đơn điều chỉnh' : 'Hóa đơn hủy',
+    ttxly: Number(item.ttxly || 1),
+    ttxlyLabel: item.ttxly === 1 ? 'CQT đã cấp mã' : item.ttxly === 2 ? 'CQT chưa cấp mã' : 'Đã tiếp nhận',
+    mhdon: item.mhdon || '',
+    hsgcma: Boolean(item.mhdon || item.hsgcma),
+    loaiHdon: type,
+    hasDigitalSignature: true,
+    signerName: item.nbten || item.nbtnnt || item.nbtlhdon || 'Người nộp thuế',
+    signedDate: item.tdlap,
+    caProvider: resolvedCaProvider,
+    provider: resolvedProvider,
+    msttcgp: resolvedMsttcgp,
+    tentcgp: resolvedTentcgp,
+    lookupCode: getLookupCodeFromPayload(item),
+    lookupUrl: getLookupUrlFromPayload(item) || defaultLookupUrl,
+    items: getInvoiceItemListFromPayload(item).map((it: any, idx: number) => normalizeInvoiceItem(it, idx)),
+    sourceCompleteness: 'summary',
+    isPos
+  };
+}
+
+/**
+ * Fetch Captcha with Backend proxy only
+ */
+export async function executeGdtCaptcha(): Promise<CaptchaResult> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    const res = await fetch('/api/gdt/captcha', { signal: controller.signal });
+    clearTimeout(timer);
+
+    if (res.ok) {
       const rawText = await res.text();
       let data: any = null;
-      try {
-        data = JSON.parse(rawText);
-      } catch {}
-
-      if (data && data.success && data.captchaCode) {
-        const detectedCode = String(data.captchaCode).trim().toUpperCase();
-        setCaptchaCode(detectedCode);
-        setOcrSuccess(true);
-        setOcrNotice(null);
-        if (authError) setAuthError(null);
-      } else {
-        setOcrSuccess(false);
-        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+      try { data = JSON.parse(rawText); } catch {}
+      if (data && data.success && data.captchaImage) {
+        return {
+          success: true,
+          captchaImage: data.captchaImage,
+          captchaKey: data.captchaKey || '',
+          captchaCookie: data.captchaCookie || '',
+          source: 'proxy'
+        };
       }
+    }
+  } catch (proxyErr) {
+    console.info('[Proxy Captcha switched to direct fetch]:', proxyErr);
+  }
+
+  return {
+    success: false,
+    captchaImage: '',
+    captchaKey: '',
+    source: 'proxy'
+  };
+}
+
+/** Fetch a fresh CAPTCHA bound to the authenticated GDT POS session. */
+export async function executeGdtPosCaptcha(options: {
+  token: string;
+  cookieHeader?: string;
+  vietnamProxy?: string;
+}): Promise<PosCaptchaResult> {
+  try {
+    const response = await fetch('/api/gdt/pos-captcha', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: options.token,
+        ...(options.cookieHeader ? { 'x-gdt-cookie': options.cookieHeader } : {}),
+      },
+      body: JSON.stringify(options),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data?.success && data.captchaImage && data.captchaKey) {
+      return {
+        success: true,
+        captchaImage: data.captchaImage,
+        captchaKey: data.captchaKey,
+        captchaCookie: data.captchaCookie || '',
+        source: 'proxy',
+      };
+    }
+    return { success: false, captchaImage: '', captchaKey: '', error: data?.message || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
+  } catch (error: any) {
+    return { success: false, captchaImage: '', captchaKey: '', error: error?.message || 'Lỗi kết nối khi tải CAPTCHA hóa đơn máy tính tiền.' };
+  }
+}
+
+/**
+ * Giải mã CAPTCHA hóa đơn máy tính tiền (POS) bằng Tesseract Local trực tiếp trên Client
+ */
+export async function executeGdtPosCaptchaSolve(options: {
+  captchaImage: string;
+  customApiKey?: string;
+  forceGemini?: boolean;
+}): Promise<PosCaptchaSolveResult> {
+  try {
+    if (!options.captchaImage) {
+      return { success: false, error: 'Hình ảnh CAPTCHA rỗng.' };
+    }
+
+    let imageSource = options.captchaImage;
+    try {
+      imageSource = await convertSvgToSharpPng(options.captchaImage);
     } catch {
-      setOcrSuccess(false);
-      setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
-    } finally {
-      setIsScanningOcr(false);
-    }
-  };
-
-  const fetchCaptcha = async () => {
-    setIsLoadingCaptcha(true);
-    setAuthError(null);
-    setOcrNotice(null);
-    setCaptchaCode('');
-    setOcrSuccess(false);
-
-    const res = await executeGdtCaptcha();
-    if (res.success && res.captchaImage) {
-      setCaptchaImg(res.captchaImage);
-      setCaptchaKey(res.captchaKey || '');
-      setCaptchaCookie(res.captchaCookie || '');
-      setIsRealGdtCaptcha(res.source === 'proxy' || res.source === 'direct_browser');
-      setAuthError(null);
-      setIsLoadingCaptcha(false);
-
-      handleScanOcr(res.captchaImage, res.captchaKey || '');
-      return;
+      imageSource = options.captchaImage;
     }
 
-    setCaptchaImg('');
-    setCaptchaKey('');
-    setCaptchaCookie('');
-    setCaptchaCode('');
-    setOcrSuccess(false);
-    setIsRealGdtCaptcha(false);
-    setAuthError('Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" để thử lại.');
-    setIsLoadingCaptcha(false);
-  };
-
-  useEffect(() => {
-    fetchCaptcha();
-  }, []);
-
-  const handleMstBlur = () => {
-    const trimmed = localMst.trim();
-    if (trimmed !== account.taxCode) {
-      onUpdateAccount({
-        ...account,
-        taxCode: trimmed,
-        taxpayerName: `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})`,
-        isRealGDT: false
-      });
-    }
-  };
-
-  const handlePasswordBlur = () => {
-    const trimmed = localPassword.trim();
-    if (trimmed !== account.password) {
-      onUpdateAccount({
-        ...account,
-        password: trimmed,
-        isRealGDT: false
-      });
-    }
-  };
-
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setAuthError(null);
-    setIsWafBlocked(false);
-
-    const mst = localMst.trim();
-    const pwd = localPassword.trim();
-
-    if (!mst) {
-      setAuthError('Vui lòng nhập Mã số thuế (MST).');
-      return;
-    }
-
-    let activeCaptchaCode = captchaCode.trim();
-
-    if (!account.isRealGDT) {
-      if (!pwd) {
-        setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
-        return;
-      }
-      
-      if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhìn hình và nhập mã Captcha hoặc bấm "Đọc mã AI" để gán vào.');
-        return;
-      }
-    }
-
-    const result = await onRunCrawler({
-      taxCode: mst,
-      password: pwd,
-      captchaKey,
-      captchaCode: activeCaptchaCode,
-      captchaCookie,
-      vietnamProxy: account.vietnamProxy,
-      customApiKey: account.customApiKey
+    const localResult = await solveCaptchaWithTesseract(imageSource, {
+      digitsOnly: false,
+      timeoutMs: 8000
     });
 
-    if (result && result.success) {
-      setIsWafBlocked(false);
-      if (onCollapseSidebar) onCollapseSidebar();
-      if (onCloseMobileSidebar) onCloseMobileSidebar();
-    } else if (result && !result.success) {
-      if (result.isWafBlocked) {
-        setIsWafBlocked(true);
-      }
-      if (result.needManualCaptcha) {
-        fetchCaptcha();
-      }
-      if (result.error) {
-        setAuthError(result.error);
-      }
-      fetchCaptcha();
+    if (localResult && localResult.code) {
+      return {
+        success: true,
+        code: localResult.code.toUpperCase(),
+        engine: 'tesseract-local'
+      };
     }
+
+    return { success: false, error: 'Không thể tự nhận diện CAPTCHA POS bằng Local OCR.' };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA POS.' };
+  }
+}
+
+/**
+ * Auto-Login with Zero-Click Captcha and auto-retry
+ */
+export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<LoginResult> {
+  const { taxCode, password, vietnamProxy, customApiKey } = options;
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 35000);
+
+    const res = await fetch('/api/gdt/auto-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taxCode: taxCode.trim(),
+        password: password.trim(),
+        vietnamProxy,
+        customApiKey
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch {}
+
+    if (res.ok && data?.success && data.session?.token) {
+      return {
+        success: true,
+        token: data.session.token,
+        taxpayerName: data.session.taxpayerName,
+        address: data.session.address,
+        cookieHeader: data.session.cookieHeader,
+        attemptsUsed: data.attemptsUsed,
+        source: 'proxy'
+      };
+    }
+
+    return {
+      success: false,
+      isWafBlocked: data?.isWafBlocked || res.status === 403,
+      needManualCaptcha: data?.needManualCaptcha,
+      error: data?.message || 'Không thể tự động đăng nhập Cổng Thuế.'
+    };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return {
+        success: false,
+        error: 'Thời gian tự động vượt Captcha kéo dài quá lâu (quá 35s). Vui lòng thử lại hoặc nhập mã thủ công.'
+      };
+    }
+    return {
+      success: false,
+      error: `Lỗi kết nối khi tự động đăng nhập: ${err?.message || err}`
+    };
+  }
+}
+
+export async function executeGdtLogin(options: LoginOptions): Promise<LoginResult> {
+  const { taxCode, password, captchaKey, captchaCode, captchaCookie, vietnamProxy, customApiKey } = options;
+
+  if (!captchaCode || !captchaCode.trim()) {
+    return executeGdtAutoLogin({
+      taxCode: password ? taxCode : taxCode,
+      password: password || '',
+      vietnamProxy,
+      customApiKey
+    });
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const res = await fetch('/api/gdt/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        taxCode: taxCode.trim(),
+        password: (password || '').trim(),
+        captchaKey,
+        captchaCode: (captchaCode || '').trim(),
+        captchaCookie,
+        vietnamProxy
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    const raw = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(raw); } catch {}
+
+    if (res.ok && data?.success && data.session?.token) {
+      return {
+        success: true,
+        token: data.session.token,
+        taxpayerName: data.session.taxpayerName,
+        address: data.session.address,
+        cookieHeader: data.session.cookieHeader,
+        source: 'proxy'
+      };
+    }
+
+    return {
+      success: false,
+      isWafBlocked: res.status === 403,
+      error: data?.message || `Cổng Thuế từ chối đăng nhập (HTTP ${res.status}).`
+    };
+  } catch (proxyErr: any) {
+    return {
+      success: false,
+      error: 'Máy chủ chưa kết nối được Cổng Tổng cục Thuế. Vui lòng thử lại sau.'
+    };
+  }
+}
+
+export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
+  const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '', includePos = true, posOnly = false, customApiKey, posCaptcha } = options;
+
+  let proxyError: string | null = null;
+  let proxyStatus: number | null = null;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 28000);
+
+    const res = await fetch('/api/gdt/query-invoices', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token,
+        ...(cookieHeader ? { 'x-gdt-cookie': cookieHeader } : {})
+      },
+      body: JSON.stringify({
+        fromDate,
+        toDate,
+        invoiceType,
+        size,
+        token,
+        cookieHeader,
+        includePos,
+        posOnly,
+        customApiKey,
+        posCaptcha
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    proxyStatus = res.status;
+
+    if (res.status === 401) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        status: 401,
+        invoices: [],
+        message: errData.message || 'Phiên Cổng Thuế cần xác thực lại.'
+      };
+    }
+
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (Array.isArray(data.invoices)) {
+        return {
+          success: true,
+          invoices: data.invoices,
+          source: 'proxy',
+          posDiagnostics: data.posDiagnostics
+        };
+      }
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      proxyError = errData.message || `Proxy HTTP ${res.status}`;
+    }
+  } catch (err: any) {
+    proxyError = err?.message || 'Proxy connection error';
+  }
+
+  return {
+    success: false,
+    status: proxyStatus || 502,
+    invoices: [],
+    message: proxyError || 'Máy chủ chưa lấy được dữ liệu từ Cổng Tổng cục Thuế.'
   };
+}
 
-  return (
-    <aside className="w-72 lg:w-80 bg-slate-900 text-slate-100 p-5 flex flex-col justify-between border-r border-slate-800 shrink-0 h-full overflow-y-auto z-40">
-      <div className="space-y-4.5">
-        <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 shadow-xs">
-              <Building2 className="w-5 h-5 text-blue-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold tracking-tight text-white">
-                  Tra Cứu Hóa Đơn
-                </h2>
-                <span className={`w-2 h-2 rounded-full ${account.isRealGDT ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
-                <Globe2 className="w-3 h-3 text-slate-500" />
-                <span>hoadondientu.gdt.gov.vn</span>
-              </p>
-            </div>
-          </div>
+export async function executeGdtInvoiceDetail(
+  invoice: GDTInvoice,
+  token: string,
+  cookie: string = ''
+): Promise<GDTInvoice | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const response = await fetch('/api/gdt/invoice-detail', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': token } : {}),
+        ...(cookie ? { 'x-gdt-cookie': cookie } : {})
+      },
+      body: JSON.stringify({ invoice, token, cookieHeader: cookie }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
 
-          <div className="flex items-center gap-1.5">
-            {onCollapseSidebar && (
-              <button
-                type="button"
-                onClick={onCollapseSidebar}
-                className="hidden lg:flex items-center gap-1 px-2 py-1 text-xs text-slate-400 hover:text-slate-100 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
-                title="Ẩn menu bên trái để mở rộng không gian nhìn"
-              >
-                <PanelLeftClose className="w-4 h-4 text-slate-400" />
-                <span className="text-[11px] font-medium">Ẩn</span>
-              </button>
-            )}
+    if (response.ok) {
+      const data = await response.json().catch(() => null);
+      if (data && data.success && data.invoice) {
+        return data.invoice as GDTInvoice;
+      }
+    }
+  } catch {}
 
-            {onCloseMobileSidebar && (
-              <button
-                type="button"
-                onClick={onCloseMobileSidebar}
-                className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-800 cursor-pointer"
-                title="Đóng menu"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className={`px-3 py-2 rounded-lg text-xs flex items-center gap-2 font-medium transition-colors ${
-          account.isRealGDT 
-            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' 
-            : 'bg-slate-800/80 border border-slate-700/60 text-slate-300'
-        }`}>
-          {account.isRealGDT ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="truncate">Đã kết nối Cổng Tổng cục Thuế</span>
-            </>
-          ) : (
-            <>
-              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
-              <span className="truncate">Sẵn sàng kết nối Cơ quan Thuế</span>
-            </>
-          )}
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-3.5">
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300">
-                Mã số thuế (Tên đăng nhập)
-              </label>
-              <span className="text-[11px] text-emerald-400 flex items-center gap-0.5">
-                <ShieldCheck className="w-3 h-3" /> Hợp lệ
-              </span>
-            </div>
-            <input
-              type="text"
-              value={localMst}
-              onChange={(e) => setLocalMst(e.target.value.replace(/\s+/g, ''))}
-              onBlur={handleMstBlur}
-              placeholder="VD: 4000926165"
-              className="text-input-dark font-mono text-sm tracking-wide"
-              required
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300">
-                Mật khẩu CQT cấp
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="text-[11px] text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                {showPassword ? 'Ẩn' : 'Hiện'}
-              </button>
-            </div>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={localPassword}
-                onChange={(e) => setLocalPassword(e.target.value)}
-                onBlur={handlePasswordBlur}
-                placeholder="Nhập mật khẩu thuế..."
-                className="text-input-dark pr-9 text-sm"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60 space-y-2.5">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/60">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-blue-400" />
-                <span>Mã Captcha</span>
-              </span>
-
-              <button
-                type="button"
-                onClick={() => handleScanOcr(undefined, undefined, true)}
-                disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
-                className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
-                title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
-              >
-                <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
-                <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div 
-                  className="h-10 bg-white rounded-md flex items-center justify-center p-1 overflow-hidden border border-slate-600 cursor-pointer shadow-xs min-w-[120px] flex-1 relative group"
-                  onClick={fetchCaptcha}
-                  title="Nhấn vào hình để đổi ảnh Captcha khác"
-                >
-                  {isLoadingCaptcha ? (
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                      <RefreshCw className="w-3 h-3 animate-spin text-slate-500" /> Đang tải...
-                    </div>
-                  ) : captchaImg ? (
-                    <img
-                      src={captchaImg}
-                      alt="GDT Captcha"
-                      className="max-h-full object-contain filter contrast-125 select-none"
-                    />
-                  ) : (
-                    <div className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3" /> Bấm thử lại
-                    </div>
-                  )}
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={captchaCode}
-                    onChange={(e) => {
-                      setCaptchaCode(e.target.value.toUpperCase());
-                      if (authError) setAuthError(null);
-                    }}
-                    placeholder="Mã ảnh"
-                    maxLength={8}
-                    className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-slate-950 py-1.5 focus:border-blue-500 ${
-                      ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-amber-300'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-                {ocrNotice ? (
-                  <span className={ocrSuccess ? 'text-emerald-400 font-medium flex items-center gap-1' : 'text-amber-400'}>
-                    {ocrSuccess && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                    {ocrNotice}
-                  </span>
-                ) : captchaCode ? (
-                  <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Đã nhận diện: <strong className="font-mono">{captchaCode}</strong></span>
-                  </span>
-                ) : (
-                  <span className="text-slate-400">Nhập ký tự từ ảnh</span>
-                )}
-
-                <button
-                  type="button"
-                  onClick={fetchCaptcha}
-                  disabled={isLoadingCaptcha || isScanningOcr}
-                  className="text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
-                >
-                  <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
-                  <span>Đổi ảnh</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {isWafBlocked && (
-            <div className="p-3 bg-amber-950/60 border border-amber-600/60 rounded-lg text-amber-200 text-xs leading-relaxed space-y-2 animate-fadeIn shadow-xs">
-              <div className="flex items-start gap-1.5 font-semibold text-amber-300">
-                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span>Cổng Thuế tạm từ chối kết nối IP (HTTP 403)</span>
-              </div>
-              <p className="text-[11px] text-amber-200/90 leading-normal">
-                Tường lửa Tổng cục Thuế phát hiện kết nối từ IP đám mây. Bạn hãy thử lại sau giây lát hoặc làm mới mã Captcha.
-              </p>
-              <div className="flex items-center gap-2 pt-0.5">
-                <button
-                  type="button"
-                  onClick={onOpenConfigModal}
-                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold rounded-md text-xs flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Cấu hình</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={fetchCaptcha}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md text-xs cursor-pointer transition-colors flex items-center gap-1"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Đổi mã</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {authError && !isWafBlocked && (
-            <div className="p-3 bg-rose-950/60 border border-rose-800/60 rounded-lg text-rose-200 text-xs leading-relaxed flex items-start gap-2 animate-fadeIn shadow-xs">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="block text-rose-300 font-semibold">Kết nối Cổng Thuế không thành công:</strong>
-                <span className="text-rose-200/90 text-[11px]">{authError}</span>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-medium text-slate-300">
-                Khoảng thời gian tra cứu
-              </label>
-              <span className="text-[11px] text-slate-400">Chọn nhanh:</span>
-            </div>
-            
-            <div className="bg-slate-950/70 p-1 rounded-lg border border-slate-800 grid grid-cols-4 gap-1 mb-2.5">
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2026-01-01', toDate: '2026-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2026-01-01' && filters.toDate === '2026-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2026
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2025-01-01', toDate: '2025-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2025-01-01' && filters.toDate === '2025-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2025
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2024-01-01', toDate: '2024-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2024-01-01' && filters.toDate === '2024-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2024
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2022-01-01', toDate: '2026-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2022-01-01'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                Tất cả
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-[11px] text-slate-400 block mb-1">Từ ngày:</span>
-                <input
-                  type="date"
-                  value={filters.fromDate}
-                  onChange={(e) => onFilterChange({ ...filters, fromDate: e.target.value })}
-                  className="text-input-dark text-xs p-1.5"
-                />
-              </div>
-              <div>
-                <span className="text-[11px] text-slate-400 block mb-1">Đến ngày:</span>
-                <input
-                  type="date"
-                  value={filters.toDate}
-                  onChange={(e) => onFilterChange({ ...filters, toDate: e.target.value })}
-                  className="text-input-dark text-xs p-1.5"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/40 border border-slate-700/50 rounded-lg">
-            <span className="text-xs text-slate-400 font-medium">Phạm vi tra cứu</span>
-            <span className="text-xs font-semibold text-blue-400">Hóa đơn mua vào</span>
-          </div>
-
-          <div className="pt-1">
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="btn-primary-accent w-full flex items-center justify-center gap-2 cursor-pointer shadow-sm py-2.5 text-xs font-semibold rounded-lg"
-            >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Đang truy xuất Cổng Thuế...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>BẮT ĐẦU TRUY XUẤT</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-
-        <div className="p-3 bg-slate-800/40 rounded-lg border border-slate-800/80 space-y-2 text-xs">
-          <div className="text-slate-400 font-medium text-xs pb-1.5 border-b border-slate-800 flex items-center justify-between">
-            <span>Trạng thái hệ thống</span>
-            <span className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-medium">
-              Hoạt động
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-slate-300 text-[11px]">
-            <span className="text-slate-400">Cổng Thuế:</span>
-            <span className="text-slate-200 font-medium font-mono">hoadondientu.gdt.gov.vn</span>
-          </div>
-          <div className="flex items-center justify-between text-slate-300 text-[11px]">
-            <span className="text-slate-400">Chứng thư số:</span>
-            <span className="text-blue-400 font-medium font-mono">CQT SHA-256</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="pt-3 border-t border-slate-800 space-y-1 text-xs">
-        <button
-          onClick={onOpenConfigModal}
-          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-md transition-colors text-xs cursor-pointer"
-        >
-          <Settings className="w-4 h-4 text-slate-400" />
-          <span>Cấu hình tài khoản & Captcha</span>
-        </button>
-      </div>
-    </aside>
-  );
-};
+  return null;
+}
