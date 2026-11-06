@@ -210,7 +210,8 @@ export async function solveCaptchaWithTesseract(
       throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
     }
 
-    const digitsOnly = options?.digitsOnly !== false;
+    // Đặt mặc định digitsOnly = false để nhận diện cả chữ và số (VD: K8H6WK)
+    const digitsOnly = options?.digitsOnly === true;
     const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ');
 
     let processBuf = buf;
