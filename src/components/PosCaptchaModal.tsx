@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, RefreshCw } from 'lucide-react';
+import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
+import { preprocessPosCaptchaImage } from '../utils/captchaOcrHelper';
 
 interface PosCaptchaModalProps {
   captchaImage: string;
@@ -26,68 +28,39 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
     if (!isOpen || !captchaImage) return;
     setCode('');
     submittedRef.current = false;
-    setStatusText('Đang tự động đọc mã CAPTCHA...');
+    setStatusText('Đang tự động đọc mã CAPTCHA (Local OCR)...');
     setIsSolving(true);
 
     let isMounted = true;
 
-    const fetchOcrAndSubmit = async () => {
+    const runLocalOcr = async () => {
       try {
-        // Gọi thẳng về API OCR sẵn có trên server (hoặc qua helper xử lý ảnh)
-        const response = await fetch('/api/invoice-downloader/solve-captcha', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image: captchaImage,
-            alphanumeric: true,
-            timeoutMs: 8000
-          }),
+        // 1. Tiền xử lý ảnh làm sạch bằng Canvas
+        const cleanImage = await preprocessPosCaptchaImage(captchaImage);
+
+        // 2. Gọi Tesseract chạy trực tiếp trên trình duyệt client
+        const result = await solveCaptchaWithTesseract(cleanImage, {
+          digitsOnly: false,
+          timeoutMs: 6000
         });
 
-        const data = await response.json().catch(() => ({}));
-
         if (isMounted) {
-          if (response.ok && data?.success && data.code) {
-            const detectedCode = String(data.code).trim().toUpperCase();
+          if (result && result.code) {
+            const detectedCode = String(result.code).trim().toUpperCase();
             setCode(detectedCode);
-            setStatusText(`Đã đọc thành công: ${detectedCode}`);
+            setStatusText(`Đã nhận diện thành công: ${detectedCode}`);
             setIsSolving(false);
 
-            // Tự động gán và submit luôn để tiếp tục chuỗi tải 10 tháng
+            // Tự động submit để tiếp tục chuỗi tải dữ liệu
             if (!submittedRef.current) {
               submittedRef.current = true;
               window.setTimeout(() => {
                 if (isMounted) {
                   onSubmit(detectedCode);
                 }
-              }, 400);
+              }, 300);
             }
           } else {
-            // Fallback sang endpoint ocr-captcha nếu endpoint trên lỗi
-            const resFallback = await fetch('/api/gdt/ocr-captcha', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ captchaImage }),
-            });
-            const dataFallback = await resFallback.json().catch(() => ({}));
-            
-            if (resFallback.ok && dataFallback?.success && dataFallback?.captchaCode) {
-              const detectedCode = String(dataFallback.captchaCode).trim().toUpperCase();
-              setCode(detectedCode);
-              setStatusText(`Đã đọc thành công: ${detectedCode}`);
-              setIsSolving(false);
-
-              if (!submittedRef.current) {
-                submittedRef.current = true;
-                window.setTimeout(() => {
-                  if (isMounted) {
-                    onSubmit(detectedCode);
-                  }
-                }, 400);
-              }
-              return;
-            }
-
             setStatusText('Vui lòng nhập tay nếu cần.');
             setIsSolving(false);
             window.setTimeout(() => inputRef.current?.focus(), 0);
@@ -102,7 +75,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
       }
     };
 
-    fetchOcrAndSubmit();
+    runLocalOcr();
 
     return () => {
       isMounted = false;
@@ -123,7 +96,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
         <h2 className="text-base font-semibold text-white">Xác nhận CAPTCHA hóa đơn máy tính tiền</h2>
         <p className="mt-1 text-sm text-slate-300">Đợt truy vấn: {rangeLabel}</p>
         <p className="mt-3 text-xs leading-5 text-slate-400">
-          Tổng cục Thuế yêu cầu mã mới cho từng đợt. Hệ thống đang tự động nhận diện mã CAPTCHA để tiếp tục tải.
+          Tổng cục Thuế yêu cầu mã mới cho từng đợt. Hệ thống đang tự động nhận diện mã CAPTCHA.
         </p>
 
         <div className="mt-4 flex min-h-20 items-center justify-center rounded border border-slate-700 bg-white p-2 relative">
@@ -131,7 +104,7 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
           {isSolving && (
             <div className="absolute inset-0 bg-white/90 flex items-center justify-center gap-2 text-xs font-semibold text-blue-600">
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Đang đọc mã CAPTCHA tự động...</span>
+              <span>Đang đọc mã CAPTCHA...</span>
             </div>
           )}
         </div>
