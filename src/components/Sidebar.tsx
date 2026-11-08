@@ -215,9 +215,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         return;
       }
       
-      if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhìn hình và nhập mã Captcha hoặc bấm "Đọc mã AI" để gán vào.');
-        return;
+      // Đợi OCR ngầm đọc mã nếu đang trong tiến trình nhận diện
+      if (!activeCaptchaCode && isScanningOcr) {
+        for (let wait = 0; wait < 8; wait++) {
+          await new Promise(r => setTimeout(r, 250));
+          if (captchaCode.trim()) {
+            activeCaptchaCode = captchaCode.trim();
+            break;
+          }
+        }
       }
     }
 
@@ -376,8 +382,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Captcha Section */}
-          <div className="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60 space-y-2.5">
+          {/* Captcha Section: Tạm ẩn trên giao diện theo yêu cầu người dùng, tính năng ở code vẫn giữ để tự đọc ngầm */}
+          <div className="hidden" aria-hidden="true">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/60">
               <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-blue-400" />

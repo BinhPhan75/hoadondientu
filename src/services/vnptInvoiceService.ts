@@ -18,6 +18,7 @@ export interface VnptLookupResult {
   pdfDownloadUrl?: string;
   portalUrl: string;
   isCached?: boolean;
+  captchaSolved?: string;
   invoiceInfo?: {
     name?: string;
     template?: string;
@@ -36,6 +37,7 @@ export interface VnptCacheEntry {
   portalUrl: string;
   pdfBuffer?: Buffer;
   cookies: string;
+  captchaSolved?: string;
   invoiceInfo?: VnptLookupResult['invoiceInfo'];
   cachedAt: number;
 }
@@ -90,9 +92,13 @@ export async function lookupOriginalVnptInvoice(params: VnptOriginalInvoiceParam
   const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
   if (!lookupCode) throw new Error('Mã tra cứu VNPT không được để trống');
 
-  const portal = (params.lookupUrl || (params.sellerTaxCode
-    ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn`
-    : 'https://4000344946-tt78.vnpt-invoice.com.vn')).replace(/\/+$/, '');
+  let portal = params.lookupUrl;
+  if (!portal || /tracuu\.vnpt-invoice|portal\.vnpt-invoice/i.test(portal)) {
+    portal = params.sellerTaxCode
+      ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn`
+      : 'https://4000344946-tt78.vnpt-invoice.com.vn';
+  }
+  portal = portal.replace(/\/+$/, '');
 
   const cacheKey = getVnptCacheKey(params.sellerTaxCode, lookupCode, portal);
 
@@ -295,6 +301,7 @@ export async function lookupOriginalVnptInvoice(params: VnptOriginalInvoiceParam
           portalUrl: portal,
           pdfBuffer: prefetchedPdfBuffer,
           cookies: finalCookies,
+          captchaSolved: captchaCode,
           invoiceInfo,
           cachedAt: Date.now()
         };
@@ -311,6 +318,7 @@ export async function lookupOriginalVnptInvoice(params: VnptOriginalInvoiceParam
             : undefined,
           portalUrl: portal,
           isCached: false,
+          captchaSolved: captchaCode,
           invoiceInfo
         };
       } catch (err: any) {
@@ -339,10 +347,13 @@ export async function downloadOriginalVnptPdf(params: {
   lookupCode: string;
   sellerTaxCode?: string;
   invoiceNumber?: string;
-}): Promise<{ data: Buffer; filename: string; contentType: string }> {
-  let portal = params.portalUrl || (params.sellerTaxCode
-    ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn`
-    : 'https://4000344946-tt78.vnpt-invoice.com.vn');
+}): Promise<{ data: Buffer; filename: string; contentType: string; captchaSolved?: string }> {
+  let portal = params.portalUrl;
+  if (!portal || /tracuu\.vnpt-invoice|portal\.vnpt-invoice/i.test(portal)) {
+    portal = params.sellerTaxCode
+      ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn`
+      : 'https://4000344946-tt78.vnpt-invoice.com.vn';
+  }
   portal = portal.replace(/\/+$/, '');
 
   const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, '').trim();
@@ -357,7 +368,8 @@ export async function downloadOriginalVnptPdf(params: {
     return {
       data: cached.pdfBuffer,
       filename: `HoaDon_VNPT_${cleanShd}.pdf`,
-      contentType: 'application/pdf'
+      contentType: 'application/pdf',
+      captchaSolved: cached.captchaSolved || 'Đã giải thành công'
     };
   }
 
@@ -367,6 +379,7 @@ export async function downloadOriginalVnptPdf(params: {
   };
 
   let validPdfBuffer: Buffer | null = null;
+  let resolvedCaptcha = cached?.captchaSolved;
 
   // 2. Nếu đã có checkCode và cookies trong session cached -> tải trực tiếp siêu nhanh (khoảng 200ms)
   const checkCode = (params.checkCode && params.checkCode !== 'undefined' && params.checkCode !== 'null')
@@ -407,6 +420,7 @@ export async function downloadOriginalVnptPdf(params: {
       sellerTaxCode: params.sellerTaxCode,
       lookupUrl: portal
     });
+    resolvedCaptcha = lookupRes.captchaSolved;
 
     const refreshedCache = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
     if (refreshedCache?.pdfBuffer && refreshedCache.pdfBuffer.length > 1000) {
@@ -438,6 +452,7 @@ export async function downloadOriginalVnptPdf(params: {
   return {
     data: validPdfBuffer,
     filename: `HoaDon_VNPT_${cleanShd}.pdf`,
-    contentType: 'application/pdf'
+    contentType: 'application/pdf',
+    captchaSolved: resolvedCaptcha
   };
 }

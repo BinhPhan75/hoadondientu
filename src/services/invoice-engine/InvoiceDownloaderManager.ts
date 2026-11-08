@@ -28,6 +28,7 @@ import { CyberBillDriver } from './drivers/CyberBillDriver';
 import { VnpayDriver } from './drivers/VnpayDriver';
 import { GenericFallbackDriver } from './drivers/GenericFallbackDriver';
 import { detectProvider, detectProviderWithDetails, DetectedInvoiceProvider, DetectionResultDetails } from './providerDetector';
+import { parseGDTInvoiceXml } from '../../utils/xmlParser';
 
 export class InvoiceDownloaderManager {
   private static instance: InvoiceDownloaderManager | null = null;
@@ -158,6 +159,10 @@ export class InvoiceDownloaderManager {
     if (options?.forceFallback) {
       this.log('Người dùng yêu cầu ép sử dụng GenericFallbackDriver.', overallLogs);
       const fallbackInfo = await this.fallbackDriver.extractInfo(xmlContent);
+      if (options?.customInfo) {
+        if (options.customInfo.lookupCode) fallbackInfo.lookupCode = options.customInfo.lookupCode;
+        if (options.customInfo.sellerTaxCode) fallbackInfo.sellerTaxCode = options.customInfo.sellerTaxCode;
+      }
       const res = await this.fallbackDriver.fetchPdf(fallbackInfo, options);
       res.executionLogs = overallLogs.concat(res.executionLogs);
       return res;
@@ -201,14 +206,35 @@ export class InvoiceDownloaderManager {
       invoiceInfo = await this.fallbackDriver.extractInfo(xmlContent);
     }
 
+    // Đảm bảo đầy đủ thông tin bên bán, bên mua và cấu trúc hóa đơn từ GDT XML
+    try {
+      const gdtInv = parseGDTInvoiceXml(xmlContent);
+      if (!invoiceInfo.buyerName && gdtInv.nmten) invoiceInfo.buyerName = gdtInv.nmten;
+      if (!invoiceInfo.buyerTaxCode && gdtInv.nmmst) invoiceInfo.buyerTaxCode = gdtInv.nmmst;
+      if (!invoiceInfo.sellerName && gdtInv.nbten) invoiceInfo.sellerName = gdtInv.nbten;
+      if (!invoiceInfo.sellerTaxCode && gdtInv.nbmst) invoiceInfo.sellerTaxCode = gdtInv.nbmst;
+      if (!invoiceInfo.templateCode && gdtInv.khmshdon) invoiceInfo.templateCode = gdtInv.khmshdon;
+      if (!invoiceInfo.cqtCode && gdtInv.mhdon) invoiceInfo.cqtCode = gdtInv.mhdon;
+      if (!invoiceInfo.additionalData) invoiceInfo.additionalData = {};
+      invoiceInfo.additionalData.parsedInvoice = gdtInv;
+    } catch {
+      // Bỏ qua nếu xmlContent gặp lỗi parse
+    }
+
     // 3.1 Hợp nhất thông tin tùy chỉnh từ người dùng (customInfo: lookupCode, secretCode, lookupUrl, sellerTaxCode)
     if (options?.customInfo) {
       if (options.customInfo.lookupCode) {
         invoiceInfo.lookupCode = options.customInfo.lookupCode;
+        if (!invoiceInfo.secretCode) {
+          invoiceInfo.secretCode = options.customInfo.lookupCode;
+        }
         this.log(`Áp dụng Mã tra cứu do người dùng cung cấp: "${invoiceInfo.lookupCode}"`, overallLogs);
       }
       if (options.customInfo.secretCode) {
         invoiceInfo.secretCode = options.customInfo.secretCode;
+        if (!invoiceInfo.lookupCode) {
+          invoiceInfo.lookupCode = options.customInfo.secretCode;
+        }
         this.log(`Áp dụng Mã bí mật do người dùng cung cấp: "${invoiceInfo.secretCode}"`, overallLogs);
       }
       if (options.customInfo.lookupUrl) {
@@ -217,6 +243,12 @@ export class InvoiceDownloaderManager {
       }
       if (options.customInfo.sellerTaxCode) {
         invoiceInfo.sellerTaxCode = options.customInfo.sellerTaxCode;
+      }
+      if (options.customInfo.invoiceNo) {
+        invoiceInfo.invoiceNo = String(options.customInfo.invoiceNo).padStart(7, '0');
+      }
+      if (options.customInfo.invoiceSeries) {
+        invoiceInfo.invoiceSeries = options.customInfo.invoiceSeries;
       }
     }
 
@@ -232,15 +264,15 @@ export class InvoiceDownloaderManager {
       } catch (crawlError: any) {
         if (crawlError instanceof OriginalInvoiceError) throw crawlError;
         this.log(`[CẢNH BÁO CRAWL THẤT BẠI]: ${crawlError.message}`, overallLogs);
-        this.log(`TỰ ĐỘNG CHUYỂN SANG GENERIC FALLBACK DRIVER ĐỂ ĐẢM BẢO HỆ THỐNG KHÔNG BỊ GIÁN ĐOẠN...`, overallLogs);
+        this.log(`TỰ ĐỘNG LẤY BẢN THỂ HIỆN MẪU CHUẨN TỔNG CỤC THUẾ (NĐ 123/2020/NĐ-CP & TT 78/2021/TT-BTC)...`, overallLogs);
       }
     }
 
-    // 5. KÍCH HOẠT FALLBACK SAFEGUARD: Render bản thể hiện nội bộ đạt chuẩn pháp lý
+    // 5. KÍCH HOẠT BẢN THỂ HIỆN MẪU CHUẨN TỔNG CỤC THUẾ (Decree 123 / Circular 78)
     try {
       const fallbackResult = await this.fallbackDriver.fetchPdf(invoiceInfo, options);
       fallbackResult.executionLogs = overallLogs.concat(fallbackResult.executionLogs);
-      this.log(`[SAFEGUARD HOÀN TẤT] Đã tạo bản thể hiện nội bộ thành công trong ${Date.now() - startTime}ms`, fallbackResult.executionLogs);
+      this.log(`[HOÀN TẤT] Đã tạo bản thể hiện Mẫu Chuẩn Tổng Cục Thuế thành công trong ${Date.now() - startTime}ms`, fallbackResult.executionLogs);
       return fallbackResult;
     } catch (fallbackError: any) {
       // Trường hợp cực kỳ hi hữu

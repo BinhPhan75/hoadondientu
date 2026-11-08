@@ -64,8 +64,8 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
     const logs: string[] = [];
     this.createLog(`Khởi động xử lý HĐĐT EasyInvoice: Số ${info.invoiceNo}, Mẫu ${info.templateCode}/${info.invoiceSeries}`, logs);
 
-    const lookupCode = (info.lookupCode || '').trim();
-    const cleanMst = (info.sellerTaxCode || '').trim();
+    const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || '').trim();
+    const cleanMst = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
     this.createLog(`Mã tra cứu EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
 
     // 1. Nếu có mã tra cứu, thử tải trực tiếp hóa đơn gốc qua Cổng EasyInvoice với Gemini Captcha Solver
@@ -75,13 +75,14 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
         const dlRes = await downloadOriginalEasyInvoice({
           lookupCode,
           sellerTaxCode: cleanMst,
-          lookupUrl: info.lookupUrl,
-          khhdon: info.invoiceSeries,
-          shdon: info.invoiceNo
+          lookupUrl: options?.customInfo?.lookupUrl || info.lookupUrl,
+          khhdon: options?.customInfo?.invoiceSeries || info.invoiceSeries,
+          shdon: options?.customInfo?.invoiceNo || info.invoiceNo
         });
 
         if (dlRes.success && dlRes.buffer && dlRes.buffer.length > 50) {
-          this.createLog(`Vượt Captcha và tải thành công hóa đơn gốc từ EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})`, logs);
+          const captchaMsg = dlRes.captchaSolved ? ` (Đã vượt Captcha: ${dlRes.captchaSolved})` : '';
+          this.createLog(`Vượt Captcha và tải thành công hóa đơn gốc từ EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})${captchaMsg}`, logs);
           return {
             success: true,
             provider: this.providerCode,
@@ -91,6 +92,7 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
             contentType: dlRes.contentType || 'application/pdf',
             filename: dlRes.filename || this.buildPdfFilename(info),
             isFallback: false,
+            captchaSolved: dlRes.captchaSolved,
             sourceUrl: info.lookupUrl || 'https://tracuu.easyinvoice.vn',
             executionLogs: logs
           };

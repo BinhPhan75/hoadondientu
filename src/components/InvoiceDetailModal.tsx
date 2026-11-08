@@ -88,11 +88,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setOriginalLoadError(null);
     setIsDownloadingEasyInvoice(false);
     setOriginalEasyInvoiceHtml(null);
+    setMisaPortalUrl(null);
     if (originalProviderPdfUrl) {
       window.URL.revokeObjectURL(originalProviderPdfUrl);
       setOriginalProviderPdfUrl(null);
     }
-    setOriginalMisaPdfUrl(null);
     setOriginalVnptHtml(null);
     setVnptCheckCode(null);
     setVnptPortalUrl(null);
@@ -112,7 +112,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     : null;
 
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
-  const [originalMisaPdfUrl, setOriginalMisaPdfUrl] = useState<string | null>(null);
+  const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
@@ -554,7 +554,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
-        if (resolveInvoiceProvider(target) === 'MISA') setOriginalMisaPdfUrl(url);
       }
       setEasyInvoiceDownloadStatus('Đã mở bản gốc lưu trên máy.');
     } catch (error: any) {
@@ -607,7 +606,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
-    if (!effectiveInvoice?.rawXml || !resolveInvoiceProvider(effectiveInvoice)) return;
+    const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
+    if (!effectiveInvoice?.rawXml || !provider || provider === 'MISA') return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
 
@@ -937,12 +937,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               className="flex justify-center"
               style={{
                 width: '100%',
-                maxWidth: originalVnptHtml ? '890px' : '820px',
+                maxWidth: originalVnptHtml || misaPortalUrl ? '890px' : '820px',
                 minHeight: '1160px',
               }}
             >
                 <div className="w-full min-h-[1160px] bg-white rounded shadow-2xl overflow-hidden border border-gray-300">
-                  {originalViettelPdfUrl ? (
+                  {misaPortalUrl ? (
+                    <iframe
+                      src={misaPortalUrl}
+                      title="Cổng tra cứu MISA meInvoice"
+                      className="w-full h-[1200px] border-0 bg-white"
+                      allow="clipboard-read; clipboard-write"
+                    />
+                  ) : originalViettelPdfUrl ? (
                     <iframe
                       src={originalViettelPdfUrl}
                       title="Bản gốc PDF Viettel vInvoice"
@@ -995,7 +1002,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
               {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
-                {originalEasyInvoiceHtml ? (
+                {misaPortalUrl ? (
+                  <>Đang xem <span className="text-emerald-400 font-bold">cổng MISA meInvoice</span> trong ứng dụng • </>
+                ) : originalEasyInvoiceHtml ? (
                   <>Bản thể hiện <span className="text-emerald-400 font-bold">gốc từ {currentProviderMeta.name}</span> • </>
                 ) : originalVnptHtml ? (
                   <>Bản thể hiện <span className="text-cyan-400 font-bold">gốc từ VNPT Invoice</span> • </>
@@ -1034,20 +1043,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             ) : isMisaInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleViewOriginalProvider}
-                  disabled={isDownloadingEasyInvoice}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 disabled:opacity-60"
-                  title={`Tải PDF gốc MISA bằng FKey/TransactionID: ${lookupDetails.lookupCode || ''}`}
-                >
-                  {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tải...') : originalMisaPdfUrl ? 'Đang xem PDF gốc MISA' : 'Xem hóa đơn gốc MISA'}</span>
-                </button>
                 {directLookupUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setMisaPortalUrl(directLookupUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{misaPortalUrl ? 'Đang mở tra cứu MISA' : 'Mở tra cứu MISA'}</span>
+                  </button>
+                )}
+                {directLookupUrl && misaPortalUrl && (
                   <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
                     <ExternalLink className="w-3 h-3" />
-                    <span>Mở cổng MISA</span>
+                    <span>Mở cửa sổ riêng</span>
                   </a>
                 )}
               </div>

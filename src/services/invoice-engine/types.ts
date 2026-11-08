@@ -55,10 +55,12 @@ export interface CaptchaSolveOptions {
   whitelist?: string; // Ký tự cho phép (mặc định: A-Z0-9)
   timeoutMs?: number; // Timeout OCR
   preprocess?: boolean; // Tiền xử lý ảnh
+  preprocessEasyInvoice?: boolean; // Tiền xử lý chuyên biệt cho EasyInvoice PNG
   lang?: string; // 'eng' | 'vie'
   prompt?: string; // Tùy chỉnh prompt gửi cho Gemini AI
   alphanumeric?: boolean;
   customApiKey?: string;
+  forceGemini?: boolean; // Bỏ qua Tesseract local, trực tiếp dùng Gemini API
 }
 
 export interface CaptchaSolveResult {

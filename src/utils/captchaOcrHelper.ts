@@ -1,8 +1,13 @@
 /**
  * Helper to convert SVG captcha from GDT Portal to high-resolution crisp PNG
- * using HTML5 Offscreen Canvas. This enables Gemini Vision to see the rendered glyphs
- * instead of parsing raw SVG markup, increasing OCR accuracy to 99%+.
+ * using HTML5 Offscreen Canvas. This enables Gemini Vision / Local Tesseract to see
+ * the rendered glyphs instead of parsing raw SVG markup, increasing OCR accuracy.
  */
+
+export function cleanGdtSvgString(svg: string): string {
+  if (!svg || typeof svg !== 'string') return svg;
+  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
+}
 
 export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string> {
   if (typeof window === 'undefined' || !svgOrDataUri) return svgOrDataUri;
@@ -13,11 +18,19 @@ export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string
   }
 
   let src = svgOrDataUri;
-  if (!src.startsWith('data:image/svg+xml')) {
+  if (src.startsWith('data:image/svg+xml;base64,')) {
+    try {
+      const decoded = atob(src.replace('data:image/svg+xml;base64,', ''));
+      const cleaned = cleanGdtSvgString(decoded);
+      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
+    } catch {
+      // keep original
+    }
+  } else if (!src.startsWith('data:image/svg+xml')) {
     if (src.includes('<svg')) {
-      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(src)}`;
+      const cleaned = cleanGdtSvgString(src);
+      src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
     } else {
-      // Might be plain text or unsupported format
       return svgOrDataUri;
     }
   }
@@ -93,5 +106,90 @@ export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string
     };
 
     img.src = src;
+  });
+}
+
+/**
+ * Tiền xử lý chuyên sâu cho CAPTCHA Hóa đơn máy tính tiền (POS Captcha).
+ * Khử sạch các đường gạch ngang, vạch cắt ngang và nhiễu hoa văn mờ bằng HTML5 Canvas binarization.
+ */
+export async function preprocessPosCaptchaImage(imageSrc: string): Promise<string> {
+  if (typeof window === 'undefined' || !imageSrc) return imageSrc;
+
+  // Nếu là SVG, chuyển đổi sang PNG sắc nét trước
+  let basePng = imageSrc;
+  if (imageSrc.includes('<svg') || imageSrc.startsWith('data:image/svg+xml')) {
+    basePng = await convertSvgToSharpPng(imageSrc);
+  }
+
+  return new Promise<string>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    const timer = setTimeout(() => {
+      resolve(basePng);
+    }, 2500);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(basePng);
+          return;
+        }
+
+        const width = img.naturalWidth || img.width || 200;
+        const height = img.naturalHeight || img.height || 60;
+        canvas.width = width;
+        canvas.height = height;
+
+        // Vẽ nền trắng
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const imgData = ctx.getImageData(0, 0, width, height);
+        const data = imgData.data;
+
+        // Ngưỡng binarization linh hoạt để tẩy vạch gạch mờ và giữ nét chữ
+        const threshold = 145;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+
+          // Độ xám theo chuẩn cảm nhận mắt người
+          const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+
+          // Chuyển nét chữ đậm về ĐEN TUYỀN (0), còn vạch kẻ mờ & nền thành TRẮNG TINH (255)
+          if (luminance < threshold) {
+            data[i] = 0;       // Red
+            data[i + 1] = 0;   // Green
+            data[i + 2] = 0;   // Blue
+          } else {
+            data[i] = 255;     // Red
+            data[i + 1] = 255; // Green
+            data[i + 2] = 255; // Blue
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+        return;
+      } catch (err) {
+        console.warn('POS Preprocessing error:', err);
+      }
+      resolve(basePng);
+    };
+
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve(basePng);
+    };
+
+    img.src = basePng;
   });
 }

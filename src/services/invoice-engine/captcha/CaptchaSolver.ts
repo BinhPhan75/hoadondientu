@@ -6,6 +6,8 @@ export class CaptchaSolver {
   /**
    * Ưu tiên giải mã cục bộ bằng Tesseract (Miễn phí 100%, chạy offline),
    * nếu thất bại mới tự động chuyển sang Gemini API làm phương án dự phòng.
+   * Nếu có cờ forceGemini (ví dụ khi GDT từ chối mã từ OCR local ở lần trước),
+   * sẽ bỏ qua Tesseract và dùng ngay Gemini API trên CAPTCHA mới.
    */
   public static async solveWithAI(
     imageInput: Buffer | string | Uint8Array,
@@ -13,50 +15,59 @@ export class CaptchaSolver {
   ): Promise<CaptchaSolveResult | null> {
     const startTime = Date.now();
     
-    // 1. ƯU TIÊN SỐ 1: Chạy Tesseract local trước
-    try {
-      const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
-        digitsOnly: options?.alphanumeric !== true,
-        whitelist: options?.whitelist,
-        timeoutMs: options?.timeoutMs || 2500,
-        preprocessEasyInvoice: options?.preprocess !== false,
-      });
+    // 1. ƯU TIÊN SỐ 1: Chạy Tesseract local trước (trừ khi có cờ forceGemini)
+    if (!options?.forceGemini) {
+      try {
+        const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
+          digitsOnly: options?.alphanumeric !== true,
+          whitelist: options?.whitelist || (options?.alphanumeric ? '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' : '0123456789'),
+          timeoutMs: options?.timeoutMs || 4000,
+          preprocessEasyInvoice: options?.preprocessEasyInvoice === true,
+        });
 
-      const localCode = options?.alphanumeric
-        ? (tesseractRes?.code || '').toUpperCase()
-        : tesseractRes?.code || '';
-      const validLocalCode = options?.alphanumeric
-        ? /^[a-z0-9]{4,6}$/i.test(localCode)
-        : localCode.length >= 3;
-      if (validLocalCode) {
-        return {
-          code: localCode,
-          confidence: tesseractRes.confidence,
-          engine: 'tesseract-local',
-          processingTimeMs: Date.now() - startTime,
-        };
+        const localCode = (tesseractRes?.code || '').trim().toUpperCase();
+        const validLocalCode = options?.alphanumeric
+          ? /^[A-Z0-9]{4,6}$/.test(localCode)
+          : /^[0-9]{3,6}$/.test(localCode);
+        if (validLocalCode) {
+          console.log(`[CaptchaSolver] Tesseract local giải thành công: "${localCode}" (độ tin cậy: ${Math.round(tesseractRes.confidence)}%)`);
+          return {
+            code: localCode,
+            confidence: tesseractRes.confidence,
+            engine: 'tesseract-local',
+            processingTimeMs: Date.now() - startTime,
+          };
+        }
+      } catch (error: any) {
+        console.warn('[CaptchaSolver] Tesseract local OCR không nhận diện được:', error?.message || error);
       }
-    } catch (error) {
-      console.warn('[CaptchaSolver] Local Tesseract OCR failed; trying Gemini fallback:', error);
     }
 
-    // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được
+    // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được hoặc yêu cầu forceGemini
     try {
+      if (options?.forceGemini) {
+        console.log('[CaptchaSolver] Kích hoạt ưu tiên Gemini API cho CAPTCHA mới...');
+      }
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, {
-        timeoutMs: options?.timeoutMs,
+        timeoutMs: Math.max(options?.timeoutMs || 12000, 10000),
         customApiKey: options?.customApiKey,
         alphanumeric: options?.alphanumeric,
       });
-      return {
-        code,
-        confidence: 99,
-        engine: 'gemini',
-        processingTimeMs: Date.now() - startTime,
-      };
-    } catch (error) {
-      console.warn('[CaptchaSolver] Gemini CAPTCHA fallback failed:', error);
+      if (code) {
+        console.log(`[CaptchaSolver] Gemini API giải thành công: "${code}"`);
+        return {
+          code,
+          confidence: 99,
+          engine: 'gemini',
+          processingTimeMs: Date.now() - startTime,
+        };
+      }
+    } catch (error: any) {
+      console.warn('[CaptchaSolver] Gemini CAPTCHA fallback không thành công:', error?.message || error);
       return null;
     }
+
+    return null;
   }
 
   public static isValidImageBuffer(buf: Buffer | Uint8Array): boolean {

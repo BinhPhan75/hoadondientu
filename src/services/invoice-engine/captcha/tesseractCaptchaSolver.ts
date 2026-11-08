@@ -1,4 +1,4 @@
-import { createWorker, Worker } from 'tesseract.js';
+import { createWorker, type Worker } from 'tesseract.js';
 import zlib from 'zlib';
 
 const isServerless = Boolean(
@@ -191,24 +191,33 @@ export async function solveCaptchaWithTesseract(
   imageInput: Buffer | string | Uint8Array,
   options?: TesseractSolveOptions
 ): Promise<{ code: string; confidence: number }> {
-  const timeoutMs = options?.timeoutMs || 2500;
+  const timeoutMs = options?.timeoutMs || 4500;
 
   const recognitionPromise = (async () => {
     let buf: Buffer;
     if (typeof imageInput === 'string') {
-      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, '');
+      const trimmed = imageInput.trim();
+      if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
+        throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
+      }
+      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, '');
       buf = Buffer.from(cleanB64, 'base64');
     } else {
       buf = Buffer.from(imageInput);
     }
 
-    const digitsOnly = options?.digitsOnly !== false;
-    const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz');
+    if (buf.length >= 4 && buf.slice(0, 10).toString('utf-8').includes('<svg')) {
+      throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
+    }
+
+    // Đặt mặc định digitsOnly = false để nhận diện cả chữ và số (VD: K8H6WK)
+    const digitsOnly = options?.digitsOnly === true;
+    const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ');
 
     let processBuf = buf;
 
     const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (options?.preprocessEasyInvoice || (options?.preprocessEasyInvoice !== false && isPng)) {
+    if (options?.preprocessEasyInvoice === true && isPng) {
       const decoded = decodePngRgba(buf);
       if (decoded) {
         const binarized = createBinarizedBmp(decoded, 3, 25, 145);
@@ -223,7 +232,7 @@ export async function solveCaptchaWithTesseract(
     if (digitsOnly) {
       text = text.replace(/[^0-9]/g, '');
     } else {
-      text = text.replace(/[^a-zA-Z0-9]/g, '');
+      text = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     }
 
     return {

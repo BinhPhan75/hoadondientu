@@ -2,6 +2,7 @@ import { GDTInvoice } from '../types';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
 import { convertSvgToSharpPng } from './captchaOcrHelper';
+import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
 
 export interface QueryInvoicesOptions {
   fromDate: string;
@@ -31,7 +32,7 @@ export interface QueryInvoicesResult {
 
 export interface LoginOptions {
   taxCode: string;
-  password: string;
+  password?: string;
   captchaKey?: string;
   captchaCode?: string;
   captchaCookie?: string;
@@ -150,11 +151,7 @@ export function normalizeGdtInvoiceItem(item: any, type: 'purchase' | 'sold', is
   };
 }
 
-/**
- * Fetch Captcha with Backend proxy only
- */
 export async function executeGdtCaptcha(): Promise<CaptchaResult> {
-  // Strategy 1: Serverless Backend Proxy (/api/gdt/captcha)
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 9000);
@@ -178,7 +175,7 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   } catch (proxyErr) {
     console.info('[Proxy Captcha switched to direct fetch]:', proxyErr);
   }
-
+
   return {
     success: false,
     captchaImage: '',
@@ -187,7 +184,6 @@ export async function executeGdtCaptcha(): Promise<CaptchaResult> {
   };
 }
 
-/** Fetch a fresh CAPTCHA bound to the authenticated GDT POS session. */
 export async function executeGdtPosCaptcha(options: {
   token: string;
   cookieHeader?: string;
@@ -225,38 +221,42 @@ export async function executeGdtPosCaptchaSolve(options: {
   forceGemini?: boolean;
 }): Promise<PosCaptchaSolveResult> {
   try {
-    const image = await convertSvgToSharpPng(options.captchaImage);
-    const response = await fetch('/api/invoice-downloader/solve-captcha', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image,
-        alphanumeric: true,
-        preprocess: false,
-        timeoutMs: 12000,
-        customApiKey: options.customApiKey,
-        forceGemini: options.forceGemini,
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok && data?.success && data.code) {
-      return { success: true, code: data.code, engine: data.engine };
+    if (!options.captchaImage) {
+      return { success: false, error: 'Hình ảnh CAPTCHA rỗng.' };
     }
-    return { success: false, error: data?.error || 'Không thể tự nhận diện CAPTCHA.' };
+
+    let imageSource = options.captchaImage;
+    try {
+      imageSource = await convertSvgToSharpPng(options.captchaImage);
+    } catch {
+      imageSource = options.captchaImage;
+    }
+
+    const localResult = await solveCaptchaWithTesseract(imageSource, {
+      digitsOnly: false,
+      timeoutMs: 8000
+    });
+
+    if (localResult && localResult.code) {
+      return {
+        success: true,
+        code: localResult.code.toUpperCase(),
+        engine: 'tesseract-local'
+      };
+    }
+
+    return { success: false, error: 'Không thể tự nhận diện CAPTCHA POS bằng Local OCR.' };
   } catch (error: any) {
-    return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA.' };
+    return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA POS.' };
   }
 }
 
-/**
- * Auto-Login with Zero-Click Captcha and auto-retry
- */
 export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<LoginResult> {
   const { taxCode, password, vietnamProxy, customApiKey } = options;
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 35000); // 35s for 3 attempts
+    const timer = setTimeout(() => controller.abort(), 35000);
 
     const res = await fetch('/api/gdt/auto-login', {
       method: 'POST',
@@ -307,23 +307,18 @@ export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<Lo
   }
 }
 
-/**
- * Resilient GDT Login with Backend proxy only
- */
 export async function executeGdtLogin(options: LoginOptions): Promise<LoginResult> {
   const { taxCode, password, captchaKey, captchaCode, captchaCookie, vietnamProxy, customApiKey } = options;
 
-  // If captchaCode is omitted or empty, use executeGdtAutoLogin!
   if (!captchaCode || !captchaCode.trim()) {
     return executeGdtAutoLogin({
       taxCode,
-      password,
+      password: password || '',
       vietnamProxy,
       customApiKey
     });
   }
 
-  // Strategy 1: Serverless Proxy /api/gdt/login
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
@@ -332,7 +327,7 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         taxCode: taxCode.trim(),
-        password: password.trim(),
+        password: (password || '').trim(),
         captchaKey,
         captchaCode: (captchaCode || '').trim(),
         captchaCookie,
@@ -357,51 +352,28 @@ export async function executeGdtLogin(options: LoginOptions): Promise<LoginResul
       };
     }
 
-    if (data?.message || data?.details) {
-      return {
-        success: false,
-        isWafBlocked: data?.isWafBlocked || res.status === 403,
-        error: data.message || data.details
-      };
-    }
-
     return {
       success: false,
       isWafBlocked: res.status === 403,
-      error: `Cổng Thuế từ chối đăng nhập (HTTP ${res.status}). Vui lòng kiểm tra Captcha, MST và mật khẩu.`
+      error: data?.message || `Cổng Thuế từ chối đăng nhập (HTTP ${res.status}).`
     };
   } catch (proxyErr: any) {
-    console.warn('[Proxy Login Failed]:', proxyErr);
-    if (proxyErr?.name === 'AbortError') {
-      return {
-        success: false,
-        error: 'Thời gian chờ xác thực từ Cổng Thuế quá lâu (quá 25s). Vui lòng thử lại.'
-      };
-    }
+    return {
+      success: false,
+      error: 'Máy chủ chưa kết nối được Cổng Tổng cục Thuế. Vui lòng thử lại sau.'
+    };
   }
-
-  return {
-    success: false,
-    error: 'Máy chủ chưa kết nối được Cổng Tổng cục Thuế. Vui lòng thử lại sau.'
-  };
 }
 
-/**
- * Unified resilient invoice query:
- * 1. Tries the Serverless Backend Proxy (/api/gdt/query-invoices)
- * 2. If proxy fails, times out, returns 502/504 (e.g. Vercel IP blocked by GDT firewall),
- *    uses the backend proxy only
- */
 export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
   const { fromDate, toDate, invoiceType = 'purchase', size = 50, token, cookieHeader = '', includePos = true, posOnly = false, customApiKey, posCaptcha } = options;
 
   let proxyError: string | null = null;
   let proxyStatus: number | null = null;
 
-  // Step 1: Attempt Serverless Proxy
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28000); // 28s timeout matching Vercel maxDuration 30s
+    const timeoutId = setTimeout(() => controller.abort(), 28000);
 
     const res = await fetch('/api/gdt/query-invoices', {
       method: 'POST',
@@ -434,17 +406,7 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
         success: false,
         status: 401,
         invoices: [],
-        message: errData.message || 'Phiên Cổng Thuế cần xác thực lại. Vui lòng nhập Captcha để tiếp tục.'
-      };
-    }
-
-    if (res.status === 403) {
-      const errData = await res.json().catch(() => ({}));
-      return {
-        success: false,
-        status: 403,
-        invoices: [],
-        message: errData.message || 'Cổng Tổng cục Thuế chặn truy vấn từ IP máy chủ Cloud nước ngoài (HTTP 403). Phiên đăng nhập vẫn còn hiệu lực.'
+        message: errData.message || 'Phiên Cổng Thuế cần xác thực lại.'
       };
     }
 
@@ -465,25 +427,20 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
   } catch (err: any) {
     proxyError = err?.message || 'Proxy connection error';
   }
-
+
   return {
     success: false,
     status: proxyStatus || 502,
     invoices: [],
-    message: proxyError || 'Máy chủ chưa lấy được dữ liệu từ Cổng Tổng cục Thuế. Không thể gọi trực tiếp từ trình duyệt do chính sách CORS.'
+    message: proxyError || 'Máy chủ chưa lấy được dữ liệu từ Cổng Tổng cục Thuế.'
   };
 }
 
-/**
- * Resilient Invoice Detail & XML Enrichment
- * Tries server proxy first, then falls back to direct browser fetch
- */
 export async function executeGdtInvoiceDetail(
   invoice: GDTInvoice,
   token: string,
   cookie: string = ''
 ): Promise<GDTInvoice | null> {
-  // Strategy 1: Serverless Proxy
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 8000);
@@ -505,9 +462,7 @@ export async function executeGdtInvoiceDetail(
         return data.invoice as GDTInvoice;
       }
     }
-  } catch {
-    // Proxy failed or timed out on Vercel
-  }
+  } catch {}
 
   return null;
 }
