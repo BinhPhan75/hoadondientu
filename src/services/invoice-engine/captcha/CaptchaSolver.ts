@@ -15,14 +15,15 @@ export class CaptchaSolver {
   ): Promise<CaptchaSolveResult | null> {
     const startTime = Date.now();
     
-    // 1. ƯU TIÊN SỐ 1: Chạy Tesseract local trước (trừ khi có cờ forceGemini)
-    if (!options?.forceGemini) {
+    // 1. ƯU TIÊN SỐ 1: Chạy Tesseract local OCR
+    if (!options?.forceGemini || options?.alphanumeric) {
       try {
         const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
           digitsOnly: options?.alphanumeric !== true,
           whitelist: options?.whitelist || (options?.alphanumeric ? '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' : '0123456789'),
           timeoutMs: options?.timeoutMs || 4000,
           preprocessEasyInvoice: options?.preprocessEasyInvoice === true,
+          preprocessPosCaptcha: options?.alphanumeric === true,
         });
 
         const localCode = (tesseractRes?.code || '').trim().toUpperCase();
@@ -43,15 +44,20 @@ export class CaptchaSolver {
       }
     }
 
-    // 2. ƯU TIÊN SỐ 2 (Fallback): Gọi Gemini API nếu local không nhận diện được hoặc yêu cầu forceGemini
+    // 2. Đối với Hóa đơn máy tính tiền (alphanumeric): TUYỆT ĐỐI BỎ GỌI GEMINI API
+    // Hoàn toàn dựa vào công nghệ Local OCR (Template Matching Client + Tesseract Local),
+    // nếu không tự đọc được thì chuyển thẳng sang luồng người dùng nhập tay.
+    if (options?.alphanumeric || options?.localOnly) {
+      console.info('[CaptchaSolver] Không gọi Gemini API cho CAPTCHA máy tính tiền; kết thúc luồng OCR cục bộ để chuyển nhập tay.');
+      return null;
+    }
+
+    // 3. Fallback Gemini API CHỈ dành cho các loại hóa đơn khác ngoài máy tính tiền (như EasyInvoice số hoặc VNPT nếu có key)
     try {
-      if (options?.forceGemini) {
-        console.log('[CaptchaSolver] Kích hoạt ưu tiên Gemini API cho CAPTCHA mới...');
-      }
       const code = await solveCaptchaWithGemini(imageInput, options?.prompt, {
-        timeoutMs: Math.max(options?.timeoutMs || 12000, 10000),
+        timeoutMs: Math.max(options?.timeoutMs || 25000, 15000),
         customApiKey: options?.customApiKey,
-        alphanumeric: options?.alphanumeric,
+        alphanumeric: false,
       });
       if (code) {
         console.log(`[CaptchaSolver] Gemini API giải thành công: "${code}"`);
@@ -96,7 +102,7 @@ export class CaptchaSolver {
   ): Promise<CaptchaSolveResult> {
     const res = await this.solveWithAI(imageInput, options);
     if (!res || !res.code) {
-      throw new Error('[CaptchaSolver] Không thể giải Captcha bằng cả Tesseract local lẫn Gemini.');
+      throw new Error('[CaptchaSolver] Không thể nhận diện mã Captcha bằng bộ xử lý OCR cục bộ.');
     }
     return res;
   }

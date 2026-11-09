@@ -8,40 +8,62 @@ const isServerless = Boolean(
   process.env.NETLIFY
 );
 
+export const POS_CAPTCHA_WHITELIST = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+export const DIGITS_CAPTCHA_WHITELIST = '0123456789';
+
 let tesseractWorker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
 
 async function getWorker(whitelist?: string): Promise<Worker> {
+  const targetWhitelist = whitelist || POS_CAPTCHA_WHITELIST;
+
   if (tesseractWorker) {
-    if (whitelist) {
-      await tesseractWorker.setParameters({
-        tessedit_char_whitelist: whitelist,
-        tessedit_pageseg_mode: '7' as any, // Single text line
-      });
-    }
+    await tesseractWorker.setParameters({
+      tessedit_char_whitelist: targetWhitelist,
+      tessedit_pageseg_mode: '7' as any, // PSM 7: Treat the image as a single text line
+      user_defined_dpi: '300',
+      tessjs_create_pdf: '0',
+      tessjs_create_hocr: '0',
+      tessjs_create_tsv: '0',
+      tessjs_create_box: '0',
+      tessjs_create_unlv: '0',
+      tessjs_create_osd: '0',
+    });
     return tesseractWorker;
   }
 
   if (workerInitializing) {
     const w = await workerInitializing;
-    if (whitelist) {
-      await w.setParameters({
-        tessedit_char_whitelist: whitelist,
-        tessedit_pageseg_mode: '7' as any,
-      });
-    }
+    await w.setParameters({
+      tessedit_char_whitelist: targetWhitelist,
+      tessedit_pageseg_mode: '7' as any,
+      user_defined_dpi: '300',
+      tessjs_create_pdf: '0',
+      tessjs_create_hocr: '0',
+      tessjs_create_tsv: '0',
+      tessjs_create_box: '0',
+      tessjs_create_unlv: '0',
+      tessjs_create_osd: '0',
+    });
     return w;
   }
 
   workerInitializing = (async () => {
     try {
-      const cachePath = isServerless ? '/tmp' : '.';
+      const cachePath = process.env.TEMP || '/tmp';
       const w = await createWorker('eng', 1, {
         cachePath,
       });
       await w.setParameters({
-        tessedit_char_whitelist: whitelist || '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
-        tessedit_pageseg_mode: '7' as any,
+        tessedit_char_whitelist: targetWhitelist,
+        tessedit_pageseg_mode: '7' as any, // PSM 7: Single text line
+        user_defined_dpi: '300',
+        tessjs_create_pdf: '0',
+        tessjs_create_hocr: '0',
+        tessjs_create_tsv: '0',
+        tessjs_create_box: '0',
+        tessjs_create_unlv: '0',
+        tessjs_create_osd: '0',
       });
       tesseractWorker = w;
       return w;
@@ -175,10 +197,140 @@ export function createBinarizedBmp(
   return bmp;
 }
 
+/**
+ * Tạo ảnh BMP binarized chuyên sâu cho CAPTCHA máy tính tiền (POS Captcha) trên Node.js
+ * Tăng tương phản tối đa, loại bỏ nền xám mờ và bổ sung viền trắng an toàn cho Tesseract
+ */
+export function createPosBinarizedBmp(
+  decoded: { width: number; height: number; data: Buffer },
+  scale = 2.5,
+  threshold = 145,
+  padding = 10
+): Buffer {
+  const { width, height, data } = decoded;
+
+  // Nếu ảnh đã được phóng to sẵn từ phía client (width >= 300), giữ nguyên scale 1.0
+  const effectiveScale = width >= 300 ? 1.0 : Math.max(1.0, Math.min(scale, Math.round(500 / width)));
+  const effectivePadding = width >= 300 ? Math.round(padding / 2) : padding;
+
+  const paddedW = width + effectivePadding * 2;
+  const paddedH = height + effectivePadding * 2;
+  const newW = Math.round(paddedW * effectiveScale);
+  const newH = Math.round(paddedH * effectiveScale);
+
+  const rowSize = Math.floor((24 * newW + 31) / 32) * 4;
+  const imageSize = rowSize * newH;
+  const fileSize = 54 + imageSize;
+
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write('BM', 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(newW, 18);
+  bmp.writeInt32LE(newH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+
+  // Khởi tạo nền trắng
+  bmp.fill(255, 54);
+
+  for (let destY = 0; destY < newH; destY++) {
+    const srcY = Math.floor((newH - 1 - destY) / effectiveScale) - effectivePadding;
+    const rowStart = 54 + destY * rowSize;
+
+    if (srcY < 0 || srcY >= height) continue;
+
+    for (let destX = 0; destX < newW; destX++) {
+      const srcX = Math.floor(destX / effectiveScale) - effectivePadding;
+      if (srcX < 0 || srcX >= width) continue;
+
+      const srcIdx = (srcY * width + srcX) * 4;
+      const r = data[srcIdx] || 0;
+      const g = data[srcIdx + 1] || 0;
+      const b = data[srcIdx + 2] || 0;
+      const lum = r * 0.299 + g * 0.587 + b * 0.114;
+
+      // Chữ đậm -> Đen (0), Nền và vạch mờ -> Trắng (255)
+      const val = lum < threshold ? 0 : 255;
+
+      const pxOffset = rowStart + destX * 3;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+
+  return bmp;
+}
+
+/**
+ * Bộ lọc hậu xử lý regex chuẩn hóa mã OCR, loại bỏ ký tự rác và sửa lỗi nhầm lẫn phổ biến.
+ */
+export function postProcessOcrText(
+  rawText: string,
+  options?: { digitsOnly?: boolean; expectedLength?: number }
+): string {
+  if (!rawText) return '';
+
+  const digitsOnly = options?.digitsOnly === true;
+
+  if (digitsOnly) {
+    // 1. Chuyển đổi các ký tự chữ dễ bị Tesseract nhận diện nhầm thành số
+    let mapped = rawText
+      .replace(/[OoD]/g, '0')
+      .replace(/[Il|!]/g, '1')
+      .replace(/[Zz]/g, '2')
+      .replace(/[Ss]/g, '5')
+      .replace(/[b]/g, '6')
+      .replace(/[T]/g, '7')
+      .replace(/[B]/g, '8')
+      .replace(/[gq]/g, '9');
+
+    // 2. Chỉ giữ lại số
+    let digits = mapped.replace(/[^0-9]/g, '');
+
+    // 3. Khớp độ dài nếu có yêu cầu (VD: EasyInvoice / VNPT thường là 4 số)
+    if (options?.expectedLength && digits.length > options.expectedLength) {
+      const match = digits.match(new RegExp(`\\d{${options.expectedLength}}`));
+      if (match) return match[0];
+      return digits.substring(0, options.expectedLength);
+    }
+    return digits;
+  }
+
+  // Luồng Alphanumeric (Mã POS Captcha Cổng Thuế: 4-6 ký tự in hoa và số, VD: 6V7BEF, 46JBRS)
+  // 1. Loại bỏ các ký tự rác, nét gạch, ký hiệu phân cách phi chữ số do vạch nhiễu
+  let cleaned = rawText
+    .replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+
+  // 2. Loại bỏ các ký tự phi alphanumeric
+  cleaned = cleaned.replace(/[^A-Z0-9]/g, '');
+
+  // 3. Xử lý độ dài: Captcha máy tính tiền của Tổng cục Thuế thường là 6 ký tự
+  const targetLen = options?.expectedLength || 6;
+  if (cleaned.length > targetLen) {
+    // Nếu bị nhận diện thừa ký tự do rác ở viền mép (VD: "I6V7BEF" hoặc "6V7BEF_")
+    // Kiểm tra xem có cụm 4-6 ký tự hợp lệ không
+    const match = cleaned.match(/[A-Z0-9]{4,6}/);
+    if (match && match[0].length >= 4 && match[0].length <= targetLen) {
+      return match[0];
+    }
+    return cleaned.substring(0, targetLen);
+  }
+
+  return cleaned;
+}
+
 export interface TesseractSolveOptions {
   digitsOnly?: boolean;
   expectedLength?: number;
   preprocessEasyInvoice?: boolean;
+  preprocessPosCaptcha?: boolean;
   whitelist?: string;
   timeoutMs?: number;
 }
@@ -191,7 +343,7 @@ export async function solveCaptchaWithTesseract(
   imageInput: Buffer | string | Uint8Array,
   options?: TesseractSolveOptions
 ): Promise<{ code: string; confidence: number }> {
-  const timeoutMs = options?.timeoutMs || 4500;
+  const timeoutMs = options?.timeoutMs || 12000;
 
   const recognitionPromise = (async () => {
     let buf: Buffer;
@@ -212,7 +364,7 @@ export async function solveCaptchaWithTesseract(
 
     // Đặt mặc định digitsOnly = false để nhận diện cả chữ và số (VD: K8H6WK)
     const digitsOnly = options?.digitsOnly === true;
-    const whitelist = options?.whitelist || (digitsOnly ? '0123456789' : '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+    const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
 
     let processBuf = buf;
 
@@ -223,20 +375,26 @@ export async function solveCaptchaWithTesseract(
         const binarized = createBinarizedBmp(decoded, 3, 25, 145);
         processBuf = binarized;
       }
+    } else if (options?.preprocessPosCaptcha === true && isPng) {
+      const decoded = decodePngRgba(buf);
+      // Chỉ re-binarize nếu ảnh nhỏ (< 300px), ảnh đã scale lớn từ client canvas được giữ nguyên để Tesseract đọc nét căng
+      if (decoded && decoded.width < 300) {
+        const binarized = createPosBinarizedBmp(decoded, 2.5, 145, 12);
+        processBuf = binarized;
+      }
     }
 
     const worker = await getWorker(whitelist);
     const result = await worker.recognize(processBuf);
-    let text = result.data.text || '';
+    const rawText = result.data.text || '';
 
-    if (digitsOnly) {
-      text = text.replace(/[^0-9]/g, '');
-    } else {
-      text = text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-    }
+    const cleaned = postProcessOcrText(rawText, {
+      digitsOnly,
+      expectedLength: options?.expectedLength,
+    });
 
     return {
-      code: text,
+      code: cleaned,
       confidence: result.data.confidence || 0,
     };
   })();

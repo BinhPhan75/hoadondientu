@@ -61,6 +61,7 @@ export interface CaptchaSolveOptions {
   alphanumeric?: boolean;
   customApiKey?: string;
   forceGemini?: boolean; // Bỏ qua Tesseract local, trực tiếp dùng Gemini API
+  localOnly?: boolean; // Chỉ dùng giải mã cục bộ, tuyệt đối không gọi Gemini API
 }
 
 export interface CaptchaSolveResult {

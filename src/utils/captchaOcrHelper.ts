@@ -6,7 +6,19 @@
 
 export function cleanGdtSvgString(svg: string): string {
   if (!svg || typeof svg !== 'string') return svg;
-  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
+  let cleaned = svg
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']none["'][^>]*\/?>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']none["'][^>]*><\/path>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']transparent["'][^>]*\/?>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']transparent["'][^>]*><\/path>/gi, '')
+    .replace(/<line\b[^>]*\/?>/gi, '')
+    .replace(/<polyline\b[^>]*\/?>/gi, '');
+
+  if (cleaned.includes('<svg') && !cleaned.includes('fill="#ffffff"') && !cleaned.includes('fill="white"')) {
+    cleaned = cleaned.replace(/<svg\b([^>]*)>/i, '<svg$1><rect width="100%" height="100%" fill="#ffffff"/>');
+  }
+
+  return cleaned;
 }
 
 export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string> {
@@ -111,15 +123,27 @@ export async function convertSvgToSharpPng(svgOrDataUri: string): Promise<string
 
 /**
  * Tiền xử lý chuyên sâu cho CAPTCHA Hóa đơn máy tính tiền (POS Captcha).
- * Khử sạch các đường gạch ngang, vạch cắt ngang và nhiễu hoa văn mờ bằng HTML5 Canvas binarization.
+ * Khử sạch các đường gạch ngang, vạch cắt ngang và nhiễu hoa văn mờ bằng HTML5 Canvas binarization,
+ * đồng thời bổ sung viền trắng an toàn để Tesseract PSM 7 không bị mất nét chữ ở mép viền.
  */
 export async function preprocessPosCaptchaImage(imageSrc: string): Promise<string> {
   if (typeof window === 'undefined' || !imageSrc) return imageSrc;
 
-  // Nếu là SVG, chuyển đổi sang PNG sắc nét trước
-  let basePng = imageSrc;
+  // 1. Nếu là định dạng SVG, làm sạch các đường gạch nhiễu fill="none" và chèn nền trắng
+  let baseSource = imageSrc;
   if (imageSrc.includes('<svg') || imageSrc.startsWith('data:image/svg+xml')) {
-    basePng = await convertSvgToSharpPng(imageSrc);
+    if (imageSrc.startsWith('data:image/svg+xml;base64,')) {
+      try {
+        const decoded = atob(imageSrc.replace('data:image/svg+xml;base64,', ''));
+        const cleaned = cleanGdtSvgString(decoded);
+        baseSource = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
+      } catch {
+        baseSource = imageSrc;
+      }
+    } else if (imageSrc.includes('<svg')) {
+      const cleaned = cleanGdtSvgString(imageSrc);
+      baseSource = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cleaned)}`;
+    }
   }
 
   return new Promise<string>((resolve) => {
@@ -127,7 +151,7 @@ export async function preprocessPosCaptchaImage(imageSrc: string): Promise<strin
     img.crossOrigin = 'anonymous';
 
     const timer = setTimeout(() => {
-      resolve(basePng);
+      resolve(baseSource);
     }, 2500);
 
     img.onload = () => {
@@ -136,24 +160,36 @@ export async function preprocessPosCaptchaImage(imageSrc: string): Promise<strin
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          resolve(basePng);
+          resolve(baseSource);
           return;
         }
 
-        const width = img.naturalWidth || img.width || 200;
-        const height = img.naturalHeight || img.height || 60;
-        canvas.width = width;
-        canvas.height = height;
+        const scale = 2.5;
+        const padding = 12; // Viền trắng an toàn giúp Tesseract PSM 7 phân đoạn dòng chữ chính xác
+        const rawW = img.naturalWidth || img.width || 200;
+        const rawH = img.naturalHeight || img.height || 40;
+
+        const scaledW = Math.round(rawW * scale);
+        const scaledH = Math.round(rawH * scale);
+        const totalW = scaledW + padding * 2;
+        const totalH = scaledH + padding * 2;
+
+        canvas.width = totalW;
+        canvas.height = totalH;
 
         // Vẽ nền trắng
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
+        ctx.fillRect(0, 0, totalW, totalH);
 
-        const imgData = ctx.getImageData(0, 0, width, height);
+        // Bật khử răng cưa chất lượng cao khi phóng to
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, padding, padding, scaledW, scaledH);
+
+        const imgData = ctx.getImageData(0, 0, totalW, totalH);
         const data = imgData.data;
 
-        // Ngưỡng binarization linh hoạt để tẩy vạch gạch mờ và giữ nét chữ
+        // Binarization: Tách chữ và vạch mờ/nhiễu
         const threshold = 145;
 
         for (let i = 0; i < data.length; i += 4) {
@@ -161,18 +197,41 @@ export async function preprocessPosCaptchaImage(imageSrc: string): Promise<strin
           const g = data[i + 1];
           const b = data[i + 2];
 
-          // Độ xám theo chuẩn cảm nhận mắt người
+          // Độ xám cảm nhận mắt người (ITU-R BT.601)
           const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
 
-          // Chuyển nét chữ đậm về ĐEN TUYỀN (0), còn vạch kẻ mờ & nền thành TRẮNG TINH (255)
           if (luminance < threshold) {
-            data[i] = 0;       // Red
-            data[i + 1] = 0;   // Green
-            data[i + 2] = 0;   // Blue
+            // Nét chữ: Đen tuyền 100%
+            data[i] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
           } else {
-            data[i] = 255;     // Red
-            data[i + 1] = 255; // Green
-            data[i + 2] = 255; // Blue
+            // Nền & vạch mờ: Trắng tinh 100%
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+          }
+        }
+
+        // Khử đốm nhỏ cô lập (Despeckle)
+        for (let y = 1; y < totalH - 1; y++) {
+          for (let x = 1; x < totalW - 1; x++) {
+            const idx = (y * totalW + x) * 4;
+            if (data[idx] === 0) {
+              let blackNeighbors = 0;
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                  if (dx === 0 && dy === 0) continue;
+                  const nIdx = ((y + dy) * totalW + (x + dx)) * 4;
+                  if (data[nIdx] === 0) blackNeighbors++;
+                }
+              }
+              if (blackNeighbors < 2) {
+                data[idx] = 255;
+                data[idx + 1] = 255;
+                data[idx + 2] = 255;
+              }
+            }
           }
         }
 
@@ -182,14 +241,39 @@ export async function preprocessPosCaptchaImage(imageSrc: string): Promise<strin
       } catch (err) {
         console.warn('POS Preprocessing error:', err);
       }
-      resolve(basePng);
+      resolve(baseSource);
     };
 
     img.onerror = () => {
       clearTimeout(timer);
-      resolve(basePng);
+      resolve(baseSource);
     };
 
-    img.src = basePng;
+    img.src = baseSource;
   });
 }
+
+/**
+ * Bộ lọc regex hậu xử lý cho mã Captcha POS ở phía client
+ * Loại bỏ ký tự đặc biệt, dấu câu, rác phân đoạn, đưa về 4-6 ký tự in hoa/chữ số
+ */
+export function cleanPosCaptchaOcrResult(rawText: string, expectedLength = 6): string {
+  if (!rawText) return '';
+  let cleaned = rawText
+    .replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  if (cleaned.length > expectedLength) {
+    const match = cleaned.match(/[A-Z0-9]{4,6}/);
+    if (match && match[0].length >= 4 && match[0].length <= expectedLength) {
+      return match[0];
+    }
+    return cleaned.substring(0, expectedLength);
+  }
+  return cleaned;
+}
+
+export { solveCaptchaWithClientTemplateMatching } from './clientTemplateCaptchaSolver';
+
