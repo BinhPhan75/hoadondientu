@@ -44,13 +44,14 @@ export async function solveCaptchaWithGemini(
   const apiKey = options.customApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY chưa được cấu hình.');
   if (process.env.CAPTCHA_AI_ENABLED === 'false') throw new Error('OCR AI đã tắt. Vui lòng nhập CAPTCHA thủ công.');
-  let model = process.env.CAPTCHA_AI_MODEL || 'gemini-flash-latest';
-  if (model === 'gemini-2.5-flash-lite' || model.includes('1.5-flash') || model.includes('2.0-flash')) {
-    model = 'gemini-flash-latest';
+  let configuredModel = process.env.CAPTCHA_AI_MODEL || 'gemini-3.1-flash-lite';
+  if (configuredModel === 'gemini-flash-latest' || configuredModel.includes('1.5') || configuredModel.includes('2.0') || configuredModel.includes('2.5')) {
+    configuredModel = 'gemini-3.1-flash-lite';
   }
+  const model = configuredModel;
   const keyHash = createHash('sha256').update(apiKey).digest('hex');
   if ((blockedKeys.get(keyHash) || 0) > Date.now()) {
-    throw new Error('OCR AI đang tạm dừng sau lỗi hạn mức/cấu hình. Vui lòng nhập CAPTCHA thủ công.');
+    throw new Error('Hạn mức AI nhận diện Captcha tạm hết lượt hôm nay. Vui lòng nhập thủ công.');
   }
   const image = imagePart(input);
   const prompt = customPrompt || VNPT_CAPTCHA_PROMPT;
@@ -77,14 +78,32 @@ export async function solveCaptchaWithGemini(
         },
       });
       usage.requests++;
-      const response = await ai.models.generateContent({
-        model,
-        contents: [{ inlineData: image }, { text: prompt }],
-        config: {
-          maxOutputTokens: 32,
-          abortSignal: AbortSignal.timeout(timeoutMs),
-        },
-      });
+      
+      const candidateModels = [model, 'gemini-3.1-flash-lite'].filter((v, i, a) => a.indexOf(v) === i);
+      let response: any = null;
+      let lastModelError: any = null;
+
+      for (const candidate of candidateModels) {
+        try {
+          response = await ai.models.generateContent({
+            model: candidate,
+            contents: [{ inlineData: image }, { text: prompt }],
+            config: {
+              maxOutputTokens: 32,
+              abortSignal: AbortSignal.timeout(timeoutMs),
+            },
+          });
+          if (response && response.text) break;
+        } catch (candErr: any) {
+          lastModelError = candErr;
+          console.warn(`[OCR AI model ${candidate} failed]:`, candErr.message?.substring(0, 80));
+        }
+      }
+
+      if (!response || !response.text) {
+        throw lastModelError || new Error('Không nhận diện được nội dung từ các mô hình AI.');
+      }
+
       usage.inputTokens += response.usageMetadata?.promptTokenCount || 0;
       usage.outputTokens += response.usageMetadata?.candidatesTokenCount || 0;
       usage.thinkingTokens += response.usageMetadata?.thoughtsTokenCount || 0;
@@ -105,11 +124,10 @@ export async function solveCaptchaWithGemini(
     } catch (error: any) {
       usage.failures++;
       const message = String(error?.message || error);
-      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY/i.test(message)) {
+      if (/429|RESOURCE_EXHAUSTED|spending cap|quota/i.test(message)) {
         if (blockedKeys.size >= 128) blockedKeys.delete(blockedKeys.keys().next().value!);
-        blockedKeys.set(keyHash, Date.now() + 60000);
+        blockedKeys.set(keyHash, Date.now() + 20000); // 20s temporary backoff
       }
-      // Retain failed attempts briefly too: callers must not bill the same image again.
       throw error;
     }
   })();

@@ -72,6 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [ocrNotice, setOcrNotice] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isWafBlocked, setIsWafBlocked] = useState<boolean>(false);
+  const captchaInputRef = React.useRef<HTMLInputElement>(null);
 
   // Synchronize local input state if parent account updates
   useEffect(() => {
@@ -104,7 +105,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const res = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ captchaImage: payloadImg, captchaKey: targetKey })
+        body: JSON.stringify({ captchaImage: payloadImg, captchaKey: targetKey, customApiKey: account.customApiKey })
       });
       
       const rawText = await res.text();
@@ -122,7 +123,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         if (authError) setAuthError(null);
       } else {
         setOcrSuccess(false);
-        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+        const errMsg = String(data?.message || '');
+        if (data?.isSpendingCap || /429|quota|resource_exhausted/i.test(errMsg)) {
+          setOcrNotice('Hạn mức AI tạm hết. Vui lòng nhìn ảnh và nhập mã.');
+        } else {
+          setOcrNotice(errMsg || 'Vui lòng nhìn hình và nhập mã thủ công.');
+        }
       }
     } catch {
       setOcrSuccess(false);
@@ -225,6 +231,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }
         }
       }
+
+      // Nếu vẫn chưa có mã Captcha, hướng dẫn người dùng nhìn ảnh và nhập
+      if (!activeCaptchaCode) {
+        setAuthError('Vui lòng nhìn hình ảnh và nhập mã Captcha vào ô bên cạnh.');
+        if (captchaInputRef.current) {
+          captchaInputRef.current.focus();
+        }
+        return;
+      }
     }
 
     const result = await onRunCrawler({
@@ -247,13 +262,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setIsWafBlocked(true);
       }
       if (result.needManualCaptcha) {
-        fetchCaptcha();
-      }
-      if (result.error) {
+        setAuthError('Mã Captcha chưa chính xác hoặc phiên đã hết hạn. Đã đổi ảnh mới, vui lòng nhập lại.');
+      } else if (result.error) {
         setAuthError(result.error);
       }
-      // Auto refresh captcha on failure so user can retry immediately
+      // Tải lại captcha mới để người dùng nhập ngay mà không bị kẹt mã cũ
       fetchCaptcha();
+      if (captchaInputRef.current) {
+        setTimeout(() => captchaInputRef.current?.focus(), 250);
+      }
     }
   };
 
@@ -382,98 +399,126 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Captcha Section: Tạm ẩn trên giao diện theo yêu cầu người dùng, tính năng ở code vẫn giữ để tự đọc ngầm */}
-          <div className="hidden" aria-hidden="true">
-            <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/60">
-              <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-blue-400" />
-                <span>Mã Captcha</span>
-              </span>
-
-              {/* Nút bấm đọc OCR và gán vào */}
+          {/* Captcha Section: Hiển thị đầy đủ, rõ ràng để người dùng nhập hoặc nhận diện AI */}
+          {account.isRealGDT ? (
+            <div className="bg-emerald-950/40 border border-emerald-800/50 rounded-lg p-2.5 flex items-center justify-between text-xs text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-medium">Phiên làm việc Cổng Thuế đang hoạt động</span>
+              </div>
               <button
                 type="button"
-                onClick={() => handleScanOcr(undefined, undefined, true)}
-                disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
-                className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
-                title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
+                onClick={() => {
+                  onUpdateAccount({ ...account, isRealGDT: false });
+                  fetchCaptcha();
+                }}
+                className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
               >
-                <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
-                <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
+                Đăng nhập lại
               </button>
             </div>
+          ) : (
+            <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/80 space-y-2">
+              <div className="flex items-center justify-between pb-1.5 border-b border-slate-700/60">
+                <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Mã Captcha Cổng Thuế</span>
+                </span>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                {/* Khung ảnh Captcha thật */}
-                <div 
-                  className="h-10 bg-white rounded-md flex items-center justify-center p-1 overflow-hidden border border-slate-600 cursor-pointer shadow-xs min-w-[120px] flex-1 relative group"
-                  onClick={fetchCaptcha}
-                  title="Nhấn vào hình để đổi ảnh Captcha khác"
-                >
-                  {isLoadingCaptcha ? (
-                    <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                      <RefreshCw className="w-3 h-3 animate-spin text-slate-500" /> Đang tải...
-                    </div>
-                  ) : captchaImg ? (
-                    <img
-                      src={captchaImg}
-                      alt="GDT Captcha"
-                      className="max-h-full object-contain filter contrast-125 select-none"
-                    />
-                  ) : (
-                    <div className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
-                      <RefreshCw className="w-3 h-3" /> Bấm thử lại
-                    </div>
-                  )}
-                </div>
-
-                {/* Ô Nhập Captcha */}
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={captchaCode}
-                    onChange={(e) => {
-                      setCaptchaCode(e.target.value.toUpperCase());
-                      if (authError) setAuthError(null);
-                    }}
-                    placeholder="Mã ảnh"
-                    maxLength={8}
-                    className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-slate-950 py-1.5 focus:border-blue-500 ${
-                      ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-amber-300'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Thông tin hỗ trợ */}
-              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
-                {ocrNotice ? (
-                  <span className={ocrSuccess ? 'text-emerald-400 font-medium flex items-center gap-1' : 'text-amber-400'}>
-                    {ocrSuccess && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                    {ocrNotice}
-                  </span>
-                ) : captchaCode ? (
-                  <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>Đã nhận diện: <strong className="font-mono">{captchaCode}</strong></span>
-                  </span>
-                ) : (
-                  <span className="text-slate-400">Nhập ký tự từ ảnh</span>
-                )}
-
+                {/* Nút bấm đọc OCR và gán vào */}
                 <button
                   type="button"
-                  onClick={fetchCaptcha}
-                  disabled={isLoadingCaptcha || isScanningOcr}
-                  className="text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                  onClick={() => handleScanOcr(undefined, undefined, true)}
+                  disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
+                  className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
+                  title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
                 >
-                  <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
-                  <span>Đổi ảnh</span>
+                  <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
+                  <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
                 </button>
               </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  {/* Khung ảnh Captcha thật */}
+                  <div 
+                    className="h-10 bg-white rounded-md flex items-center justify-center p-1 overflow-hidden border border-slate-600 hover:border-blue-400 cursor-pointer shadow-xs min-w-[120px] flex-1 relative group transition-colors"
+                    onClick={fetchCaptcha}
+                    title="Nhấn vào hình để đổi ảnh Captcha khác"
+                  >
+                    {isLoadingCaptcha ? (
+                      <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                        <RefreshCw className="w-3 h-3 animate-spin text-slate-500" /> Đang tải...
+                      </div>
+                    ) : captchaImg ? (
+                      <img
+                        src={captchaImg}
+                        alt="GDT Captcha"
+                        className="max-h-full object-contain filter contrast-125 select-none"
+                      />
+                    ) : (
+                      <div className="text-[11px] text-rose-600 font-medium flex items-center gap-1">
+                        <RefreshCw className="w-3 h-3" /> Bấm thử lại
+                      </div>
+                    )}
+                    <span className="absolute bottom-0 right-1 text-[9px] text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 px-1 rounded">Đổi ảnh</span>
+                  </div>
+
+                  {/* Ô Nhập Captcha */}
+                  <div className="relative">
+                    <input
+                      ref={captchaInputRef}
+                      type="text"
+                      value={captchaCode}
+                      onChange={(e) => {
+                        setCaptchaCode(e.target.value.toUpperCase());
+                        if (authError) setAuthError(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSubmit();
+                        }
+                      }}
+                      placeholder="Mã ảnh"
+                      maxLength={8}
+                      className={`w-28 text-input-dark font-mono text-base uppercase text-center font-bold tracking-widest bg-slate-950 py-1.5 focus:border-blue-500 ${
+                        ocrSuccess ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-amber-300'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                {/* Thông tin hỗ trợ */}
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-0.5">
+                  {ocrNotice ? (
+                    <span className={ocrSuccess ? 'text-emerald-400 font-medium flex items-center gap-1' : 'text-amber-400'}>
+                      {ocrSuccess && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                      <span className="truncate max-w-[170px]">{ocrNotice}</span>
+                    </span>
+                  ) : captchaCode ? (
+                    <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Đã điền: <strong className="font-mono">{captchaCode}</strong></span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">Nhìn hình và nhập mã</span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={fetchCaptcha}
+                    disabled={isLoadingCaptcha || isScanningOcr}
+                    className="text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer shrink-0 transition-colors"
+                    title="Đổi ảnh Captcha mới"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingCaptcha ? 'animate-spin' : ''}`} />
+                    <span>Đổi ảnh</span>
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* WAF 403 Warning */}
           {isWafBlocked && (
@@ -526,53 +571,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-[11px] text-slate-400">Chọn nhanh:</span>
             </div>
             
-            {/* Quick Period Buttons: Modern Segmented Switch */}
-            <div className="bg-slate-950/70 p-1 rounded-lg border border-slate-800 grid grid-cols-4 gap-1 mb-2.5">
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2026-01-01', toDate: '2026-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2026-01-01' && filters.toDate === '2026-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2026
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2025-01-01', toDate: '2025-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2025-01-01' && filters.toDate === '2025-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2025
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2024-01-01', toDate: '2024-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2024-01-01' && filters.toDate === '2024-12-31'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                2024
-              </button>
-              <button
-                type="button"
-                onClick={() => onFilterChange({ ...filters, fromDate: '2022-01-01', toDate: '2026-12-31' })}
-                className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
-                  filters.fromDate === '2022-01-01'
-                    ? 'bg-blue-600 text-white shadow-xs font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                Tất cả
-              </button>
-            </div>
+            {/* Quick Period Buttons: Modern Segmented Switch (Mặc định năm hiện tại) */}
+            {(() => {
+              const currentYear = new Date().getFullYear();
+              const prevYear = currentYear - 1;
+              const twoYearsAgo = currentYear - 2;
+              return (
+                <div className="bg-slate-950/70 p-1 rounded-lg border border-slate-800 grid grid-cols-4 gap-1 mb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => onFilterChange({ ...filters, fromDate: `${currentYear}-01-01`, toDate: `${currentYear}-12-31` })}
+                    className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
+                      filters.fromDate === `${currentYear}-01-01` && filters.toDate === `${currentYear}-12-31`
+                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    {currentYear}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onFilterChange({ ...filters, fromDate: `${prevYear}-01-01`, toDate: `${prevYear}-12-31` })}
+                    className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
+                      filters.fromDate === `${prevYear}-01-01` && filters.toDate === `${prevYear}-12-31`
+                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    {prevYear}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onFilterChange({ ...filters, fromDate: `${twoYearsAgo}-01-01`, toDate: `${twoYearsAgo}-12-31` })}
+                    className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
+                      filters.fromDate === `${twoYearsAgo}-01-01` && filters.toDate === `${twoYearsAgo}-12-31`
+                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    {twoYearsAgo}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onFilterChange({ ...filters, fromDate: '2022-01-01', toDate: `${currentYear}-12-31` })}
+                    className={`py-1 text-xs font-medium rounded-md transition-all text-center cursor-pointer ${
+                      filters.fromDate === '2022-01-01'
+                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    Tất cả
+                  </button>
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-2 gap-2">
               <div>

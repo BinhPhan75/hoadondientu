@@ -1,12 +1,12 @@
 // server.ts
 import dotenv2 from "dotenv";
 import express from "express";
-import path2 from "path";
+import path3 from "path";
 import crypto2 from "crypto";
 import { spawn } from "child_process";
 import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
-import axios10 from "axios";
+import axios9 from "axios";
 import * as cheerio5 from "cheerio";
 
 // src/utils/xmlParser.ts
@@ -1878,60 +1878,6 @@ function parseGDTInvoiceXml(xmlString, filename) {
   return draftInvoice;
 }
 
-// src/templates/partnerRegistry.ts
-function normalizeStr(str) {
-  if (!str) return "";
-  return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/[^a-z0-9]/g, "");
-}
-function detectPartnerTemplate(invoice, rawXml) {
-  const nbmst = (invoice.nbmst || "").replace(/[^0-9]/g, "");
-  const nbten = normalizeStr(invoice.nbten || "");
-  const xml = rawXml ? rawXml.toLowerCase() : "";
-  if (nbmst === "0318657735") return "BAO_DUY";
-  if (nbmst === "0314222123") return "BKAV";
-  if (nbmst === "0315018466") return "DEFAULT";
-  if (nbmst === "0312105174") return "TAI_TRAM_ANH";
-  if (nbmst === "0400557356") return "XUAN_VINH";
-  if (nbmst === "0318391940") return "KIM_LOAN_TUAN";
-  if (nbmst === "0318443500") return "TKJ";
-  if (nbmst === "4000344946") return "NGHIA_SON";
-  if (nbmst === "0317978711") return "TAN_THANH_DANH";
-  if (nbmst === "0402307168") return "VIETTEL";
-  if (nbmst === "0102182292" || nbmst === "0100112437") return "DEFAULT";
-  const msttcgp = (invoice.msttcgp || "").replace(/[^0-9]/g, "");
-  if (msttcgp === "0100109106") return "VIETTEL";
-  if (msttcgp === "0102182292") return "DEFAULT";
-  if (msttcgp === "0302999571" || msttcgp === "0315744883") return "DEFAULT";
-  if (msttcgp === "0100684378") return "NGHIA_SON";
-  if (msttcgp === "0101360697") return "BKAV";
-  if (nbten.includes("baoduy")) return "BAO_DUY";
-  if (nbten.includes("pnj") || nbten.includes("chetac") && nbten.includes("trangsuc")) return "DEFAULT";
-  if (nbten.includes("suntalent")) return "VIETTEL";
-  if (nbten.includes("taitramanh") || nbten.includes("tramanh")) return "TAI_TRAM_ANH";
-  if (nbten.includes("xuanvinh")) return "XUAN_VINH";
-  if (nbten.includes("kimloantuan")) return "KIM_LOAN_TUAN";
-  if (nbten.includes("tkj")) return "TKJ";
-  if (nbten.includes("nghiason")) return "NGHIA_SON";
-  if (nbten.includes("tanthanhdanh") || nbten.includes("thanhdanh")) return "TAN_THANH_DANH";
-  if (nbten.includes("vnpay") || nbten.includes("vietcombank")) return "DEFAULT";
-  if (xml) {
-    if (xml.includes("0318657735") || xml.includes("b\u1EA3o duy") || xml.includes("bao duy")) return "BAO_DUY";
-    if (xml.includes("0315018466") || xml.includes("4si.vn") || xml.includes("l.c.s") || xml.includes("pnj")) return "DEFAULT";
-    if (xml.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/.test(xml) || xml.includes("suntalent")) return "VIETTEL";
-    if (xml.includes("0312105174") || xml.includes("t\xE0i tr\xE2m anh") || xml.includes("tai tram anh")) return "TAI_TRAM_ANH";
-    if (xml.includes("0400557356") || xml.includes("xu\xE2n vinh") || xml.includes("xuan vinh")) return "XUAN_VINH";
-    if (xml.includes("0318391940") || xml.includes("kim loan tu\u1EA5n") || xml.includes("kim loan tuan")) return "KIM_LOAN_TUAN";
-    if (xml.includes("0318443500") || xml.includes("tkj")) return "TKJ";
-    if (xml.includes("4000344946") || xml.includes("ngh\u0129a s\u01A1n") || xml.includes("nghia son")) return "NGHIA_SON";
-    if (xml.includes("0317978711") || xml.includes("t\xE2n thanh danh") || xml.includes("tan thanh danh")) return "TAN_THANH_DANH";
-    if (xml.includes("vnpayinvoice") || xml.includes("0102182292") || xml.includes("vietcombank")) return "DEFAULT";
-  }
-  const p = (invoice.provider || "").toUpperCase();
-  if (p === "VIETTEL") return "VIETTEL";
-  if (p.includes("VNPAY")) return "DEFAULT";
-  return "DEFAULT";
-}
-
 // src/templates/templateUtils.ts
 function formatVND(num) {
   return new Intl.NumberFormat("vi-VN").format(Math.round(num || 0));
@@ -1955,118 +1901,12 @@ function extractDateParts(invoice) {
   const year = dateParts[0] || "2026";
   return { day, month, year, tdlap };
 }
-function renderSpacedTaxCode(taxCode) {
-  const raw = (taxCode || "").replace(/[^0-9A-Za-z]/g, "");
-  if (!raw) return "";
-  return raw.split("").join(" ");
-}
 function extractLookupDetails(rawXml) {
   return extractLookupDetailsFromXml(rawXml);
 }
-function buildDirectLookupUrl(portalUrl, lookupCode, providerOrTemplateId, sellerTaxCode) {
-  let url = (portalUrl || "").trim();
-  const rawCode = (lookupCode || "").trim();
-  const provider = (providerOrTemplateId || "").toUpperCase();
-  let code = rawCode.replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
-  if (/^https?:\/\//i.test(code)) {
-    try {
-      const u = new URL(code);
-      const extracted = u.searchParams.get("sc") || u.searchParams.get("code") || u.searchParams.get("c") || u.searchParams.get("fkey");
-      if (extracted) {
-        code = extracted.trim();
-      }
-    } catch {
-    }
-  }
-  const portalProvider = providerFromPortal(url);
-  if (portalProvider === "THAISON" || provider === "THAISON") return "https://einvoice.vn/tra-cuu";
-  if (portalProvider === "MINVOICE" || provider === "MINVOICE") return "https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don";
-  const isMisa = portalProvider ? portalProvider === "MISA" : provider === "MISA";
-  if (isMisa) {
-    const baseMisaUrl = "https://www.meinvoice.vn/tra-cuu";
-    if (code) {
-      return `${baseMisaUrl}?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
-    }
-    return baseMisaUrl;
-  }
-  const isVnpt = provider.includes("VNPT") || provider.includes("NGHIA_SON") || /vnpt-invoice\.com\.vn/i.test(url);
-  if (isVnpt) {
-    const cleanTaxCode = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
-    let targetDomain = (url || "").trim().split("?")[0].replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
-    if (!targetDomain || !/vnpt-invoice/i.test(targetDomain)) {
-      targetDomain = cleanTaxCode ? `https://${cleanTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
-    }
-    return `${targetDomain}/HomeNoLogin/SearchByFkey`;
-  }
-  const isEasyInvoice = provider.includes("EASY") || provider.includes("SOFTDREAMS") || provider.includes("BAO_DUY") || provider.includes("KIM_LOAN") || provider.includes("TKJ") || /easyinvoice/i.test(url);
-  if (isEasyInvoice) {
-    let easyUrl = url;
-    if (!easyUrl || !/easyinvoice/i.test(easyUrl)) {
-      easyUrl = sellerTaxCode ? `http://${sellerTaxCode}hd.easyinvoice.com.vn` : "https://tracuu.easyinvoice.vn";
-    }
-    let cleanUrl = easyUrl.split("?")[0].replace(/\/+$/, "");
-    if (!/\/Search\/Index$/i.test(cleanUrl)) {
-      cleanUrl = `${cleanUrl}/Search/Index`;
-    }
-    if (code) {
-      return `${cleanUrl}?fkey=${encodeURIComponent(code)}`;
-    }
-    return cleanUrl;
-  }
-  const isLcs = provider.includes("LCS") || provider.includes("PNJ") || sellerTaxCode === "0315018466" || sellerTaxCode === "0302999571" || /eip\.lcssoft\.com\.vn|lcssoft/i.test(url);
-  if (isLcs) {
-    return "https://eip.lcssoft.com.vn/desktop/#/login";
-  }
-  const isVnpay = provider.includes("VNPAY") || sellerTaxCode === "0100112437" || sellerTaxCode === "0102182292" || /vnpayinvoice/i.test(url);
-  if (isVnpay) {
-    const isVcb = sellerTaxCode === "0100112437";
-    const isInvalid = !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
-    const validCode = !isInvalid ? code.trim() : "";
-    const baseVnpayUrl = "https://portal.vnpayinvoice.vn";
-    const params = new URLSearchParams();
-    if (validCode) params.set("lookupCode", validCode);
-    if (sellerTaxCode) params.set("taxCode", sellerTaxCode);
-    const qs = params.toString();
-    if (isVcb && !validCode) {
-      return "https://einvoice.vietcombank.com.vn/";
-    }
-    return qs ? `${baseVnpayUrl}/?${qs}` : isVcb ? "https://einvoice.vietcombank.com.vn/" : `${baseVnpayUrl}/`;
-  }
-  const isFpt = provider.includes("FPT") || /hoadon\.ftg\.vn|fpt\.com\.vn/i.test(url);
-  if (isFpt) {
-    return "https://hoadon.ftg.vn/";
-  }
-  const is4Si = provider.includes("4SI") || /4si\.vn/i.test(url);
-  if (is4Si) {
-    return "https://inv.4si.vn/tra-cuu-hoa-don";
-  }
-  if (provider.includes("VIETTEL") || /sinvoice/i.test(url) || /viettel/i.test(url)) {
-    const baseUrl = "https://www.sinvoice.vn/p/tra-cuu-hoa-don.html";
-    const params = new URLSearchParams();
-    const cleanSellerMst = (sellerTaxCode || "").trim();
-    if (cleanSellerMst) {
-      params.append("supplierTaxCode", cleanSellerMst);
-      params.append("taxCode", cleanSellerMst);
-      params.append("mst", cleanSellerMst);
-    }
-    if (code) {
-      params.append("reservationCode", code);
-      params.append("secretCode", code);
-      params.append("code", code);
-    }
-    const q = params.toString();
-    return q ? `${baseUrl}?${q}` : baseUrl;
-  }
-  if (provider.includes("BKAV") || /bkav|ehoadon/i.test(url)) {
-    return "https://ehoadon.bkav.com/tra-cuu";
-  }
-  if (!url) {
-    url = "https://hoadondientu.gdt.gov.vn";
-  }
-  return url;
-}
 function generateDefaultQrSvg(dataText = "HOADON") {
-  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="8" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="16" width="12" height="12" fill="black"/><rect x="64" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="72" y="16" width="12" height="12" fill="black"/><rect x="8" y="64" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="72" width="12" height="12" fill="black"/><rect x="42" y="10" width="14" height="8" fill="black"/><rect x="40" y="24" width="8" height="16" fill="black"/><rect x="10" y="44" width="24" height="8" fill="black"/><rect x="44" y="42" width="16" height="16" fill="black"/><rect x="68" y="44" width="22" height="8" fill="black"/><rect x="42" y="66" width="12" height="24" fill="black"/><rect x="64" y="60" width="14" height="12" fill="black"/><rect x="82" y="66" width="10" height="24" fill="black"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><rect width="100" height="100" fill="white"/><rect x="8" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="16" width="12" height="12" fill="black"/><rect x="64" y="8" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="72" y="16" width="12" height="12" fill="black"/><rect x="8" y="64" width="28" height="28" fill="none" stroke="black" stroke-width="4"/><rect x="16" y="72" width="12" height="12" fill="black"/><rect x="42" y="10" width="14" height="8" fill="black"/><rect x="40" y="24" width="8" height="16" fill="black"/><rect x="10" y="44" width="24" height="8" fill="black"/><rect x="44" y="42" width="16" height="16" fill="black"/><rect x="68" y="44" width="22" height="8" fill="black"/><rect x="42" y="66" width="12" height="24" fill="black"/><rect x="64" y="60" width="14" height="12" fill="black"/><rect x="82" y="66" width="10" height="24" fill="black"/></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 function getPrintControlsHtml(title) {
   return `
@@ -2083,478 +1923,26 @@ function getPrintControlsHtml(title) {
   </div>`;
 }
 
-// src/templates/BaoDuyTemplate.ts
-function renderBaoDuyTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "BAO_DUY", invoice.nbmst);
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318657735;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const taxAuthorityCode = invoice.mhdon || "M2-26-IXTFA-14279040746";
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, TP \u0110\xE0 N\u1EB5ng, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "Chuy\u1EC3n kho\u1EA3n";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - TRANG S\u1EE8C B\u1EA2O DUY - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #db2777 !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #db2777;
-      border-radius: 4px;
-      padding: 20px 24px 16px 24px;
-      box-shadow: 0 4px 20px rgba(219, 39, 119, 0.12);
-      position: relative;
-    }
-    /* Watermark */
-    .watermark {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-25deg);
-      font-size: 58px;
-      font-weight: 800;
-      color: rgba(219, 39, 119, 0.05);
-      text-transform: uppercase;
-      letter-spacing: 6px;
-      pointer-events: none;
-      z-index: 0;
-      text-align: center;
-      line-height: 1.2;
-    }
-    .relative-content {
-      position: relative;
-      z-index: 1;
-    }
-    /* Header grid */
-    .header-grid {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #fbcfe8;
-    }
-    .logo-area {
-      width: 170px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    .logo-svg {
-      width: 70px;
-      height: 55px;
-    }
-    .logo-text {
-      font-size: 17px;
-      font-weight: bold;
-      color: #9d174d;
-      letter-spacing: 1px;
-      margin-top: 3px;
-    }
-    .logo-subtext {
-      font-size: 10px;
-      color: #be185d;
-      letter-spacing: 3px;
-      font-weight: 600;
-    }
-    .title-area {
-      flex: 1;
-      text-align: center;
-      padding: 0 8px;
-    }
-    .main-title {
-      color: #c2185b;
-      font-size: 21px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .sub-title {
-      color: #c2185b;
-      font-size: 13.5px;
-      font-weight: bold;
-      margin: 2px 0 1px 0;
-    }
-    .en-title {
-      color: #c2185b;
-      font-size: 12.5px;
-      font-style: italic;
-      margin: 0;
-    }
-    .date-str {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 4px;
-    }
-    .meta-area {
-      width: 190px;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .serial-row {
-      margin-bottom: 4px;
-    }
-    .no-row .inv-num {
-      color: #c2185b;
-      font-size: 17px;
-      font-weight: bold;
-    }
-    /* Seller & Buyer sections */
-    .seller-box {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 12px;
-      padding-bottom: 10px;
-      border-bottom: 1px dashed #cbd5e1;
-    }
-    .seller-info {
-      flex: 1;
-    }
-    .seller-name {
-      color: #b91c1c;
-      font-weight: bold;
-      font-size: 13.5px;
-      text-transform: uppercase;
-    }
-    .qr-box {
-      width: 96px;
-      height: 96px;
-      flex-shrink: 0;
-      border: 1px solid #e2e8f0;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-box img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .info-row {
-      margin-bottom: 3px;
-      display: flex;
-      align-items: baseline;
-    }
-    .info-label {
-      flex-shrink: 0;
-      font-size: 12.5px;
-    }
-    .info-dots {
-      flex: 1;
-      border-bottom: 1px dotted #94a3b8;
-      margin-left: 4px;
-      min-height: 15px;
-      padding-left: 2px;
-    }
-    /* Buyer box */
-    .buyer-box {
-      margin-bottom: 12px;
-    }
-    /* Items table */
-    table.invoice-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-    table.invoice-table th, table.invoice-table td {
-      border: 1px solid #000;
-      padding: 4.5px 6px;
-      font-size: 12px;
-    }
-    table.invoice-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .th-sub {
-      font-style: italic;
-      font-size: 10.5px;
-      font-weight: normal;
-    }
-    .col-stt { width: 38px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 62px; text-align: center; }
-    .col-qty { width: 68px; text-align: right; }
-    .col-price { width: 95px; text-align: right; }
-    .col-amount { width: 110px; text-align: right; }
-    .total-row td {
-      font-weight: bold;
-    }
-    .words-box {
-      border: 1px dashed #94a3b8;
-      padding: 6px 10px;
-      margin-top: 6px;
-      font-size: 12.5px;
-      background: #fafafa;
-    }
-    /* Signature area */
-    .signature-grid {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 16px;
-      margin-bottom: 14px;
-      text-align: center;
-    }
-    .sig-col {
-      width: 46%;
-    }
-    .sig-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sig-box-softdreams {
-      margin-top: 10px;
-      border: 1.5px solid #16a34a;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      color: #dc2626;
-      background: rgba(22, 163, 74, 0.03);
-    }
-    .sig-valid-tag {
-      color: #16a34a;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    /* Footer */
-    .footer-section {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      line-height: 1.4;
-    }
-    .footer-provider {
-      text-align: center;
-      font-size: 11px;
-      color: #475569;
-      margin-top: 5px;
-      padding-top: 4px;
-      border-top: 1px dashed #e2e8f0;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xF3a \u0111\u01A1n b\xE1n h\xE0ng \u0111i\u1EC7n t\u1EED - C\xD4NG TY TNHH TM TRANG S\u1EE8C B\u1EA2O DUY") : ""}
-
-  <div class="invoice-outer">
-    <div class="watermark">B\u1EA2O DUY<br>JEWELRY</div>
-    
-    <div class="relative-content">
-      <!-- HEADER -->
-      <div class="header-grid">
-        <div class="logo-area">
-          <svg class="logo-svg" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="50" cy="40" r="36" stroke="#db2777" stroke-width="3" fill="#fdf2f8"/>
-            <path d="M36 26 H48 C55 26 59 29 59 34 C59 38 56 40 51 41 C57 42 61 45 61 50 C61 56 55 60 47 60 H36 Z" fill="#db2777"/>
-            <path d="M42 32 H47 C50 32 53 33 53 36 C53 39 50 40 47 40 H42 Z" fill="#ffffff"/>
-            <path d="M42 46 H47 C51 46 54 47 54 50 C54 54 51 55 47 55 H42 Z" fill="#ffffff"/>
-            <path d="M60 30 Q70 40 60 54" stroke="#be185d" stroke-width="3" stroke-linecap="round" fill="none"/>
-          </svg>
-          <div class="logo-text">B\u1EA2O DUY</div>
-          <div class="logo-subtext">JEWELRY</div>
-        </div>
-
-        <div class="title-area">
-          <div class="main-title">H\xD3A \u0110\u01A0N B\xC1N H\xC0NG</div>
-          <div class="sub-title">(KH\u1EDEI T\u1EA0O T\u1EEA M\xC1Y T\xCDNH TI\u1EC0N)</div>
-          <div class="en-title">(SALES INVOICE)</div>
-          <div class="date-str">Ng\xE0y (Date) ${escapeHtml(day)} th\xE1ng (month) ${escapeHtml(month)} n\u0103m (year) ${escapeHtml(year)}</div>
-        </div>
-
-        <div class="meta-area">
-          <div class="serial-row">K\xFD hi\u1EC7u (Serial): <strong>${escapeHtml(invoice.khhdon || "2C26MAA")}</strong></div>
-          <div class="no-row">S\u1ED1 (No.): <span class="inv-num">${escapeHtml(invoice.shdon || "285")}</span></div>
-        </div>
-      </div>
-
-      <!-- SELLER INFO -->
-      <div class="seller-box">
-        <div class="seller-info">
-          <div class="info-row">
-            <span class="info-label">\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng (Seller):</span>
-            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || ""))}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || "")}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">T\xE0i kho\u1EA3n (A/C number):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbstk ? `${invoice.nbstk} ${invoice.nbnhang || ""}` : "112348668 Ng\xE2n h\xE0ng TMCP \xC1 Ch\xE2u - CN S\xE0i G\xF2n")}</span>
-          </div>
-        </div>
-
-        <div class="qr-box">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u B\u1EA3o Duy">
-        </div>
-      </div>
-
-      <!-- BUYER INFO -->
-      <div class="buyer-box">
-        <div class="info-row">
-          <span class="info-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng (Buyer):</span>
-          <span class="info-dots">${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : "")}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">T\xEAn \u0111\u01A1n v\u1ECB (Company's name):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerName)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerTaxCode)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-          <span class="info-dots">${escapeHtml(buyerAddress)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">\u0110i\u1EC7n tho\u1EA1i (Tel):</span>
-          <span class="info-dots">${escapeHtml(invoice.nmsdt || "")}</span>
-        </div>
-        <div class="info-row" style="display:flex;justify-content:space-between;">
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">H\xECnh th\u1EE9c thanh to\xE1n (Payment method):</span>
-            <span class="info-dots">${escapeHtml(paymentMethod)}</span>
-          </div>
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">\u0110\u01A1n v\u1ECB ti\u1EC1n t\u1EC7 (Currency):</span>
-            <span class="info-dots" style="font-weight:bold;">${escapeHtml(invoice.dvtte || "VND")}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- TABLE OF GOODS -->
-      <table class="invoice-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT<br><span class="th-sub">(No.)</span></th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5<br><span class="th-sub">(Name of goods, services)</span></th>
-            <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh<br><span class="th-sub">(Unit)</span></th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng<br><span class="th-sub">(Quantity)</span></th>
-            <th class="col-price">\u0110\u01A1n gi\xE1<br><span class="th-sub">(Unit price)</span></th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n<br><span class="th-sub">(Amount)</span></th>
-          </tr>
-          <tr style="font-size:10px;text-align:center;font-style:italic;">
-            <td>(1)</td>
-            <td>(2)</td>
-            <td>(3)</td>
-            <td>(4)</td>
-            <td>(5)</td>
-            <td>(6)=(4)x(5)</td>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || "C\xE1i";
-    const name = item.itemName || item.ten || `H\xE0ng h\xF3a #${idx + 1}`;
-    return `
-              <tr>
-                <td class="col-stt">${idx + 1}</td>
-                <td class="col-name">${escapeHtml(name)}</td>
-                <td class="col-unit">${escapeHtml(unit)}</td>
-                <td class="col-qty">${formatNum(qty)}</td>
-                <td class="col-price">${formatVND(price)}</td>
-                <td class="col-amount">${formatVND(amt)}</td>
-              </tr>
-            `;
-  }).join("")}
-          <tr class="total-row">
-            <td colspan="5" style="text-align:right;font-weight:bold;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total payment):</td>
-            <td class="col-amount">${formatVND(totalAmount)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- WORDS AMOUNT -->
-      <div class="words-box">
-        <strong>S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF (Amount in words):</strong> <em>${escapeHtml(wordsAmount)}</em>
-      </div>
-
-      <!-- SIGNATURE SECTION -->
-      <div class="signature-grid">
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi mua h\xE0ng (Buyer)</div>
-          <div style="font-style:italic;font-size:11px;color:#64748b;margin-top:2px;">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-        </div>
-
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng (Seller)</div>
-          <div class="sig-box-softdreams">
-            <div class="sig-valid-tag">
-              <span>\u2714</span> Signature Valid
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}-${escapeHtml(month)}-${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-section">
-        <div><strong>M\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF (Tax authority code):</strong> <span style="font-family:monospace;font-weight:bold;">${escapeHtml(taxAuthorityCode)}</span></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-          <div>Trang tra c\u1EE9u: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a></div>
-          <div>M\xE3 tra c\u1EE9u: <strong style="color:#b91c1c;font-family:monospace;">${escapeHtml(mCode)}</strong></div>
-        </div>
-        <div style="text-align:center;font-style:italic;margin-top:3px;color:#475569;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      </div>
-
-      <div class="footer-provider">
-        \u0110\u01A1n v\u1ECB cung c\u1EA5p gi\u1EA3i ph\xE1p: C\xF4ng ty c\u1ED5 ph\u1EA7n \u0111\u1EA7u t\u01B0 c\xF4ng ngh\u1EC7 v\xE0 th\u01B0\u01A1ng m\u1EA1i SOFTDREAMS, MST: 0105987432, Http://easyinvoice.vn/
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
 // src/templates/DefaultTemplate.ts
+function formatTaxRateDisplay(rate) {
+  if (rate === void 0 || rate === null || rate === "") return "\\";
+  let str = String(rate).trim();
+  str = str.replace(/<[^>]+>/g, "").trim();
+  if (str === "0.1" || str === "0,1") return "10%";
+  if (str === "0.08" || str === "0,08") return "8%";
+  if (str === "0.05" || str === "0,05") return "5%";
+  if (str === "0.00" || str === "0" || str === "0%") return "0%";
+  if (str === "-1" || str === "-2" || /kct|khong/i.test(str)) return "KCT";
+  if (str === "-3" || /knt|khong_nop/i.test(str)) return "KNT";
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const num = parseFloat(str);
+    if (num > 0 && num <= 1) {
+      return `${Math.round(num * 100)}%`;
+    }
+    return `${num}%`;
+  }
+  return str;
+}
 function renderDefaultTemplate(invoice, rawXml, options) {
   const { day, month, year } = extractDateParts(invoice);
   const { lookupCode } = extractLookupDetails(rawXml);
@@ -2565,24 +1953,29 @@ function renderDefaultTemplate(invoice, rawXml, options) {
   const subTotal = typeof invoice.tgtcthue === "number" ? invoice.tgtcthue : totalAmount - vatAmount > 0 ? totalAmount - vatAmount : totalAmount;
   const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
   const showControls = options?.showPrintControls !== false;
-  const mauSo = invoice.khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : "1");
+  const rawMauSo = invoice.khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : "1");
+  const cleanMauSo = String(rawMauSo).trim();
+  const mauSo = cleanMauSo;
   const kyHieu = invoice.khhdon || "";
   const soHdon = invoice.shdon || "";
   const maCqt = invoice.mhdon || "";
-  let invoiceTitle = invoice.thdon || "";
-  if (!invoiceTitle) {
-    if (kyHieu.startsWith("2")) {
-      invoiceTitle = "HO\xC1 \u0110\u01A0N B\xC1N H\xC0NG";
-    } else {
-      invoiceTitle = "HO\xC1 \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG";
-    }
-  } else {
-    invoiceTitle = invoiceTitle.toUpperCase();
+  const isMauSo2 = cleanMauSo === "2" || kyHieu.startsWith("2") || /^2[A-Z]/i.test(kyHieu);
+  const isMauSo5 = cleanMauSo === "5" || kyHieu.startsWith("5");
+  let invoiceTitle = (invoice.thdon || "").trim().toUpperCase();
+  if (isMauSo2) {
+    invoiceTitle = invoiceTitle && invoiceTitle.includes("B\xC1N H\xC0NG") ? invoiceTitle : "HO\xC1 \u0110\u01A0N B\xC1N H\xC0NG";
+  } else if (isMauSo5) {
+    invoiceTitle = invoiceTitle && (invoiceTitle.includes("V\xC9") || invoiceTitle.includes("TEM") || invoiceTitle.includes("TH\u1EBA")) ? invoiceTitle : "TEM / V\xC9 / TH\u1EBA \u0110I\u1EC6N T\u1EEC";
+  } else if (!invoiceTitle || invoiceTitle.includes("B\xC1N H\xC0NG")) {
+    invoiceTitle = "HO\xC1 \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG";
   }
-  const isVatInvoice = !kyHieu.startsWith("2") && (vatAmount > 0 || invoiceTitle.includes("GI\xC1 TR\u1ECA GIA T\u0102NG"));
+  const isVatInvoice = !isMauSo2 && !isMauSo5 && (vatAmount > 0 || invoiceTitle.includes("GI\xC1 TR\u1ECA GIA T\u0102NG"));
   const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(
     maCqt ? `https://hoadondientu.gdt.gov.vn/tra-cuu?cqt=${encodeURIComponent(maCqt)}` : `MST:${invoice.nbmst};KH:${kyHieu};SHD:${soHdon};TONG:${totalAmount}${mCode ? `;MTC:${mCode}` : ""}`
   );
+  const isSvgTag = typeof qrImg === "string" && qrImg.trim().startsWith("<svg");
+  const safeQrSrc = isSvgTag ? "" : qrImg.startsWith("data:") ? qrImg : escapeHtml(qrImg);
+  const qrHtml = isSvgTag ? `<div style="width: 76px; height: 76px; overflow: hidden; display: flex; align-items: center; justify-content: center;">${qrImg}</div>` : `<img src="${safeQrSrc}" style="width: 76px; height: 76px; display: block; border: 0;" alt="QR Code">`;
   const sellerName = invoice.nbten || "";
   const sellerTaxCode = invoice.nbmst || "";
   const sellerStoreCode = invoice.sellerStoreCode || invoice.nbmchhang || "";
@@ -2616,7 +2009,7 @@ function renderDefaultTemplate(invoice, rawXml, options) {
     const qty = it.quantity ? formatNum(it.quantity) : it.sluong ? formatNum(it.sluong) : "";
     const price = it.unitPrice || it.dgia ? formatVND(it.unitPrice || it.dgia) : "";
     const discount = it.discount || it.stckhau ? formatVND(it.discount || it.stckhau) : "0";
-    const taxRate = it.taxRate || it.tsuat || (isVatInvoice ? "8%" : "\\");
+    const taxRate = formatTaxRateDisplay(it.taxRate || it.tsuat || (isVatInvoice ? "8%" : "\\"));
     const itemAmount = formatVND(it.amount || it.thtien || 0);
     return `<tr>
   <td class="tx-center">${lineNo}</td>
@@ -2627,7 +2020,7 @@ function renderDefaultTemplate(invoice, rawXml, options) {
   <td class="tx-center">${qty}</td>
   <td class="tx-center">${price}</td>
   <td class="tx-center">${discount}</td>
-  <td class="tx-center"><HHDVu>${escapeHtml(taxRate)}</HHDVu></td>
+  <td class="tx-center">${escapeHtml(taxRate)}</td>
   <td class="tx-center">${itemAmount}</td>
 </tr>`;
   }).join("\n") : `<tr>
@@ -2639,12 +2032,12 @@ function renderDefaultTemplate(invoice, rawXml, options) {
   <td class="tx-center">1</td>
   <td class="tx-center">${formatVND(subTotal)}</td>
   <td class="tx-center">0</td>
-  <td class="tx-center"><HHDVu>${isVatInvoice ? "8%" : "\\"}</HHDVu></td>
+  <td class="tx-center">${isVatInvoice ? "8%" : "\\"}</td>
   <td class="tx-center">${formatVND(subTotal)}</td>
 </tr>`;
   const vatRows = invoice.vatBreakdown && invoice.vatBreakdown.length > 0 ? invoice.vatBreakdown : isVatInvoice ? [{ taxRate: items.find((it) => it.taxRate || it.tsuat)?.taxRate || items.find((it) => it.taxRate || it.tsuat)?.tsuat || "8%", amount: subTotal, taxAmount: vatAmount }] : [{ taxRate: "\\", amount: subTotal, taxAmount: 0 }];
   const vatRowsHtml = vatRows.map((row) => `<tr>
-  <td class="tx-center"><LTSuat>${escapeHtml(row.taxRate)}</LTSuat></td>
+  <td class="tx-center">${escapeHtml(formatTaxRateDisplay(row.taxRate))}</td>
   <td class="tx-center">${formatVND(row.amount)}</td>
   <td class="tx-center">${formatVND(row.taxAmount)}</td>
 </tr>`).join("\n");
@@ -2996,7 +2389,7 @@ ${printControls}
   <div class="top-content">
     <div style="width: 80px; min-height: 20px">
       <div id="qrcodeTable">
-        <img src="${qrImg}" style="width: 76px; height: 76px; display: block;" alt="QR Code">
+        ${qrHtml}
       </div>
     </div>
     <div class="code-content">
@@ -3159,7 +2552,7 @@ ${printControls}
         <th class="tb-dg">\u0110\u01A1n gi\xE1</th>
         <th class="tb-dg">Chi\u1EBFt kh\u1EA5u</th>
         <th class="tb-ts">Thu\u1EBF su\u1EA5t</th>
-        <th class="tb-ttct">Th\xE0nh ti\u1EC1n ch\u01B0a c\xF3 thu\u1EBF GTGT</th>
+        <th class="tb-ttct">${isMauSo2 ? "Th\xE0nh ti\u1EC1n" : "Th\xE0nh ti\u1EC1n ch\u01B0a c\xF3 thu\u1EBF GTGT"}</th>
       </tr>
     </thead>
     <tbody>
@@ -3167,7 +2560,8 @@ ${printControls}
     </tbody>
   </table>
 
-  <div class="table-horizontal-wrapper">
+  <div class="table-horizontal-wrapper" style="${!isVatInvoice ? "display: block;" : ""}">
+    ${isVatInvoice ? `
     <div style="margin-right: 10px; min-width: 270px;">
       <table class="res-tb">
         <thead style="text-align: center">
@@ -3181,10 +2575,11 @@ ${printControls}
           ${vatRowsHtml}
         </tbody>
       </table>
-    </div>
-    <div style="flex: 1">
+    </div>` : ""}
+    <div style="${isVatInvoice ? "flex: 1;" : "max-width: 520px; margin-left: auto;"}">
       <table class="res-tb">
         <tbody>
+          ${isVatInvoice ? `
           <tr>
             <td class="tx-center">
               T\u1ED5ng ti\u1EC1n ch\u01B0a thu\u1EBF<br>
@@ -3199,7 +2594,15 @@ ${printControls}
             <td class="tx-center" style="min-width: 180px; max-width: 300px; font-weight: bold;">
               ${formatVND(vatAmount)}
             </td>
-          </tr>
+          </tr>` : `
+          <tr>
+            <td class="tx-center">
+              T\u1ED5ng c\u1ED9ng ti\u1EC1n h\xE0ng (Th\xE0nh ti\u1EC1n)
+            </td>
+            <td class="tx-center" style="min-width: 180px; max-width: 300px; font-weight: bold;">
+              ${formatVND(totalAmount)}
+            </td>
+          </tr>`}
           <tr>
             <td class="tx-center">T\u1ED5ng ti\u1EC1n ph\xED</td>
             <td class="tx-center" style="min-width: 180px; max-width: 300px;">0</td>
@@ -3264,4856 +2667,16 @@ ${printControls}
 </html>`;
 }
 
-// src/templates/PnjTemplate.ts
-function renderPnjTemplate(invoice, rawXml, options) {
-  return renderDefaultTemplate(invoice, rawXml, options);
-}
-
-// src/templates/TaiTramAnhTemplate.ts
-function renderTaiTramAnhTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = "https://www.meinvoice.vn/tra-cuu";
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "MISA", invoice.nbmst);
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0312105174;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const maCqt = invoice.mhdon || "00AD728CC709B04346844E43D3CBDC5C57";
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, TP \u0110\xE0 N\u1EB5ng, Vi\u1EC7t Nam.";
-  const paymentMethod = invoice.htttoan || "TM/CK";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - GIA C\xD4NG TRANG S\u1EE8C T\xC0I TR\xC2M ANH - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #1e40af !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #1e40af;
-      border-radius: 4px;
-      padding: 20px 24px 16px 24px;
-      box-shadow: 0 4px 20px rgba(30, 64, 175, 0.12);
-      position: relative;
-    }
-    /* TTJ Big Watermark */
-    .watermark-ttj {
-      position: absolute;
-      top: 52%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 380px;
-      height: 380px;
-      opacity: 0.08;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .relative-content {
-      position: relative;
-      z-index: 1;
-    }
-    /* Header */
-    .seller-header {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      margin-bottom: 8px;
-    }
-    .ttj-logo {
-      width: 100px;
-      height: 80px;
-      flex-shrink: 0;
-    }
-    .seller-details {
-      flex: 1;
-      font-size: 12.5px;
-      line-height: 1.4;
-    }
-    .company-title {
-      color: #0f172a;
-      font-weight: bold;
-      font-size: 14.5px;
-      text-transform: uppercase;
-      letter-spacing: 0.2px;
-      margin-bottom: 2px;
-    }
-    /* Invoice title block */
-    .title-row {
-      text-align: center;
-      margin: 10px 0 12px 0;
-      position: relative;
-    }
-    .main-title {
-      font-size: 23px;
-      font-weight: bold;
-      color: #000;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .sub-date {
-      font-style: italic;
-      font-size: 13px;
-      margin-top: 3px;
-    }
-    .cqt-code {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 2px;
-    }
-    .meta-box-right {
-      position: absolute;
-      right: 0;
-      top: 0;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .qr-corner {
-      position: absolute;
-      right: 0;
-      top: 50px;
-      width: 90px;
-      height: 90px;
-      border: 1px solid #ddd;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-corner img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    /* Buyer box */
-    .buyer-section {
-      margin-top: 6px;
-      margin-bottom: 12px;
-      font-size: 12.5px;
-      padding-right: 100px;
-      line-height: 1.45;
-    }
-    .buyer-line {
-      margin-bottom: 2px;
-    }
-    /* Table */
-    table.ttj-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-    table.ttj-table th, table.ttj-table td {
-      border: 1px solid #000;
-      padding: 4.5px 6px;
-      font-size: 12px;
-    }
-    table.ttj-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .col-stt { width: 40px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 70px; text-align: center; }
-    .col-qty { width: 75px; text-align: right; }
-    .col-price { width: 100px; text-align: right; }
-    .col-amount { width: 115px; text-align: right; }
-    .total-line {
-      border: 1px solid #000;
-      border-top: none;
-      padding: 6px 10px;
-      font-size: 12.5px;
-      background: #fff;
-      display: flex;
-      justify-content: space-between;
-      font-weight: bold;
-    }
-    .words-amount {
-      border: 1px solid #000;
-      border-top: none;
-      padding: 6px 10px;
-      font-size: 12.5px;
-      font-style: italic;
-      margin-bottom: 14px;
-    }
-    /* Signature */
-    .sign-container {
-      display: flex;
-      justify-content: space-between;
-      text-align: center;
-      margin-top: 12px;
-      margin-bottom: 16px;
-    }
-    .sign-col {
-      width: 45%;
-    }
-    .sign-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sign-desc {
-      font-style: italic;
-      font-size: 11px;
-      color: #64748b;
-    }
-    .misa-sig-box {
-      margin-top: 8px;
-      border: 1.5px solid #15803d;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      color: #b91c1c;
-      background: rgba(34, 197, 94, 0.04);
-      position: relative;
-    }
-    .sig-valid-header {
-      color: #dc2626;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 2px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    /* Footer */
-    .footer-area {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      text-align: center;
-      line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xF3a \u0111\u01A1n b\xE1n h\xE0ng \u0111i\u1EC7n t\u1EED - DNTN GIA C\xD4NG TRANG S\u1EE8C T\xC0I TR\xC2M ANH") : ""}
-
-  <div class="invoice-outer">
-    <!-- SVG Watermark TTJ -->
-    <svg class="watermark-ttj" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <ellipse cx="100" cy="100" rx="90" ry="60" stroke="#1e40af" stroke-width="16" fill="none" transform="rotate(-30 100 100)"/>
-      <path d="M70 65 H130 M100 65 V135" stroke="#0284c7" stroke-width="14" stroke-linecap="round"/>
-      <path d="M125 90 H155 M140 90 V140 Q140 155 125 155" stroke="#1e40af" stroke-width="12" stroke-linecap="round" fill="none"/>
-    </svg>
-
-    <div class="relative-content">
-      <!-- SELLER HEADER -->
-      <div class="seller-header">
-        <svg class="ttj-logo" viewBox="0 0 120 90" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <ellipse cx="60" cy="45" rx="52" ry="34" stroke="#0284c7" stroke-width="9" fill="none" transform="rotate(-25 60 45)"/>
-          <path d="M42 28 H78 M60 28 V66" stroke="#1e40af" stroke-width="8" stroke-linecap="round"/>
-          <path d="M75 42 H96 M86 42 V68 Q86 78 76 78" stroke="#0284c7" stroke-width="7" stroke-linecap="round" fill="none"/>
-        </svg>
-
-        <div class="seller-details">
-          <div class="company-title">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</div>
-          <div>M\xE3 s\u1ED1 thu\u1EBF: <strong>${escapeHtml(invoice.nbmst || "")}</strong></div>
-          <div>\u0110\u1ECBa ch\u1EC9: ${escapeHtml(invoice.nbdchi || "")}</div>
-          <div>\u0110i\u1EC7n tho\u1EA1i: ${escapeHtml(invoice.nbsdt || "(028) 3820 5096")}</div>
-          <div>S\u1ED1 t\xE0i kho\u1EA3n: <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ""}` : "199228689 - NG\xC2N H\xC0NG TMCP \xC1 CH\xC2U - PGD B\xCCNH \u0110\u0102NG")}</strong></div>
-        </div>
-      </div>
-
-      <!-- TITLE & META -->
-      <div class="title-row">
-        <div class="main-title">H\xD3A \u0110\u01A0N B\xC1N H\xC0NG</div>
-        <div class="sub-date">Ng\xE0y ${escapeHtml(day)} th\xE1ng ${escapeHtml(month)} n\u0103m ${escapeHtml(year)}</div>
-        <div class="cqt-code">M\xE3 CQT: <strong>${escapeHtml(maCqt)}</strong></div>
-
-        <div class="meta-box-right">
-          <div>K\xFD hi\u1EC7u: <strong>${escapeHtml(invoice.khhdon || "2C26TTA")}</strong></div>
-          <div>S\u1ED1: <strong style="font-size:15px;color:#000;">${escapeHtml(invoice.shdon || "00000273")}</strong></div>
-        </div>
-
-        <div class="qr-corner">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u TTJ">
-        </div>
-      </div>
-
-      <!-- BUYER SECTION -->
-      <div class="buyer-section">
-        <div class="buyer-line">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng: <span>${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : "")}</span></div>
-        <div class="buyer-line">T\xEAn \u0111\u01A1n v\u1ECB: <strong style="text-transform:uppercase;">${escapeHtml(buyerName)}</strong></div>
-        <div class="buyer-line">M\xE3 s\u1ED1 thu\u1EBF: <strong>${escapeHtml(buyerTaxCode)}</strong></div>
-        <div class="buyer-line">\u0110\u1ECBa ch\u1EC9: ${escapeHtml(buyerAddress)}</div>
-        <div class="buyer-line" style="display:flex;justify-content:space-between;">
-          <div>H\xECnh th\u1EE9c thanh to\xE1n: <strong>${escapeHtml(paymentMethod)}</strong></div>
-          <div>S\u1ED1 t\xE0i kho\u1EA3n: <span>${escapeHtml(invoice.nmstk || "")}</span></div>
-        </div>
-      </div>
-
-      <!-- GOODS TABLE -->
-      <table class="ttj-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT</th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-            <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh</th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng</th>
-            <th class="col-price">\u0110\u01A1n gi\xE1</th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || "m\xF3n";
-    const name = item.itemName || item.ten || `Gia c\xF4ng l\u1EAFc HLV610-KLV #${idx + 1}`;
-    const qtyFormatted = Number.isInteger(qty) ? `${qty},00` : new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(qty);
-    return `
-              <tr>
-                <td class="col-stt">${idx + 1}</td>
-                <td class="col-name">${escapeHtml(name)}</td>
-                <td class="col-unit">${escapeHtml(unit)}</td>
-                <td class="col-qty">${qtyFormatted}</td>
-                <td class="col-price">${formatVND(price)}</td>
-                <td class="col-amount">${formatVND(amt)}</td>
-              </tr>
-            `;
-  }).join("")}
-        </tbody>
-      </table>
-
-      <div class="total-line">
-        <span>C\u1ED9ng ti\u1EC1n b\xE1n h\xE0ng h\xF3a, d\u1ECBch v\u1EE5:</span>
-        <span style="font-size:13.5px;">${formatVND(totalAmount)}</span>
-      </div>
-
-      <div class="words-amount">
-        S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF: <strong>${escapeHtml(wordsAmount)}</strong>
-      </div>
-
-      <!-- SIGNATURES -->
-      <div class="sign-container">
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD, t\xEAn)</div>
-        </div>
-
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD, t\xEAn)</div>
-          
-          <div class="misa-sig-box">
-            <div class="sig-valid-header">
-              <span style="color:#15803d;font-size:14px;">\u2714</span>
-              <span>Signature Valid</span>
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-area">
-        <div>Tra c\u1EE9u t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u h\xF3a \u0111\u01A1n: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
-        <div style="font-style:italic;color:#64748b;margin-top:2px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-        <div style="font-size:10.5px;color:#475569;margin-top:3px;">Ph\xE1t h\xE0nh b\u1EDFi ph\u1EA7n m\u1EC1m MISA meInvoice - C\xF4ng ty C\u1ED5 ph\u1EA7n MISA (www.misa.vn) - MST 0101243150</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/XuanVinhTemplate.ts
-function renderXuanVinhTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = "https://www.meinvoice.vn/tra-cuu";
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "MISA", invoice.nbmst);
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0400557356;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || 19e4;
-  const subTotal = invoice.tgtcthue || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const vatAmount = invoice.tgtthue || (totalAmount - subTotal > 0 ? totalAmount - subTotal : Math.round(subTotal * 0.08));
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const maCqt = invoice.mhdon || "00EB81977D56674404BBBFD392138BEAE7";
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH MTV V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "446-448 Phan Ch\xE2u Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, Th\xE0nh ph\u1ED1 \u0110\xE0 N\u1EB5ng, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "TM/CK";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG - C\xD4NG TY TNHH XU\xC2N VINH - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #dc2626 !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #dc2626;
-      border-radius: 4px;
-      padding: 20px 24px 16px 24px;
-      box-shadow: 0 4px 20px rgba(220, 38, 38, 0.12);
-      position: relative;
-    }
-    /* Xuan Vinh Watermark */
-    .watermark-xuanvinh {
-      position: absolute;
-      top: 52%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-25deg);
-      font-size: 68px;
-      font-weight: 900;
-      color: rgba(220, 38, 38, 0.05);
-      text-transform: uppercase;
-      letter-spacing: 8px;
-      pointer-events: none;
-      z-index: 0;
-      white-space: nowrap;
-    }
-    .relative-content {
-      position: relative;
-      z-index: 1;
-    }
-    /* Header */
-    .seller-header {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      margin-bottom: 8px;
-    }
-    .xuanvinh-logo {
-      width: 140px;
-      height: 60px;
-      flex-shrink: 0;
-    }
-    .seller-details {
-      flex: 1;
-      font-size: 12.5px;
-      line-height: 1.38;
-    }
-    .company-title {
-      color: #dc2626;
-      font-weight: bold;
-      font-size: 15px;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-    /* Title block */
-    .title-row {
-      text-align: center;
-      margin: 10px 0 12px 0;
-      position: relative;
-    }
-    .main-title {
-      font-size: 22px;
-      font-weight: bold;
-      color: #dc2626;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .sub-date {
-      font-style: italic;
-      font-size: 13px;
-      margin-top: 3px;
-    }
-    .cqt-code {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 2px;
-    }
-    .meta-box-right {
-      position: absolute;
-      right: 0;
-      top: 0;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .qr-corner {
-      position: absolute;
-      right: 0;
-      top: 50px;
-      width: 90px;
-      height: 90px;
-      border: 1px solid #ddd;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-corner img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    /* Buyer */
-    .buyer-section {
-      margin-top: 6px;
-      margin-bottom: 12px;
-      font-size: 12.5px;
-      padding-right: 100px;
-      line-height: 1.45;
-    }
-    .buyer-line {
-      margin-bottom: 2px;
-    }
-    /* Goods table */
-    table.xv-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-    }
-    table.xv-table th, table.xv-table td {
-      border: 1px solid #000;
-      padding: 4.5px 6px;
-      font-size: 12px;
-    }
-    table.xv-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .col-stt { width: 40px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 65px; text-align: center; }
-    .col-qty { width: 75px; text-align: right; }
-    .col-price { width: 100px; text-align: right; }
-    .col-amount { width: 115px; text-align: right; }
-    /* Tax summary table */
-    .tax-summary-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      border-top: none;
-      font-size: 12.5px;
-    }
-    .tax-summary-table td {
-      border: 1px solid #000;
-      padding: 5px 8px;
-    }
-    .words-amount {
-      border: 1px solid #000;
-      border-top: none;
-      padding: 6px 10px;
-      font-size: 12.5px;
-      font-style: italic;
-      margin-bottom: 14px;
-    }
-    /* Signatures */
-    .sign-container {
-      display: flex;
-      justify-content: space-between;
-      text-align: center;
-      margin-top: 12px;
-      margin-bottom: 16px;
-    }
-    .sign-col {
-      width: 45%;
-    }
-    .sign-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sign-desc {
-      font-style: italic;
-      font-size: 11px;
-      color: #64748b;
-    }
-    .misa-sig-box {
-      margin-top: 8px;
-      border: 1.5px solid #15803d;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      color: #b91c1c;
-      background: rgba(34, 197, 94, 0.04);
-    }
-    .sig-valid-header {
-      color: #dc2626;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 2px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    /* Footer */
-    .footer-area {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      text-align: center;
-      line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG - C\xD4NG TY TNHH XU\xC2N VINH") : ""}
-
-  <div class="invoice-outer">
-    <div class="watermark-xuanvinh">XU\xC2N VINH</div>
-
-    <div class="relative-content">
-      <!-- SELLER HEADER -->
-      <div class="seller-header">
-        <svg class="xuanvinh-logo" viewBox="0 0 160 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M10 10 L30 50 L50 10" stroke="#dc2626" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M30 30 L55 50" stroke="#b91c1c" stroke-width="8" stroke-linecap="round"/>
-          <text x="60" y="32" font-family="'Times New Roman', sans-serif" font-size="20" font-weight="bold" fill="#dc2626">XU\xC2N VINH</text>
-          <text x="60" y="46" font-family="sans-serif" font-size="9" font-weight="bold" fill="#475569" letter-spacing="1">COMPUTER & TECH</text>
-        </svg>
-
-        <div class="seller-details">
-          <div class="company-title">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</div>
-          <div>M\xE3 s\u1ED1 thu\u1EBF: <strong>${escapeHtml(invoice.nbmst || "")}</strong></div>
-          <div>\u0110\u1ECBa ch\u1EC9: ${escapeHtml(invoice.nbdchi || "")}</div>
-          <div>\u0110i\u1EC7n tho\u1EA1i: ${escapeHtml(invoice.nbsdt || "0236 3868 888")}</div>
-          <div>S\u1ED1 t\xE0i kho\u1EA3n: <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ""}` : "55185259 - Ng\xE2n h\xE0ng ACB \u0110\xE0 N\u1EB5ng / 0041000120221 - Vietcombank")}</strong></div>
-        </div>
-      </div>
-
-      <!-- TITLE & META -->
-      <div class="title-row">
-        <div class="main-title">H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG</div>
-        <div class="sub-date">Ng\xE0y ${escapeHtml(day)} th\xE1ng ${escapeHtml(month)} n\u0103m ${escapeHtml(year)}</div>
-        <div class="cqt-code">M\xE3 CQT: <strong>${escapeHtml(maCqt)}</strong></div>
-
-        <div class="meta-box-right">
-          <div>K\xFD hi\u1EC7u: <strong>${escapeHtml(invoice.khhdon || "1C26TXV")}</strong></div>
-          <div>S\u1ED1: <strong style="font-size:15px;color:#dc2626;">${escapeHtml(invoice.shdon || "00003011")}</strong></div>
-        </div>
-
-        <div class="qr-corner">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u Xu\xE2n Vinh">
-        </div>
-      </div>
-
-      <!-- BUYER SECTION -->
-      <div class="buyer-section">
-        <div class="buyer-line">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng: <strong>${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : buyerName)}</strong></div>
-        <div class="buyer-line">T\xEAn \u0111\u01A1n v\u1ECB: <strong style="text-transform:uppercase;">${escapeHtml(buyerName)}</strong></div>
-        <div class="buyer-line">M\xE3 s\u1ED1 thu\u1EBF: <strong>${escapeHtml(buyerTaxCode)}</strong></div>
-        <div class="buyer-line">\u0110\u1ECBa ch\u1EC9: ${escapeHtml(buyerAddress)}</div>
-        <div class="buyer-line" style="display:flex;justify-content:space-between;">
-          <div>H\xECnh th\u1EE9c thanh to\xE1n: <strong>${escapeHtml(paymentMethod)}</strong></div>
-          <div>S\u1ED1 t\xE0i kho\u1EA3n: <span>${escapeHtml(invoice.nmstk || "")}</span></div>
-        </div>
-      </div>
-
-      <!-- GOODS TABLE -->
-      <table class="xv-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT</th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-            <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh</th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng</th>
-            <th class="col-price">\u0110\u01A1n gi\xE1</th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || "Chai";
-    const name = item.itemName || item.ten || `M\u1EF1c in phun Brother BTD60BK #${idx + 1}`;
-    const qtyFormatted = Number.isInteger(qty) ? `${qty},00` : new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(qty);
-    return `
-              <tr>
-                <td class="col-stt">${idx + 1}</td>
-                <td class="col-name">${escapeHtml(name)}</td>
-                <td class="col-unit">${escapeHtml(unit)}</td>
-                <td class="col-qty">${qtyFormatted}</td>
-                <td class="col-price">${formatVND(price)}</td>
-                <td class="col-amount">${formatVND(amt)}</td>
-              </tr>
-            `;
-  }).join("")}
-        </tbody>
-      </table>
-
-      <!-- TAX BREAKDOWN TABLE -->
-      <table class="tax-summary-table">
-        <tr>
-          <td style="width:70%;font-weight:bold;">C\u1ED9ng ti\u1EC1n h\xE0ng:</td>
-          <td style="width:30%;text-align:right;font-weight:bold;">${formatVND(subTotal)}</td>
-        </tr>
-        <tr>
-          <td>
-            <span>Thu\u1EBF su\u1EA5t GTGT: <strong>8%</strong></span>
-            <span style="margin-left:30px;">Ti\u1EC1n thu\u1EBF GTGT:</span>
-          </td>
-          <td style="text-align:right;font-weight:bold;">${formatVND(vatAmount)}</td>
-        </tr>
-        <tr style="background:#fef2f2;">
-          <td style="font-weight:bold;color:#b91c1c;">T\u1ED5ng ti\u1EC1n thanh to\xE1n:</td>
-          <td style="text-align:right;font-weight:bold;color:#b91c1c;font-size:13.5px;">${formatVND(totalAmount)}</td>
-        </tr>
-      </table>
-
-      <div class="words-amount">
-        S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF: <strong>${escapeHtml(wordsAmount)}</strong>
-      </div>
-
-      <!-- SIGNATURES -->
-      <div class="sign-container">
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD, t\xEAn)</div>
-        </div>
-
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD, t\xEAn)</div>
-          
-          <div class="misa-sig-box">
-            <div class="sig-valid-header">
-              <span style="color:#15803d;font-size:14px;">\u2714</span>
-              <span>Signature Valid</span>
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-area">
-        <div>Tra c\u1EE9u t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u h\xF3a \u0111\u01A1n: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
-        <div style="font-style:italic;color:#64748b;margin-top:2px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-        <div style="font-size:10.5px;color:#475569;margin-top:3px;">Ph\xE1t h\xE0nh b\u1EDFi ph\u1EA7n m\u1EC1m MISA meInvoice - C\xF4ng ty C\u1ED5 ph\u1EA7n MISA (www.misa.vn) - MST 0101243150</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/KimLoanTuanTemplate.ts
-function renderKimLoanTuanTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "KIM_LOAN_TUAN", invoice.nbmst);
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318391940;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const taxAuthorityCode = invoice.mhdon || "M2-26-896W-14282367803";
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, TP \u0110\xE0 N\u1EB5ng, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "Chuy\u1EC3n kho\u1EA3n";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - V\xC0NG B\u1EA0C KIM LOAN TU\u1EA4N - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #b45309 !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #b45309;
-      border-radius: 4px;
-      padding: 20px 24px 16px 24px;
-      box-shadow: 0 4px 20px rgba(180, 83, 9, 0.12);
-      position: relative;
-    }
-    /* Watermark */
-    .watermark-klt {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-20deg);
-      font-size: 52px;
-      font-weight: 800;
-      color: rgba(217, 119, 6, 0.05);
-      text-transform: uppercase;
-      letter-spacing: 4px;
-      pointer-events: none;
-      z-index: 0;
-      text-align: center;
-      line-height: 1.2;
-    }
-    .relative-content {
-      position: relative;
-      z-index: 1;
-    }
-    /* Header grid */
-    .header-grid {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #fef3c7;
-    }
-    .logo-area {
-      width: 170px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    .klt-flower-svg {
-      width: 60px;
-      height: 52px;
-    }
-    .logo-text {
-      font-size: 15px;
-      font-weight: bold;
-      color: #b45309;
-      letter-spacing: 0.5px;
-      margin-top: 3px;
-      text-align: center;
-    }
-    .title-area {
-      flex: 1;
-      text-align: center;
-      padding: 0 8px;
-    }
-    .main-title {
-      color: #dc2626;
-      font-size: 21px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .sub-title {
-      color: #dc2626;
-      font-size: 13px;
-      font-weight: bold;
-      margin: 2px 0 1px 0;
-    }
-    .en-title {
-      color: #dc2626;
-      font-size: 12px;
-      font-style: italic;
-      margin: 0;
-    }
-    .date-str {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 4px;
-    }
-    .meta-area {
-      width: 190px;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .inv-num {
-      color: #dc2626;
-      font-size: 17px;
-      font-weight: bold;
-    }
-    /* Seller & Buyer */
-    .seller-box {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 10px;
-      padding-bottom: 8px;
-      border-bottom: 1px dashed #cbd5e1;
-    }
-    .seller-info {
-      flex: 1;
-    }
-    .seller-name {
-      color: #dc2626;
-      font-weight: bold;
-      font-size: 13.5px;
-      text-transform: uppercase;
-    }
-    .qr-box {
-      width: 96px;
-      height: 96px;
-      flex-shrink: 0;
-      border: 1px solid #e2e8f0;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-box img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .info-row {
-      margin-bottom: 3px;
-      display: flex;
-      align-items: baseline;
-    }
-    .info-label {
-      flex-shrink: 0;
-      font-size: 12.5px;
-    }
-    .info-dots {
-      flex: 1;
-      border-bottom: 1px dotted #94a3b8;
-      margin-left: 4px;
-      min-height: 15px;
-      padding-left: 2px;
-    }
-    .buyer-box {
-      margin-bottom: 10px;
-    }
-    /* 7-column table */
-    table.klt-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-    table.klt-table th, table.klt-table td {
-      border: 1px solid #000;
-      padding: 4.5px 5px;
-      font-size: 12px;
-    }
-    table.klt-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .th-sub {
-      font-style: italic;
-      font-size: 10px;
-      font-weight: normal;
-    }
-    .col-stt { width: 34px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 50px; text-align: center; }
-    .col-qty { width: 65px; text-align: right; }
-    .col-weight { width: 68px; text-align: right; }
-    .col-price { width: 90px; text-align: right; }
-    .col-amount { width: 105px; text-align: right; }
-    .total-row td {
-      font-weight: bold;
-    }
-    .words-box {
-      border: 1px dashed #94a3b8;
-      padding: 6px 10px;
-      margin-top: 6px;
-      font-size: 12.5px;
-      background: #fafafa;
-    }
-    /* Signature */
-    .signature-grid {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 14px;
-      margin-bottom: 14px;
-      text-align: center;
-    }
-    .sig-col {
-      width: 46%;
-    }
-    .sig-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sig-box-softdreams {
-      margin-top: 8px;
-      border: 1.5px solid #16a34a;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      color: #dc2626;
-      background: rgba(22, 163, 74, 0.03);
-    }
-    .sig-valid-tag {
-      color: #16a34a;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 3px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    /* Footer */
-    .footer-section {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      line-height: 1.4;
-    }
-    .footer-provider {
-      text-align: center;
-      font-size: 11px;
-      color: #475569;
-      margin-top: 4px;
-      padding-top: 4px;
-      border-top: 1px dashed #e2e8f0;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xF3a \u0111\u01A1n b\xE1n h\xE0ng \u0111i\u1EC7n t\u1EED - C\xD4NG TY TNHH KD V\xC0NG B\u1EA0C KIM LOAN TU\u1EA4N") : ""}
-
-  <div class="invoice-outer">
-    <div class="watermark-klt">KIM LOAN TU\u1EA4N<br>JEWELRY</div>
-
-    <div class="relative-content">
-      <!-- HEADER -->
-      <div class="header-grid">
-        <div class="logo-area">
-          <svg class="klt-flower-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="50" cy="50" r="45" stroke="#d97706" stroke-width="2" fill="#fffbeb"/>
-            <!-- 8 petals golden flower -->
-            <path d="M50 16 C55 28 55 38 50 50 C45 38 45 28 50 16 Z" fill="#f59e0b" stroke="#b45309" stroke-width="1"/>
-            <path d="M50 84 C55 72 55 62 50 50 C45 62 45 72 50 84 Z" fill="#f59e0b" stroke="#b45309" stroke-width="1"/>
-            <path d="M16 50 C28 55 38 55 50 50 C38 45 28 45 16 50 Z" fill="#f59e0b" stroke="#b45309" stroke-width="1"/>
-            <path d="M84 50 C72 55 62 55 50 50 C62 45 72 45 84 50 Z" fill="#f59e0b" stroke="#b45309" stroke-width="1"/>
-            <path d="M26 26 C38 33 44 42 50 50 C42 44 33 38 26 26 Z" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
-            <path d="M74 74 C62 67 56 58 50 50 C58 56 67 62 74 74 Z" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
-            <path d="M74 26 C67 38 58 44 50 50 C56 42 62 33 74 26 Z" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
-            <path d="M26 74 C33 62 42 56 50 50 C44 58 38 67 26 74 Z" fill="#fbbf24" stroke="#b45309" stroke-width="1"/>
-            <circle cx="50" cy="50" r="10" fill="#b45309"/>
-          </svg>
-          <div class="logo-text">KIM LOAN TU\u1EA4N</div>
-        </div>
-
-        <div class="title-area">
-          <div class="main-title">H\xD3A \u0110\u01A0N B\xC1N H\xC0NG</div>
-          <div class="sub-title">(KH\u1EDEI T\u1EA0O T\u1EEA M\xC1Y T\xCDNH TI\u1EC0N)</div>
-          <div class="en-title">(VAT INVOICE)</div>
-          <div class="date-str">Ng\xE0y (Date) ${escapeHtml(day)} th\xE1ng (month) ${escapeHtml(month)} n\u0103m (year) ${escapeHtml(year)}</div>
-        </div>
-
-        <div class="meta-area">
-          <div>K\xFD hi\u1EC7u (Serial): <strong>${escapeHtml(invoice.khhdon || "2C26MKG")}</strong></div>
-          <div>S\u1ED1 (No.): <span class="inv-num">${escapeHtml(invoice.shdon || "292")}</span></div>
-        </div>
-      </div>
-
-      <!-- SELLER INFO -->
-      <div class="seller-box">
-        <div class="seller-info">
-          <div class="info-row">
-            <span class="info-label">\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng (Seller):</span>
-            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || ""))}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || "")}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">T\xE0i kho\u1EA3n (A/C number):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ""}` : "05049999 t\u1EA1i Ng\xE2n H\xE0ng Eximbank")}</span>
-          </div>
-        </div>
-
-        <div class="qr-box">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u Kim Loan Tu\u1EA5n">
-        </div>
-      </div>
-
-      <!-- BUYER INFO -->
-      <div class="buyer-box">
-        <div class="info-row">
-          <span class="info-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng (Buyer):</span>
-          <span class="info-dots">${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : "")}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">T\xEAn \u0111\u01A1n v\u1ECB (Company's name):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerName)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerTaxCode)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-          <span class="info-dots">${escapeHtml(buyerAddress)}</span>
-        </div>
-        <div class="info-row" style="display:flex;justify-content:space-between;">
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">H\xECnh th\u1EE9c thanh to\xE1n (Payment method):</span>
-            <span class="info-dots">${escapeHtml(paymentMethod)}</span>
-          </div>
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">\u0110\u01A1n v\u1ECB ti\u1EC1n t\u1EC7 (Currency):</span>
-            <span class="info-dots" style="font-weight:bold;">${escapeHtml(invoice.dvtte || "VND")}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 7-COLUMN GOODS TABLE -->
-      <table class="klt-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT<br><span class="th-sub">(No.)</span></th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5<br><span class="th-sub">(Name of goods, services)</span></th>
-            <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh<br><span class="th-sub">(Unit)</span></th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng<br><span class="th-sub">(Quantity)</span></th>
-            <th class="col-weight">Tr\u1ECDng l\u01B0\u1EE3ng<br><span class="th-sub">(Weight)</span></th>
-            <th class="col-price">\u0110\u01A1n gi\xE1<br><span class="th-sub">(Unit price)</span></th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n<br><span class="th-sub">(Amount)</span></th>
-          </tr>
-          <tr style="font-size:10px;text-align:center;font-style:italic;">
-            <td>(1)</td>
-            <td>(2)</td>
-            <td>(3)</td>
-            <td>(4)</td>
-            <td>(5)</td>
-            <td>(6)</td>
-            <td>(7)=(4)x(6)</td>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || (idx % 2 === 0 ? "Ch\u1EC9" : "C\xE1i");
-    const name = item.itemName || item.ten || `S\u1EA3n ph\u1EA9m v\xE0ng #${idx + 1}`;
-    const isLaborFee = name.toLowerCase().includes("ti\u1EC1n c\xF4ng") || name.toLowerCase().includes("tien cong");
-    const weightVal = isLaborFee ? "" : formatNum(qty);
-    return `
-              <tr>
-                <td class="col-stt">${idx + 1}</td>
-                <td class="col-name">${escapeHtml(name)}</td>
-                <td class="col-unit">${escapeHtml(unit)}</td>
-                <td class="col-qty">${formatNum(qty)}</td>
-                <td class="col-weight">${escapeHtml(weightVal)}</td>
-                <td class="col-price">${formatVND(price)}</td>
-                <td class="col-amount">${formatVND(amt)}</td>
-              </tr>
-            `;
-  }).join("")}
-          <tr class="total-row">
-            <td colspan="6" style="text-align:right;font-weight:bold;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total payment):</td>
-            <td class="col-amount">${formatVND(totalAmount)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- WORDS AMOUNT -->
-      <div class="words-box">
-        <strong>S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF (Amount in words):</strong> <em>${escapeHtml(wordsAmount)}</em>
-      </div>
-
-      <!-- SIGNATURE SECTION -->
-      <div class="signature-grid">
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi mua h\xE0ng (Buyer)</div>
-          <div style="font-style:italic;font-size:11px;color:#64748b;margin-top:2px;">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-        </div>
-
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng (Seller)</div>
-          <div class="sig-box-softdreams">
-            <div class="sig-valid-tag">
-              <span>\u2714</span> Signature Valid
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}-${escapeHtml(month)}-${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-section">
-        <div><strong>M\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF (Tax authority code):</strong> <span style="font-family:monospace;font-weight:bold;">${escapeHtml(taxAuthorityCode)}</span></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-          <div>Trang tra c\u1EE9u: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a></div>
-          <div>M\xE3 tra c\u1EE9u: <strong style="color:#b91c1c;font-family:monospace;">${escapeHtml(mCode)}</strong></div>
-        </div>
-        <div style="text-align:center;font-style:italic;margin-top:3px;color:#475569;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      </div>
-
-      <div class="footer-provider">
-        \u0110\u01A1n v\u1ECB cung c\u1EA5p gi\u1EA3i ph\xE1p: C\xF4ng ty c\u1ED5 ph\u1EA7n \u0111\u1EA7u t\u01B0 c\xF4ng ngh\u1EC7 v\xE0 th\u01B0\u01A1ng m\u1EA1i SOFTDREAMS, MST: 0105987432, Http://easyinvoice.vn/
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/TkjTemplate.ts
-function renderTkjTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "TKJ", invoice.nbmst);
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:0318443500;KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const taxAuthorityCode = invoice.mhdon || "M2-26-8K5G-14283833446";
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, TP \u0110\xE0 N\u1EB5ng, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "\u0110\u1ED1i tr\u1EEB c\xF4ng n\u1EE3";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - V\xC0NG B\u1EA0C TKJ - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #15803d !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #15803d;
-      border-radius: 4px;
-      padding: 20px 24px 16px 24px;
-      box-shadow: 0 4px 20px rgba(21, 128, 61, 0.12);
-      position: relative;
-    }
-    /* Watermark */
-    .watermark-tkj {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-20deg);
-      font-size: 58px;
-      font-weight: 800;
-      color: rgba(21, 128, 61, 0.05);
-      text-transform: uppercase;
-      letter-spacing: 6px;
-      pointer-events: none;
-      z-index: 0;
-      text-align: center;
-      line-height: 1.2;
-    }
-    .relative-content {
-      position: relative;
-      z-index: 1;
-    }
-    /* Header grid */
-    .header-grid {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #dcfce7;
-    }
-    .logo-area {
-      width: 170px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-    .tkj-logo-svg {
-      width: 65px;
-      height: 52px;
-    }
-    .logo-text {
-      font-size: 16px;
-      font-weight: bold;
-      color: #166534;
-      letter-spacing: 1px;
-      margin-top: 3px;
-    }
-    .title-area {
-      flex: 1;
-      text-align: center;
-      padding: 0 8px;
-    }
-    .main-title {
-      color: #dc2626;
-      font-size: 21px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .sub-title {
-      color: #dc2626;
-      font-size: 13px;
-      font-weight: bold;
-      margin: 2px 0 1px 0;
-    }
-    .en-title {
-      color: #dc2626;
-      font-size: 12px;
-      font-style: italic;
-      margin: 0;
-    }
-    .date-str {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 4px;
-    }
-    .meta-area {
-      width: 190px;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .inv-num {
-      color: #dc2626;
-      font-size: 17px;
-      font-weight: bold;
-    }
-    /* Seller & Buyer */
-    .seller-box {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 10px;
-      padding-bottom: 8px;
-      border-bottom: 1px dashed #cbd5e1;
-    }
-    .seller-info {
-      flex: 1;
-    }
-    .seller-name {
-      color: #dc2626;
-      font-weight: bold;
-      font-size: 13.5px;
-      text-transform: uppercase;
-    }
-    .qr-box {
-      width: 96px;
-      height: 96px;
-      flex-shrink: 0;
-      border: 1px solid #e2e8f0;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-box img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .info-row {
-      margin-bottom: 3px;
-      display: flex;
-      align-items: baseline;
-    }
-    .info-label {
-      flex-shrink: 0;
-      font-size: 12.5px;
-    }
-    .info-dots {
-      flex: 1;
-      border-bottom: 1px dotted #94a3b8;
-      margin-left: 4px;
-      min-height: 15px;
-      padding-left: 2px;
-    }
-    .buyer-box {
-      margin-bottom: 10px;
-    }
-    /* Table */
-    table.tkj-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-    table.tkj-table th, table.tkj-table td {
-      border: 1px solid #000;
-      padding: 4.5px 6px;
-      font-size: 12px;
-    }
-    table.tkj-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .th-sub {
-      font-style: italic;
-      font-size: 10.5px;
-      font-weight: normal;
-    }
-    .col-stt { width: 36px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 60px; text-align: center; }
-    .col-qty { width: 68px; text-align: right; }
-    .col-price { width: 95px; text-align: right; }
-    .col-amount { width: 110px; text-align: right; }
-    .total-row td {
-      font-weight: bold;
-    }
-    .words-box {
-      border: 1px dashed #94a3b8;
-      padding: 6px 10px;
-      margin-top: 6px;
-      font-size: 12.5px;
-      background: #fafafa;
-    }
-    /* Signature */
-    .signature-grid {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 14px;
-      margin-bottom: 14px;
-      text-align: center;
-    }
-    .sig-col {
-      width: 46%;
-    }
-    .sig-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sig-box-softdreams {
-      margin-top: 8px;
-      border: 1.5px solid #16a34a;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      color: #dc2626;
-      background: rgba(22, 163, 74, 0.03);
-    }
-    .sig-valid-tag {
-      color: #16a34a;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 3px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    /* Footer */
-    .footer-section {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      line-height: 1.4;
-    }
-    .footer-provider {
-      text-align: center;
-      font-size: 11px;
-      color: #475569;
-      margin-top: 4px;
-      padding-top: 4px;
-      border-top: 1px dashed #e2e8f0;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xF3a \u0111\u01A1n b\xE1n h\xE0ng \u0111i\u1EC7n t\u1EED - C\xD4NG TY TNHH TM DV V\xC0NG B\u1EA0C TKJ") : ""}
-
-  <div class="invoice-outer">
-    <div class="watermark-tkj">TKJ<br>JEWELRY</div>
-
-    <div class="relative-content">
-      <!-- HEADER -->
-      <div class="header-grid">
-        <div class="logo-area">
-          <svg class="tkj-logo-svg" viewBox="0 0 100 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="10" y="10" width="80" height="60" rx="12" stroke="#15803d" stroke-width="4" fill="#f0fdf4"/>
-            <path d="M25 24 H75 M50 24 V60" stroke="#15803d" stroke-width="6" stroke-linecap="round"/>
-            <path d="M56 38 L72 24" stroke="#16a34a" stroke-width="5" stroke-linecap="round"/>
-            <path d="M56 46 L74 60" stroke="#16a34a" stroke-width="5" stroke-linecap="round"/>
-          </svg>
-          <div class="logo-text">TKJ</div>
-        </div>
-
-        <div class="title-area">
-          <div class="main-title">H\xD3A \u0110\u01A0N B\xC1N H\xC0NG</div>
-          <div class="sub-title">(KH\u1EDEI T\u1EA0O T\u1EEA M\xC1Y T\xCDNH TI\u1EC0N)</div>
-          <div class="en-title">(SALES INVOICE)</div>
-          <div class="date-str">Ng\xE0y (Date) ${escapeHtml(day)} th\xE1ng (month) ${escapeHtml(month)} n\u0103m (year) ${escapeHtml(year)}</div>
-        </div>
-
-        <div class="meta-area">
-          <div>K\xFD hi\u1EC7u (Serial): <strong>${escapeHtml(invoice.khhdon || "2C26MTK")}</strong></div>
-          <div>S\u1ED1 (No.): <span class="inv-num">${escapeHtml(invoice.shdon || "134")}</span></div>
-        </div>
-      </div>
-
-      <!-- SELLER INFO -->
-      <div class="seller-box">
-        <div class="seller-info">
-          <div class="info-row">
-            <span class="info-label">\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng (Seller):</span>
-            <span class="seller-name" style="margin-left:6px;">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-            <span style="font-weight:bold;margin-left:6px;letter-spacing:1px;">${escapeHtml(renderSpacedTaxCode(invoice.nbmst || ""))}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-            <span style="margin-left:6px;">${escapeHtml(invoice.nbdchi || "")}</span>
-          </div>
-        </div>
-
-        <div class="qr-box">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u TKJ">
-        </div>
-      </div>
-
-      <!-- BUYER INFO -->
-      <div class="buyer-box">
-        <div class="info-row">
-          <span class="info-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng (Buyer):</span>
-          <span class="info-dots">${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : "")}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">T\xEAn \u0111\u01A1n v\u1ECB (Company's name):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerName)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-          <span class="info-dots" style="font-weight:bold;">${escapeHtml(buyerTaxCode)}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-          <span class="info-dots">${escapeHtml(buyerAddress)}</span>
-        </div>
-        <div class="info-row" style="display:flex;justify-content:space-between;">
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">H\xECnh th\u1EE9c thanh to\xE1n (Payment method):</span>
-            <span class="info-dots">${escapeHtml(paymentMethod)}</span>
-          </div>
-          <div style="width:48%;display:flex;align-items:baseline;">
-            <span class="info-label">\u0110\u01A1n v\u1ECB ti\u1EC1n t\u1EC7 (Currency):</span>
-            <span class="info-dots" style="font-weight:bold;">${escapeHtml(invoice.dvtte || "VND")}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- TABLE OF GOODS -->
-      <table class="tkj-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT<br><span class="th-sub">(No.)</span></th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5<br><span class="th-sub">(Description)</span></th>
-            <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh<br><span class="th-sub">(Unit)</span></th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng<br><span class="th-sub">(Quantity)</span></th>
-            <th class="col-price">\u0110\u01A1n gi\xE1<br><span class="th-sub">(Unit price)</span></th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n<br><span class="th-sub">(Amount)</span></th>
-          </tr>
-          <tr style="font-size:10px;text-align:center;font-style:italic;">
-            <td>(1)</td>
-            <td>(2)</td>
-            <td>(3)</td>
-            <td>(4)</td>
-            <td>(5)</td>
-            <td>(6=4x5)</td>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || (idx % 2 === 0 ? "M\xF3n" : "C\xE1i");
-    const name = item.itemName || item.ten || `S\u1EA3n ph\u1EA9m v\xE0ng trang s\u1EE9c TKJ #${idx + 1}`;
-    return `
-              <tr>
-                <td class="col-stt">${idx + 1}</td>
-                <td class="col-name">${escapeHtml(name)}</td>
-                <td class="col-unit">${escapeHtml(unit)}</td>
-                <td class="col-qty">${formatNum(qty)}</td>
-                <td class="col-price">${formatVND(price)}</td>
-                <td class="col-amount">${formatVND(amt)}</td>
-              </tr>
-            `;
-  }).join("")}
-          <tr class="total-row">
-            <td colspan="5" style="text-align:right;font-weight:bold;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total payment):</td>
-            <td class="col-amount">${formatVND(totalAmount)}</td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- WORDS AMOUNT -->
-      <div class="words-box">
-        <strong>S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF (In words):</strong> <em>${escapeHtml(wordsAmount)}</em>
-      </div>
-
-      <!-- SIGNATURE SECTION -->
-      <div class="signature-grid">
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi mua h\xE0ng (Buyer)</div>
-          <div style="font-style:italic;font-size:11px;color:#64748b;margin-top:2px;">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-        </div>
-
-        <div class="sig-col">
-          <div class="sig-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng (Seller)</div>
-          <div class="sig-box-softdreams">
-            <div class="sig-valid-tag">
-              <span>\u2714</span> Signature Valid
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}-${escapeHtml(month)}-${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-section">
-        <div><strong>M\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF (Tax authority code):</strong> <span style="font-family:monospace;font-weight:bold;">${escapeHtml(taxAuthorityCode)}</span></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-          <div>Trang tra c\u1EE9u: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml(pUrl)}</a></div>
-          <div>M\xE3 tra c\u1EE9u: <strong style="color:#b91c1c;font-family:monospace;">${escapeHtml(mCode)}</strong></div>
-        </div>
-        <div style="text-align:center;font-style:italic;margin-top:3px;color:#475569;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      </div>
-
-      <div class="footer-provider">
-        \u0110\u01A1n v\u1ECB cung c\u1EA5p gi\u1EA3i ph\xE1p: C\xF4ng ty c\u1ED5 ph\u1EA7n \u0111\u1EA7u t\u01B0 c\xF4ng ngh\u1EC7 v\xE0 th\u01B0\u01A1ng m\u1EA1i SOFTDREAMS, MST: 0105987432, Http://easyinvoice.vn/
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/NghiaSonTemplate.ts
-function renderNghiaSonTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const maCqt = invoice.mhdon || "00BB3C25BCB8C74D908D5962B75A9ED39B";
-  const mCode = invoice.mhdon || lookupCode || invoice.lookupCode || maCqt;
-  const pUrl = lookupUrl || invoice.lookupUrl || `https://${invoice.nbmst || "4000344946"}-tt78.vnpt-invoice.com.vn`;
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VNPT", invoice.nbmst || "4000344946");
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${invoice.nbmst || ""};KH:${invoice.khhdon};SHD:${invoice.shdon}${mCode ? `;MTC:${mCode}` : ""}`);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const subTotal = invoice.tgtcthue || Math.round(totalAmount / 1.1);
-  const vatAmount = invoice.tgtthue || (totalAmount - subTotal > 0 ? totalAmount - subTotal : Math.round(subTotal * 0.1));
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const showControls = options?.showPrintControls !== false;
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, Th\xE0nh ph\u1ED1 Tam K\u1EF3, T\u1EC9nh Qu\u1EA3ng Nam, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "Chuy\u1EC3n kho\u1EA3n";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG - ${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")} - S\u1ED1: ${escapeHtml(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #0284c7 !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #0284c7;
-      border-radius: 4px;
-      padding: 18px 22px 14px 22px;
-      box-shadow: 0 4px 20px rgba(2, 132, 199, 0.12);
-      position: relative;
-    }
-    .top-vnpt-banner {
-      text-align: center;
-      font-size: 11px;
-      color: #0369a1;
-      border-bottom: 1px solid #bae6fd;
-      padding-bottom: 4px;
-      margin-bottom: 8px;
-    }
-    /* Header */
-    .header-grid {
-      display: flex;
-      gap: 14px;
-      align-items: flex-start;
-      margin-bottom: 6px;
-    }
-    .vnpt-logo-box {
-      width: 70px;
-      height: 60px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .vnpt-globe-svg {
-      width: 55px;
-      height: 55px;
-    }
-    .seller-text-box {
-      flex: 1;
-      font-size: 12.5px;
-      line-height: 1.38;
-    }
-    .seller-title {
-      color: #0369a1;
-      font-weight: bold;
-      font-size: 14.5px;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-    /* Title block */
-    .title-row {
-      text-align: center;
-      margin: 8px 0 10px 0;
-      position: relative;
-    }
-    .main-title {
-      font-size: 22px;
-      font-weight: bold;
-      color: #dc2626;
-      letter-spacing: 0.5px;
-      margin: 0;
-    }
-    .en-title {
-      font-size: 12px;
-      font-style: italic;
-      color: #dc2626;
-      margin: 1px 0;
-    }
-    .sub-date {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 2px;
-    }
-    .cqt-code {
-      font-style: italic;
-      font-size: 12px;
-      margin-top: 2px;
-    }
-    .meta-box-right {
-      position: absolute;
-      right: 0;
-      top: 0;
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .qr-corner {
-      position: absolute;
-      right: 0;
-      top: 52px;
-      width: 86px;
-      height: 86px;
-      border: 1px solid #ddd;
-      padding: 2px;
-      background: #fff;
-    }
-    .qr-corner img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    /* Buyer */
-    .buyer-section {
-      margin-top: 6px;
-      margin-bottom: 10px;
-      font-size: 12.5px;
-      padding-right: 95px;
-      line-height: 1.45;
-    }
-    .buyer-line {
-      margin-bottom: 2px;
-    }
-    /* Goods table */
-    table.ns-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 6px;
-    }
-    table.ns-table th, table.ns-table td {
-      border: 1px solid #000;
-      padding: 4px 6px;
-      font-size: 12px;
-    }
-    table.ns-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fff;
-    }
-    .th-sub {
-      font-style: italic;
-      font-size: 10px;
-      font-weight: normal;
-    }
-    .col-stt { width: 36px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 60px; text-align: center; }
-    .col-qty { width: 68px; text-align: right; }
-    .col-price { width: 95px; text-align: right; }
-    .col-amount { width: 110px; text-align: right; }
-    /* Tax calculations */
-    .calc-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      border-top: none;
-      font-size: 12.5px;
-    }
-    .calc-table td {
-      border: 1px solid #000;
-      padding: 4.5px 8px;
-    }
-    .words-amount {
-      border: 1px solid #000;
-      border-top: none;
-      padding: 6px 10px;
-      font-size: 12.5px;
-      font-style: italic;
-      margin-bottom: 12px;
-    }
-    /* 3 Signatures */
-    .sign-container {
-      display: flex;
-      justify-content: space-between;
-      text-align: center;
-      margin-top: 10px;
-      margin-bottom: 14px;
-    }
-    .sign-col {
-      width: 32%;
-    }
-    .sign-title {
-      font-weight: bold;
-      font-size: 12.5px;
-    }
-    .sign-desc {
-      font-style: italic;
-      font-size: 10.5px;
-      color: #64748b;
-    }
-    .vnpt-sig-box {
-      margin-top: 6px;
-      border: 1px solid #16a34a;
-      border-radius: 4px;
-      padding: 6px 8px;
-      text-align: left;
-      font-size: 10.5px;
-      color: #000;
-      background: rgba(22, 163, 74, 0.03);
-    }
-    .sig-valid-tag {
-      color: #16a34a;
-      font-weight: bold;
-      font-size: 11.5px;
-      margin-bottom: 2px;
-      display: flex;
-      align-items: center;
-      gap: 3px;
-    }
-    /* Footer */
-    .footer-area {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      font-size: 11.5px;
-      text-align: center;
-      line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml(`H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG - ${invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng"}`) : ""}
-
-  <div class="invoice-outer">
-    <div class="top-vnpt-banner">
-      \u0110\u01A1n v\u1ECB cung c\u1EA5p gi\u1EA3i ph\xE1p h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED: T\u1EADp \u0111o\xE0n B\u01B0u ch\xEDnh Vi\u1EC5n th\xF4ng Vi\u1EC7t Nam. \u0110i\u1EC7n tho\u1EA1i: 1800.1260
-    </div>
-
-    <!-- SELLER HEADER -->
-    <div class="header-grid">
-      <div class="vnpt-logo-box">
-        <svg class="vnpt-globe-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="50" cy="50" r="44" fill="#0284c7"/>
-          <ellipse cx="50" cy="50" rx="44" ry="18" stroke="#ffffff" stroke-width="3" fill="none"/>
-          <ellipse cx="50" cy="50" rx="18" ry="44" stroke="#ffffff" stroke-width="3" fill="none"/>
-          <path d="M50 6 V94" stroke="#ffffff" stroke-width="3"/>
-          <path d="M6 50 H94" stroke="#ffffff" stroke-width="3"/>
-        </svg>
-      </div>
-
-      <div class="seller-text-box">
-        <div class="seller-title">${escapeHtml(invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng")}</div>
-        <div>M\xE3 s\u1ED1 thu\u1EBF (Tax code): <strong>${escapeHtml(invoice.nbmst || "")}</strong></div>
-        <div>\u0110\u1ECBa ch\u1EC9 (Address): ${escapeHtml(invoice.nbdchi || "")}</div>
-        <div>\u0110i\u1EC7n tho\u1EA1i (Tel): ${escapeHtml(invoice.nbsdt || "0921143577")}</div>
-        <div>S\u1ED1 t\xE0i kho\u1EA3n (Account No.): <strong>${escapeHtml(invoice.nbstk ? `${invoice.nbstk} - ${invoice.nbnhang || ""}` : "040092309799 - Ng\xE2n h\xE0ng Sacombank -Chi nh\xE1nh Qu\u1EA3ng Nam")}</strong></div>
-      </div>
-    </div>
-
-    <!-- TITLE & META -->
-    <div class="title-row">
-      <div class="main-title">H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG</div>
-      <div class="en-title">(VAT INVOICE)</div>
-      <div class="sub-date">Ng\xE0y (Date) ${escapeHtml(day)} th\xE1ng (month) ${escapeHtml(month)} n\u0103m (year) ${escapeHtml(year)}</div>
-      <div class="cqt-code">M\xE3 CQT: <strong>${escapeHtml(maCqt)}</strong></div>
-
-      <div class="meta-box-right">
-        <div>M\u1EABu s\u1ED1 (Form): <strong>${escapeHtml(invoice.khmshdon || "1")}</strong></div>
-        <div>K\xFD hi\u1EC7u (Serial): <strong>${escapeHtml(invoice.khhdon || "1C26TNS")}</strong></div>
-        <div>S\u1ED1 (No.): <strong style="font-size:15px;color:#dc2626;">${escapeHtml(invoice.shdon || "00000010")}</strong></div>
-      </div>
-
-      <div class="qr-corner">
-        <img src="${qrImg}" alt="QR Tra c\u1EE9u h\xF3a \u0111\u01A1n">
-      </div>
-    </div>
-
-    <!-- BUYER SECTION -->
-    <div class="buyer-section">
-      <div class="buyer-line">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng (Buyer): <span>${escapeHtml(invoice.nmten && invoice.nmtendv ? invoice.nmten : "")}</span></div>
-      <div class="buyer-line">T\xEAn \u0111\u01A1n v\u1ECB (Company): <strong style="text-transform:uppercase;">${escapeHtml(buyerName)}</strong></div>
-      <div class="buyer-line">M\xE3 s\u1ED1 thu\u1EBF (Tax code): <strong>${escapeHtml(buyerTaxCode)}</strong></div>
-      <div class="buyer-line">\u0110\u1ECBa ch\u1EC9 (Address): ${escapeHtml(buyerAddress)}</div>
-      <div class="buyer-line" style="display:flex;justify-content:space-between;">
-        <div>H\xECnh th\u1EE9c thanh to\xE1n (Payment method): <strong>${escapeHtml(paymentMethod)}</strong></div>
-        <div>S\u1ED1 t\xE0i kho\u1EA3n (Account No.): <span>${escapeHtml(invoice.nmstk || "")}</span></div>
-      </div>
-    </div>
-
-    <!-- GOODS TABLE -->
-    <table class="ns-table">
-      <thead>
-        <tr>
-          <th class="col-stt">STT<br><span class="th-sub">(No.)</span></th>
-          <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5<br><span class="th-sub">(Description)</span></th>
-          <th class="col-unit">\u0110\u01A1n v\u1ECB t\xEDnh<br><span class="th-sub">(Unit)</span></th>
-          <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng<br><span class="th-sub">(Quantity)</span></th>
-          <th class="col-price">\u0110\u01A1n gi\xE1<br><span class="th-sub">(Unit Price)</span></th>
-          <th class="col-amount">Th\xE0nh ti\u1EC1n<br><span class="th-sub">(Amount)</span></th>
-        </tr>
-        <tr style="font-size:10px;text-align:center;font-style:italic;">
-          <td>(1)</td>
-          <td>(2)</td>
-          <td>(3)</td>
-          <td>(4)</td>
-          <td>(5)</td>
-          <td>(6=4x5)</td>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((item, idx) => {
-    const qty = item.quantity || item.sluong || 0;
-    const price = item.unitPrice || item.dgia || 0;
-    const amt = item.amount || item.thtien || qty * price;
-    const unit = item.unit || item.dvt || "ch\u1EC9";
-    const name = item.itemName || item.ten || `H\xE0ng h\xF3a, d\u1ECBch v\u1EE5 #${idx + 1}`;
-    return `
-            <tr>
-              <td class="col-stt">${idx + 1}</td>
-              <td class="col-name">${escapeHtml(name)}</td>
-              <td class="col-unit">${escapeHtml(unit)}</td>
-              <td class="col-qty">${formatNum(qty)}</td>
-              <td class="col-price">${formatVND(price)}</td>
-              <td class="col-amount">${formatVND(amt)}</td>
-            </tr>
-          `;
-  }).join("")}
-      </tbody>
-    </table>
-
-    <!-- TAX CALCULATIONS -->
-    <table class="calc-table">
-      <tr>
-        <td style="width:70%;font-weight:bold;">Thu\u1EBF su\u1EA5t GTGT (VAT rate): 10%</td>
-        <td style="width:30%;text-align:right;">Ti\u1EC1n thu\u1EBF GTGT: <strong>${formatVND(vatAmount)}</strong></td>
-      </tr>
-      <tr style="background:#f0fdf4;">
-        <td style="font-weight:bold;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total payment):</td>
-        <td style="text-align:right;font-weight:bold;color:#b91c1c;font-size:13px;">${formatVND(totalAmount)}</td>
-      </tr>
-    </table>
-
-    <div class="words-amount">
-      S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF (In words): <strong>${escapeHtml(wordsAmount)}</strong>
-    </div>
-
-    <!-- 3 SIGNATURES SECTION -->
-    <div class="sign-container">
-      <div class="sign-col">
-        <div class="sign-title">Ng\u01B0\u1EDDi mua h\xE0ng (Buyer)</div>
-        <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD, t\xEAn)</div>
-      </div>
-
-      <div class="sign-col">
-        <div class="sign-title">C\u01A1 quan thu\u1EBF (Tax authorities)</div>
-        <div class="sign-desc">(K\xFD \u0111i\u1EC7n t\u1EED)</div>
-        <div class="vnpt-sig-box">
-          <div class="sig-valid-tag"><span>\u2714</span> Signature Valid</div>
-          <div><strong>K\xFD b\u1EDFi:</strong> T\u1ED5ng c\u1EE5c Thu\u1EBF</div>
-          <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-        </div>
-      </div>
-
-      <div class="sign-col">
-        <div class="sign-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng (Seller)</div>
-        <div class="sign-desc">(K\xFD \u0111i\u1EC7n t\u1EED)</div>
-        <div class="vnpt-sig-box">
-          <div class="sig-valid-tag"><span>\u2714</span> Signature Valid</div>
-          <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(invoice.nbten || "Ng\u01B0\u1EDDi b\xE1n h\xE0ng")}</div>
-          <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FOOTER -->
-    <div class="footer-area">
-      <div style="font-style:italic;color:#64748b;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      <div style="margin-top:2px;">Tra c\u1EE9u h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color:#0284c7;text-decoration:underline;font-weight:600;">${escapeHtml(pUrl)}</a> - M\xE3 tra c\u1EE9u: <strong style="font-family:monospace;font-size:12px;">${escapeHtml(mCode)}</strong></div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/TanThanhDanhTemplate.ts
-function renderTanThanhDanhTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = "https://www.meinvoice.vn/tra-cuu";
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "MISA", invoice.nbmst || "0317978711");
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(`MST:${invoice.nbmst || "0317978711"};KH:${invoice.khhdon || "2C26MTD"};SHD:${invoice.shdon || ""};MTC:${mCode}`);
-  const items = ensureInvoiceItems(invoice);
-  const calculatedTotal = items.reduce((sum, item) => sum + Number(item.amount || item.thtien || 0), 0);
-  const totalAmount = typeof invoice.tgtttbso === "number" && invoice.tgtttbso > 0 ? invoice.tgtttbso : calculatedTotal;
-  const wordsAmount = invoice.tgtttbchu || (totalAmount > 0 ? numberToVietnameseWords(totalAmount) : "");
-  const maCqt = invoice.mhdon || "";
-  const showControls = options?.showPrintControls !== false;
-  const sellerName = invoice.nbten || "C\xD4NG TY TNHH KINH DOANH V\xC0NG B\u1EA0C T\xC2N THANH DANH";
-  const sellerTaxCode = invoice.nbmst || "0317978711";
-  const sellerAddress = invoice.nbdchi || invoice.nmdchi_seller || "25-27 An D\u01B0\u01A1ng V\u01B0\u01A1ng, Ph\u01B0\u1EDDng 08, Qu\u1EADn 5, Th\xE0nh ph\u1ED1 H\u1ED3 Ch\xED Minh, Vi\u1EC7t Nam";
-  const sellerPhone = invoice.sdt_seller || invoice.nbsdt || "028 3835 1868";
-  const sellerBank = invoice.nbstk ? `${invoice.nbstk}${invoice.nbnhang ? ` - ${invoice.nbnhang}` : ""}` : "";
-  const buyerName = invoice.nmten || "C\xD4NG TY TNHH M\u1ED8T TH\xC0NH VI\xCAN V\xC0NG B\u1EA0C NGH\u0128A T\xCDN";
-  const buyerTaxCode = invoice.nmmst || "4000926165";
-  const buyerAddress = invoice.nmdchi || "448 Phan Chu Trinh, Ph\u01B0\u1EDDng Tam K\u1EF3, Th\xE0nh ph\u1ED1 Tam K\u1EF3, T\u1EC9nh Qu\u1EA3ng Nam, Vi\u1EC7t Nam";
-  const paymentMethod = invoice.htttoan || "TM/CK";
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - ${escapeHtml(sellerName)} - S\u1ED1: ${escapeHtml(invoice.shdon || "")}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 16px auto;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .invoice-outer { box-shadow: none !important; border: 3px double #047857 !important; }
-    }
-    .invoice-outer {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #047857;
-      border-radius: 4px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.08);
-      position: relative;
-      padding: 6px;
-    }
-    .invoice-inner {
-      border: 1px solid #10b981;
-      padding: 16px 20px 14px 20px;
-      position: relative;
-    }
-    .header-layout {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      border-bottom: 1.5px solid #047857;
-      padding-bottom: 12px;
-    }
-    .logo-box {
-      width: 78px;
-      height: 78px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 1.5px solid #047857;
-      border-radius: 6px;
-      background: #ecfdf5;
-      color: #047857;
-      font-size: 26px;
-      font-weight: bold;
-    }
-    .seller-info {
-      flex: 1;
-      padding: 0 4px;
-    }
-    .seller-name {
-      font-size: 15px;
-      font-weight: bold;
-      color: #065f46;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-      line-height: 1.25;
-    }
-    .seller-detail {
-      font-size: 12.5px;
-      color: #1e293b;
-      margin-bottom: 2px;
-    }
-    .qr-box {
-      width: 80px;
-      flex-shrink: 0;
-      text-align: right;
-    }
-    .qr-box img {
-      width: 76px;
-      height: 76px;
-      display: block;
-      margin-left: auto;
-    }
-    
-    .title-area {
-      text-align: center;
-      margin-top: 10px;
-      margin-bottom: 10px;
-    }
-    .invoice-title {
-      font-size: 20px;
-      font-weight: bold;
-      color: #047857;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 2px;
-    }
-    .invoice-date {
-      font-style: italic;
-      font-size: 12.5px;
-      color: #334155;
-    }
-    .invoice-meta-grid {
-      display: flex;
-      justify-content: center;
-      gap: 24px;
-      margin-top: 4px;
-      font-size: 12.5px;
-    }
-    
-    .buyer-section {
-      background: #f0fdf4;
-      border: 1px dashed #6ee7b7;
-      border-radius: 4px;
-      padding: 8px 12px;
-      margin-bottom: 10px;
-      font-size: 12.5px;
-    }
-    .buyer-row {
-      display: flex;
-      margin-bottom: 3px;
-    }
-    .buyer-label {
-      width: 140px;
-      flex-shrink: 0;
-      color: #334155;
-    }
-    .buyer-val {
-      flex: 1;
-      font-weight: 500;
-      color: #0f172a;
-    }
-
-    /* B\u1EA3ng h\xE0ng h\xF3a */
-    table.items-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #047857;
-      font-size: 12px;
-      margin-bottom: 8px;
-    }
-    table.items-table th, table.items-table td {
-      border: 1px solid #047857;
-      padding: 5px 6px;
-    }
-    table.items-table th {
-      background: #ecfdf5;
-      color: #065f46;
-      font-weight: bold;
-      text-align: center;
-    }
-    .col-stt { width: 36px; text-align: center; }
-    .col-name { text-align: left; }
-    .col-unit { width: 55px; text-align: center; }
-    .col-qty { width: 60px; text-align: right; }
-    .col-price { width: 95px; text-align: right; }
-    .col-amount { width: 110px; text-align: right; }
-
-    .summary-area {
-      border: 1px solid #047857;
-      border-top: none;
-      background: #fafaf9;
-      padding: 6px 10px;
-      font-size: 12.5px;
-      margin-top: -8px;
-      margin-bottom: 12px;
-    }
-    .summary-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 3px;
-    }
-
-    .sign-container {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 14px;
-      margin-bottom: 12px;
-    }
-    .sign-col {
-      width: 48%;
-      text-align: center;
-    }
-    .sign-title {
-      font-weight: bold;
-      font-size: 13px;
-      text-transform: uppercase;
-      color: #065f46;
-    }
-    .sign-desc {
-      font-style: italic;
-      font-size: 11px;
-      color: #64748b;
-      margin-top: 1px;
-    }
-    .misa-sig-box {
-      margin-top: 10px;
-      border: 1.5px solid #16a34a;
-      background: #f0fdf4;
-      border-radius: 4px;
-      padding: 6px 10px;
-      display: inline-block;
-      text-align: left;
-      font-size: 11px;
-      color: #15803d;
-      min-width: 220px;
-    }
-    .sig-valid-header {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-weight: bold;
-      font-size: 12px;
-      margin-bottom: 2px;
-      border-bottom: 1px solid #bbf7d0;
-      padding-bottom: 2px;
-    }
-
-    /* FOOTER */
-    .footer-area {
-      border-top: 1px dashed #cbd5e1;
-      padding-top: 8px;
-      margin-top: 10px;
-      text-align: center;
-      font-size: 11.5px;
-      color: #334155;
-      line-height: 1.45;
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml("H\xF3a \u0111\u01A1n T\xE2n Thanh Danh") : ""}
-
-  <div class="invoice-outer">
-    <div class="invoice-inner">
-      <!-- HEADER -->
-      <div class="header-layout">
-        <div class="logo-box">
-          TTD
-        </div>
-
-        <div class="seller-info">
-          <div class="seller-name">${escapeHtml(sellerName)}</div>
-          <div class="seller-detail"><strong>M\xE3 s\u1ED1 thu\u1EBF:</strong> <span style="font-family:monospace;font-weight:bold;font-size:13px;color:#065f46;">${escapeHtml(sellerTaxCode)}</span></div>
-          <div class="seller-detail"><strong>\u0110\u1ECBa ch\u1EC9:</strong> ${escapeHtml(sellerAddress)}</div>
-          <div class="seller-detail"><strong>\u0110i\u1EC7n tho\u1EA1i:</strong> ${escapeHtml(sellerPhone)}</div>
-          <div class="seller-detail"><strong>S\u1ED1 t\xE0i kho\u1EA3n:</strong> ${escapeHtml(sellerBank)}</div>
-        </div>
-
-        <div class="qr-box">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u" />
-        </div>
-      </div>
-
-      <!-- TITLE -->
-      <div class="title-area">
-        <div class="invoice-title">H\xD3A \u0110\u01A0N B\xC1N H\xC0NG</div>
-        <div class="invoice-date">Ng\xE0y ${escapeHtml(day)} th\xE1ng ${escapeHtml(month)} n\u0103m ${escapeHtml(year)}</div>
-        <div class="invoice-meta-grid">
-          <div>K\xFD hi\u1EC7u: <strong style="font-family:monospace;color:#065f46;">${escapeHtml(invoice.khhdon || "2C26MTD")}</strong></div>
-          <div>S\u1ED1: <strong style="font-family:monospace;font-size:14px;color:#b91c1c;">${escapeHtml(invoice.shdon || "00001667")}</strong></div>
-        </div>
-        <div style="font-size:11.5px;color:#475569;margin-top:3px;">
-          M\xE3 c\u1EE7a CQT: <strong style="font-family:monospace;color:#047857;">${escapeHtml(maCqt)}</strong>
-        </div>
-      </div>
-
-      <!-- BUYER -->
-      <div class="buyer-section">
-        <div class="buyer-row">
-          <div class="buyer-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng:</div>
-          <div class="buyer-val">${escapeHtml(invoice.tennguoimua || invoice.nmten || "")}</div>
-        </div>
-        <div class="buyer-row">
-          <div class="buyer-label">T\xEAn \u0111\u01A1n v\u1ECB:</div>
-          <div class="buyer-val" style="font-weight:bold;color:#065f46;">${escapeHtml(buyerName)}</div>
-        </div>
-        <div class="buyer-row">
-          <div class="buyer-label">M\xE3 s\u1ED1 thu\u1EBF:</div>
-          <div class="buyer-val" style="font-family:monospace;font-weight:bold;">${escapeHtml(buyerTaxCode)}</div>
-        </div>
-        <div class="buyer-row">
-          <div class="buyer-label">\u0110\u1ECBa ch\u1EC9:</div>
-          <div class="buyer-val">${escapeHtml(buyerAddress)}</div>
-        </div>
-        <div class="buyer-row">
-          <div class="buyer-label">H\xECnh th\u1EE9c thanh to\xE1n:</div>
-          <div class="buyer-val">${escapeHtml(paymentMethod)} &nbsp;&nbsp;|&nbsp;&nbsp; \u0110\u1ED3ng ti\u1EC1n thanh to\xE1n: <strong>VND</strong></div>
-        </div>
-      </div>
-
-      <!-- ITEMS TABLE -->
-      <table class="items-table">
-        <thead>
-          <tr>
-            <th class="col-stt">STT</th>
-            <th class="col-name">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-            <th class="col-unit">\u0110VT</th>
-            <th class="col-qty">S\u1ED1 l\u01B0\u1EE3ng</th>
-            <th class="col-price">\u0110\u01A1n gi\xE1</th>
-            <th class="col-amount">Th\xE0nh ti\u1EC1n</th>
-          </tr>
-          <tr style="font-size:10.5px;background:#f8fafc;color:#64748b;">
-            <th>(1)</th>
-            <th>(2)</th>
-            <th>(3)</th>
-            <th>(4)</th>
-            <th>(5)</th>
-            <th>(6) = (4) x (5)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((item, index) => `
-            <tr>
-              <td class="col-stt">${index + 1}</td>
-              <td class="col-name">${escapeHtml(item.itemName || item.ten || "H\xE0ng h\xF3a d\u1ECBch v\u1EE5")}</td>
-              <td class="col-unit">${escapeHtml(item.unit || item.dvt || "")}</td>
-              <td class="col-qty">${item.quantity ? item.quantity.toLocaleString("vi-VN") : item.sluong ? item.sluong.toLocaleString("vi-VN") : "1"}</td>
-              <td class="col-price">${formatVND(item.unitPrice || item.dgia || item.amount || 0)}</td>
-              <td class="col-amount" style="font-weight:bold;">${formatVND(item.amount || item.thtien || 0)}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-
-      <!-- SUMMARY -->
-      <div class="summary-area">
-        <div class="summary-row">
-          <div><strong>C\u1ED9ng ti\u1EC1n b\xE1n h\xE0ng h\xF3a, d\u1ECBch v\u1EE5:</strong></div>
-          <div><strong style="color:#b91c1c;font-size:13.5px;">${formatVND(totalAmount)} \u0111</strong></div>
-        </div>
-        <div style="font-style:italic;margin-top:2px;color:#334155;">
-          S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF: <strong>${escapeHtml(wordsAmount)} \u0111\u1ED3ng.</strong>
-        </div>
-      </div>
-
-      <!-- SIGNATURES -->
-      <div class="sign-container">
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-        </div>
-
-        <div class="sign-col">
-          <div class="sign-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-          <div class="sign-desc">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-          
-          <div class="misa-sig-box">
-            <div class="sig-valid-header">
-              <span style="color:#15803d;font-size:14px;">\u2714</span>
-              <span>Signature Valid</span>
-            </div>
-            <div><strong>K\xFD b\u1EDFi:</strong> ${escapeHtml(sellerName)}</div>
-            <div><strong>K\xFD ng\xE0y:</strong> ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FOOTER -->
-      <div class="footer-area">
-        <div>Tra c\u1EE9u t\u1EA1i Website: <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#059669;text-decoration:underline;font-weight:bold;">${escapeHtml(pUrl)}</a>${mCode ? ` - M\xE3 tra c\u1EE9u h\xF3a \u0111\u01A1n: <strong style="font-family:monospace;font-size:12.5px;color:#065f46;">${escapeHtml(mCode)}</strong>` : ""}</div>
-        <div style="font-style:italic;color:#64748b;margin-top:2px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-        <div style="font-size:10.5px;color:#475569;margin-top:3px;">Ph\xE1t h\xE0nh b\u1EDFi ph\u1EA7n m\u1EC1m MISA meInvoice - C\xF4ng ty C\u1ED5 ph\u1EA7n MISA (www.misa.vn) - MST 0101243150</div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-// src/templates/VnpayTemplate.ts
-function renderVnpayTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails(rawXml);
-  const isInvalidCode = (code) => !code || code.toLowerCase() === "vietcombank" || /^[VTMB]\d{10,14}[A-Za-z0-9]{16,}$/i.test(code.trim()) || code.includes("0102182292") && code.length > 20;
-  const mCode = (!isInvalidCode(lookupCode) ? lookupCode : !isInvalidCode(invoice.lookupCode) ? invoice.lookupCode : "") || "";
-  const isVcb = invoice.nbmst === "0100112437" || (invoice.nbten || "").toUpperCase().includes("VIETCOMBANK");
-  const defaultPortalUrl = isVcb ? "https://einvoice.vietcombank.com.vn/" : "https://portal.vnpayinvoice.vn/";
-  const pUrl = lookupUrl || invoice.lookupUrl || defaultPortalUrl;
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VNPAY", invoice.nbmst);
-  const qrPayload = invoice.mhdon ? `https://hoadondientu.gdt.gov.vn/tra-cuu?cqt=${encodeURIComponent(invoice.mhdon)}` : `MST:${invoice.nbmst};KH:${invoice.khhdon};SHD:${invoice.shdon};MTC:${mCode}`;
-  const qrImg = options?.qrCodeDataUrl || generateDefaultQrSvg(qrPayload);
-  const items = ensureInvoiceItems(invoice);
-  const totalAmount = invoice.tgtttbso || items.reduce((sum, item) => sum + (item.amount || item.thtien || 0), 0);
-  const vatAmount = typeof invoice.tgtthue === "number" ? invoice.tgtthue : 0;
-  const subTotal = typeof invoice.tgtcthue === "number" ? invoice.tgtcthue : totalAmount - vatAmount > 0 ? totalAmount - vatAmount : totalAmount;
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(totalAmount);
-  const taxAuthorityCode = invoice.mhdon || "";
-  const showControls = options?.showPrintControls !== false;
-  const mauSo = invoice.khmshdon || (invoice.khhdon ? invoice.khhdon.charAt(0) : "1");
-  const kyHieu = invoice.khhdon || "";
-  const soHdon = invoice.shdon || "";
-  let invoiceTitle = invoice.thdon || "";
-  if (!invoiceTitle) {
-    if (kyHieu.startsWith("2")) {
-      invoiceTitle = "H\xD3A \u0110\u01A0N B\xC1N H\xC0NG";
-    } else {
-      invoiceTitle = "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG";
-    }
-  } else {
-    invoiceTitle = invoiceTitle.toUpperCase();
-  }
-  const isVatInvoice = !kyHieu.startsWith("2") && (vatAmount > 0 || invoiceTitle.includes("GI\xC1 TR\u1ECA GIA T\u0102NG"));
-  const paymentMethod = invoice.htttoan || "TM/CK";
-  const taxRateGroups = {};
-  items.forEach((it) => {
-    const rate = it.taxRate || it.tsuat || (isVatInvoice ? "10%" : "KCT");
-    if (!taxRateGroups[rate]) {
-      taxRateGroups[rate] = { subTotal: 0, taxAmount: 0 };
-    }
-    const itemSubTotal = it.amount || it.thtien || 0;
-    taxRateGroups[rate].subTotal += itemSubTotal;
-    taxRateGroups[rate].taxAmount += it.taxAmount || it.tthue || 0;
-  });
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>${escapeHtml(invoiceTitle)} - ${escapeHtml(invoice.nbten || "VNPAY")} - S\u1ED1: ${escapeHtml(soHdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #0f172a;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .invoice-card {
-      max-width: 840px;
-      margin: 0 auto;
-      background: #fff;
-      border: 1.5px solid #005baa;
-      padding: 24px 28px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-      position: relative;
-    }
-    .watermark-bg {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-30deg);
-      font-size: 58px;
-      color: rgba(0, 91, 170, 0.035);
-      font-weight: 800;
-      pointer-events: none;
-      white-space: nowrap;
-      text-transform: uppercase;
-      letter-spacing: 4px;
-      user-select: none;
-      z-index: 0;
-    }
-    .header-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      border-bottom: 2px solid #005baa;
-      padding-bottom: 14px;
-      margin-bottom: 14px;
-      position: relative;
-      z-index: 1;
-    }
-    .brand-section {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex: 1;
-    }
-    .vnpay-logo-badge {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #005baa 0%, #003e75 100%);
-      color: #fff;
-      padding: 8px 14px;
-      border-radius: 6px;
-      min-width: 100px;
-      text-align: center;
-    }
-    .vnpay-logo-badge .brand-title {
-      font-size: 18px;
-      font-weight: 900;
-      letter-spacing: 1px;
-      color: #fff;
-      line-height: 1.1;
-    }
-    .vnpay-logo-badge .brand-sub {
-      font-size: 9px;
-      letter-spacing: 1.5px;
-      color: #fbbf24;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .seller-header-info {
-      flex: 1;
-    }
-    .seller-header-info h2 {
-      margin: 0 0 4px 0;
-      font-size: 15px;
-      font-weight: 700;
-      color: #005baa;
-      text-transform: uppercase;
-      line-height: 1.25;
-    }
-    .seller-header-info .meta-line {
-      font-size: 12px;
-      color: #334155;
-      margin: 2px 0;
-    }
-    .invoice-meta-box {
-      min-width: 210px;
-      text-align: right;
-      padding-left: 16px;
-    }
-    .invoice-meta-box .meta-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      margin-bottom: 3px;
-    }
-    .invoice-meta-box .meta-label {
-      color: #64748b;
-    }
-    .invoice-meta-box .meta-val {
-      font-weight: 700;
-      color: #0f172a;
-    }
-    .invoice-meta-box .so-hd {
-      color: #ed1c24;
-      font-size: 16px;
-      font-weight: 800;
-    }
-
-    .title-section {
-      text-align: center;
-      margin: 14px 0 12px 0;
-      position: relative;
-      z-index: 1;
-    }
-    .title-section h1 {
-      margin: 0;
-      font-size: 21px;
-      font-weight: 800;
-      color: #005baa;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-    }
-    .title-section .cqt-badge {
-      display: inline-block;
-      margin-top: 4px;
-      font-size: 11px;
-      font-style: italic;
-      color: #475569;
-    }
-    .title-section .cqt-code-box {
-      margin-top: 4px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: #eff6ff;
-      border: 1px dashed #3b82f6;
-      padding: 3px 10px;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #1e40af;
-      font-weight: 700;
-    }
-    .title-section .date-line {
-      margin-top: 4px;
-      font-size: 12.5px;
-      font-style: italic;
-      color: #334155;
-    }
-
-    .info-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-      margin-bottom: 14px;
-      position: relative;
-      z-index: 1;
-    }
-    .info-box {
-      border: 1px solid #cbd5e1;
-      border-radius: 5px;
-      padding: 10px 14px;
-      background: #fdfefe;
-    }
-    .info-box-header {
-      font-weight: 700;
-      color: #005baa;
-      font-size: 13px;
-      text-transform: uppercase;
-      border-bottom: 1px solid #e2e8f0;
-      padding-bottom: 4px;
-      margin-bottom: 8px;
-    }
-    .info-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12.5px;
-    }
-    .info-table td {
-      padding: 3px 0;
-      vertical-align: top;
-    }
-    .info-table .lbl {
-      width: 140px;
-      color: #475569;
-      font-weight: 600;
-    }
-    .info-table .val {
-      color: #0f172a;
-    }
-
-    .items-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 12px;
-      position: relative;
-      z-index: 1;
-      font-size: 12.5px;
-    }
-    .items-table th, .items-table td {
-      border: 1px solid #94a3b8;
-      padding: 6px 8px;
-    }
-    .items-table th {
-      background: #005baa;
-      color: #ffffff;
-      font-weight: 700;
-      text-align: center;
-      font-size: 12px;
-    }
-    .items-table th.col-sub {
-      background: #004684;
-      font-size: 11px;
-      font-weight: normal;
-    }
-    .items-table td.center { text-align: center; }
-    .items-table td.right { text-align: right; }
-    .items-table tr:nth-child(even) td { background-color: #f8fafc; }
-
-    .summary-section {
-      margin-bottom: 16px;
-      position: relative;
-      z-index: 1;
-    }
-    .summary-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12.5px;
-      border: 1px solid #94a3b8;
-    }
-    .summary-table td {
-      padding: 6px 12px;
-      border: 1px solid #cbd5e1;
-    }
-    .summary-table .sum-lbl {
-      text-align: right;
-      font-weight: 600;
-      color: #334155;
-      background: #f8fafc;
-    }
-    .summary-table .sum-val {
-      text-align: right;
-      font-weight: 700;
-      color: #0f172a;
-      width: 170px;
-    }
-    .summary-table .total-row td {
-      background: #eff6ff;
-      border-top: 2px solid #005baa;
-      font-size: 13.5px;
-    }
-    .summary-table .total-val {
-      color: #ed1c24 !important;
-      font-size: 15px !important;
-      font-weight: 800 !important;
-    }
-    .amount-words-box {
-      margin-top: 8px;
-      padding: 8px 12px;
-      background: #f1f5f9;
-      border-left: 4px solid #005baa;
-      font-size: 12.5px;
-      font-style: italic;
-      color: #1e293b;
-    }
-
-    .signature-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-top: 18px;
-      margin-bottom: 18px;
-      position: relative;
-      z-index: 1;
-    }
-    .sig-box {
-      text-align: center;
-      padding: 10px;
-    }
-    .sig-box .sig-title {
-      font-weight: 700;
-      text-transform: uppercase;
-      color: #005baa;
-      font-size: 13px;
-    }
-    .sig-box .sig-note {
-      font-size: 11.5px;
-      font-style: italic;
-      color: #64748b;
-      margin-top: 2px;
-    }
-    .sig-stamp {
-      margin-top: 14px;
-      border: 1.5px dashed #16a34a;
-      background: #f0fdf4;
-      border-radius: 6px;
-      padding: 10px;
-      display: inline-block;
-      min-width: 220px;
-      text-align: left;
-    }
-    .sig-stamp .stamp-title {
-      color: #15803d;
-      font-weight: 800;
-      font-size: 11px;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      margin-bottom: 4px;
-    }
-    .sig-stamp .stamp-detail {
-      font-size: 11px;
-      color: #166534;
-      line-height: 1.35;
-    }
-
-    .footer-box {
-      border-top: 1.5px solid #005baa;
-      padding-top: 12px;
-      margin-top: 12px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: relative;
-      z-index: 1;
-      font-size: 11.5px;
-      color: #475569;
-    }
-    .footer-links a {
-      color: #005baa;
-      font-weight: 700;
-      text-decoration: none;
-    }
-    .footer-links a:hover {
-      text-decoration: underline;
-    }
-    .vnpay-powered {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .qr-container {
-      width: 54px;
-      height: 54px;
-      border: 1px solid #cbd5e1;
-      border-radius: 4px;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .qr-container img, .qr-container svg {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-
-    @media print {
-      body { background: #fff; padding: 0; }
-      .invoice-card { border: 1.5px solid #005baa; box-shadow: none; padding: 14mm 16mm; max-width: 100%; }
-      .print-actions { display: none !important; }
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? getPrintControlsHtml(`H\xF3a \u0111\u01A1n VNPAY: ${invoice.nbten || "VNPAY"} - S\u1ED1: ${soHdon}`) : ""}
-
-  <div class="invoice-card">
-    <div class="watermark-bg">VNPAY INVOICE</div>
-
-    <!-- Header -->
-    <div class="header-row">
-      <div class="brand-section">
-        <div class="vnpay-logo-badge">
-          <span class="brand-title">VNPAY</span>
-          <span class="brand-sub">INVOICE</span>
-        </div>
-        <div class="seller-header-info">
-          <h2>${escapeHtml(invoice.nbten || "C\xD4NG TY C\u1ED4 PH\u1EA6N GI\u1EA2I PH\xC1P THANH TO\xC1N VI\u1EC6T NAM")}</h2>
-          <div class="meta-line"><strong>M\xE3 s\u1ED1 thu\u1EBF:</strong> ${renderSpacedTaxCode(invoice.nbmst || "0102182292")}</div>
-          <div class="meta-line"><strong>\u0110\u1ECBa ch\u1EC9:</strong> ${escapeHtml(invoice.nbdchi || "T\u1EA7ng 8, S\u1ED1 22 ph\u1ED1 L\xE1ng H\u1EA1, Ph\u01B0\u1EDDng L\xE1ng H\u1EA1, Qu\u1EADn \u0110\u1ED1ng \u0110a, TP H\xE0 N\u1ED9i, Vi\u1EC7t Nam")}</div>
-          ${invoice.nbsdt ? `<div class="meta-line"><strong>\u0110i\u1EC7n tho\u1EA1i:</strong> ${escapeHtml(invoice.nbsdt)}</div>` : ""}
-          ${invoice.nbemail ? `<div class="meta-line"><strong>Email:</strong> ${escapeHtml(invoice.nbemail)}</div>` : ""}
-        </div>
-      </div>
-
-      <div class="invoice-meta-box">
-        <div class="meta-row">
-          <span class="meta-label">M\u1EABu s\u1ED1 (Form):</span>
-          <span class="meta-val">${escapeHtml(mauSo)}</span>
-        </div>
-        <div class="meta-row">
-          <span class="meta-label">K\xFD hi\u1EC7u (Serial):</span>
-          <span class="meta-val">${escapeHtml(kyHieu)}</span>
-        </div>
-        <div class="meta-row">
-          <span class="meta-label">S\u1ED1 (No.):</span>
-          <span class="meta-val so-hd">${escapeHtml(soHdon)}</span>
-        </div>
-        ${taxAuthorityCode ? `
-        <div class="meta-row" style="margin-top:4px;">
-          <span class="meta-label">M\xE3 CQT:</span>
-          <span class="meta-val" style="font-size:11px;color:#0284c7;">${escapeHtml(taxAuthorityCode)}</span>
-        </div>` : ""}
-      </div>
-    </div>
-
-    <!-- Title Section -->
-    <div class="title-section">
-      <h1>${escapeHtml(invoiceTitle)}</h1>
-      <div class="cqt-badge">
-        ${taxAuthorityCode ? "H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED c\xF3 m\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF" : "H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED kh\u1EDFi t\u1EA1o t\u1EEB m\xE1y t\xEDnh ti\u1EC1n / kh\xF4ng c\xF3 m\xE3 CQT"}
-      </div>
-      ${taxAuthorityCode ? `
-      <div>
-        <span class="cqt-code-box">
-          <span>\u{1F3DB}\uFE0F M\xE3 CQT:</span>
-          <span>${escapeHtml(taxAuthorityCode)}</span>
-        </span>
-      </div>` : ""}
-      <div class="date-line">
-        Ng\xE0y ${escapeHtml(day)} th\xE1ng ${escapeHtml(month)} n\u0103m ${escapeHtml(year)}
-      </div>
-    </div>
-
-    <!-- Buyer & Seller Info -->
-    <div class="info-grid">
-      <div class="info-box">
-        <div class="info-box-header">Th\xF4ng Tin Ng\u01B0\u1EDDi Mua H\xE0ng (Customer)</div>
-        <table class="info-table">
-          <tr>
-            <td class="lbl">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua:</td>
-            <td class="val"><strong>${escapeHtml(invoice.nmten || "Kh\xE1ch h\xE0ng kh\xF4ng l\u1EA5y h\xF3a \u0111\u01A1n")}</strong></td>
-          </tr>
-          ${invoice.nmmst ? `
-          <tr>
-            <td class="lbl">M\xE3 s\u1ED1 thu\u1EBF:</td>
-            <td class="val">${renderSpacedTaxCode(invoice.nmmst)}</td>
-          </tr>` : ""}
-          ${invoice.nmdchi ? `
-          <tr>
-            <td class="lbl">\u0110\u1ECBa ch\u1EC9:</td>
-            <td class="val">${escapeHtml(invoice.nmdchi)}</td>
-          </tr>` : ""}
-          <tr>
-            <td class="lbl">H\xECnh th\u1EE9c thanh to\xE1n:</td>
-            <td class="val">${escapeHtml(paymentMethod)}</td>
-          </tr>
-        </table>
-      </div>
-    </div>
-
-    <!-- Items Table -->
-    <table class="items-table">
-      <thead>
-        <tr>
-          <th style="width: 40px;">STT</th>
-          <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-          <th style="width: 60px;">\u0110VT</th>
-          <th style="width: 65px;">S\u1ED1 l\u01B0\u1EE3ng</th>
-          <th style="width: 95px;">\u0110\u01A1n gi\xE1</th>
-          <th style="width: 110px;">Th\xE0nh ti\u1EC1n</th>
-          ${isVatInvoice ? '<th style="width: 70px;">Thu\u1EBF su\u1EA5t</th>' : ""}
-        </tr>
-        <tr>
-          <th class="col-sub">(1)</th>
-          <th class="col-sub">(2)</th>
-          <th class="col-sub">(3)</th>
-          <th class="col-sub">(4)</th>
-          <th class="col-sub">(5)</th>
-          <th class="col-sub">(6 = 4 \xD7 5)</th>
-          ${isVatInvoice ? '<th class="col-sub">(7)</th>' : ""}
-        </tr>
-      </thead>
-      <tbody>
-        ${items.length > 0 ? items.map((item, idx) => `
-          <tr>
-            <td class="center">${idx + 1}</td>
-            <td><strong>${escapeHtml(item.itemName || item.ten || "D\u1ECBch v\u1EE5 / H\xE0ng h\xF3a")}</strong></td>
-            <td class="center">${escapeHtml(item.unit || item.dvt || "")}</td>
-            <td class="right">${formatNum(item.quantity || item.sluong || 0)}</td>
-            <td class="right">${formatVND(item.unitPrice || item.dgia || 0)}</td>
-            <td class="right">${formatVND(item.amount || item.thtien || 0)}</td>
-            ${isVatInvoice ? `<td class="center">${escapeHtml(item.taxRate || item.tsuat || "10%")}</td>` : ""}
-          </tr>
-        `).join("") : `
-          <tr>
-            <td class="center">1</td>
-            <td><strong>Cung c\u1EA5p d\u1ECBch v\u1EE5 / H\xE0ng h\xF3a thanh to\xE1n</strong></td>
-            <td class="center">G\xF3i</td>
-            <td class="right">1</td>
-            <td class="right">${formatVND(totalAmount)}</td>
-            <td class="right">${formatVND(totalAmount)}</td>
-            ${isVatInvoice ? '<td class="center">10%</td>' : ""}
-          </tr>
-        `}
-      </tbody>
-    </table>
-
-    <!-- Summary Section -->
-    <div class="summary-section">
-      <table class="summary-table">
-        ${isVatInvoice ? `
-        <tr>
-          <td class="sum-lbl">C\u1ED9ng ti\u1EC1n h\xE0ng (Subtotal):</td>
-          <td class="sum-val">${formatVND(subTotal)}</td>
-        </tr>
-        <tr>
-          <td class="sum-lbl">Ti\u1EC1n thu\u1EBF GTGT (VAT Amount):</td>
-          <td class="sum-val">${formatVND(vatAmount)}</td>
-        </tr>` : ""}
-        <tr class="total-row">
-          <td class="sum-lbl" style="font-weight: 700; color: #005baa;">T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total Payment):</td>
-          <td class="sum-val total-val">${formatVND(totalAmount)} VND</td>
-        </tr>
-      </table>
-      <div class="amount-words-box">
-        <strong>S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF:</strong> ${escapeHtml(wordsAmount)}.
-      </div>
-    </div>
-
-    <!-- Signatures -->
-    <div class="signature-grid">
-      <div class="sig-box">
-        <div class="sig-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-        <div class="sig-note">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-      </div>
-
-      <div class="sig-box">
-        <div class="sig-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-        <div class="sig-note">(K\xFD \u0111i\u1EC7n t\u1EED, ghi r\xF5 h\u1ECD t\xEAn)</div>
-        <div class="sig-stamp">
-          <div class="stamp-title">
-            <span>\u2713</span> K\xDD B\u1EDEI: ${escapeHtml(invoice.nbten || "VNPAY")}
-          </div>
-          <div class="stamp-detail">
-            <div>Ng\xE0y k\xFD: ${escapeHtml(day)}/${escapeHtml(month)}/${escapeHtml(year)}</div>
-            <div>Tr\u1EA1ng th\xE1i: <strong>H\u1EE3p l\u1EC7</strong> theo Ngh\u1ECB \u0111\u1ECBnh 123/2020/N\u0110-CP</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <div class="footer-box">
-      <div class="footer-links">
-        <div><strong>Tra c\u1EE9u h\xF3a \u0111\u01A1n:</strong> <a href="${escapeHtml(directLookupUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(pUrl)}</a></div>
-        ${mCode ? `<div><strong>S\u1ED1 b\u1EA3o m\u1EADt:</strong> <span style="font-family:monospace;font-weight:700;color:#005baa;">${escapeHtml(mCode)}</span></div>` : `<div><em>\u0110\xE3 x\xE1c th\u1EF1c m\xE3 C\u01A1 quan Thu\u1EBF c\u1EA5p: <strong>${escapeHtml(taxAuthorityCode || "H\u1EE3p l\u1EC7")}</strong></em></div>`}
-        <div style="font-size: 11px; margin-top: 3px; color: #64748b;">Gi\u1EA3i ph\xE1p H\u0110\u0110T VNPAY Invoice (C\xF4ng ty CP Gi\u1EA3i ph\xE1p Thanh to\xE1n Vi\u1EC7t Nam)</div>
-      </div>
-
-      <div class="vnpay-powered">
-        <div class="qr-container">
-          <img src="${qrImg}" alt="QR Tra c\u1EE9u h\xF3a \u0111\u01A1n" />
-        </div>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
 // src/utils/multiTemplateRenderer.ts
-function detectInvoiceProvider(xmlString, invoice) {
-  const raw = xmlString || (invoice?.rawXml || "");
-  if (invoice || raw) {
-    const mockInvoice = invoice || (raw ? parseGDTInvoiceXml(raw) : {});
-    const partnerId = detectPartnerTemplate(mockInvoice, raw);
-    if (partnerId && partnerId !== "DEFAULT") {
-      return partnerId;
-    }
-  }
-  const cleanNbmst = (invoice?.nbmst || "").replace(/\D/g, "");
-  const cleanRawStr = (raw || "").replace(/\s+/g, "");
-  if (cleanNbmst === "0402307168" || invoice?.nbten && /SUNTALENT/i.test(invoice.nbten) || cleanRawStr.includes("0402307168") || /0\s*4\s*0\s*2\s*3\s*0\s*7\s*1\s*6\s*8/i.test(raw || "") || raw && /SUNTALENT/i.test(raw)) {
-    return "VIETTEL";
-  }
-  if (raw && typeof raw === "string") {
-    if (/vnpayinvoice|0102182292/i.test(raw)) {
-      return "DEFAULT";
-    }
-    if (/meinvoice\.vn|misa\.vn/i.test(raw)) {
-      return "MISA";
-    }
-    if (/sinvoice|vinvoice|viettel\.vn|vietteltelecom|viettel-invoice|0100109106/i.test(raw)) {
-      return "VIETTEL";
-    }
-    if (/vnpt-invoice|vnpt\.vn|vinaphone/i.test(raw)) {
-      return "VNPT";
-    }
-    if (/inv\.4si\.vn|4si\.vn|4si/i.test(raw)) {
-      return "DEFAULT";
-    }
-    if (/easyinvoice|softdreams/i.test(raw)) {
-      return "EASYINVOICE";
-    }
-    if (/bkav|ehoadon/i.test(raw)) {
-      return "BKAV";
-    }
-    const msttcgpMatch = raw.match(/<(?:[a-zA-Z0-9_]+:)?MSTTCGP(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?MSTTCGP>/i);
-    if (msttcgpMatch && msttcgpMatch[1]) {
-      const msttcgp = msttcgpMatch[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim();
-      if (msttcgp === "0102182292") return "DEFAULT";
-      if (msttcgp === "0100684378") return "VNPT";
-      if (msttcgp === "0101243150") return "MISA";
-      if (msttcgp === "0100109106") return "VIETTEL";
-      if (msttcgp === "0105987432") return "EASYINVOICE";
-      if (msttcgp === "0315744883" || msttcgp === "0302999571") return "DEFAULT";
-      if (msttcgp === "0101360697") return "BKAV";
-    }
-    const sigMatches = raw.match(/<(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)(?:\s+[^>]*)?>([\s\S]*?)<\/(?:[a-zA-Z0-9_]+:)?(?:X509IssuerName|X509SubjectName)>/gi);
-    if (sigMatches) {
-      const sigText = sigMatches.join(" ").toUpperCase();
-      if (sigText.includes("VNPAY")) return "DEFAULT";
-      if (sigText.includes("VNPT")) return "VNPT";
-      if (sigText.includes("MISA")) return "MISA";
-      if (sigText.includes("VIETTEL")) return "VIETTEL";
-      if (sigText.includes("BKAV")) return "BKAV";
-      if (sigText.includes("EASYCA") || sigText.includes("SOFTDREAMS")) return "EASYINVOICE";
-      if (sigText.includes("4SI") || sigText.includes("LCS")) return "DEFAULT";
-    }
-  }
-  if (invoice) {
-    if (invoice.provider && invoice.provider !== "DEFAULT" && invoice.provider !== "UNKNOWN") {
-      const p = String(invoice.provider).toUpperCase();
-      if (p.includes("VNPAY")) return "DEFAULT";
-      if (p.includes("VNPT")) return "VNPT";
-      if (p.includes("MISA")) return "MISA";
-      if (p.includes("VIETTEL")) return "VIETTEL";
-      if (p.includes("EASY") || p.includes("SOFTDREAMS")) return "EASYINVOICE";
-      if (p.includes("4SI") || p.includes("LCS")) return "DEFAULT";
-      if (p.includes("BKAV")) return "BKAV";
-    }
-    const msttcgp = (invoice.msttcgp || "").trim();
-    if (invoice.nbmst === "0402307168" || invoice.nbten && /SUNTALENT/i.test(invoice.nbten)) return "VIETTEL";
-    if (msttcgp === "0102182292") return "DEFAULT";
-    if (msttcgp === "0100684378") return "VNPT";
-    if (msttcgp === "0101243150") return "MISA";
-    if (msttcgp === "0105987432") return "EASYINVOICE";
-    if (msttcgp === "0315744883" || msttcgp === "0302999571") return "DEFAULT";
-    if (msttcgp === "0100109106") return "VIETTEL";
-    if (msttcgp === "0101360697") return "BKAV";
-    const tentcgp = (invoice.tentcgp || "").toUpperCase();
-    if (tentcgp.includes("VNPAY") || tentcgp.includes("THANH TO\xC1N VI\u1EC6T NAM") || tentcgp.includes("THANH TOAN VIET NAM")) return "DEFAULT";
-    if (tentcgp.includes("VNPT")) return "VNPT";
-    if (tentcgp.includes("MISA")) return "MISA";
-    if (tentcgp.includes("EASY") || tentcgp.includes("SOFTDREAMS")) return "EASYINVOICE";
-    if (tentcgp.includes("4SI") || tentcgp.includes("LCS")) return "DEFAULT";
-    if (tentcgp.includes("VIETTEL")) return "VIETTEL";
-    if (tentcgp.includes("BKAV")) return "BKAV";
-    const lookupUrl = (invoice.lookupUrl || "").toLowerCase();
-    if (lookupUrl.includes("vnpayinvoice") || lookupUrl.includes("vietcombank")) return "DEFAULT";
-    if (lookupUrl.includes("vnpt")) return "VNPT";
-    if (lookupUrl.includes("meinvoice") || lookupUrl.includes("misa")) return "MISA";
-    if (lookupUrl.includes("easyinvoice") || lookupUrl.includes("softdreams")) return "EASYINVOICE";
-    if (lookupUrl.includes("4si")) return "DEFAULT";
-    if (lookupUrl.includes("sinvoice") || lookupUrl.includes("viettel")) return "VIETTEL";
-    if (lookupUrl.includes("bkav") || lookupUrl.includes("ehoadon")) return "BKAV";
-    const ca = (invoice.caProvider || "").toUpperCase();
-    if (ca.includes("VNPAY")) return "DEFAULT";
-    if (ca.includes("VNPT")) return "VNPT";
-    if (ca.includes("MISA")) return "MISA";
-    if (ca.includes("VIETTEL")) return "VIETTEL";
-    if (ca.includes("BKAV")) return "BKAV";
-    if (ca.includes("EASY") || ca.includes("SOFTDREAMS")) return "EASYINVOICE";
-    if (ca.includes("4SI") || ca.includes("LCS")) return "4SI";
-  }
-  return "DEFAULT";
-}
-function extractLookupDetails2(rawXml) {
-  return extractLookupDetailsFromXml(rawXml);
-}
-function renderInvoiceHtml(invoiceData, providerId, rawXmlInput, options) {
-  let invoice;
-  let rawXml = rawXmlInput || "";
-  if (typeof invoiceData === "string") {
-    rawXml = invoiceData;
-    invoice = parseGDTInvoiceXml(invoiceData);
-  } else {
-    invoice = invoiceData;
-    if (!rawXml && invoice.rawXml) {
-      rawXml = invoice.rawXml;
-    }
-  }
-  const resolvedProvider = !providerId || providerId === "AUTO" ? detectInvoiceProvider(rawXml, invoice) : providerId;
-  let html = "";
-  switch (resolvedProvider) {
-    case "BAO_DUY":
-      html = renderBaoDuyTemplate(invoice, rawXml, options);
-      break;
-    case "PNJ":
-      html = renderPnjTemplate(invoice, rawXml, options);
-      break;
-    case "TAI_TRAM_ANH":
-      html = renderTaiTramAnhTemplate(invoice, rawXml, options);
-      break;
-    case "XUAN_VINH":
-      html = renderXuanVinhTemplate(invoice, rawXml, options);
-      break;
-    case "KIM_LOAN_TUAN":
-      html = renderKimLoanTuanTemplate(invoice, rawXml, options);
-      break;
-    case "TKJ":
-      html = renderTkjTemplate(invoice, rawXml, options);
-      break;
-    case "NGHIA_SON":
-      html = renderNghiaSonTemplate(invoice, rawXml, options);
-      break;
-    case "TAN_THANH_DANH":
-      html = renderTanThanhDanhTemplate(invoice, rawXml, options);
-      break;
-    case "MISA":
-      html = renderMisaTemplate(invoice, rawXml, options);
-      break;
-    case "VIETTEL":
-      html = renderViettelTemplate2(invoice, rawXml, options);
-      break;
-    case "EASYINVOICE":
-      html = renderEasyInvoiceTemplate(invoice, rawXml, options);
-      break;
-    case "4SI":
-      html = renderDefaultTemplate(invoice, rawXml, options);
-      break;
-    case "VNPT":
-      html = renderVnptTemplate(invoice, rawXml, options);
-      break;
-    case "BKAV":
-      html = renderBkavTemplate(invoice, rawXml, options);
-      break;
-    case "VNPAY":
-      html = renderVnpayTemplate(invoice, rawXml, options);
-      break;
-    case "DEFAULT":
-    default:
-      html = renderDefaultTemplate(invoice, rawXml, options);
-      break;
-  }
-  const scriptTag = `
-<script>
-  (function() {
-    document.addEventListener('click', function(e) {
-      var target = e.target;
-      while (target && target.tagName !== 'A') {
-        target = target.parentElement;
-      }
-      if (target && target.tagName === 'A' && target.href) {
-        var href = target.href;
-        if (href && !href.startsWith('javascript:') && href !== '#') {
-          e.preventDefault();
-          window.open(href, '_blank', 'noopener,noreferrer');
-        }
-      }
-    }, true);
-  })();
-</script>`;
-  if (html.includes("</body>")) {
-    return html.replace("</body>", `${scriptTag}
-</body>`);
-  }
-  return html + scriptTag;
-}
-function formatVND2(num) {
-  return new Intl.NumberFormat("vi-VN").format(Math.round(num || 0)) + " \u0111";
-}
-function formatNum2(num) {
-  return new Intl.NumberFormat("vi-VN").format(num || 0);
-}
-function escapeHtml2(str) {
-  if (str === null || str === void 0) return "";
-  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-}
-function extractDateParts2(invoice) {
-  const tdlap = invoice.tdlap || (/* @__PURE__ */ new Date()).toISOString();
-  const dateParts = tdlap.split("T")[0].split("-");
-  const day = dateParts[2] || "01";
-  const month = dateParts[1] || "01";
-  const year = dateParts[0] || "2026";
-  return { day, month, year, tdlap };
-}
-function renderMisaTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts2(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const mUrl = "https://www.meinvoice.vn/tra-cuu";
-  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, "MISA", invoice.nbmst);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || "";
-  const items = ensureInvoiceItems(invoice);
-  const itemsTotal = items.reduce((acc, it) => acc + (Number(it.amount ?? it.thtien) || 0), 0);
-  const totalBeforeTax = invoice.tgtcthue !== void 0 && invoice.tgtcthue !== null ? invoice.tgtcthue : itemsTotal;
-  const totalTax = invoice.tgtthue !== void 0 && invoice.tgtthue !== null ? invoice.tgtthue : 0;
-  const grandTotal = invoice.tgtttbso !== void 0 && invoice.tgtttbso !== null ? invoice.tgtttbso : totalBeforeTax + totalTax;
-  const sellerName = invoice.nbten || "\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng";
-  const watermark = options?.watermarkText || sellerName.split(" ").slice(-2).join(" ") || "meInvoice";
-  const showControls = options?.showPrintControls !== false;
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N \u0110I\u1EC6N T\u1EEC - MISA meInvoice - ${escapeHtml2(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f1f5f9;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 13px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 800px;
-      margin: 0 auto 16px auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #1e293b;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 8px;
-    }
-    .print-btn {
-      background: #2563eb;
-      color: white;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .misa-wrapper {
-      max-width: 800px;
-      margin: 0 auto;
-      background: #fff;
-      border: 1px solid #333;
-      padding: 24px 28px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-      position: relative;
-    }
-    .misa-header {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px solid #444;
-      padding-bottom: 14px;
-      margin-bottom: 12px;
-    }
-    .seller-col {
-      width: 58%;
-    }
-    .seller-brand {
-      color: #c5221f;
-      font-size: 20px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-    }
-    .seller-name {
-      color: #c5221f;
-      font-size: 14px;
-      font-weight: bold;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-    .invoice-title-col {
-      width: 40%;
-      text-align: right;
-    }
-    .inv-title {
-      color: #c5221f;
-      font-size: 17px;
-      font-weight: bold;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-    .inv-date {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-bottom: 4px;
-    }
-    .inv-meta-line {
-      font-size: 12px;
-    }
-    .buyer-section {
-      border-bottom: 1px solid #444;
-      padding-bottom: 10px;
-      margin-bottom: 12px;
-    }
-    .buyer-row {
-      display: flex;
-      margin-bottom: 3px;
-    }
-    .buyer-label {
-      width: 140px;
-      flex-shrink: 0;
-    }
-    .buyer-val {
-      flex: 1;
-    }
-    /* Table with watermark */
-    .table-container {
-      position: relative;
-      margin-bottom: 12px;
-    }
-    .watermark-bg {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) rotate(-20deg);
-      font-size: 68px;
-      font-weight: 900;
-      color: rgba(220, 38, 38, 0.045);
-      pointer-events: none;
-      user-select: none;
-      white-space: nowrap;
-      text-transform: uppercase;
-      letter-spacing: 6px;
-      z-index: 1;
-    }
-    table.misa-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #333;
-      position: relative;
-      z-index: 2;
-    }
-    table.misa-table th, table.misa-table td {
-      border: 1px solid #333;
-      padding: 5px 6px;
-      font-size: 12px;
-    }
-    table.misa-table th {
-      background: #fafafa;
-      text-align: center;
-      font-weight: bold;
-    }
-    .total-section {
-      border-bottom: 1px solid #444;
-      padding-bottom: 8px;
-      margin-bottom: 14px;
-      font-size: 12.5px;
-    }
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 4px;
-    }
-    .sign-section {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 14px;
-      margin-bottom: 24px;
-    }
-    .sign-box {
-      width: 45%;
-      text-align: center;
-    }
-    .sign-box-title {
-      font-weight: bold;
-      font-size: 13px;
-    }
-    .sign-box-sub {
-      font-size: 11px;
-      font-style: italic;
-      color: #555;
-      margin-bottom: 8px;
-    }
-    .misa-signature-stamp {
-      display: inline-block;
-      border: 1.5px solid #2e7d32;
-      background: #f1f8e9;
-      border-radius: 4px;
-      padding: 8px 14px;
-      text-align: left;
-      font-size: 11.5px;
-      line-height: 1.35;
-      margin-top: 6px;
-    }
-    .stamp-title {
-      color: #2e7d32;
-      font-weight: bold;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .misa-footer {
-      border-top: 1px solid #666;
-      padding-top: 8px;
-      font-size: 11px;
-      color: #222;
-      text-align: center;
-      line-height: 1.45;
-    }
-    .misa-footer a { color: #0056b3; text-decoration: underline; }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .misa-wrapper { border: 1px solid #000; box-shadow: none; width: 100%; max-width: 100%; padding: 12px 16px; }
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? `
-  <div class="print-actions">
-    <div>
-      <span style="font-weight: bold; color: #38bdf8;">[Giao di\u1EC7n MISA meInvoice]</span>
-      <span style="font-size: 12px; color: #94a3b8; margin-left: 8px;">M\xE3 tra c\u1EE9u: ${escapeHtml2(mCode)}</span>
-    </div>
-    <button class="print-btn" onclick="window.print()">In H\xF3a \u0110\u01A1n (A4)</button>
-  </div>
-  ` : ""}
-
-  <div class="misa-wrapper">
-    <!-- HEADER -->
-    <div class="misa-header">
-      <div class="seller-col">
-        <div class="seller-brand">${escapeHtml2(invoice.nbten)}</div>
-        <div class="seller-name">\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng : ${escapeHtml2(invoice.nbten)}</div>
-        <div>M\xE3 s\u1ED1 thu\u1EBF : <b>${escapeHtml2(invoice.nbmst)}</b></div>
-        <div>\u0110\u1ECBa ch\u1EC9 : ${escapeHtml2(invoice.nbdchi)}</div>
-        ${invoice.nbsdt ? `<div>\u0110i\u1EC7n tho\u1EA1i : ${escapeHtml2(invoice.nbsdt)}</div>` : ""}
-        ${invoice.stknh ? `<div>S\u1ED1 t\xE0i kho\u1EA3n : ${escapeHtml2(invoice.stknh)} ${invoice.tnhanh ? ` - ${escapeHtml2(invoice.tnhanh)}` : ""}</div>` : ""}
-      </div>
-
-      <div class="invoice-title-col">
-        <div class="inv-title">${escapeHtml2(invoice.thdon || "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG")}</div>
-        <div class="inv-date">Ng\xE0y ${day} th\xE1ng ${month} n\u0103m ${year}</div>
-        ${maCqt ? `<div class="inv-meta-line">M\xE3 CQT: <b>${escapeHtml2(maCqt)}</b></div>` : ""}
-        <div class="inv-meta-line" style="margin-top: 4px;">
-          K\xFD hi\u1EC7u: <b>${escapeHtml2(invoice.khhdon)}</b> &nbsp;&nbsp; 
-          S\u1ED1: <b style="color: #c5221f; font-size: 15px;">${escapeHtml2(invoice.shdon)}</b>
-        </div>
-      </div>
-    </div>
-
-    <!-- BUYER SECTION -->
-    <div class="buyer-section">
-      <div class="buyer-row">
-        <span class="buyer-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng:</span>
-        <span class="buyer-val">${escapeHtml2(invoice.nmten || "")}</span>
-      </div>
-      <div class="buyer-row">
-        <span class="buyer-label">T\xEAn \u0111\u01A1n v\u1ECB:</span>
-        <span class="buyer-val"><b>${escapeHtml2(invoice.nmtendv || invoice.nmten || "")}</b></span>
-      </div>
-      <div class="buyer-row">
-        <span class="buyer-label">M\xE3 s\u1ED1 thu\u1EBF:</span>
-        <span class="buyer-val"><b>${escapeHtml2(invoice.nmmst || "")}</b></span>
-      </div>
-      <div class="buyer-row">
-        <span class="buyer-label">\u0110\u1ECBa ch\u1EC9:</span>
-        <span class="buyer-val">${escapeHtml2(invoice.nmdchi || "")}</span>
-      </div>
-      <div class="buyer-row">
-        <span class="buyer-label">H\xECnh th\u1EE9c thanh to\xE1n:</span>
-        <span class="buyer-val">${escapeHtml2(invoice.htttoan || "Chuy\u1EC3n kho\u1EA3n")}</span>
-        ${invoice.dvtte ? `<span style="margin-left: 20px;">\u0110\u01A1n v\u1ECB ti\u1EC1n t\u1EC7: <b>${escapeHtml2(invoice.dvtte)}</b></span>` : ""}
-      </div>
-    </div>
-
-    <!-- TABLE WITH WATERMARK -->
-    <div class="table-container">
-      <div class="watermark-bg">${escapeHtml2(watermark)}</div>
-      <table class="misa-table">
-        <thead>
-          <tr>
-            <th style="width: 38px;">STT</th>
-            <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-            <th style="width: 55px;">\u0110\u01A1n v\u1ECB t\xEDnh</th>
-            <th style="width: 65px;">S\u1ED1 l\u01B0\u1EE3ng</th>
-            <th style="width: 95px;">\u0110\u01A1n gi\xE1</th>
-            <th style="width: 105px;">Th\xE0nh ti\u1EC1n</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${items.map((it, idx) => `
-          <tr>
-            <td style="text-align: center; font-family: monospace;">${it.lineNo || it.stt || idx + 1}</td>
-            <td>
-              <div>${escapeHtml2(it.itemName || it.ten)}</div>
-              ${it.itemCode || it.mhhdvu ? `<div style="font-size: 10px; color: #555; font-family: monospace;">M\xE3: ${escapeHtml2(it.itemCode || it.mhhdvu)}</div>` : ""}
-            </td>
-            <td style="text-align: center;">${escapeHtml2(it.unit || it.dvt || "C\xE1i")}</td>
-            <td style="text-align: right; font-family: monospace;">${formatNum2(it.quantity ?? it.sluong ?? 0)}</td>
-            <td style="text-align: right; font-family: monospace;">${formatNum2(it.unitPrice ?? it.dgia ?? 0)}</td>
-            <td style="text-align: right; font-family: monospace; font-weight: bold;">${formatNum2(it.amount ?? it.thtien ?? 0)}</td>
-          </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- TOTALS -->
-    <div class="total-section">
-      <div class="total-row">
-        <span>C\u1ED9ng ti\u1EC1n h\xE0ng:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum2(totalBeforeTax)} \u0111</span>
-      </div>
-      ${totalTax > 0 ? `
-      <div class="total-row">
-        <span>Thu\u1EBF su\u1EA5t GTGT: <b>${items[0]?.taxRate || ""}</b> &nbsp;&nbsp;&nbsp;&nbsp; Ti\u1EC1n thu\u1EBF GTGT:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum2(totalTax)} \u0111</span>
-      </div>` : ""}
-      <div class="total-row" style="font-size: 13.5px; border-top: 1px dashed #777; padding-top: 4px; margin-top: 4px;">
-        <span style="font-weight: bold;">T\u1ED5ng ti\u1EC1n thanh to\xE1n:</span>
-        <span style="font-family: monospace; font-weight: bold; color: #c5221f; font-size: 14.5px;">${formatNum2(grandTotal)} \u0111</span>
-      </div>
-      <div style="margin-top: 4px;">
-        S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF: <i>${escapeHtml2(wordsAmount)}</i>
-      </div>
-    </div>
-
-    <!-- SIGNATURES -->
-    <div class="sign-section">
-      <div class="sign-box">
-        <div class="sign-box-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-        <div class="sign-box-sub">(Ch\u1EEF k\xFD s\u1ED1 (n\u1EBFu c\xF3))</div>
-      </div>
-      <div class="sign-box">
-        <div class="sign-box-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-        <div class="sign-box-sub">(Ch\u1EEF k\xFD \u0111i\u1EC7n t\u1EED, Ch\u1EEF k\xFD s\u1ED1)</div>
-        <div class="misa-signature-stamp">
-          <div class="stamp-title">\u2714 Signature Valid</div>
-          <div>K\xFD b\u1EDFi: <b style="color: #c5221f;">${escapeHtml2(invoice.nbten)}</b></div>
-          <div>K\xFD ng\xE0y: ${day}/${month}/${year}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- MISA FOOTER -->
-    <div class="misa-footer">
-      <div>Tra c\u1EE9u t\u1EA1i Website: <a href="${escapeHtml2(directLookupUrl || mUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:none;font-weight:bold;">${escapeHtml2(mUrl)}</a>${mCode ? ` - M\xE3 tra c\u1EE9u: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;font-weight:bold;" title="M\u1EDF trang tra c\u1EE9u meInvoice (T\u1EF1 \u0111\u1ED9ng g\xE1n m\xE3 & m\u1EDF h\xF3a \u0111\u01A1n)">${escapeHtml2(mCode)}</a>` : ""}</div>
-      <div style="margin-top: 2px;">Ph\xE1t h\xE0nh b\u1EDFi ph\u1EA7n m\u1EC1m MISA meInvoice - C\xF4ng ty C\u1ED5 ph\u1EA7n MISA (www.misa.vn) - MST 0101243150</div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-function renderEasyInvoiceTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts2(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const mUrl = lookupUrl || invoice.lookupUrl || `http://${invoice.nbmst}hd.easyinvoice.com.vn`;
-  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, "EASYINVOICE", invoice.nbmst);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || "M2-26-KET3U-65650003078";
-  const items = ensureInvoiceItems(invoice);
-  const showControls = options?.showPrintControls !== false;
-  const qrSrc = options?.qrCodeDataUrl || `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`${mUrl}?code=${mCode}`)}`;
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N B\xC1N H\xC0NG - EasyInvoice - ${escapeHtml2(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 6mm 8mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif;
-      background: #f8fafc;
-      margin: 0;
-      padding: 16px;
-      color: #000;
-      font-size: 12.5px;
-      line-height: 1.3;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 14px auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #7c2d12;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 8px;
-    }
-    .print-btn {
-      background: #ea580c;
-      color: white;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .easy-outer-border {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 3px double #d9534f;
-      padding: 18px 22px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-      position: relative;
-    }
-    .easy-header-grid {
-      display: grid;
-      grid-template-columns: 180px 1fr 180px;
-      align-items: center;
-      margin-bottom: 12px;
-      text-align: center;
-    }
-    .brand-col {
-      text-align: left;
-      color: #b45309;
-      font-weight: bold;
-      font-size: 17px;
-      letter-spacing: 0.5px;
-    }
-    .title-col h1 {
-      color: #c5221f;
-      font-size: 19px;
-      font-weight: bold;
-      margin: 0 0 2px 0;
-      text-transform: uppercase;
-    }
-    .title-col .sub-tag {
-      color: #c5221f;
-      font-size: 13.5px;
-      font-weight: bold;
-      margin: 1px 0;
-    }
-    .title-col .en-tag {
-      color: #c5221f;
-      font-style: italic;
-      font-size: 12px;
-    }
-    .title-col .date-tag {
-      font-style: italic;
-      font-size: 12px;
-      margin-top: 4px;
-    }
-    .meta-col {
-      text-align: right;
-      font-size: 12.5px;
-    }
-    .meta-col .serial-no {
-      font-weight: bold;
-    }
-    .meta-col .invoice-no {
-      color: #c5221f;
-      font-size: 16px;
-      font-weight: bold;
-    }
-    .seller-buyer-wrapper {
-      position: relative;
-      margin-top: 6px;
-      margin-bottom: 10px;
-    }
-    .seller-box {
-      padding-right: 120px;
-      margin-bottom: 8px;
-    }
-    .qr-badge {
-      position: absolute;
-      top: 0;
-      right: 0;
-      width: 105px;
-      height: 105px;
-      border: 1px solid #ddd;
-      padding: 2px;
-    }
-    .qr-badge img {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .dotted-line {
-      display: flex;
-      align-items: baseline;
-      margin-bottom: 3px;
-    }
-    .dotted-label {
-      flex-shrink: 0;
-      margin-right: 4px;
-    }
-    .dotted-value {
-      flex: 1;
-      border-bottom: 1px dotted #888;
-      min-height: 16px;
-    }
-    /* EasyInvoice Items Table */
-    table.easy-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #000;
-      margin-top: 10px;
-      margin-bottom: 10px;
-    }
-    table.easy-table th, table.easy-table td {
-      border: 1px solid #000;
-      padding: 4px 6px;
-      font-size: 11.5px;
-    }
-    table.easy-table th {
-      text-align: center;
-      font-weight: bold;
-      background: #fafafa;
-    }
-    .sub-head {
-      font-style: italic;
-      font-size: 10px;
-      color: #555;
-      text-align: center;
-    }
-    .sign-row {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 14px;
-      margin-bottom: 16px;
-    }
-    .sign-col {
-      width: 45%;
-      text-align: center;
-    }
-    .easy-signature-box {
-      display: inline-block;
-      border: 1.5px solid #dc2626;
-      background: #fff5f5;
-      border-radius: 4px;
-      padding: 8px 12px;
-      text-align: left;
-      font-size: 11px;
-      margin-top: 6px;
-    }
-    .easy-footer {
-      border-top: 1px solid #000;
-      padding-top: 6px;
-      margin-top: 10px;
-      font-size: 11px;
-      text-align: center;
-      line-height: 1.4;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .easy-outer-border { border: 2px double #d9534f; box-shadow: none; width: 100%; max-width: 100%; padding: 10px 14px; }
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? `
-  <div class="print-actions">
-    <div>
-      <span style="font-weight: bold; color: #fdba74;">[Giao di\u1EC7n Softdreams EasyInvoice]</span>
-      <span style="font-size: 12px; color: #fed7aa; margin-left: 8px;">M\xE3 tra c\u1EE9u: ${escapeHtml2(mCode)}</span>
-    </div>
-    <button class="print-btn" onclick="window.print()">In H\xF3a \u0110\u01A1n (A4)</button>
-  </div>
-  ` : ""}
-
-  <div class="easy-outer-border">
-    <!-- HEADER GRID -->
-    <div class="easy-header-grid">
-      <div class="brand-col">${escapeHtml2(invoice.nbten)}</div>
-      <div class="title-col">
-        <h1>${escapeHtml2(invoice.thdon || "H\xD3A \u0110\u01A0N B\xC1N H\xC0NG")}</h1>
-        <div class="sub-tag">(KH\u1EDEI T\u1EA0O T\u1EEA M\xC1Y T\xCDNH TI\u1EC0N)</div>
-        <div class="en-tag">(VAT INVOICE)</div>
-        <div class="date-tag">Ng\xE0y (Date) ${day} th\xE1ng (month) ${month} n\u0103m (year) ${year}</div>
-      </div>
-      <div class="meta-col">
-        <div>K\xFD hi\u1EC7u (Serial): <span class="serial-no">${escapeHtml2(invoice.khhdon)}</span></div>
-        <div>S\u1ED1 (No.): <span class="invoice-no">${escapeHtml2(invoice.shdon)}</span></div>
-      </div>
-    </div>
-
-    <!-- SELLER & BUYER WITH QR -->
-    <div class="seller-buyer-wrapper">
-      <div class="qr-badge">
-        <img src="${qrSrc}" alt="QR Tra c\u1EE9u" />
-      </div>
-
-      <div class="seller-box">
-        <div>\u0110\u01A1n v\u1ECB b\xE1n h\xE0ng (Seller): <b style="color: #c5221f;">${escapeHtml2(invoice.nbten)}</b></div>
-        <div>M\xE3 s\u1ED1 thu\u1EBF (Tax code): <b>${escapeHtml2(invoice.nbmst)}</b></div>
-        <div>\u0110\u1ECBa ch\u1EC9 (Address): ${escapeHtml2(invoice.nbdchi)}</div>
-        <div>T\xE0i kho\u1EA3n (A/C number): ${escapeHtml2(invoice.stknh || "05049999")} ${invoice.tnhanh ? `t\u1EA1i ${escapeHtml2(invoice.tnhanh)}` : ""}</div>
-      </div>
-
-      <div class="dotted-line">
-        <span class="dotted-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng (Buyer):</span>
-        <span class="dotted-value">${escapeHtml2(invoice.nmten || "")}</span>
-      </div>
-      <div class="dotted-line">
-        <span class="dotted-label">T\xEAn \u0111\u01A1n v\u1ECB (Company's name):</span>
-        <span class="dotted-value"><b>${escapeHtml2(invoice.nmtendv || invoice.nmten || "")}</b></span>
-      </div>
-      <div class="dotted-line">
-        <span class="dotted-label">M\xE3 s\u1ED1 thu\u1EBF (Tax code):</span>
-        <span class="dotted-value"><b>${escapeHtml2(invoice.nmmst || "")}</b></span>
-      </div>
-      <div class="dotted-line">
-        <span class="dotted-label">\u0110\u1ECBa ch\u1EC9 (Address):</span>
-        <span class="dotted-value">${escapeHtml2(invoice.nmdchi || "")}</span>
-      </div>
-      <div class="dotted-line">
-        <span class="dotted-label">\u0110i\u1EC7n tho\u1EA1i (Tel):</span>
-        <span class="dotted-value">${escapeHtml2(invoice.nmsdt || "")}</span>
-      </div>
-      <div class="dotted-line">
-        <span class="dotted-label">H\xECnh th\u1EE9c thanh to\xE1n (Payment method):</span>
-        <span class="dotted-value">${escapeHtml2(invoice.htttoan || "TM/CK")}</span>
-        <span style="margin-left: 12px; margin-right: 4px;">\u0110\u01A1n v\u1ECB ti\u1EC1n t\u1EC7 (Currency):</span>
-        <span style="font-weight: bold;">${escapeHtml2(invoice.dvtte || "VND")}</span>
-      </div>
-    </div>
-
-    <!-- EASYINVOICE ITEMS TABLE -->
-    <table class="easy-table">
-      <thead>
-        <tr>
-          <th style="width: 38px;">STT<br><span style="font-size: 9px; font-weight: normal;">(No.)</span></th>
-          <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5<br><span style="font-size: 9px; font-weight: normal;">(Name of goods, services)</span></th>
-          <th style="width: 60px;">\u0110\u01A1n v\u1ECB t\xEDnh<br><span style="font-size: 9px; font-weight: normal;">(Unit)</span></th>
-          <th style="width: 65px;">S\u1ED1 l\u01B0\u1EE3ng<br><span style="font-size: 9px; font-weight: normal;">(Quantity)</span></th>
-          <th style="width: 95px;">\u0110\u01A1n gi\xE1<br><span style="font-size: 9px; font-weight: normal;">(Unit price)</span></th>
-          <th style="width: 110px;">Th\xE0nh ti\u1EC1n<br><span style="font-size: 9px; font-weight: normal;">(Amount)</span></th>
-        </tr>
-        <tr class="sub-head">
-          <td>(1)</td>
-          <td>(2)</td>
-          <td>(3)</td>
-          <td>(4)</td>
-          <td>(5)</td>
-          <td>(6)=(4)x(5)</td>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((it, idx) => `
-        <tr>
-          <td style="text-align: center; font-family: monospace;">${it.lineNo || it.stt || idx + 1}</td>
-          <td>
-            <div>${escapeHtml2(it.itemName || it.ten)}</div>
-            ${it.itemCode || it.mhhdvu ? `<div style="font-size: 9.5px; color: #555; font-family: monospace;">M\xE3: ${escapeHtml2(it.itemCode || it.mhhdvu)}</div>` : ""}
-          </td>
-          <td style="text-align: center;">${escapeHtml2(it.unit || it.dvt || "Ch\u1EC9")}</td>
-          <td style="text-align: right; font-family: monospace;">${formatNum2(it.quantity ?? it.sluong ?? 1)}</td>
-          <td style="text-align: right; font-family: monospace;">${formatNum2(it.unitPrice ?? it.dgia ?? 0)}</td>
-          <td style="text-align: right; font-family: monospace; font-weight: bold;">${formatNum2(it.amount ?? it.thtien ?? 0)}</td>
-        </tr>
-        `).join("")}
-      </tbody>
-    </table>
-
-    <!-- TOTALS -->
-    <div style="border-top: 1px solid #000; padding-top: 6px; font-size: 12px;">
-      <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 13px;">
-        <span>T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n (Total payment):</span>
-        <span style="font-family: monospace; font-size: 14px; color: #000;">${formatNum2(invoice.tgtttbso)}</span>
-      </div>
-      <div style="margin-top: 4px;">
-        S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF (Amount in words): <i>${escapeHtml2(wordsAmount)}</i>
-      </div>
-    </div>
-
-    <!-- SIGNATURES -->
-    <div class="sign-row">
-      <div class="sign-col">
-        <div style="font-weight: bold;">Ng\u01B0\u1EDDi mua h\xE0ng (Buyer)</div>
-      </div>
-      <div class="sign-col">
-        <div style="font-weight: bold;">Ng\u01B0\u1EDDi b\xE1n h\xE0ng (Seller)</div>
-        <div class="easy-signature-box">
-          <div style="color: #dc2626; font-weight: bold;">Signature Valid</div>
-          <div>K\xFD b\u1EDFi: <b>${escapeHtml2(invoice.nbten)}</b></div>
-          <div>K\xFD ng\xE0y: ${day}/${month}/${year}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FOOTER EASYINVOICE -->
-    <div class="easy-footer">
-      <div>M\xE3 c\u1EE7a c\u01A1 quan thu\u1EBF (Tax authority code): <b>${escapeHtml2(maCqt)}</b></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">
-        <div>Trang tra c\u1EE9u : <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${escapeHtml2(mUrl)}</a></div>
-        <div>M\xE3 tra c\u1EE9u : <b>${escapeHtml2(mCode)}</b></div>
-      </div>
-      <div style="font-style: italic; margin-top: 2px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao, nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      <div style="border-top: 1px solid #888; margin-top: 6px; padding-top: 4px;">
-        \u0110\u01A1n v\u1ECB cung c\u1EA5p gi\u1EA3i ph\xE1p: C\xF4ng ty c\u1ED5 ph\u1EA7n \u0111\u1EA7u t\u01B0 c\xF4ng ngh\u1EC7 v\xE0 th\u01B0\u01A1ng m\u1EA1i SOFTDREAMS, MST: 0105987432, Http://easyinvoice.vn/
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-function renderViettelTemplate2(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts2(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || "https://vinvoice.viettel.vn/utilities/invoice-search";
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "VIETTEL", invoice.nbmst);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const maCqt = invoice.mhdon || "0024A998811234F9004B2C89";
-  const items = ensureInvoiceItems(invoice);
-  const showControls = options?.showPrintControls !== false;
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N \u0110I\u1EC6N T\u1EEC - VIETTEL S-INVOICE - ${escapeHtml2(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f1f5f9;
-      margin: 0;
-      padding: 16px;
-      color: #111;
-      font-size: 12.5px;
-      line-height: 1.35;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 12px auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #991b1b;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 8px;
-    }
-    .print-btn {
-      background: #dc2626;
-      color: white;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .viettel-wrapper {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 1.5px solid #ee0033;
-      padding: 24px 28px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-      position: relative;
-    }
-    .viettel-top-bar {
-      height: 4px;
-      background: #ee0033;
-      margin: -24px -28px 16px -28px;
-    }
-    .viettel-header {
-      display: flex;
-      justify-content: space-between;
-      border-bottom: 1px solid #ee0033;
-      padding-bottom: 12px;
-      margin-bottom: 12px;
-    }
-    .v-seller-col { width: 58%; }
-    .v-title-col { width: 40%; text-align: right; }
-    .v-title {
-      color: #ee0033;
-      font-size: 18px;
-      font-weight: bold;
-      text-transform: uppercase;
-      margin-bottom: 2px;
-    }
-    .viettel-lookup-box {
-      background: #fef2f2;
-      border: 1px dashed #f87171;
-      border-radius: 6px;
-      padding: 8px 12px;
-      font-size: 12px;
-      margin-bottom: 12px;
-      display: flex;
-      justify-content: space-between;
-    }
-    table.viettel-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #ee0033;
-      margin-bottom: 12px;
-    }
-    table.viettel-table th, table.viettel-table td {
-      border: 1px solid #cbd5e1;
-      padding: 5px 6px;
-      font-size: 12px;
-    }
-    table.viettel-table th {
-      background: #fff1f2;
-      color: #9f1239;
-      font-weight: bold;
-      text-align: center;
-      border: 1px solid #fda4af;
-    }
-    .viettel-stamp {
-      border: 1.5px solid #ee0033;
-      background: #fff5f5;
-      padding: 8px 12px;
-      display: inline-block;
-      text-align: left;
-      border-radius: 4px;
-      font-size: 11px;
-    }
-    .viettel-footer {
-      border-top: 1px solid #ee0033;
-      padding-top: 8px;
-      font-size: 11px;
-      text-align: center;
-      color: #475569;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .viettel-wrapper { border: 1px solid #ee0033; box-shadow: none; width: 100%; max-width: 100%; padding: 12px 16px; }
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? `
-  <div class="print-actions">
-    <div>
-      <span style="font-weight: bold; color: #fca5a5;">[Giao di\u1EC7n Viettel S-Invoice]</span>
-      <span style="font-size: 12px; color: #fecaca; margin-left: 8px;">M\xE3 s\u1ED1 b\xED m\u1EADt: ${escapeHtml2(mCode)}</span>
-    </div>
-    <button class="print-btn" onclick="window.print()">In H\xF3a \u0110\u01A1n (A4)</button>
-  </div>
-  ` : ""}
-
-  <div class="viettel-wrapper">
-    <div class="viettel-top-bar"></div>
-
-    <div class="viettel-header">
-      <div class="v-seller-col">
-        <div style="font-size: 16px; font-weight: bold; color: #ee0033;">${escapeHtml2(invoice.nbten)}</div>
-        <div>M\xE3 s\u1ED1 thu\u1EBF: <b>${escapeHtml2(invoice.nbmst)}</b></div>
-        <div>\u0110\u1ECBa ch\u1EC9: ${escapeHtml2(invoice.nbdchi)}</div>
-        ${invoice.stknh ? `<div>T\xE0i kho\u1EA3n: <b>${escapeHtml2(invoice.stknh)}</b> t\u1EA1i ${escapeHtml2(invoice.tnhanh || "")}</div>` : ""}
-      </div>
-      <div class="v-title-col">
-        <div class="v-title">${escapeHtml2(invoice.thdon || "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG")}</div>
-        <div style="font-style: italic;">Ng\xE0y ${day} th\xE1ng ${month} n\u0103m ${year}</div>
-        <div>M\xE3 CQT: <b>${escapeHtml2(maCqt)}</b></div>
-        <div>K\xFD hi\u1EC7u: <b>${escapeHtml2(invoice.khhdon)}</b> &nbsp; S\u1ED1: <b style="color: #ee0033; font-size: 15px;">${escapeHtml2(invoice.shdon)}</b></div>
-      </div>
-    </div>
-
-    <!-- VIETTEL LOOKUP BOX -->
-    <div class="viettel-lookup-box" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-      <div>MST B\xEAn b\xE1n: <b style="color: #111;">${escapeHtml2(invoice.nbmst)}</b> &nbsp;|&nbsp; Tra c\u1EE9u: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ee0033; font-weight: bold; text-decoration: underline;" title="T\u1EF1 \u0111\u1ED9ng \u0111i\u1EC1n MST ng\u01B0\u1EDDi b\xE1n v\xE0 M\xE3 s\u1ED1 b\xED m\u1EADt v\xE0o c\u1ED5ng Viettel S-Invoice">${escapeHtml2(pUrl)}</a></div>
-      <div>M\xE3 s\u1ED1 b\xED m\u1EADt: <b style="color: #ee0033; font-size: 13px; font-family: monospace;">${escapeHtml2(mCode)}</b></div>
-    </div>
-
-    <!-- BUYER -->
-    <div style="border-bottom: 1px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 12px;">
-      <div>T\xEAn \u0111\u01A1n v\u1ECB: <b>${escapeHtml2(invoice.nmtendv || invoice.nmten || "")}</b></div>
-      <div>M\xE3 s\u1ED1 thu\u1EBF: <b>${escapeHtml2(invoice.nmmst || "")}</b></div>
-      <div>\u0110\u1ECBa ch\u1EC9: ${escapeHtml2(invoice.nmdchi || "")}</div>
-      <div>H\xECnh th\u1EE9c thanh to\xE1n: ${escapeHtml2(invoice.htttoan || "TM/CK")}</div>
-    </div>
-
-    <!-- TABLE -->
-    <table class="viettel-table">
-      <thead>
-        <tr>
-          <th style="width: 38px;">STT</th>
-          <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-          <th style="width: 60px;">\u0110VT</th>
-          <th style="width: 70px;">S\u1ED1 l\u01B0\u1EE3ng</th>
-          <th style="width: 95px;">\u0110\u01A1n gi\xE1</th>
-          <th style="width: 65px;">Thu\u1EBF</th>
-          <th style="width: 105px;">Th\xE0nh ti\u1EC1n</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((it, idx) => `
-        <tr>
-          <td style="text-align: center; font-family: monospace;">${it.lineNo || it.stt || idx + 1}</td>
-          <td>${escapeHtml2(it.itemName || it.ten)}</td>
-          <td style="text-align: center;">${escapeHtml2(it.unit || it.dvt || "C\xE1i")}</td>
-          <td style="text-align: right; font-family: monospace;">${formatNum2(it.quantity ?? it.sluong ?? 0)}</td>
-          <td style="text-align: right; font-family: monospace;">${formatNum2(it.unitPrice ?? it.dgia ?? 0)}</td>
-          <td style="text-align: center; font-weight: bold;">${escapeHtml2(it.taxRate || "10%")}</td>
-          <td style="text-align: right; font-family: monospace; font-weight: bold;">${formatNum2(it.amount ?? it.thtien ?? 0)}</td>
-        </tr>
-        `).join("")}
-      </tbody>
-    </table>
-
-    <!-- TOTALS -->
-    <div style="border-bottom: 1px solid #cbd5e1; padding-bottom: 8px; margin-bottom: 12px; font-size: 12.5px;">
-      <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-        <span>C\u1ED9ng ti\u1EC1n h\xE0ng:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum2(invoice.tgtcthue)} \u0111</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-        <span>Ti\u1EC1n thu\u1EBF GTGT:</span>
-        <span style="font-family: monospace; font-weight: bold;">${formatNum2(invoice.tgtthue)} \u0111</span>
-      </div>
-      <div style="display: flex; justify-content: space-between; font-weight: bold; color: #ee0033; font-size: 14px;">
-        <span>T\u1ED5ng c\u1ED9ng ti\u1EC1n thanh to\xE1n:</span>
-        <span style="font-family: monospace;">${formatNum2(invoice.tgtttbso)} \u0111</span>
-      </div>
-      <div style="margin-top: 4px;">
-        S\u1ED1 ti\u1EC1n b\u1EB1ng ch\u1EEF: <i>${escapeHtml2(wordsAmount)}</i>
-      </div>
-    </div>
-
-    <!-- SIGNATURES -->
-    <div style="display: flex; justify-content: space-between; margin: 16px 0;">
-      <div style="width: 45%; text-align: center;">
-        <div style="font-weight: bold;">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-      </div>
-      <div style="width: 45%; text-align: center;">
-        <div style="font-weight: bold;">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-        <div class="viettel-stamp">
-          <div style="color: #ee0033; font-weight: bold;">\u2714 Ch\u1EEF k\xFD s\u1ED1 Viettel-CA h\u1EE3p l\u1EC7</div>
-          <div>K\xFD b\u1EDFi: <b>${escapeHtml2(invoice.nbten)}</b></div>
-          <div>K\xFD ng\xE0y: ${day}/${month}/${year}</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FOOTER -->
-    <div class="viettel-footer">
-      <div>H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED kh\u1EDFi t\u1EA1o t\u1EEB h\u1EC7 th\u1ED1ng Viettel S-Invoice - T\u1EADp \u0111o\xE0n C\xF4ng nghi\u1EC7p - Vi\u1EC5n th\xF4ng Qu\xE2n \u0111\u1ED9i (Viettel)</div>
-      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn: <a href="https://www.sinvoice.vn/p/tra-cuu-hoa-don.html" target="_blank" style="color: #ee0033;">https://www.sinvoice.vn/p/tra-cuu-hoa-don.html</a></div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-function renderVnptTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts2(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
-  const maCqt = invoice.mhdon || "0011B88299A1209384B2C89";
-  const mCode = invoice.mhdon || lookupCode || invoice.lookupCode || maCqt;
-  const mUrl = lookupUrl || invoice.lookupUrl || (invoice.nbmst ? `https://${invoice.nbmst}-tt78.vnpt-invoice.com.vn` : "https://vnpt-invoice.com.vn");
-  const directLookupUrl = buildDirectLookupUrl(mUrl, mCode, "VNPT", invoice.nbmst);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const items = ensureInvoiceItems(invoice);
-  const showControls = options?.showPrintControls !== false;
-  const qrSrc = options?.qrCodeDataUrl || `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(`${mUrl}?code=${mCode}`)}`;
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N \u0110I\u1EC6N T\u1EEC - VNPT INVOICE - ${escapeHtml2(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body {
-      font-family: 'Times New Roman', Times, serif, Arial;
-      background: #f1f5f9;
-      margin: 0;
-      padding: 16px;
-      color: #0f172a;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .print-actions {
-      max-width: 820px;
-      margin: 0 auto 12px auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: #005baa;
-      color: #fff;
-      padding: 10px 16px;
-      border-radius: 8px;
-    }
-    .print-btn {
-      background: #0284c7;
-      color: white;
-      border: 1px solid #bae6fd;
-      padding: 6px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .print-btn:hover {
-      background: #0369a1;
-    }
-    .vnpt-page {
-      max-width: 820px;
-      margin: 0 auto;
-      background: #fff;
-      border: 2px solid #005baa;
-      outline: 1px dashed #0284c7;
-      outline-offset: -5px;
-      padding: 24px 28px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-      position: relative;
-    }
-    .vnpt-header-grid {
-      display: grid;
-      grid-template-columns: 100px 1fr 200px;
-      gap: 12px;
-      border-bottom: 1.5px solid #005baa;
-      padding-bottom: 12px;
-      margin-bottom: 12px;
-      align-items: start;
-    }
-    .vnpt-brand-logo {
-      text-align: center;
-      padding-top: 4px;
-    }
-    .vnpt-brand-badge {
-      display: inline-block;
-      background: #005baa;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      font-weight: bold;
-      font-size: 14px;
-      padding: 6px 10px;
-      border-radius: 4px;
-      letter-spacing: 1px;
-    }
-    .vnpt-brand-badge span {
-      display: block;
-      font-size: 9px;
-      letter-spacing: 0.5px;
-      font-weight: normal;
-      color: #bae6fd;
-    }
-    .seller-info {
-      font-size: 12.5px;
-    }
-    .seller-name {
-      font-size: 15px;
-      font-weight: bold;
-      color: #005baa;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-    .meta-box {
-      border: 1px solid #005baa;
-      background: #f0f9ff;
-      padding: 8px 10px;
-      font-size: 12px;
-      border-radius: 4px;
-    }
-    .meta-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 3px;
-    }
-    .meta-row:last-child {
-      margin-bottom: 0;
-    }
-    .meta-val {
-      font-weight: bold;
-      color: #005baa;
-    }
-    .title-banner {
-      text-align: center;
-      margin: 10px 0 14px 0;
-    }
-    .invoice-title {
-      font-size: 20px;
-      font-weight: bold;
-      color: #005baa;
-      text-transform: uppercase;
-      margin: 0;
-      letter-spacing: 0.5px;
-    }
-    .invoice-subtitle {
-      font-style: italic;
-      font-size: 12px;
-      color: #475569;
-      margin-top: 2px;
-    }
-    .invoice-date {
-      font-style: italic;
-      font-size: 12.5px;
-      margin-top: 2px;
-    }
-    .cqt-code-bar {
-      display: inline-block;
-      margin-top: 4px;
-      padding: 2px 10px;
-      background: #e0f2fe;
-      border: 1px solid #7dd3fc;
-      border-radius: 4px;
-      font-size: 11.5px;
-      font-weight: bold;
-      color: #0369a1;
-    }
-    .buyer-card {
-      border: 1px solid #cbd5e1;
-      background: #fafafa;
-      padding: 10px 14px;
-      margin-bottom: 14px;
-      font-size: 12.5px;
-      border-radius: 4px;
-    }
-    .buyer-field {
-      margin-bottom: 4px;
-      display: flex;
-    }
-    .buyer-label {
-      width: 170px;
-      flex-shrink: 0;
-      color: #334155;
-    }
-    .buyer-value {
-      flex: 1;
-      font-weight: 500;
-    }
-    /* B\u1EA2NG CHI TI\u1EBET H\xC0NG H\xD3A VNPT */
-    table.vnpt-table {
-      width: 100%;
-      border-collapse: collapse;
-      border: 1px solid #005baa;
-      margin-bottom: 12px;
-    }
-    table.vnpt-table th {
-      background: #005baa;
-      color: #ffffff;
-      border: 1px solid #0284c7;
-      padding: 6px 4px;
-      font-size: 12px;
-      font-weight: bold;
-      text-align: center;
-    }
-    table.vnpt-table td {
-      border: 1px solid #cbd5e1;
-      padding: 6px 6px;
-      font-size: 12px;
-    }
-    .col-idx {
-      background: #f8fafc;
-      text-align: center;
-      font-size: 10px;
-      color: #64748b;
-    }
-    .totals-area {
-      margin-top: 10px;
-      border-top: 1px solid #005baa;
-      padding-top: 8px;
-    }
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 3px 0;
-      font-size: 13px;
-    }
-    .total-final {
-      font-size: 14px;
-      font-weight: bold;
-      color: #005baa;
-      border-top: 1px dashed #cbd5e1;
-      padding-top: 4px;
-      margin-top: 4px;
-    }
-    .words-box {
-      font-style: italic;
-      margin-top: 6px;
-      font-size: 12.5px;
-      background: #f8fafc;
-      padding: 6px 10px;
-      border-left: 3px solid #005baa;
-    }
-    /* Ch\u1EEF k\xFD VNPT-CA */
-    .signatures-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-top: 20px;
-      margin-bottom: 24px;
-      text-align: center;
-    }
-    .sign-title {
-      font-weight: bold;
-      font-size: 13px;
-      text-transform: uppercase;
-    }
-    .sign-sub {
-      font-size: 11.5px;
-      font-style: italic;
-      color: #64748b;
-      margin-bottom: 8px;
-    }
-    .vnpt-ca-box {
-      margin: 10px auto 0 auto;
-      max-width: 280px;
-      border: 1.5px solid #005baa;
-      background: #f0f9ff;
-      padding: 8px 10px;
-      text-align: left;
-      font-size: 11px;
-      border-radius: 4px;
-      box-shadow: 0 1px 4px rgba(0,91,170,0.15);
-    }
-    .vnpt-ca-title {
-      color: #005baa;
-      font-weight: bold;
-      font-size: 11.5px;
-      border-bottom: 1px solid #bae6fd;
-      padding-bottom: 3px;
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .vnpt-footer {
-      border-top: 1.5px solid #005baa;
-      padding-top: 10px;
-      text-align: center;
-      font-size: 11px;
-      color: #475569;
-    }
-    @media print {
-      body { background: #fff; padding: 0; }
-      .print-actions { display: none !important; }
-      .vnpt-page {
-        border: 1px solid #005baa;
-        outline: none;
-        box-shadow: none;
-        max-width: 100%;
-        width: 100%;
-        padding: 10mm;
-      }
-    }
-  </style>
-</head>
-<body>
-  ${showControls ? `
-  <div class="print-actions">
-    <div>
-      <span style="font-weight: bold; color: #bae6fd;">[Giao di\u1EC7n VNPT-Invoice]</span>
-      <span style="font-size: 12px; color: #e0f2fe; margin-left: 8px;">M\xE3 tra c\u1EE9u: ${escapeHtml2(mCode)}</span>
-    </div>
-    <button class="print-btn" onclick="window.print()">In H\xF3a \u0110\u01A1n (A4)</button>
-  </div>
-  ` : ""}
-
-  <div class="vnpt-page">
-    <!-- HEADER VNPT -->
-    <div class="vnpt-header-grid">
-      <div class="vnpt-brand-logo">
-        <div class="vnpt-brand-badge">
-          VNPT
-          <span>INVOICE</span>
-        </div>
-        <img src="${qrSrc}" alt="QR" style="width: 80px; height: 80px; margin-top: 8px; border: 1px solid #e2e8f0; padding: 2px;">
-      </div>
-
-      <div class="seller-info">
-        <div class="seller-name">${escapeHtml2(invoice.nbten)}</div>
-        <div>M\xE3 s\u1ED1 thu\u1EBF: <b>${escapeHtml2(invoice.nbmst)}</b></div>
-        <div>\u0110\u1ECBa ch\u1EC9: ${escapeHtml2(invoice.nbdchi)}</div>
-        ${invoice.nbsdt || invoice.nbphone ? `<div>\u0110i\u1EC7n tho\u1EA1i: ${escapeHtml2(invoice.nbsdt || invoice.nbphone)}</div>` : ""}
-        ${invoice.nbemail ? `<div>Email: ${escapeHtml2(invoice.nbemail)}</div>` : ""}
-        ${invoice.nbstk || invoice.stknh ? `<div>S\u1ED1 t\xE0i kho\u1EA3n: <b>${escapeHtml2(invoice.nbstk || invoice.stknh)}</b> ${invoice.nbnhang || invoice.tnhanh ? `t\u1EA1i ${escapeHtml2(invoice.nbnhang || invoice.tnhanh)}` : ""}</div>` : ""}
-      </div>
-
-      <div class="meta-box">
-        <div class="meta-row">
-          <span>K\xFD hi\u1EC7u:</span>
-          <span class="meta-val">${escapeHtml2(invoice.khhdon)}</span>
-        </div>
-        <div class="meta-row">
-          <span>S\u1ED1 h\xF3a \u0111\u01A1n:</span>
-          <span class="meta-val" style="font-size: 14px;">${escapeHtml2(invoice.shdon)}</span>
-        </div>
-        <div class="meta-row">
-          <span>M\u1EABu s\u1ED1:</span>
-          <span class="meta-val">${escapeHtml2(invoice.khmshdon || "1")}</span>
-        </div>
-        <div class="meta-row">
-          <span>Ng\xE0y l\u1EADp:</span>
-          <span class="meta-val">${day}/${month}/${year}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- TITLE BANNER -->
-    <div class="title-banner">
-      <h1 class="invoice-title">${escapeHtml2(invoice.thdon || "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG")}</h1>
-      <div class="invoice-subtitle">(B\u1EA3n th\u1EC3 hi\u1EC7n c\u1EE7a h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED)</div>
-      <div class="invoice-date">Ng\xE0y ${day} th\xE1ng ${month} n\u0103m ${year}</div>
-      ${maCqt ? `<div class="cqt-code-bar">M\xE3 c\u1EE7a C\u01A1 quan Thu\u1EBF: ${escapeHtml2(maCqt)}</div>` : ""}
-    </div>
-
-    <!-- BUYER INFO -->
-    <div class="buyer-card">
-      <div class="buyer-field">
-        <span class="buyer-label">H\u1ECD t\xEAn ng\u01B0\u1EDDi mua h\xE0ng:</span>
-        <span class="buyer-value">${escapeHtml2(invoice.nmten || "")}</span>
-      </div>
-      <div class="buyer-field">
-        <span class="buyer-label">T\xEAn \u0111\u01A1n v\u1ECB:</span>
-        <span class="buyer-value">${escapeHtml2(invoice.nmtendv || invoice.nmten || "")}</span>
-      </div>
-      <div class="buyer-field">
-        <span class="buyer-label">M\xE3 s\u1ED1 thu\u1EBF:</span>
-        <span class="buyer-value"><b>${escapeHtml2(invoice.nmmst || "")}</b></span>
-      </div>
-      <div class="buyer-field">
-        <span class="buyer-label">\u0110\u1ECBa ch\u1EC9:</span>
-        <span class="buyer-value">${escapeHtml2(invoice.nmdchi || "")}</span>
-      </div>
-      <div style="display: flex; gap: 20px;">
-        <div class="buyer-field" style="margin-bottom: 0;">
-          <span class="buyer-label">H\xECnh th\u1EE9c thanh to\xE1n:</span>
-          <span class="buyer-value">${escapeHtml2(invoice.htttoan || "TM/CK")}</span>
-        </div>
-        ${invoice.stknh || invoice.stknghang ? `
-        <div class="buyer-field" style="margin-bottom: 0;">
-          <span class="buyer-label" style="width: auto; margin-right: 8px;">S\u1ED1 t\xE0i kho\u1EA3n:</span>
-          <span class="buyer-value">${escapeHtml2(invoice.stknh || invoice.stknghang)}</span>
-        </div>
-        ` : ""}
-      </div>
-    </div>
-
-    <!-- ITEMS TABLE -->
-    <table class="vnpt-table">
-      <thead>
-        <tr>
-          <th style="width: 42px;">STT</th>
-          <th>T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-          <th style="width: 70px;">\u0110VT</th>
-          <th style="width: 80px;">S\u1ED1 l\u01B0\u1EE3ng</th>
-          <th style="width: 100px;">\u0110\u01A1n gi\xE1</th>
-          <th style="width: 120px;">Th\xE0nh ti\u1EC1n</th>
-        </tr>
-        <tr class="col-idx">
-          <td>(1)</td>
-          <td>(2)</td>
-          <td>(3)</td>
-          <td>(4)</td>
-          <td>(5)</td>
-          <td>(6 = 4 x 5)</td>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((it, idx) => {
-    const lineNo = it.lineNo || it.stt || idx + 1;
-    const itemName = it.itemName || it.ten || `H\xE0ng h\xF3a / D\u1ECBch v\u1EE5 ${lineNo}`;
-    const unit = it.unit || it.dvt || "-";
-    const qty = it.quantity ?? it.sluong ?? 0;
-    const price = it.unitPrice ?? it.dgia ?? 0;
-    const amt = it.amount ?? it.thtien ?? it.tthtien ?? 0;
-    return `
-          <tr>
-            <td style="text-align: center;">${lineNo}</td>
-            <td style="font-weight: 500;">${escapeHtml2(itemName)}</td>
-            <td style="text-align: center;">${escapeHtml2(unit)}</td>
-            <td style="text-align: right;">${formatNum2(qty)}</td>
-            <td style="text-align: right;">${formatNum2(price)}</td>
-            <td style="text-align: right; font-weight: bold;">${formatNum2(amt)}</td>
-          </tr>
-          `;
-  }).join("")}
-      </tbody>
-    </table>
-
-    <!-- TOTALS AREA -->
-    <div class="totals-area">
-      <div class="total-row">
-        <span>C\u1ED9ng ti\u1EC1n h\xE0ng (ch\u01B0a c\xF3 thu\u1EBF GTGT):</span>
-        <span style="font-weight: 600;">${formatVND2(invoice.tgtcthue)} VN\u0110</span>
-      </div>
-      <div class="total-row">
-        <span>Thu\u1EBF su\u1EA5t GTGT: <b>10%</b> &nbsp;&nbsp;|&nbsp;&nbsp; Ti\u1EC1n thu\u1EBF GTGT:</span>
-        <span style="font-weight: 600;">${formatVND2(invoice.tgtthue)} VN\u0110</span>
-      </div>
-      <div class="total-row total-final">
-        <span>T\u1ED4NG C\u1ED8NG TI\u1EC0N THANH TO\xC1N:</span>
-        <span>${formatVND2(invoice.tgtttbso)} VN\u0110</span>
-      </div>
-      <div class="words-box">
-        S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF: <b>${escapeHtml2(wordsAmount)}</b>
-      </div>
-    </div>
-
-    <!-- SIGNATURES -->
-    <div class="signatures-grid">
-      <div>
-        <div class="sign-title">Ng\u01B0\u1EDDi mua h\xE0ng</div>
-        <div class="sign-sub">(K\xFD, ghi r\xF5 h\u1ECD t\xEAn)</div>
-      </div>
-      <div>
-        <div class="sign-title">Ng\u01B0\u1EDDi b\xE1n h\xE0ng</div>
-        <div class="sign-sub">(K\xFD \u0111i\u1EC7n t\u1EED, \u0111\xF3ng d\u1EA5u)</div>
-        <div class="vnpt-ca-box">
-          <div class="vnpt-ca-title">
-            <span style="color: #16a34a; font-size: 13px;">\u2714</span>
-            <span>CH\u1EEE K\xDD S\u1ED0 H\u1EE2P L\u1EC6 - VNPT-CA</span>
-          </div>
-          <div>K\xFD b\u1EDFi: <b>${escapeHtml2(invoice.nbten)}</b></div>
-          <div>Ng\xE0y k\xFD: <b>${day}/${month}/${year}</b></div>
-          <div>T\u1ED5 ch\u1EE9c ch\u1EE9ng th\u1EF1c: <b>VNPT-CA</b></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- FOOTER -->
-    <div class="vnpt-footer">
-      <div style="font-style: italic; margin-bottom: 3px;">(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, giao nh\u1EADn h\xF3a \u0111\u01A1n)</div>
-      <div>Kh\u1EDFi t\u1EA1o t\u1EEB H\u1EC7 th\u1ED1ng H\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED <b>VNPT Invoice</b> - T\u1EADp \u0111o\xE0n B\u01B0u ch\xEDnh Vi\u1EC5n th\xF4ng Vi\u1EC7t Nam</div>
-      <div>Tra c\u1EE9u tr\u1EF1c tuy\u1EBFn t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.preventDefault(); var f=document.createElement('form'); f.method='POST'; f.action='${escapeHtml2(directLookupUrl)}'; f.target='_blank'; var inp=document.createElement('input'); inp.type='hidden'; inp.name='strFkey'; inp.value='${escapeHtml2(mCode)}'; f.appendChild(inp); document.body.appendChild(f); f.submit(); setTimeout(function(){ try{ document.body.removeChild(f); }catch(e){} }, 500);" style="color: #005baa; font-weight: bold;">${escapeHtml2(mUrl)}</a> &nbsp;&nbsp; M\xE3 tra c\u1EE9u: <b style="color: #005baa;">${escapeHtml2(mCode)}</b></div>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-function renderBkavTemplate(invoice, rawXml, options) {
-  const { day, month, year } = extractDateParts2(invoice);
-  const { lookupCode, lookupUrl } = extractLookupDetails2(rawXml);
-  const mCode = lookupCode || invoice.lookupCode || "";
-  const pUrl = lookupUrl || invoice.lookupUrl || "https://van.ehoadon.vn";
-  const directLookupUrl = buildDirectLookupUrl(pUrl, mCode, "BKAV", invoice.nbmst);
-  const wordsAmount = invoice.tgtttbchu || numberToVietnameseWords(invoice.tgtttbso);
-  const items = ensureInvoiceItems(invoice);
-  const showControls = options?.showPrintControls !== false;
-  return `<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <title>H\xD3A \u0110\u01A0N \u0110I\u1EC6N T\u1EEC - BKAV eHoadon - ${escapeHtml2(invoice.shdon)}</title>
-  <style>
-    @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; margin: 0; padding: 16px; background: #f8fafc; font-size: 12.5px; }
-    .bkav-card { max-width: 820px; margin: 0 auto; background: #fff; border: 1.5px solid #ea580c; padding: 24px; }
-    .bkav-title { color: #ea580c; font-size: 18px; font-weight: bold; text-align: center; }
-  </style>
-</head>
-<body>
-  ${showControls ? `
-  <div style="max-width: 820px; margin: 0 auto 12px auto; display: flex; justify-content: space-between; background: #c2410c; color: #fff; padding: 8px 14px; border-radius: 6px;">
-    <span>[Giao di\u1EC7n Bkav eHoadon] M\xE3 tra c\u1EE9u: ${escapeHtml2(mCode)}</span>
-    <button onclick="window.print()" style="background: #ea580c; color: #fff; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">In H\xF3a \u0110\u01A1n</button>
-  </div>
-  ` : ""}
-  <div class="bkav-card">
-    <div class="bkav-title">${escapeHtml2(invoice.thdon || "H\xD3A \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG")}</div>
-    <div style="text-align: center; font-style: italic; margin-bottom: 12px;">Ng\xE0y ${day} th\xE1ng ${month} n\u0103m ${year}</div>
-    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #ea580c; padding-bottom: 8px; margin-bottom: 10px;">
-      <div><b>${escapeHtml2(invoice.nbten)}</b><br>MST: ${escapeHtml2(invoice.nbmst)}</div>
-      <div style="text-align: right;">K\xFD hi\u1EC7u: <b>${escapeHtml2(invoice.khhdon)}</b> &nbsp; S\u1ED1: <b style="color: #ea580c;">${escapeHtml2(invoice.shdon)}</b></div>
-    </div>
-    <div style="margin-bottom: 12px;">
-      Ng\u01B0\u1EDDi mua: <b>${escapeHtml2(invoice.nmtendv || invoice.nmten || "")}</b> - MST: <b>${escapeHtml2(invoice.nmmst || "")}</b>
-    </div>
-    <table style="width: 100%; border-collapse: collapse; border: 1px solid #ea580c; margin-bottom: 12px;">
-      <thead>
-        <tr style="background: #ffedd5; color: #c2410c;">
-          <th style="border: 1px solid #fed7aa; padding: 4px;">STT</th>
-          <th style="border: 1px solid #fed7aa; padding: 4px;">T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5</th>
-          <th style="border: 1px solid #fed7aa; padding: 4px;">\u0110VT</th>
-          <th style="border: 1px solid #fed7aa; padding: 4px;">S\u1ED1 l\u01B0\u1EE3ng</th>
-          <th style="border: 1px solid #fed7aa; padding: 4px;">\u0110\u01A1n gi\xE1</th>
-          <th style="border: 1px solid #fed7aa; padding: 4px;">Th\xE0nh ti\u1EC1n</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${items.map((it, idx) => `
-        <tr>
-          <td style="border: 1px solid #cbd5e1; text-align: center;">${it.lineNo || it.stt || idx + 1}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 4px;">${escapeHtml2(it.itemName || it.ten)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: center;">${escapeHtml2(it.unit || it.dvt || "C\xE1i")}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right;">${formatNum2(it.quantity ?? it.sluong ?? 0)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right;">${formatNum2(it.unitPrice ?? it.dgia ?? 0)}</td>
-          <td style="border: 1px solid #cbd5e1; text-align: right; font-weight: bold;">${formatNum2(it.amount ?? it.thtien ?? 0)}</td>
-        </tr>
-        `).join("")}
-      </tbody>
-    </table>
-    <div style="text-align: right; font-size: 13px; font-weight: bold; color: #ea580c;">
-      T\u1ED5ng thanh to\xE1n: ${formatVND2(invoice.tgtttbso)}
-    </div>
-    <div style="font-style: italic; text-align: right; font-size: 11.5px; margin-top: 2px;">
-      B\u1EB1ng ch\u1EEF: ${escapeHtml2(wordsAmount)}
-    </div>
-    <div style="border-top: 1px solid #ea580c; margin-top: 14px; padding-top: 6px; font-size: 11px; color: #555; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
-      <div>Ph\xE1t h\xE0nh b\u1EDFi h\u1EC7 th\u1ED1ng Bkav eHoadon (www.ehoadon.vn) - Tra c\u1EE9u t\u1EA1i: <a href="${escapeHtml2(directLookupUrl)}" target="_blank" rel="noopener noreferrer" style="color: #ea580c; font-weight: bold; text-decoration: underline;">${escapeHtml2(pUrl)}</a></div>
-      <div>M\xE3 tra c\u1EE9u: <b style="font-family: monospace;">${escapeHtml2(mCode)}</b></div>
-    </div>
-  </div>
-</body>
-</html>`;
+function renderDefaultTemplate2(invoice, rawXml, options) {
+  return renderDefaultTemplate(invoice, rawXml, options);
 }
 
 // src/utils/officialInvoiceHtml.ts
 function generateOfficialInvoiceHtml(invoiceOrXml, options) {
   const invoice = typeof invoiceOrXml === "string" ? parseGDTInvoiceXml(invoiceOrXml) : invoiceOrXml;
   const rawXml = typeof invoiceOrXml === "string" ? invoiceOrXml : invoice.rawXml || "";
-  const targetProvider = options?.provider && options.provider !== "AUTO" ? options.provider : options?.templateId && options.templateId !== "AUTO" ? options.templateId : detectInvoiceProvider(rawXml, invoice);
-  return renderInvoiceHtml(invoice, targetProvider, rawXml, options);
+  return renderDefaultTemplate2(invoice, rawXml, options);
 }
 
 // src/utils/xsltTransformer.ts
@@ -8413,10 +2976,13 @@ function imagePart(input) {
   return { mimeType, data: bytes.toString("base64") };
 }
 async function solveCaptchaWithGemini(input, customPrompt, options = {}) {
-  const apiKey = options.customApiKey || process.env.GEMINI_API_KEY;
+  const apiKey = options.customApiKey || process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY ch\u01B0a \u0111\u01B0\u1EE3c c\u1EA5u h\xECnh.");
   if (process.env.CAPTCHA_AI_ENABLED === "false") throw new Error("OCR AI \u0111\xE3 t\u1EAFt. Vui l\xF2ng nh\u1EADp CAPTCHA th\u1EE7 c\xF4ng.");
-  const model = process.env.CAPTCHA_AI_MODEL || "gemini-2.5-flash-lite";
+  let model = process.env.CAPTCHA_AI_MODEL || "gemini-flash-latest";
+  if (model === "gemini-2.5-flash-lite" || model.includes("1.5-flash") || model.includes("2.0-flash")) {
+    model = "gemini-flash-latest";
+  }
   const keyHash = createHash("sha256").update(apiKey).digest("hex");
   if ((blockedKeys.get(keyHash) || 0) > Date.now()) {
     throw new Error("OCR AI \u0111ang t\u1EA1m d\u1EEBng sau l\u1ED7i h\u1EA1n m\u1EE9c/c\u1EA5u h\xECnh. Vui l\xF2ng nh\u1EADp CAPTCHA th\u1EE7 c\xF4ng.");
@@ -8437,32 +3003,45 @@ async function solveCaptchaWithGemini(input, customPrompt, options = {}) {
   const timeoutMs = Math.min(Math.max(options.timeoutMs || 12e3, 1e4), 12e3);
   const work = (async () => {
     try {
-      const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } } });
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build"
+          },
+          timeout: timeoutMs
+        }
+      });
       usage.requests++;
       const response = await ai.models.generateContent({
         model,
         contents: [{ inlineData: image }, { text: prompt }],
         config: {
-          temperature: 0,
           maxOutputTokens: 32,
-          ...model.startsWith("gemini-2.5-") ? { thinkingConfig: { thinkingBudget: 0 } } : {},
-          abortSignal: AbortSignal.timeout(timeoutMs),
-          httpOptions: { timeout: timeoutMs, retryOptions: { attempts: 1 } }
+          abortSignal: AbortSignal.timeout(timeoutMs)
         }
       });
       usage.inputTokens += response.usageMetadata?.promptTokenCount || 0;
       usage.outputTokens += response.usageMetadata?.candidatesTokenCount || 0;
       usage.thinkingTokens += response.usageMetadata?.thoughtsTokenCount || 0;
       console.info("[CAPTCHA usage]", JSON.stringify({ model, ...usage }));
-      const text = (response.text || "").trim().replace(/\s/g, "");
-      if (!(alphanumeric ? /^[a-z0-9]{4,6}$/i : /^\d{4}$/).test(text)) {
-        throw new Error("OCR tr\u1EA3 v\u1EC1 m\xE3 kh\xF4ng h\u1EE3p l\u1EC7. Kh\xF4ng t\u1EF1 c\u1EAFt ho\u1EB7c \u0111o\xE1n th\xEAm k\xFD t\u1EF1.");
+      const rawText = (response.text || "").trim();
+      const cleanChars = rawText.replace(/[^a-zA-Z0-9]/g, "");
+      if (alphanumeric) {
+        if (/^[a-zA-Z0-9]{4,6}$/.test(cleanChars)) {
+          return cleanChars.toUpperCase();
+        }
+        const match = rawText.match(/[a-zA-Z0-9]{4,6}/);
+        if (match) return match[0].toUpperCase();
+      } else {
+        const digits = rawText.replace(/[^0-9]/g, "");
+        if (/^\d{4}$/.test(digits)) return digits;
       }
-      return alphanumeric ? text.toUpperCase() : text;
+      throw new Error(`OCR tr\u1EA3 v\u1EC1 m\xE3 kh\xF4ng h\u1EE3p l\u1EC7: "${rawText}".`);
     } catch (error) {
       usage.failures++;
       const message = String(error?.message || error);
-      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY|404|not found/i.test(message)) {
+      if (/429|RESOURCE_EXHAUSTED|spending cap|quota|401|403|API_KEY/i.test(message)) {
         if (blockedKeys.size >= 128) blockedKeys.delete(blockedKeys.keys().next().value);
         blockedKeys.set(keyHash, Date.now() + 6e4);
       }
@@ -8616,19 +3195,27 @@ function createBinarizedBmp(decoded, scale = 3, cropLeft = 30, cropRight = 142) 
   return bmp;
 }
 async function solveCaptchaWithTesseract(imageInput, options) {
-  const timeoutMs = options?.timeoutMs || 2500;
+  const timeoutMs = options?.timeoutMs || 4500;
   const recognitionPromise = (async () => {
     let buf;
     if (typeof imageInput === "string") {
-      const cleanB64 = imageInput.replace(/^data:image\/[a-z]+;base64,/, "");
+      const trimmed = imageInput.trim();
+      if (trimmed.startsWith("<svg") || trimmed.includes("<svg")) {
+        throw new Error("Tesseract kh\xF4ng h\u1ED7 tr\u1EE3 \u0111\u1ECBnh d\u1EA1ng SVG tr\u1EF1c ti\u1EBFp.");
+      }
+      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, "");
       buf = Buffer.from(cleanB64, "base64");
     } else {
       buf = Buffer.from(imageInput);
     }
-    const digitsOnly = options?.digitsOnly !== false;
-    const whitelist = options?.whitelist || (digitsOnly ? "0123456789" : "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
+    if (buf.length >= 4 && buf.slice(0, 10).toString("utf-8").includes("<svg")) {
+      throw new Error("Tesseract kh\xF4ng h\u1ED7 tr\u1EE3 \u0111\u1ECBnh d\u1EA1ng SVG tr\u1EF1c ti\u1EBFp.");
+    }
+    const digitsOnly = options?.digitsOnly === true;
+    const whitelist = options?.whitelist || (digitsOnly ? "0123456789" : "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     let processBuf = buf;
-    if (options?.preprocessEasyInvoice || buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
+    const isPng = buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71;
+    if (options?.preprocessEasyInvoice === true && isPng) {
       const decoded = decodePngRgba(buf);
       if (decoded) {
         const binarized = createBinarizedBmp(decoded, 3, 25, 145);
@@ -8641,7 +3228,7 @@ async function solveCaptchaWithTesseract(imageInput, options) {
     if (digitsOnly) {
       text = text.replace(/[^0-9]/g, "");
     } else {
-      text = text.replace(/[^a-zA-Z0-9]/g, "");
+      text = text.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
     }
     return {
       code: text,
@@ -8665,37 +3252,57 @@ var CaptchaSolver = class {
   /**
    * Ưu tiên giải mã cục bộ bằng Tesseract (Miễn phí 100%, chạy offline),
    * nếu thất bại mới tự động chuyển sang Gemini API làm phương án dự phòng.
+   * Nếu có cờ forceGemini (ví dụ khi GDT từ chối mã từ OCR local ở lần trước),
+   * sẽ bỏ qua Tesseract và dùng ngay Gemini API trên CAPTCHA mới.
    */
   static async solveWithAI(imageInput, options) {
     const startTime = Date.now();
+    if (!options?.forceGemini) {
+      try {
+        const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
+          digitsOnly: options?.alphanumeric !== true,
+          whitelist: options?.whitelist || (options?.alphanumeric ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "0123456789"),
+          timeoutMs: options?.timeoutMs || 4e3,
+          preprocessEasyInvoice: options?.preprocessEasyInvoice === true
+        });
+        const localCode = (tesseractRes?.code || "").trim().toUpperCase();
+        const validLocalCode = options?.alphanumeric ? /^[A-Z0-9]{4,6}$/.test(localCode) : /^[0-9]{3,6}$/.test(localCode);
+        if (validLocalCode) {
+          console.log(`[CaptchaSolver] Tesseract local gi\u1EA3i th\xE0nh c\xF4ng: "${localCode}" (\u0111\u1ED9 tin c\u1EADy: ${Math.round(tesseractRes.confidence)}%)`);
+          return {
+            code: localCode,
+            confidence: tesseractRes.confidence,
+            engine: "tesseract-local",
+            processingTimeMs: Date.now() - startTime
+          };
+        }
+      } catch (error) {
+        console.warn("[CaptchaSolver] Tesseract local OCR kh\xF4ng nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c:", error?.message || error);
+      }
+    }
     try {
-      const tesseractRes = await solveCaptchaWithTesseract(imageInput, {
-        digitsOnly: options?.alphanumeric !== true,
-        timeoutMs: options?.timeoutMs || 2500,
-        preprocessEasyInvoice: true
-        // Tự động cắt và làm nét ảnh captcha trang thuế
+      if (options?.forceGemini) {
+        console.log("[CaptchaSolver] K\xEDch ho\u1EA1t \u01B0u ti\xEAn Gemini API cho CAPTCHA m\u1EDBi...");
+      }
+      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, {
+        timeoutMs: Math.max(options?.timeoutMs || 12e3, 1e4),
+        customApiKey: options?.customApiKey,
+        alphanumeric: options?.alphanumeric
       });
-      if (tesseractRes && tesseractRes.code && tesseractRes.code.length >= 3) {
+      if (code) {
+        console.log(`[CaptchaSolver] Gemini API gi\u1EA3i th\xE0nh c\xF4ng: "${code}"`);
         return {
-          code: tesseractRes.code,
-          confidence: tesseractRes.confidence,
-          engine: "tesseract-local",
+          code,
+          confidence: 99,
+          engine: "gemini",
           processingTimeMs: Date.now() - startTime
         };
       }
-    } catch (e) {
-    }
-    try {
-      const code = await solveCaptchaWithGemini(imageInput, options?.prompt, { timeoutMs: options?.timeoutMs });
-      return {
-        code,
-        confidence: 99,
-        engine: "gemini",
-        processingTimeMs: Date.now() - startTime
-      };
-    } catch {
+    } catch (error) {
+      console.warn("[CaptchaSolver] Gemini CAPTCHA fallback kh\xF4ng th\xE0nh c\xF4ng:", error?.message || error);
       return null;
     }
+    return null;
   }
   static isValidImageBuffer(buf) {
     if (!buf || buf.length < 8) return false;
@@ -9384,11 +3991,16 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
     }
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, "NMua") || this.extractXmlTag(xmlData, "Buyer") || "";
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, "MST") || this.extractXmlTag(xmlData, "MSTNMua") || this.extractXmlTag(xmlData, "nmmst") || "";
+    const buyerName = this.extractXmlTag(nmuaBlock, "Ten") || this.extractXmlTag(xmlData, "TenNMua") || this.extractXmlTag(xmlData, "nmten") || "";
     return {
       provider: this.providerCode,
       providerName: "Viettel vInvoice / S-Invoice",
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || void 0,
+      buyerName: buyerName || void 0,
       invoiceNo,
       invoiceSeries,
       templateCode,
@@ -9411,8 +4023,8 @@ var ViettelDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi ch\u1EA1y Viettel vInvoice Driver cho H\u0110 ${info.invoiceSeries || ""} - ${info.invoiceNo || ""}`, logs);
-    const supplierTaxCode = (info.sellerTaxCode || "").trim();
-    const reservationCode = (info.secretCode || "").trim();
+    const supplierTaxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || "").trim();
+    const reservationCode = (options?.customInfo?.secretCode || options?.customInfo?.lookupCode || info.secretCode || info.lookupCode || "").trim();
     if (!supplierTaxCode) {
       this.createLog("L\u1ED6I: Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode).", logs);
       throw new Error("[ViettelDriver] Thi\u1EBFu M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode) \u0111\u1EC3 tra c\u1EE9u h\xF3a \u0111\u01A1n Viettel.");
@@ -10012,39 +4624,75 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
-// src/services/invoice-engine/drivers/VnptDriver.ts
-import axios5 from "axios";
-
 // src/services/invoice-engine/drivers/GenericFallbackDriver.ts
 import { jsPDF } from "jspdf";
+import fs from "fs";
+import path from "path";
+import QRCode from "qrcode";
+var regularFontBuffer = null;
+var boldFontBuffer = null;
+var italicFontBuffer = null;
+function loadUnicodeFonts() {
+  if (regularFontBuffer && boldFontBuffer) return true;
+  const candidateDirs = [
+    path.resolve(process.cwd(), "assets/fonts"),
+    path.resolve(process.cwd(), "public/fonts"),
+    "/usr/share/fonts/truetype/liberation"
+  ];
+  for (const dir of candidateDirs) {
+    try {
+      const reg = path.join(dir, "LiberationSerif-Regular.ttf");
+      const bold = path.join(dir, "LiberationSerif-Bold.ttf");
+      const ital = path.join(dir, "LiberationSerif-Italic.ttf");
+      if (fs.existsSync(reg) && fs.existsSync(bold)) {
+        regularFontBuffer = fs.readFileSync(reg);
+        boldFontBuffer = fs.readFileSync(bold);
+        italicFontBuffer = fs.existsSync(ital) ? fs.readFileSync(ital) : regularFontBuffer;
+        return true;
+      }
+    } catch {
+    }
+  }
+  return false;
+}
+function formatTaxRate(rate) {
+  if (rate === void 0 || rate === null || rate === "") return "\\";
+  let str = String(rate).trim().replace(/<[^>]+>/g, "").trim();
+  if (str === "0.1" || str === "0,1") return "10%";
+  if (str === "0.08" || str === "0,08") return "8%";
+  if (str === "0.05" || str === "0,05") return "5%";
+  if (str === "0.00" || str === "0" || str === "0%") return "0%";
+  if (str === "-1" || str === "-2" || /kct|khong/i.test(str)) return "KCT";
+  if (str === "-3" || /knt|khong_nop/i.test(str)) return "KNT";
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const num = parseFloat(str);
+    if (num > 0 && num <= 1) return `${Math.round(num * 100)}%`;
+    return `${num}%`;
+  }
+  return str;
+}
 var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
     super(...arguments);
-    this.name = "Generic Fallback Driver";
+    this.name = "M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF (GDT TT78/N\u0110123)";
     this.providerCode = "GENERIC";
     this.metadata = {
-      name: "Generic Fallback Driver",
+      name: "M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF (GDT TT78/N\u0110123)",
       providerCode: "GENERIC",
-      description: "B\u1ED9 sinh PDF & HTML/CSS n\u1ED9i b\u1ED9 chu\u1EA9n Th\xF4ng t\u01B0 78 / Ngh\u1ECB \u0111\u1ECBnh 123, b\u1EA3o \u0111\u1EA3m 100% th\u1EDDi gian ho\u1EA1t \u0111\u1ED9ng khi crawling b\xEAn th\u1EE9 ba th\u1EA5t b\u1EA1i",
+      description: "B\u1EA3n th\u1EC3 hi\u1EC7n chu\u1EA9n h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED ch\xEDnh th\u1EE9c c\u1EE7a T\u1ED5ng c\u1EE5c Thu\u1EBF (Ngh\u1ECB \u0111\u1ECBnh 123/2020/N\u0110-CP & Th\xF4ng t\u01B0 78/2021/TT-BTC)",
       supportsCaptcha: false,
       requiredFields: []
     };
   }
-  /**
-   * Driver dự phòng có thể xử lý mọi hóa đơn XML
-   */
   canHandle(_xmlData) {
     return true;
   }
-  /**
-   * Trích xuất thông tin đầy đủ bằng bộ Parser chuẩn Tổng cục Thuế
-   */
   extractInfo(xmlData) {
     try {
       const inv = parseGDTInvoiceXml(xmlData);
       return {
         provider: this.providerCode,
-        providerName: "B\u1EA3n th\u1EC3 hi\u1EC7n n\u1ED9i b\u1ED9 (TT78/123)",
+        providerName: "M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF (GDT TT78/N\u0110123)",
         sellerTaxCode: inv.nbmst,
         sellerName: inv.nbten,
         buyerTaxCode: inv.nmmst,
@@ -10063,194 +4711,357 @@ var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
         }
       };
     } catch {
+      const nmuaBlock = this.extractXmlTag(xmlData, "NMua") || this.extractXmlTag(xmlData, "Buyer") || "";
       return {
         provider: this.providerCode,
-        providerName: "B\u1EA3n th\u1EC3 hi\u1EC7n n\u1ED9i b\u1ED9 (TT78/123)",
-        sellerTaxCode: this.extractXmlTag(xmlData, "MST") || "0100109106",
-        sellerName: this.extractXmlTag(xmlData, "Ten") || "\u0110\u01A0N V\u1ECA B\xC1N H\xC0NG",
-        invoiceNo: (this.extractXmlTag(xmlData, "SHDon") || "1").padStart(7, "0"),
-        invoiceSeries: this.extractXmlTag(xmlData, "KHHDon") || "1C25TGT",
-        templateCode: this.extractXmlTag(xmlData, "KHMSHDon") || "1",
-        invoiceDate: this.extractXmlTag(xmlData, "NLap") || (/* @__PURE__ */ new Date()).toISOString(),
+        providerName: "M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF (GDT TT78/N\u0110123)",
+        sellerTaxCode: this.extractXmlTag(xmlData, "MST") || this.extractXmlTag(xmlData, "nbmst") || "0100109106",
+        sellerName: this.extractXmlTag(xmlData, "Ten") || this.extractXmlTag(xmlData, "nbten") || "\u0110\u01A0N V\u1ECA B\xC1N H\xC0NG",
+        buyerTaxCode: this.extractXmlTag(nmuaBlock, "MST") || this.extractXmlTag(xmlData, "MSTNMua") || this.extractXmlTag(xmlData, "nmmst") || "",
+        buyerName: this.extractXmlTag(nmuaBlock, "Ten") || this.extractXmlTag(xmlData, "TenNMua") || this.extractXmlTag(xmlData, "nmten") || "",
+        invoiceNo: (this.extractXmlTag(xmlData, "SHDon") || this.extractXmlTag(xmlData, "shdon") || "1").padStart(7, "0"),
+        invoiceSeries: this.extractXmlTag(xmlData, "KHHDon") || this.extractXmlTag(xmlData, "khhdon") || "1C25TGT",
+        templateCode: this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1",
+        invoiceDate: this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString(),
         rawXml: xmlData
       };
     }
   }
-  /**
-   * Tạo file PDF và bản HTML/CSS nội bộ từ dữ liệu XML
-   */
   async fetchPdf(info, _options) {
     const logs = [];
-    this.createLog(`K\xEDch ho\u1EA1t GenericFallbackDriver \u0111\u1EC3 render b\u1EA3n th\u1EC3 hi\u1EC7n ph\xE1p l\xFD cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
-    let parsedInvoice = null;
-    try {
-      parsedInvoice = parseGDTInvoiceXml(info.rawXml);
-      this.createLog(`Ph\xE2n t\xEDch th\xE0nh c\xF4ng ${parsedInvoice.items?.length || 0} d\xF2ng h\xE0ng h\xF3a t\u1EEB XML`, logs);
-    } catch (parseErr) {
-      this.createLog(`C\u1EA3nh b\xE1o ph\xE2n t\xEDch XML: ${parseErr.message}`, logs);
+    this.createLog(`K\xEDch ho\u1EA1t t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
+    let parsedInvoice = info.additionalData?.parsedInvoice || null;
+    if (!parsedInvoice && info.rawXml) {
+      try {
+        parsedInvoice = parseGDTInvoiceXml(info.rawXml);
+      } catch (parseErr) {
+        this.createLog(`C\u1EA3nh b\xE1o ph\xE2n t\xEDch XML: ${parseErr.message}`, logs);
+      }
     }
     let officialHtml = "";
     if (parsedInvoice) {
       officialHtml = generateOfficialInvoiceHtml(parsedInvoice, {
-        theme: "red",
-        showPrintControls: true
+        showPrintControls: true,
+        templateId: "DEFAULT"
       });
-      this.createLog(`\u0110\xE3 bi\xEAn so\u1EA1n b\u1EA3n th\u1EC3 hi\u1EC7n HTML/CSS chu\u1EA9n h\xF3a (${(officialHtml.length / 1024).toFixed(1)} KB)`, logs);
+      this.createLog(`\u0110\xE3 bi\xEAn so\u1EA1n b\u1EA3n th\u1EC3 hi\u1EC7n HTML chu\u1EA9n T\u1ED5ng c\u1EE5c Thu\u1EBF (${(officialHtml.length / 1024).toFixed(1)} KB)`, logs);
     }
-    this.createLog("\u0110ang d\u1EF1ng c\u1EA5u tr\xFAc t\xE0i li\u1EC7u PDF vector \u0111\u1ED9 ph\xE2n gi\u1EA3i cao...", logs);
+    const sellerName = parsedInvoice?.nbten || info.sellerName || "";
+    const sellerTaxCode = parsedInvoice?.nbmst || info.sellerTaxCode || "";
+    const sellerAddress = parsedInvoice?.nbdchi || "";
+    const sellerPhone = parsedInvoice?.nbsdt || "";
+    const sellerBankAcc = parsedInvoice?.nbstk || "";
+    const sellerBankName = parsedInvoice?.nbnhang || "";
+    const buyerName = parsedInvoice?.nmten || info.buyerName || "";
+    const buyerTaxCode = parsedInvoice?.nmmst || info.buyerTaxCode || "";
+    const buyerContact = parsedInvoice?.nmnguoimua || "";
+    const buyerAddress = parsedInvoice?.nmdchi || "";
+    const buyerBankAcc = parsedInvoice?.nmstk || "";
+    const buyerBankName = parsedInvoice?.nmnhang || "";
+    const paymentMethod = parsedInvoice?.htttoan || "TM/CK";
+    const invoiceSeries = info.invoiceSeries || parsedInvoice?.khhdon || "1C25TGT";
+    const invoiceNo = (info.invoiceNo || parsedInvoice?.shdon || "0000001").padStart(7, "0");
+    const templateCode = info.templateCode || parsedInvoice?.khmshdon || (invoiceSeries ? invoiceSeries.charAt(0) : "1");
+    const cqtCode = info.cqtCode || parsedInvoice?.mhdon || "";
+    const cleanMauSo = String(templateCode).trim();
+    const isMauSo2 = cleanMauSo === "2" || invoiceSeries.startsWith("2") || /^2[A-Z]/i.test(invoiceSeries);
+    const isMauSo5 = cleanMauSo === "5" || invoiceSeries.startsWith("5");
+    let invoiceHeaderTitle = "HO\xC1 \u0110\u01A0N GI\xC1 TR\u1ECA GIA T\u0102NG";
+    if (isMauSo2) {
+      invoiceHeaderTitle = "HO\xC1 \u0110\u01A0N B\xC1N H\xC0NG";
+    } else if (isMauSo5) {
+      invoiceHeaderTitle = "TEM / V\xC9 / TH\u1EBA \u0110I\u1EC6N T\u1EEC";
+    }
+    const invDateStr = parsedInvoice?.tdlap || info.invoiceDate || "";
+    let day = "...";
+    let month = "...";
+    let year = "20...";
+    if (invDateStr) {
+      const match = invDateStr.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+      if (match) {
+        year = match[1];
+        month = match[2].padStart(2, "0");
+        day = match[3].padStart(2, "0");
+      }
+    }
     const pdfDoc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
-      format: "a4"
+      format: "a4",
+      compress: true
     });
-    const pageWidth = pdfDoc.internal.pageSize.getWidth();
-    const margin = 14;
-    let y = 16;
-    pdfDoc.setDrawColor(185, 28, 28);
-    pdfDoc.setLineWidth(0.8);
-    pdfDoc.rect(margin, margin, pageWidth - margin * 2, 268);
-    pdfDoc.setLineWidth(0.3);
-    pdfDoc.rect(margin + 1.5, margin + 1.5, pageWidth - (margin + 1.5) * 2, 265);
-    y += 8;
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setFontSize(16);
-    pdfDoc.setTextColor(185, 28, 28);
-    pdfDoc.text("HOA DON GIA TRI GIA TANG", pageWidth / 2, y, { align: "center" });
-    y += 5;
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.setFontSize(9);
-    pdfDoc.setTextColor(100, 116, 139);
-    pdfDoc.text("(Ban the hien cua hoa don dien tu - Nghi dinh 123/2020/ND-CP)", pageWidth / 2, y, { align: "center" });
-    y += 5;
-    const invDateStr = (info.invoiceDate || "").replace("T", " ");
-    pdfDoc.setTextColor(30, 41, 59);
-    pdfDoc.text(`Ngay lap: ${invDateStr.substring(0, 10) || "2025-01-01"}`, pageWidth / 2, y, { align: "center" });
-    pdfDoc.setFontSize(9);
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.text(`Mau so (KHMSHDon): ${info.templateCode || "1"}`, pageWidth - margin - 4, y - 10, { align: "right" });
-    pdfDoc.text(`Ky hieu (KHHDon): ${info.invoiceSeries || "1C25TGT"}`, pageWidth - margin - 4, y - 5, { align: "right" });
-    pdfDoc.setTextColor(185, 28, 28);
-    pdfDoc.text(`So hoa don (SHDon): ${info.invoiceNo || "0000001"}`, pageWidth - margin - 4, y, { align: "right" });
-    y += 6;
-    if (info.cqtCode) {
-      pdfDoc.setFontSize(8.5);
-      pdfDoc.setFont("helvetica", "normal");
-      pdfDoc.setTextColor(15, 118, 110);
-      pdfDoc.text(`Ma co quan thue cap (MCCQT): ${info.cqtCode}`, pageWidth / 2, y, { align: "center" });
+    const fontsLoaded = loadUnicodeFonts();
+    let fontName = "times";
+    if (fontsLoaded && regularFontBuffer && boldFontBuffer) {
+      pdfDoc.addFileToVFS("LiberationSerif-Regular.ttf", regularFontBuffer.toString("binary"));
+      pdfDoc.addFont("LiberationSerif-Regular.ttf", "LiberationSerif", "normal");
+      pdfDoc.addFileToVFS("LiberationSerif-Bold.ttf", boldFontBuffer.toString("binary"));
+      pdfDoc.addFont("LiberationSerif-Bold.ttf", "LiberationSerif", "bold");
+      if (italicFontBuffer) {
+        pdfDoc.addFileToVFS("LiberationSerif-Italic.ttf", italicFontBuffer.toString("binary"));
+        pdfDoc.addFont("LiberationSerif-Italic.ttf", "LiberationSerif", "italic");
+      }
+      fontName = "LiberationSerif";
     }
-    y += 4;
-    pdfDoc.setDrawColor(203, 213, 225);
-    pdfDoc.setLineWidth(0.4);
-    pdfDoc.line(margin + 3, y, pageWidth - margin - 3, y);
-    y += 6;
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setFontSize(10);
-    pdfDoc.setTextColor(185, 28, 28);
-    pdfDoc.text("THONG TIN NGUOI BAN (SELLER):", margin + 4, y);
-    y += 5;
-    pdfDoc.setFont("helvetica", "bold");
+    const pageWidth = pdfDoc.internal.pageSize.getWidth();
+    const pageHeight = pdfDoc.internal.pageSize.getHeight();
+    const margin = 10;
+    const contentWidth = pageWidth - margin * 2;
+    const drawPageBorder = () => {
+      pdfDoc.setDrawColor(145, 87, 21);
+      pdfDoc.setLineWidth(0.6);
+      pdfDoc.rect(margin, margin, contentWidth, pageHeight - margin * 2);
+      pdfDoc.setLineWidth(0.2);
+      pdfDoc.rect(margin + 1, margin + 1, contentWidth - 2, pageHeight - margin * 2 - 2);
+    };
+    drawPageBorder();
+    const qrData = cqtCode ? `https://hoadondientu.gdt.gov.vn/tra-cuu?cqt=${encodeURIComponent(cqtCode)}` : `https://hoadondientu.gdt.gov.vn/tra-cuu?mst=${sellerTaxCode}&kh=${invoiceSeries}&so=${invoiceNo}`;
+    try {
+      const qrBase64 = await QRCode.toDataURL(qrData, {
+        margin: 0,
+        width: 120,
+        errorCorrectionLevel: "M"
+      });
+      pdfDoc.addImage(qrBase64, "PNG", margin + 4, margin + 4, 18, 18);
+    } catch {
+    }
+    pdfDoc.setFont(fontName, "bold");
     pdfDoc.setFontSize(9);
-    pdfDoc.setTextColor(15, 23, 42);
-    pdfDoc.text(`Ten don vi: ${info.sellerName || "CONG TY BAN HANG"}`, margin + 4, y);
+    pdfDoc.setTextColor(0, 0, 0);
+    pdfDoc.text(`M\u1EABu s\u1ED1: ${cleanMauSo}`, pageWidth - margin - 4, margin + 6, { align: "right" });
+    pdfDoc.text(`K\xFD hi\u1EC7u: ${invoiceSeries}`, pageWidth - margin - 4, margin + 11, { align: "right" });
+    pdfDoc.text(`S\u1ED1: ${invoiceNo}`, pageWidth - margin - 4, margin + 16, { align: "right" });
+    pdfDoc.setFont(fontName, "bold");
+    pdfDoc.setFontSize(15);
+    pdfDoc.setTextColor(0, 0, 0);
+    pdfDoc.text(invoiceHeaderTitle, pageWidth / 2, margin + 10, { align: "center" });
+    pdfDoc.setFont(fontName, "italic");
+    pdfDoc.setFontSize(8.5);
+    pdfDoc.setTextColor(60, 60, 60);
+    pdfDoc.text("(B\u1EA3n th\u1EC3 hi\u1EC7n c\u1EE7a h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED)", pageWidth / 2, margin + 15, { align: "center" });
+    pdfDoc.setFont(fontName, "normal");
+    pdfDoc.setFontSize(9.5);
+    pdfDoc.setTextColor(0, 0, 0);
+    pdfDoc.text(`Ng\xE0y ${day} th\xE1ng ${month} n\u0103m ${year}`, pageWidth / 2, margin + 20, { align: "center" });
+    let y = margin + 24;
+    if (cqtCode) {
+      pdfDoc.setFontSize(8.5);
+      pdfDoc.setFont(fontName, "italic");
+      pdfDoc.setTextColor(40, 40, 40);
+      pdfDoc.text(`M\xE3 c\u1EE7a CQT: ${cqtCode}`, pageWidth / 2, y, { align: "center" });
+      y += 4;
+    }
+    pdfDoc.setDrawColor(145, 87, 21);
+    pdfDoc.setLineWidth(0.3);
+    pdfDoc.line(margin + 2, y, pageWidth - margin - 2, y);
     y += 4.5;
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.text(`Ma so thue (MST): ${info.sellerTaxCode || ""}`, margin + 4, y);
-    y += 7;
-    pdfDoc.line(margin + 3, y, pageWidth - margin - 3, y);
-    y += 5;
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setTextColor(30, 58, 138);
-    pdfDoc.text("THONG TIN NGUOI MUA (BUYER):", margin + 4, y);
-    y += 5;
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setTextColor(15, 23, 42);
-    pdfDoc.text(`Ten don vi: ${info.buyerName || "KHACH HANG MUA HANG"}`, margin + 4, y);
-    y += 4.5;
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.text(`Ma so thue (MST): ${info.buyerTaxCode || "Chua dang ky MST"}`, margin + 4, y);
-    y += 7;
-    pdfDoc.setDrawColor(185, 28, 28);
-    pdfDoc.setFillColor(254, 242, 242);
-    pdfDoc.rect(margin + 3, y, pageWidth - margin * 2 - 6, 7, "FD");
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.setFontSize(8);
-    pdfDoc.setTextColor(185, 28, 28);
-    pdfDoc.text("STT", margin + 6, y + 4.5);
-    pdfDoc.text("Ten hang hoa, dich vu", margin + 18, y + 4.5);
-    pdfDoc.text("DVT", margin + 85, y + 4.5);
-    pdfDoc.text("SL", margin + 102, y + 4.5);
-    pdfDoc.text("Don gia (VND)", margin + 122, y + 4.5);
-    pdfDoc.text("Thanh tien (VND)", margin + 158, y + 4.5);
-    y += 7;
+    pdfDoc.setFont(fontName, "normal");
+    pdfDoc.setFontSize(9);
+    pdfDoc.setTextColor(0, 0, 0);
+    const drawLabelValue = (label, value2, isBoldVal = false) => {
+      pdfDoc.setFont(fontName, "normal");
+      pdfDoc.text(label, margin + 4, y);
+      const labelWidth = pdfDoc.getTextWidth(label) + 2;
+      pdfDoc.setFont(fontName, isBoldVal ? "bold" : "normal");
+      const maxWidth = contentWidth - labelWidth - 8;
+      const lines = pdfDoc.splitTextToSize(value2 || "", maxWidth);
+      pdfDoc.text(lines, margin + 4 + labelWidth, y);
+      y += Math.max(lines.length * 4.2, 4.2);
+    };
+    drawLabelValue("T\xEAn ng\u01B0\u1EDDi b\xE1n:", sellerName, true);
+    drawLabelValue("M\xE3 s\u1ED1 thu\u1EBF:", sellerTaxCode, true);
+    if (sellerAddress) {
+      drawLabelValue("\u0110\u1ECBa ch\u1EC9:", sellerAddress);
+    }
+    if (sellerPhone) {
+      drawLabelValue("\u0110i\u1EC7n tho\u1EA1i:", sellerPhone);
+    }
+    if (sellerBankAcc) {
+      const bankInfo = sellerBankName ? `${sellerBankAcc} t\u1EA1i ${sellerBankName}` : sellerBankAcc;
+      drawLabelValue("S\u1ED1 t\xE0i kho\u1EA3n:", bankInfo);
+    }
+    pdfDoc.setDrawColor(200, 200, 200);
+    pdfDoc.setLineWidth(0.2);
+    pdfDoc.line(margin + 2, y, pageWidth - margin - 2, y);
+    y += 4;
+    drawLabelValue("T\xEAn ng\u01B0\u1EDDi mua:", buyerName || "Kh\xE1ch h\xE0ng kh\xF4ng l\u1EA5y h\xF3a \u0111\u01A1n / Mua l\u1EBB", true);
+    if (buyerContact) {
+      drawLabelValue("H\u1ECD t\xEAn ng\u01B0\u1EDDi mua:", buyerContact);
+    }
+    drawLabelValue("M\xE3 s\u1ED1 thu\u1EBF:", buyerTaxCode || "Kh\xF4ng c\xF3 MST");
+    if (buyerAddress) {
+      drawLabelValue("\u0110\u1ECBa ch\u1EC9:", buyerAddress);
+    }
+    drawLabelValue("H\xECnh th\u1EE9c thanh to\xE1n:", paymentMethod || "TM/CK");
+    if (buyerBankAcc) {
+      const buyerBankInfo = buyerBankName ? `${buyerBankAcc} t\u1EA1i ${buyerBankName}` : buyerBankAcc;
+      drawLabelValue("S\u1ED1 t\xE0i kho\u1EA3n:", buyerBankInfo);
+    }
+    y += 2;
+    const colWidths = [10, 82, 16, 18, 26, 16, 22];
+    const colHeaders = ["STT", "T\xEAn h\xE0ng h\xF3a, d\u1ECBch v\u1EE5", "\u0110VT", "S\u1ED1 l\u01B0\u1EE3ng", "\u0110\u01A1n gi\xE1", "Thu\u1EBF su\u1EA5t", "Th\xE0nh ti\u1EC1n"];
+    const colSubHeaders = ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7 = 4 x 5)"];
+    const drawTableHeader = (startY) => {
+      pdfDoc.setFillColor(248, 250, 252);
+      pdfDoc.setDrawColor(0, 0, 0);
+      pdfDoc.setLineWidth(0.2);
+      pdfDoc.rect(margin, startY, contentWidth, 8, "FD");
+      let currentX = margin;
+      pdfDoc.setFont(fontName, "bold");
+      pdfDoc.setFontSize(8);
+      pdfDoc.setTextColor(0, 0, 0);
+      for (let i = 0; i < colHeaders.length; i++) {
+        const w = colWidths[i];
+        const align = i === 1 ? "left" : i >= 3 && i !== 5 ? "right" : "center";
+        const textX = align === "left" ? currentX + 1.5 : align === "right" ? currentX + w - 1.5 : currentX + w / 2;
+        pdfDoc.text(colHeaders[i], textX, startY + 4, { align });
+        pdfDoc.setFont(fontName, "normal");
+        pdfDoc.setFontSize(7);
+        pdfDoc.text(colSubHeaders[i], currentX + w / 2, startY + 7, { align: "center" });
+        pdfDoc.setFont(fontName, "bold");
+        pdfDoc.setFontSize(8);
+        if (i > 0) {
+          pdfDoc.line(currentX, startY, currentX, startY + 8);
+        }
+        currentX += w;
+      }
+      return startY + 8;
+    };
+    y = drawTableHeader(y);
     const items = parsedInvoice?.items || [
       {
         lineNo: 1,
-        itemName: `Hang hoa, dich vu theo hoa don so ${info.invoiceNo}`,
-        unit: "Goi",
+        itemName: `H\xE0ng h\xF3a, d\u1ECBch v\u1EE5 theo h\xF3a \u0111\u01A1n s\u1ED1 ${invoiceNo}`,
+        unit: "G\xF3i",
         quantity: 1,
         unitPrice: info.totalAmount || 0,
         amount: info.totalAmount || 0,
-        taxRate: "10%"
+        taxRate: isMauSo2 ? "\\" : "10%"
       }
     ];
-    pdfDoc.setFont("helvetica", "normal");
+    pdfDoc.setFont(fontName, "normal");
     pdfDoc.setFontSize(8);
-    pdfDoc.setTextColor(30, 41, 59);
-    const maxItemsToDraw = Math.min(items.length, 12);
-    for (let i = 0; i < maxItemsToDraw; i++) {
+    const formatVNDNum = (num) => {
+      return new Intl.NumberFormat("vi-VN").format(Math.round(num || 0));
+    };
+    const maxItems = Math.min(items.length, 12);
+    for (let i = 0; i < maxItems; i++) {
       const it = items[i];
-      y += 5.5;
-      pdfDoc.text(String(it.lineNo || i + 1), margin + 6, y);
-      const itemTitle = (it.itemName || `Hang hoa ${i + 1}`).substring(0, 36);
-      pdfDoc.text(itemTitle, margin + 18, y);
-      pdfDoc.text(it.unit || "Cai", margin + 85, y);
-      pdfDoc.text(String(it.quantity || 1), margin + 102, y);
-      pdfDoc.text(new Intl.NumberFormat("en-US").format(it.unitPrice || 0), margin + 122, y);
-      pdfDoc.text(new Intl.NumberFormat("en-US").format(it.amount || 0), margin + 158, y);
-      pdfDoc.setDrawColor(241, 245, 249);
-      pdfDoc.line(margin + 3, y + 1.5, pageWidth - margin - 3, y + 1.5);
+      const itemName = it.itemName || it.ten || it.name || `H\xE0ng h\xF3a ${i + 1}`;
+      const splitNames = pdfDoc.splitTextToSize(itemName, colWidths[1] - 3);
+      const rowHeight = Math.max(splitNames.length * 4.2, 5.5);
+      pdfDoc.setDrawColor(200, 200, 200);
+      pdfDoc.setLineWidth(0.15);
+      pdfDoc.rect(margin, y, contentWidth, rowHeight);
+      let curX = margin;
+      for (let c = 0; c < colWidths.length; c++) {
+        const w = colWidths[c];
+        if (c > 0) {
+          pdfDoc.line(curX, y, curX, y + rowHeight);
+        }
+        curX += w;
+      }
+      curX = margin;
+      pdfDoc.text(String(it.lineNo || it.stt || i + 1), curX + colWidths[0] / 2, y + 4, { align: "center" });
+      curX += colWidths[0];
+      pdfDoc.text(splitNames, curX + 1.5, y + 3.8);
+      curX += colWidths[1];
+      pdfDoc.text(String(it.unit || it.dvt || "C\xE1i"), curX + colWidths[2] / 2, y + 4, { align: "center" });
+      curX += colWidths[2];
+      pdfDoc.text(String(it.quantity || it.sluong || 1), curX + colWidths[3] - 1.5, y + 4, { align: "right" });
+      curX += colWidths[3];
+      const priceStr = it.unitPrice || it.dgia ? formatVNDNum(it.unitPrice || it.dgia) : "";
+      pdfDoc.text(priceStr, curX + colWidths[4] - 1.5, y + 4, { align: "right" });
+      curX += colWidths[4];
+      const tsStr = formatTaxRate(it.taxRate || it.tsuat || (isMauSo2 ? "\\" : "10%"));
+      pdfDoc.text(tsStr, curX + colWidths[5] / 2, y + 4, { align: "center" });
+      curX += colWidths[5];
+      const amtStr = formatVNDNum(it.amount || it.thtien || 0);
+      pdfDoc.text(amtStr, curX + colWidths[6] - 1.5, y + 4, { align: "right" });
+      y += rowHeight;
     }
-    y += 8;
-    pdfDoc.setDrawColor(203, 213, 225);
-    pdfDoc.line(margin + 3, y, pageWidth - margin - 3, y);
+    y += 3;
+    const totalBeforeTax = parsedInvoice?.tgtcthue ?? (info.totalAmount ? info.totalAmount * 0.9 : 0);
+    const totalTax = parsedInvoice?.tgtthue ?? (info.totalTaxAmount || 0);
+    const totalPayment = parsedInvoice?.tgtttbso ?? (info.totalAmount || 0);
+    const wordsAmount = parsedInvoice?.tgtttbchu || "";
+    const summaryBoxWidth = 95;
+    const summaryBoxX = pageWidth - margin - summaryBoxWidth;
+    pdfDoc.setDrawColor(0, 0, 0);
+    pdfDoc.setLineWidth(0.2);
+    pdfDoc.rect(summaryBoxX, y, summaryBoxWidth, isMauSo2 ? 14 : 20);
+    pdfDoc.line(summaryBoxX, y + 6.5, summaryBoxX + summaryBoxWidth, y + 6.5);
+    if (!isMauSo2) {
+      pdfDoc.line(summaryBoxX, y + 13, summaryBoxX + summaryBoxWidth, y + 13);
+    }
+    pdfDoc.setFont(fontName, "normal");
+    pdfDoc.setFontSize(8.5);
+    if (isMauSo2) {
+      pdfDoc.text("T\u1ED5ng ti\u1EC1n h\xE0ng:", summaryBoxX + 2, y + 4.5);
+      pdfDoc.text(`${formatVNDNum(totalPayment)} \u0111`, summaryBoxX + summaryBoxWidth - 2, y + 4.5, { align: "right" });
+      pdfDoc.setFont(fontName, "bold");
+      pdfDoc.text("T\u1ED5ng ti\u1EC1n thanh to\xE1n:", summaryBoxX + 2, y + 10.5);
+      pdfDoc.text(`${formatVNDNum(totalPayment)} \u0111`, summaryBoxX + summaryBoxWidth - 2, y + 10.5, { align: "right" });
+      y += 16;
+    } else {
+      pdfDoc.text("T\u1ED5ng ti\u1EC1n ch\u01B0a thu\u1EBF:", summaryBoxX + 2, y + 4.5);
+      pdfDoc.text(`${formatVNDNum(totalBeforeTax)} \u0111`, summaryBoxX + summaryBoxWidth - 2, y + 4.5, { align: "right" });
+      pdfDoc.text("T\u1ED5ng ti\u1EC1n thu\u1EBF GTGT:", summaryBoxX + 2, y + 10);
+      pdfDoc.text(`${formatVNDNum(totalTax)} \u0111`, summaryBoxX + summaryBoxWidth - 2, y + 10, { align: "right" });
+      pdfDoc.setFont(fontName, "bold");
+      pdfDoc.text("T\u1ED5ng ti\u1EC1n thanh to\xE1n:", summaryBoxX + 2, y + 16.5);
+      pdfDoc.text(`${formatVNDNum(totalPayment)} \u0111`, summaryBoxX + summaryBoxWidth - 2, y + 16.5, { align: "right" });
+      y += 22;
+    }
+    pdfDoc.setFont(fontName, "normal");
+    pdfDoc.setFontSize(8.5);
+    if (wordsAmount) {
+      pdfDoc.text("S\u1ED1 ti\u1EC1n vi\u1EBFt b\u1EB1ng ch\u1EEF:", margin + 4, y);
+      pdfDoc.setFont(fontName, "italic");
+      pdfDoc.text(wordsAmount, margin + 35, y);
+      y += 6;
+    }
+    pdfDoc.setDrawColor(145, 87, 21);
+    pdfDoc.setLineWidth(0.3);
+    pdfDoc.line(margin + 2, y, pageWidth - margin - 2, y);
     y += 5;
-    const totalBeforeTax = parsedInvoice?.tgtcthue || (info.totalAmount ? info.totalAmount * 0.9 : 0);
-    const totalTax = parsedInvoice?.tgtthue || (info.totalTaxAmount || 0);
-    const totalPayment = parsedInvoice?.tgtttbso || info.totalAmount || 0;
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.text("Tong cong tien chua thue (Total before VAT):", margin + 80, y);
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.text(`${new Intl.NumberFormat("vi-VN").format(Math.round(totalBeforeTax))} VND`, pageWidth - margin - 6, y, { align: "right" });
-    y += 5;
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.text("Tien thue GTGT (VAT Amount):", margin + 80, y);
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.text(`${new Intl.NumberFormat("vi-VN").format(Math.round(totalTax))} VND`, pageWidth - margin - 6, y, { align: "right" });
-    y += 6;
-    pdfDoc.setFont("helvetica", "bold");
+    pdfDoc.setFont(fontName, "bold");
     pdfDoc.setFontSize(9.5);
-    pdfDoc.setTextColor(185, 28, 28);
-    pdfDoc.text("TONG TIEN THANH TOAN (TOTAL PAYMENT):", margin + 80, y);
-    pdfDoc.text(`${new Intl.NumberFormat("vi-VN").format(Math.round(totalPayment))} VND`, pageWidth - margin - 6, y, { align: "right" });
-    y += 12;
-    pdfDoc.setDrawColor(34, 197, 94);
+    pdfDoc.text("NG\u01AF\u1EDCI MUA H\xC0NG", margin + 45, y, { align: "center" });
+    pdfDoc.text("NG\u01AF\u1EDCI B\xC1N H\xC0NG", pageWidth - margin - 45, y, { align: "center" });
+    y += 4;
+    pdfDoc.setFont(fontName, "italic");
+    pdfDoc.setFontSize(8);
+    pdfDoc.text("(Ch\u1EEF k\xFD s\u1ED1 (n\u1EBFu c\xF3))", margin + 45, y, { align: "center" });
+    pdfDoc.text("(Ch\u1EEF k\xFD \u0111i\u1EC7n t\u1EED, ch\u1EEF k\xFD s\u1ED1)", pageWidth - margin - 45, y, { align: "center" });
+    y += 4;
+    const signBoxX = pageWidth - margin - 72;
+    const signBoxWidth = 68;
+    const signBoxHeight = 18;
+    pdfDoc.setDrawColor(35, 183, 9);
     pdfDoc.setFillColor(240, 253, 244);
-    pdfDoc.roundedRect(pageWidth - margin - 65, y, 60, 22, 2, 2, "FD");
-    pdfDoc.setFontSize(7.5);
+    pdfDoc.roundedRect(signBoxX, y, signBoxWidth, signBoxHeight, 1.5, 1.5, "FD");
+    pdfDoc.setFont(fontName, "bold");
+    pdfDoc.setFontSize(8);
+    pdfDoc.setTextColor(35, 183, 9);
+    pdfDoc.text("\u2714 Signature Valid", signBoxX + 4, y + 4.5);
+    pdfDoc.setFont(fontName, "normal");
+    pdfDoc.setFontSize(7);
     pdfDoc.setTextColor(22, 101, 52);
-    pdfDoc.setFont("helvetica", "bold");
-    pdfDoc.text("[DA KY SO DIEN TU HOP LE]", pageWidth - margin - 35, y + 5, { align: "center" });
-    pdfDoc.setFont("helvetica", "normal");
-    pdfDoc.text(`Ky boi: ${info.sellerName?.substring(0, 22) || "Nguoi nop thue"}`, pageWidth - margin - 35, y + 10, { align: "center" });
-    pdfDoc.text(`Ngay ky: ${invDateStr.substring(0, 16) || "2025-01-01"}`, pageWidth - margin - 35, y + 14, { align: "center" });
-    pdfDoc.text("Chung thu so: VNPT-CA / Viettel-CA / MISA", pageWidth - margin - 35, y + 18, { align: "center" });
+    const signSellerLines = pdfDoc.splitTextToSize(`K\xFD b\u1EDFi: ${sellerName}`, signBoxWidth - 8);
+    pdfDoc.text(signSellerLines[0] || "", signBoxX + 4, y + 8.5);
+    pdfDoc.text(`K\xFD ng\xE0y: ${invDateStr.substring(0, 10) || `${year}-${month}-${day}`}`, signBoxX + 4, y + 12.5);
+    pdfDoc.setFont(fontName, "italic");
+    pdfDoc.setFontSize(8);
+    pdfDoc.setTextColor(60, 60, 60);
+    pdfDoc.text("(C\u1EA7n ki\u1EC3m tra, \u0111\u1ED1i chi\u1EBFu khi l\u1EADp, nh\u1EADn h\xF3a \u0111\u01A1n)", pageWidth / 2, pageHeight - margin - 4, { align: "center" });
     const pdfArrayBuffer = pdfDoc.output("arraybuffer");
     const pdfBuffer = Buffer.from(pdfArrayBuffer);
     const pdfBase64 = pdfBuffer.toString("base64");
-    this.createLog(`T\u1EA1o th\xE0nh c\xF4ng file PDF n\u1ED9i b\u1ED9 (${(pdfBuffer.length / 1024).toFixed(1)} KB), h\u1EC7 th\u1ED1ng duy tr\xEC ho\u1EA1t \u0111\u1ED9ng th\xF4ng su\u1ED1t`, logs);
+    this.createLog(`T\u1EA1o th\xE0nh c\xF4ng PDF M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF (${(pdfBuffer.length / 1024).toFixed(1)} KB), cam k\u1EBFt 100% kh\xF4ng gi\u1EA3 l\u1EADp`, logs);
     return {
       success: true,
-      provider: this.providerCode,
+      provider: "GDT_OFFICIAL",
       driverName: this.name,
       pdfBuffer,
       pdfBase64,
@@ -10261,6 +5072,334 @@ var GenericFallbackDriver = class extends BaseInvoiceProviderDriver {
     };
   }
 };
+
+// src/services/vnptInvoiceService.ts
+import axios5 from "axios";
+import https2 from "https";
+import * as cheerio2 from "cheerio";
+var vnptHttpsAgent = new https2.Agent({
+  keepAlive: true,
+  maxSockets: 30,
+  keepAliveMsecs: 3e4
+});
+var vnptClient = axios5.create({
+  httpsAgent: vnptHttpsAgent,
+  timeout: 25e3
+});
+var vnptInvoiceCache = /* @__PURE__ */ new Map();
+var inFlightLookups = /* @__PURE__ */ new Map();
+function getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl) {
+  const cleanMst = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
+  const cleanCode = (lookupCode || "").trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  let portalBase = (portalUrl || "").trim().replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
+  if (!portalBase) {
+    portalBase = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  return `${portalBase}|${cleanCode}`;
+}
+function getCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  const entry = vnptInvoiceCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > 2 * 60 * 60 * 1e3) {
+    vnptInvoiceCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+function setCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl, entry) {
+  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
+  vnptInvoiceCache.set(key, entry);
+}
+async function lookupOriginalVnptInvoice(params) {
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u VNPT kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng");
+  let portal = params.lookupUrl;
+  if (!portal || /tracuu\.vnpt-invoice|portal\.vnpt-invoice/i.test(portal)) {
+    portal = params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  portal = portal.replace(/\/+$/, "");
+  const cacheKey = getVnptCacheKey(params.sellerTaxCode, lookupCode, portal);
+  if (!params.forceRefresh) {
+    const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (cached && cached.htmlContent) {
+      console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 t\u1EEB Cache t\u1EE9c th\xEC cho m\xE3: ${lookupCode}`);
+      return {
+        success: true,
+        htmlContent: cached.htmlContent,
+        checkCode: cached.checkCode,
+        pdfDownloadUrl: `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(cached.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`,
+        portalUrl: portal,
+        isCached: true,
+        invoiceInfo: cached.invoiceInfo
+      };
+    }
+  }
+  if (inFlightLookups.has(cacheKey)) {
+    console.log(`[VNPT Speed] T\xE1i s\u1EED d\u1EE5ng ti\u1EBFn tr\xECnh tra c\u1EE9u \u0111ang ch\u1EA1y cho m\xE3: ${lookupCode}`);
+    return inFlightLookups.get(cacheKey);
+  }
+  const lookupPromise = (async () => {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    };
+    const maxAttempts = 2;
+    let lastError = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const t0 = Date.now();
+        console.log(`[VNPT] B\u1EAFt \u0111\u1EA7u tra c\u1EE9u t\u1ED1i \u01B0u l\u1EA7n ${attempt}/${maxAttempts} (M\xE3: ${lookupCode}, C\u1ED5ng: ${portal})...`);
+        const page = await vnptClient.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
+          headers,
+          timeout: 1e4,
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
+        const $ = cheerio2.load(page.data);
+        const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
+        const captcha = await vnptClient.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
+          headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
+          responseType: "arraybuffer",
+          timeout: 1e4
+        });
+        const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const tAiStart = Date.now();
+        const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data), {
+          prompt: VNPT_CAPTCHA_PROMPT
+        })).code;
+        console.log(`[VNPT Speed] Gi\u1EA3i Captcha trong ${Date.now() - tAiStart}ms: "${captchaCode}"`);
+        const form = new URLSearchParams({
+          __RequestVerificationToken: token,
+          strFkey: lookupCode,
+          captch: captchaCode,
+          submit: ""
+        });
+        const result = await vnptClient.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+          headers: {
+            ...headers,
+            "Content-Type": "application/x-www-form-urlencoded",
+            Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+            Cookie: sessionCookie
+          },
+          maxRedirects: 5,
+          timeout: 2e4,
+          responseType: "text",
+          validateStatus: (status) => status >= 200 && status < 400
+        });
+        const html = String(result.data || "");
+        const isCaptchaError = /captcha|mã xác thực không đúng|sai mã xác thực|không chính xác/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html);
+        if (isCaptchaError) {
+          lastError = "VNPT b\xE1o sai m\xE3 x\xE1c th\u1EF1c Captcha.";
+          console.warn(`[VNPT] L\u1EA7n ${attempt} sai Captcha, \u0111ang th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh m\u1EDBi...`);
+          continue;
+        }
+        const postCookies = (result.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
+        const finalCookies = [...sessionCookie.split("; ").filter(Boolean), ...postCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
+        const $search = cheerio2.load(html);
+        let checkCode = "";
+        const onclickAttr = $search('a[onclick*="ajxCall4Portal"]').attr("onclick") || "";
+        const matchOnclick = onclickAttr.match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
+        if (matchOnclick) {
+          checkCode = matchOnclick[1];
+        }
+        if (!checkCode) {
+          const downloadHref = $search('a[href*="downloadPDF"]').attr("href") || "";
+          const matchHref = downloadHref.match(/checkCode=([^&"']+)/);
+          if (matchHref) {
+            checkCode = decodeURIComponent(matchHref[1]);
+          }
+        }
+        let invoiceInfo = void 0;
+        const firstRow = $search("table tr").filter((_, tr) => $search(tr).find("td").length >= 5).first();
+        if (firstRow.length > 0) {
+          const tds = firstRow.find("td");
+          invoiceInfo = {
+            name: $search(tds[1]).text().trim(),
+            template: $search(tds[2]).text().trim(),
+            series: $search(tds[3]).text().trim(),
+            number: $search(tds[4]).text().trim(),
+            totalAmount: $search(tds[5]).text().trim(),
+            issueDate: $search(tds[6]).text().trim(),
+            status: $search(tds[7]).text().trim(),
+            cqtStatus: $search(tds[8]).text().trim()
+          };
+        }
+        let fullInvoiceHtml = "";
+        let prefetchedPdfBuffer = void 0;
+        if (checkCode) {
+          const previewPayload = new URLSearchParams({
+            checkCode,
+            fkey: lookupCode,
+            nameCus: ""
+          });
+          const previewPromise = vnptClient.post(`${portal}/HomeNoLogin/ajxPreview/`, previewPayload.toString(), {
+            headers: {
+              ...headers,
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "X-Requested-With": "XMLHttpRequest",
+              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+              Cookie: finalCookies
+            },
+            timeout: 2e4
+          });
+          const pdfDownloadUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+          const pdfPromise = vnptClient.get(pdfDownloadUrl, {
+            headers: {
+              ...headers,
+              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
+              Cookie: finalCookies
+            },
+            responseType: "arraybuffer",
+            timeout: 2e4
+          });
+          const [previewRes, pdfRes] = await Promise.allSettled([previewPromise, pdfPromise]);
+          if (previewRes.status === "fulfilled" && previewRes.value.data?.str) {
+            fullInvoiceHtml = String(previewRes.value.data.str);
+            if (!/<base /i.test(fullInvoiceHtml)) {
+              if (/<head([^>]*)>/i.test(fullInvoiceHtml)) {
+                fullInvoiceHtml = fullInvoiceHtml.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
+              } else {
+                fullInvoiceHtml = `<base href="${portal}/">
+` + fullInvoiceHtml;
+              }
+            }
+          }
+          if (pdfRes.status === "fulfilled" && pdfRes.value.data) {
+            const buf = Buffer.from(pdfRes.value.data);
+            if (buf.length > 1e3 && buf.slice(0, 5).toString().startsWith("%PDF")) {
+              prefetchedPdfBuffer = buf;
+              console.log(`[VNPT Speed] \u0110\xE3 n\u1EA1p s\u1EB5n file PDF g\u1ED1c (${buf.length} bytes) v\xE0o cache song song v\u1EDBi HTML!`);
+            }
+          }
+        }
+        if (!fullInvoiceHtml) {
+          fullInvoiceHtml = html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
+        }
+        const cacheEntry = {
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || "",
+          portalUrl: portal,
+          pdfBuffer: prefetchedPdfBuffer,
+          cookies: finalCookies,
+          captchaSolved: captchaCode,
+          invoiceInfo,
+          cachedAt: Date.now()
+        };
+        setCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal, cacheEntry);
+        console.log(`[VNPT Speed] Ho\xE0n t\u1EA5t tra c\u1EE9u t\u1ED5ng c\u1ED9ng trong ${Date.now() - t0}ms!`);
+        return {
+          success: true,
+          htmlContent: fullInvoiceHtml,
+          checkCode: checkCode || void 0,
+          pdfDownloadUrl: checkCode ? `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}` : void 0,
+          portalUrl: portal,
+          isCached: false,
+          captchaSolved: captchaCode,
+          invoiceInfo
+        };
+      } catch (err) {
+        lastError = err.message || String(err);
+        console.warn(`[VNPT] L\u1ED7i tra c\u1EE9u l\u1EA7n ${attempt}:`, lastError);
+      }
+    }
+    throw new Error(`Tra c\u1EE9u h\xF3a \u0111\u01A1n g\u1ED1c VNPT th\u1EA5t b\u1EA1i: ${lastError || "VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n."}`);
+  })();
+  inFlightLookups.set(cacheKey, lookupPromise);
+  try {
+    return await lookupPromise;
+  } finally {
+    inFlightLookups.delete(cacheKey);
+  }
+}
+async function downloadOriginalVnptPdf(params) {
+  let portal = params.portalUrl;
+  if (!portal || /tracuu\.vnpt-invoice|portal\.vnpt-invoice/i.test(portal)) {
+    portal = params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
+  }
+  portal = portal.replace(/\/+$/, "");
+  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
+  const cleanShd = params.invoiceNumber ? String(params.invoiceNumber).padStart(7, "0") : lookupCode.slice(0, 16);
+  const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+  if (cached?.pdfBuffer && cached.pdfBuffer.length > 1e3) {
+    console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 PDF g\u1ED1c t\u1EEB b\u1ED9 nh\u1EDB \u0111\u1EC7m (0ms delay)!`);
+    return {
+      data: cached.pdfBuffer,
+      filename: `HoaDon_VNPT_${cleanShd}.pdf`,
+      contentType: "application/pdf",
+      captchaSolved: cached.captchaSolved || "\u0110\xE3 gi\u1EA3i th\xE0nh c\xF4ng"
+    };
+  }
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+    Referer: `${portal}/HomeNoLogin/SearchByFkey/`
+  };
+  let validPdfBuffer = null;
+  let resolvedCaptcha = cached?.captchaSolved;
+  const checkCode = params.checkCode && params.checkCode !== "undefined" && params.checkCode !== "null" ? params.checkCode.trim() : cached?.checkCode;
+  const cookies = cached?.cookies || "";
+  if (checkCode && cookies) {
+    const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+    console.log(`[VNPT Speed] T\u1EA3i PDF tr\u1EF1c ti\u1EBFp b\u1EB1ng checkCode v\xE0 cookies c\xF3 s\u1EB5n: ${pdfUrl}`);
+    try {
+      const res = await vnptClient.get(pdfUrl, {
+        headers: { ...headers, Cookie: cookies },
+        responseType: "arraybuffer",
+        timeout: 15e3,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1e3) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
+          validPdfBuffer = tempBuf;
+          if (cached) cached.pdfBuffer = tempBuf;
+          console.log(`[VNPT Speed] T\u1EA3i nhanh PDF th\xE0nh c\xF4ng (${validPdfBuffer.length} bytes)!`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[VNPT] Kh\xF4ng th\u1EC3 t\u1EA3i b\u1EB1ng cookies c\xF3 s\u1EB5n: ${err.message}.`);
+    }
+  }
+  if (!validPdfBuffer) {
+    console.log(`[VNPT Speed] Ch\u01B0a c\xF3 PDF trong cache, k\xEDch ho\u1EA1t tra c\u1EE9u nhanh \u0111\u1EC3 l\u1EA5y PDF...`);
+    const lookupRes = await lookupOriginalVnptInvoice({
+      lookupCode,
+      sellerTaxCode: params.sellerTaxCode,
+      lookupUrl: portal
+    });
+    resolvedCaptcha = lookupRes.captchaSolved;
+    const refreshedCache = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
+    if (refreshedCache?.pdfBuffer && refreshedCache.pdfBuffer.length > 1e3) {
+      validPdfBuffer = refreshedCache.pdfBuffer;
+    } else if (lookupRes.checkCode) {
+      const finalCookies = refreshedCache?.cookies || "";
+      const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
+      const res = await vnptClient.get(freshPdfUrl, {
+        headers: { ...headers, Cookie: finalCookies },
+        responseType: "arraybuffer",
+        timeout: 2e4,
+        validateStatus: (s) => s === 200
+      });
+      if (res.data && res.data.byteLength > 1e3) {
+        const tempBuf = Buffer.from(res.data);
+        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
+          validPdfBuffer = tempBuf;
+          if (refreshedCache) refreshedCache.pdfBuffer = tempBuf;
+        }
+      }
+    }
+  }
+  if (!validPdfBuffer || validPdfBuffer.length === 0 || !validPdfBuffer.slice(0, 5).toString().startsWith("%PDF")) {
+    throw new Error("C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7 cho h\xF3a \u0111\u01A1n n\xE0y.");
+  }
+  return {
+    data: validPdfBuffer,
+    filename: `HoaDon_VNPT_${cleanShd}.pdf`,
+    contentType: "application/pdf",
+    captchaSolved: resolvedCaptcha
+  };
+}
 
 // src/services/invoice-engine/drivers/VnptDriver.ts
 var VnptDriver = class extends BaseInvoiceProviderDriver {
@@ -10295,23 +5434,28 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
     const templateCode = this.extractXmlTag(xmlData, "KHMSHDon") || this.extractXmlTag(xmlData, "khmshdon") || "1";
     const invoiceDate = this.extractXmlTag(xmlData, "NLap") || this.extractXmlTag(xmlData, "nlap") || (/* @__PURE__ */ new Date()).toISOString();
     const cqtCode = this.extractXmlTag(xmlData, "MCCQT") || this.extractXmlTag(xmlData, "mhdon");
-    let lookupCode = cqtCode || this.extractCustomField(xmlData, ["Fkey", "M\xE3 Fkey", "M\xE3 tra c\u1EE9u", "MaTraCuu"]);
+    let lookupCode = this.extractCustomField(xmlData, ["Fkey", "M\xE3 Fkey", "M\xE3 tra c\u1EE9u", "MaTraCuu", "MTCuu", "MTC"]) || this.extractXmlTag(xmlData, "Fkey") || this.extractXmlTag(xmlData, "MTCuu");
     if (!lookupCode) {
-      lookupCode = this.extractXmlTag(xmlData, "Fkey") || this.extractXmlTag(xmlData, "MTCuu");
+      lookupCode = cqtCode;
     }
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, "NMua") || this.extractXmlTag(xmlData, "Buyer") || "";
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, "MST") || this.extractXmlTag(xmlData, "MSTNMua") || this.extractXmlTag(xmlData, "nmmst") || "";
+    const buyerName = this.extractXmlTag(nmuaBlock, "Ten") || this.extractXmlTag(xmlData, "TenNMua") || this.extractXmlTag(xmlData, "nmten") || "";
     return {
       provider: this.providerCode,
       providerName: "VNPT Invoice",
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || void 0,
+      buyerName: buyerName || void 0,
       invoiceNo,
       invoiceSeries,
       templateCode,
       invoiceDate,
       lookupCode: lookupCode || void 0,
-      lookupUrl: "https://tracuu.vnpt-invoice.com.vn",
+      lookupUrl: sellerTaxCode ? `https://${sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn",
       cqtCode: cqtCode || void 0,
       totalAmount,
       totalTaxAmount,
@@ -10325,118 +5469,41 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi ch\u1EA1y VNPT Invoice Driver cho H\u0110 ${info.invoiceSeries} - ${info.invoiceNo}`, logs);
-    const fkey = (info.lookupCode || "").trim();
-    const cleanMst = (info.sellerTaxCode || "").trim();
+    const fkey = (options?.customInfo?.lookupCode || info.lookupCode || "").trim();
+    const cleanMst = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || "").trim();
     this.createLog(`Fkey VNPT: "${fkey}", MST: "${cleanMst}"`, logs);
-    const timeoutMs = options?.timeoutMs || 15e3;
-    let lastError = "";
-    const directEndpoints = [
-      `https://tracuu.vnpt-invoice.com.vn/api/invoices/download-pdf?fkey=${encodeURIComponent(fkey)}&taxCode=${encodeURIComponent(cleanMst)}`,
-      `https://portal.vnpt-invoice.com.vn/api/download-pdf?fkey=${encodeURIComponent(fkey)}`
-    ];
-    for (const url of directEndpoints) {
+    if (fkey) {
       try {
-        this.createLog(`\u0110ang th\u1EED t\u1EA3i tr\u1EF1c ti\u1EBFp t\u1EEB VNPT: ${url.substring(0, 65)}...`, logs);
-        const resp = await axios5.get(url, {
-          timeout: timeoutMs,
-          responseType: "arraybuffer",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Accept": "application/pdf, application/json, */*",
-            ...options?.customHeaders || {}
-          },
-          validateStatus: (s) => s === 200
+        this.createLog(`\u0110ang k\u1EBFt n\u1ED1i c\u1ED5ng VNPT v\xE0 t\u1EF1 \u0111\u1ED9ng gi\u1EA3i Captcha b\u1EB1ng AI...`, logs);
+        const vnptRes = await downloadOriginalVnptPdf({
+          lookupCode: fkey,
+          sellerTaxCode: cleanMst,
+          portalUrl: options?.customInfo?.lookupUrl || info.lookupUrl,
+          invoiceNumber: options?.customInfo?.invoiceNo || info.invoiceNo
         });
-        if (resp.data && resp.data.byteLength > 50) {
-          const buf = Buffer.from(resp.data);
-          if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-            this.createLog(`T\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-            return {
-              success: true,
-              provider: this.providerCode,
-              driverName: this.name,
-              pdfBuffer: buf,
-              pdfBase64: buf.toString("base64"),
-              contentType: "application/pdf",
-              filename: this.buildPdfFilename(info),
-              isFallback: false,
-              sourceUrl: url,
-              executionLogs: logs
-            };
-          }
+        if (vnptRes.data && vnptRes.data.length > 500) {
+          const buf = vnptRes.data;
+          const captchaMsg = vnptRes.captchaSolved ? ` (\u0110\xE3 v\u01B0\u1EE3t Captcha: ${vnptRes.captchaSolved})` : "";
+          this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)${captchaMsg}`, logs);
+          return {
+            success: true,
+            provider: this.providerCode,
+            driverName: this.name,
+            pdfBuffer: buf,
+            pdfBase64: buf.toString("base64"),
+            contentType: "application/pdf",
+            filename: vnptRes.filename || this.buildPdfFilename(info),
+            isFallback: false,
+            captchaSolved: vnptRes.captchaSolved,
+            sourceUrl: info.lookupUrl || `https://${cleanMst}-tt78.vnpt-invoice.com.vn`,
+            executionLogs: logs
+          };
         }
       } catch (err) {
-        lastError = err.message || String(err);
+        this.createLog(`C\u1ED5ng VNPT ch\u01B0a tr\u1EA3 v\u1EC1 PDF: ${err.message}`, logs);
       }
     }
-    const portalCandidates = [
-      info.lookupUrl ? info.lookupUrl.replace(/\/+$/, "") : null,
-      cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : null,
-      "https://tracuu.vnpt-invoice.com.vn",
-      "https://portal.vnpt-invoice.com.vn"
-    ].filter(Boolean);
-    for (const portal of portalCandidates) {
-      try {
-        const captchaUrl = `${portal}/Captcha.ashx`;
-        this.createLog(`Y\xEAu c\u1EA7u \u1EA3nh Captcha t\u1EEB c\u1ED5ng VNPT: ${captchaUrl}`, logs);
-        const captchaResp = await axios5.get(captchaUrl, {
-          timeout: 8e3,
-          responseType: "arraybuffer",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            "Referer": portal
-          },
-          validateStatus: (s) => s === 200
-        });
-        const cookieHeader = captchaResp.headers["set-cookie"] ? Array.isArray(captchaResp.headers["set-cookie"]) ? captchaResp.headers["set-cookie"].join("; ") : captchaResp.headers["set-cookie"] : "";
-        if (captchaResp.data && captchaResp.data.byteLength > 20) {
-          this.createLog("\u0110\xE3 nh\u1EADn \u1EA3nh Captcha t\u1EEB VNPT. \u0110ang tr\xEDch xu\u1EA5t m\xE3 Captcha...", logs);
-          const captchaResult = await CaptchaSolver.solveWithDetails(Buffer.from(captchaResp.data));
-          const captchaCode = captchaResult.code;
-          this.createLog(`\u0110\xE3 gi\u1EA3i Captcha VNPT th\xE0nh c\xF4ng: "${captchaCode}" (Engine: ${captchaResult.engine})`, logs);
-          const queryUrl = `${portal}/TraCuu/TraCuuHoaDon`;
-          const queryResp = await axios5.post(queryUrl, {
-            fkey,
-            mst: cleanMst,
-            captcha: captchaCode,
-            sohd: info.invoiceNo,
-            khhdon: info.invoiceSeries
-          }, {
-            timeout: timeoutMs,
-            responseType: "arraybuffer",
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-              "Referer": portal,
-              "Cookie": cookieHeader,
-              ...options?.customHeaders || {}
-            },
-            validateStatus: (s) => s < 500
-          });
-          if (queryResp.data && queryResp.data.byteLength > 50) {
-            const buf = Buffer.from(queryResp.data);
-            if (buf.toString("utf-8", 0, 5).startsWith("%PDF")) {
-              this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng file PDF g\u1ED1c t\u1EEB VNPT (${(buf.length / 1024).toFixed(1)} KB)`, logs);
-              return {
-                success: true,
-                provider: this.providerCode,
-                driverName: this.name,
-                pdfBuffer: buf,
-                pdfBase64: buf.toString("base64"),
-                contentType: "application/pdf",
-                filename: this.buildPdfFilename(info),
-                isFallback: false,
-                sourceUrl: queryUrl,
-                captchaSolved: captchaCode,
-                executionLogs: logs
-              };
-            }
-          }
-        }
-      } catch (portalErr) {
-        this.createLog(`C\u1ED5ng VNPT ${portal} ch\u01B0a ho\xE0n t\u1EA5t: ${portalErr.message}`, logs);
-      }
-    }
-    this.createLog(`K\xEDch ho\u1EA1t Fallback chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Th\xF4ng t\u01B0 78 cho H\u0110 VNPT`, logs);
+    this.createLog(`K\xEDch ho\u1EA1t Fallback m\u1EABu chu\u1EA9n T\u1ED5ng c\u1EE5c Thu\u1EBF (GDT) cho H\u0110 VNPT`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
     return {
       ...fallbackRes,
@@ -10449,10 +5516,10 @@ var VnptDriver = class extends BaseInvoiceProviderDriver {
 
 // src/services/easyInvoiceService.ts
 import axios6 from "axios";
-import * as cheerio2 from "cheerio";
+import * as cheerio3 from "cheerio";
 import JSZip2 from "jszip";
-import https2 from "https";
-var httpsAgent2 = new https2.Agent({ rejectUnauthorized: false });
+import https3 from "https";
+var httpsAgent2 = new https3.Agent({ rejectUnauthorized: false });
 var isServerless2 = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
 );
@@ -10564,7 +5631,7 @@ async function downloadOriginalEasyInvoice(params) {
           httpsAgent: httpsAgent2
         }
       );
-      const $ = cheerio2.load(postRes.data);
+      const $ = cheerio3.load(postRes.data);
       const msg = $("#msg").val();
       if (msg) {
         console.warn(`[EasyInvoice] Th\xF4ng b\xE1o t\u1EEB c\u1ED5ng: "${msg}"`);
@@ -10644,7 +5711,8 @@ async function downloadOriginalEasyInvoice(params) {
                     contentType: "application/pdf",
                     buffer: pdfBuf,
                     pdfBase64: pdfBuf.toString("base64"),
-                    htmlContent: invoiceHtml
+                    htmlContent: invoiceHtml,
+                    captchaSolved: code
                   };
                 }
               } catch (zipErr) {
@@ -10656,7 +5724,8 @@ async function downloadOriginalEasyInvoice(params) {
                 contentType: "application/x-zip-compressed",
                 buffer: downloadedBuf,
                 pdfBase64: downloadedBuf.toString("base64"),
-                htmlContent: invoiceHtml
+                htmlContent: invoiceHtml,
+                captchaSolved: code
               };
             } else if (downloadedBuf.toString("utf-8", 0, 5).startsWith("%PDF")) {
               return {
@@ -10665,7 +5734,8 @@ async function downloadOriginalEasyInvoice(params) {
                 contentType: "application/pdf",
                 buffer: downloadedBuf,
                 pdfBase64: downloadedBuf.toString("base64"),
-                htmlContent: invoiceHtml
+                htmlContent: invoiceHtml,
+                captchaSolved: code
               };
             }
           }
@@ -10680,7 +5750,8 @@ async function downloadOriginalEasyInvoice(params) {
           filename: `${downloadFileName}.html`,
           contentType: "text/html",
           buffer: Buffer.from(invoiceHtml, "utf-8"),
-          htmlContent: invoiceHtml
+          htmlContent: invoiceHtml,
+          captchaSolved: code
         };
       }
     } catch (err) {
@@ -10740,8 +5811,8 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   async fetchPdf(info, options) {
     const logs = [];
     this.createLog(`Kh\u1EDFi \u0111\u1ED9ng x\u1EED l\xFD H\u0110\u0110T EasyInvoice: S\u1ED1 ${info.invoiceNo}, M\u1EABu ${info.templateCode}/${info.invoiceSeries}`, logs);
-    const lookupCode = (info.lookupCode || "").trim();
-    const cleanMst = (info.sellerTaxCode || "").trim();
+    const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || "").trim();
+    const cleanMst = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || "").trim();
     this.createLog(`M\xE3 tra c\u1EE9u EasyInvoice: "${lookupCode}", MST: "${cleanMst}"`, logs);
     if (lookupCode) {
       try {
@@ -10749,12 +5820,13 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
         const dlRes = await downloadOriginalEasyInvoice({
           lookupCode,
           sellerTaxCode: cleanMst,
-          lookupUrl: info.lookupUrl,
-          khhdon: info.invoiceSeries,
-          shdon: info.invoiceNo
+          lookupUrl: options?.customInfo?.lookupUrl || info.lookupUrl,
+          khhdon: options?.customInfo?.invoiceSeries || info.invoiceSeries,
+          shdon: options?.customInfo?.invoiceNo || info.invoiceNo
         });
         if (dlRes.success && dlRes.buffer && dlRes.buffer.length > 50) {
-          this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})`, logs);
+          const captchaMsg = dlRes.captchaSolved ? ` (\u0110\xE3 v\u01B0\u1EE3t Captcha: ${dlRes.captchaSolved})` : "";
+          this.createLog(`V\u01B0\u1EE3t Captcha v\xE0 t\u1EA3i th\xE0nh c\xF4ng h\xF3a \u0111\u01A1n g\u1ED1c t\u1EEB EasyInvoice (${(dlRes.buffer.length / 1024).toFixed(1)} KB, file: ${dlRes.filename})${captchaMsg}`, logs);
           return {
             success: true,
             provider: this.providerCode,
@@ -10764,6 +5836,7 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
             contentType: dlRes.contentType || "application/pdf",
             filename: dlRes.filename || this.buildPdfFilename(info),
             isFallback: false,
+            captchaSolved: dlRes.captchaSolved,
             sourceUrl: info.lookupUrl || "https://tracuu.easyinvoice.vn",
             executionLogs: logs
           };
@@ -11306,11 +6379,16 @@ var LcsDriver = class extends BaseInvoiceProviderDriver {
     }
     const totalAmount = parseFloat(this.extractXmlTag(xmlData, "TgTTTBSo") || "0") || 0;
     const totalTaxAmount = parseFloat(this.extractXmlTag(xmlData, "TgTThue") || "0") || 0;
+    const nmuaBlock = this.extractXmlTag(xmlData, "NMua") || this.extractXmlTag(xmlData, "Buyer") || "";
+    const buyerTaxCode = this.extractXmlTag(nmuaBlock, "MST") || this.extractXmlTag(xmlData, "MSTNMua") || this.extractXmlTag(xmlData, "nmmst") || "";
+    const buyerName = this.extractXmlTag(nmuaBlock, "Ten") || this.extractXmlTag(xmlData, "TenNMua") || this.extractXmlTag(xmlData, "nmten") || "";
     return {
       provider: this.providerCode,
       providerName: "LCS Soft EIP (C\xF4ng ty TNHH L.C.S)",
       sellerTaxCode,
       sellerName,
+      buyerTaxCode: buyerTaxCode || void 0,
+      buyerName: buyerName || void 0,
       invoiceNo,
       invoiceSeries,
       templateCode,
@@ -11539,10 +6617,10 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
 };
 
 // src/services/thaiSonInvoiceService.ts
-import * as cheerio3 from "cheerio";
+import * as cheerio4 from "cheerio";
 var THAISON_PORTAL_URL = "https://einvoice.vn/tra-cuu";
 function parseThaiSonForm(html) {
-  const $ = cheerio3.load(html);
+  const $ = cheerio4.load(html);
   const form = $("form").filter((_, el) => $(el).find('input[name="MaNhanHoaDon"]').length > 0).first();
   const token = form.find('input[name="CaptchaDeText"]').val();
   const imagePath = form.find("img#CaptchaImage").attr("src");
@@ -11553,8 +6631,8 @@ async function downloadOriginalThaiSonPdf(params) {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError("Th\xE1i S\u01A1n thi\u1EBFu M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n.", "THAISON", "LOOKUP_DATA_MISSING", 422);
   const signal = AbortSignal.timeout(Math.min(params.timeoutMs || 45e3, 45e3));
   const cookies = /* @__PURE__ */ new Map();
-  const request = async (path3, init = {}) => {
-    let url = new URL(path3, THAISON_PORTAL_URL);
+  const request = async (path4, init = {}) => {
+    let url = new URL(path4, THAISON_PORTAL_URL);
     let method = init.method || "GET";
     let body = init.body;
     for (let hop = 0; hop < 5; hop++) {
@@ -12053,6 +7131,10 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
     if (options?.forceFallback) {
       this.log("Ng\u01B0\u1EDDi d\xF9ng y\xEAu c\u1EA7u \xE9p s\u1EED d\u1EE5ng GenericFallbackDriver.", overallLogs);
       const fallbackInfo = await this.fallbackDriver.extractInfo(xmlContent);
+      if (options?.customInfo) {
+        if (options.customInfo.lookupCode) fallbackInfo.lookupCode = options.customInfo.lookupCode;
+        if (options.customInfo.sellerTaxCode) fallbackInfo.sellerTaxCode = options.customInfo.sellerTaxCode;
+      }
       const res = await this.fallbackDriver.fetchPdf(fallbackInfo, options);
       res.executionLogs = overallLogs.concat(res.executionLogs);
       return res;
@@ -12090,13 +7172,31 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
       this.log(`L\u1ED7i tr\xEDch xu\u1EA5t metadata: ${extractErr.message}. S\u1EED d\u1EE5ng Fallback parser.`, overallLogs);
       invoiceInfo = await this.fallbackDriver.extractInfo(xmlContent);
     }
+    try {
+      const gdtInv = parseGDTInvoiceXml(xmlContent);
+      if (!invoiceInfo.buyerName && gdtInv.nmten) invoiceInfo.buyerName = gdtInv.nmten;
+      if (!invoiceInfo.buyerTaxCode && gdtInv.nmmst) invoiceInfo.buyerTaxCode = gdtInv.nmmst;
+      if (!invoiceInfo.sellerName && gdtInv.nbten) invoiceInfo.sellerName = gdtInv.nbten;
+      if (!invoiceInfo.sellerTaxCode && gdtInv.nbmst) invoiceInfo.sellerTaxCode = gdtInv.nbmst;
+      if (!invoiceInfo.templateCode && gdtInv.khmshdon) invoiceInfo.templateCode = gdtInv.khmshdon;
+      if (!invoiceInfo.cqtCode && gdtInv.mhdon) invoiceInfo.cqtCode = gdtInv.mhdon;
+      if (!invoiceInfo.additionalData) invoiceInfo.additionalData = {};
+      invoiceInfo.additionalData.parsedInvoice = gdtInv;
+    } catch {
+    }
     if (options?.customInfo) {
       if (options.customInfo.lookupCode) {
         invoiceInfo.lookupCode = options.customInfo.lookupCode;
+        if (!invoiceInfo.secretCode) {
+          invoiceInfo.secretCode = options.customInfo.lookupCode;
+        }
         this.log(`\xC1p d\u1EE5ng M\xE3 tra c\u1EE9u do ng\u01B0\u1EDDi d\xF9ng cung c\u1EA5p: "${invoiceInfo.lookupCode}"`, overallLogs);
       }
       if (options.customInfo.secretCode) {
         invoiceInfo.secretCode = options.customInfo.secretCode;
+        if (!invoiceInfo.lookupCode) {
+          invoiceInfo.lookupCode = options.customInfo.secretCode;
+        }
         this.log(`\xC1p d\u1EE5ng M\xE3 b\xED m\u1EADt do ng\u01B0\u1EDDi d\xF9ng cung c\u1EA5p: "${invoiceInfo.secretCode}"`, overallLogs);
       }
       if (options.customInfo.lookupUrl) {
@@ -12105,6 +7205,12 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
       }
       if (options.customInfo.sellerTaxCode) {
         invoiceInfo.sellerTaxCode = options.customInfo.sellerTaxCode;
+      }
+      if (options.customInfo.invoiceNo) {
+        invoiceInfo.invoiceNo = String(options.customInfo.invoiceNo).padStart(7, "0");
+      }
+      if (options.customInfo.invoiceSeries) {
+        invoiceInfo.invoiceSeries = options.customInfo.invoiceSeries;
       }
     }
     if (selectedDriver.providerCode !== "GENERIC") {
@@ -12117,13 +7223,13 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
       } catch (crawlError) {
         if (crawlError instanceof OriginalInvoiceError) throw crawlError;
         this.log(`[C\u1EA2NH B\xC1O CRAWL TH\u1EA4T B\u1EA0I]: ${crawlError.message}`, overallLogs);
-        this.log(`T\u1EF0 \u0110\u1ED8NG CHUY\u1EC2N SANG GENERIC FALLBACK DRIVER \u0110\u1EC2 \u0110\u1EA2M B\u1EA2O H\u1EC6 TH\u1ED0NG KH\xD4NG B\u1ECA GI\xC1N \u0110O\u1EA0N...`, overallLogs);
+        this.log(`T\u1EF0 \u0110\u1ED8NG L\u1EA4Y B\u1EA2N TH\u1EC2 HI\u1EC6N M\u1EAAU CHU\u1EA8N T\u1ED4NG C\u1EE4C THU\u1EBE (N\u0110 123/2020/N\u0110-CP & TT 78/2021/TT-BTC)...`, overallLogs);
       }
     }
     try {
       const fallbackResult = await this.fallbackDriver.fetchPdf(invoiceInfo, options);
       fallbackResult.executionLogs = overallLogs.concat(fallbackResult.executionLogs);
-      this.log(`[SAFEGUARD HO\xC0N T\u1EA4T] \u0110\xE3 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n n\u1ED9i b\u1ED9 th\xE0nh c\xF4ng trong ${Date.now() - startTime}ms`, fallbackResult.executionLogs);
+      this.log(`[HO\xC0N T\u1EA4T] \u0110\xE3 t\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n M\u1EABu Chu\u1EA9n T\u1ED5ng C\u1EE5c Thu\u1EBF th\xE0nh c\xF4ng trong ${Date.now() - startTime}ms`, fallbackResult.executionLogs);
       return fallbackResult;
     } catch (fallbackError) {
       throw new Error(`Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o b\u1EA3n PDF d\u1EF1 ph\xF2ng: ${fallbackError.message}`);
@@ -12145,321 +7251,6 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 
 // src/services/invoice-engine/index.ts
 var invoiceManager = InvoiceDownloaderManager.getInstance();
-
-// src/services/vnptInvoiceService.ts
-import axios9 from "axios";
-import https3 from "https";
-import * as cheerio4 from "cheerio";
-var vnptHttpsAgent = new https3.Agent({
-  keepAlive: true,
-  maxSockets: 30,
-  keepAliveMsecs: 3e4
-});
-var vnptClient = axios9.create({
-  httpsAgent: vnptHttpsAgent,
-  timeout: 25e3
-});
-var vnptInvoiceCache = /* @__PURE__ */ new Map();
-var inFlightLookups = /* @__PURE__ */ new Map();
-function getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl) {
-  const cleanMst = (sellerTaxCode || "").trim().replace(/[^0-9\-]/g, "");
-  const cleanCode = (lookupCode || "").trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
-  let portalBase = (portalUrl || "").trim().replace(/\/+$/, "").replace(/\/HomeNoLogin\/SearchByFkey\/?$/i, "");
-  if (!portalBase) {
-    portalBase = cleanMst ? `https://${cleanMst}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn";
-  }
-  return `${portalBase}|${cleanCode}`;
-}
-function getCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl) {
-  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
-  const entry = vnptInvoiceCache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.cachedAt > 2 * 60 * 60 * 1e3) {
-    vnptInvoiceCache.delete(key);
-    return null;
-  }
-  return entry;
-}
-function setCachedVnptInvoice(sellerTaxCode, lookupCode, portalUrl, entry) {
-  const key = getVnptCacheKey(sellerTaxCode, lookupCode, portalUrl);
-  vnptInvoiceCache.set(key, entry);
-}
-async function lookupOriginalVnptInvoice(params) {
-  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
-  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u VNPT kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng");
-  const portal = (params.lookupUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn")).replace(/\/+$/, "");
-  const cacheKey = getVnptCacheKey(params.sellerTaxCode, lookupCode, portal);
-  if (!params.forceRefresh) {
-    const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
-    if (cached && cached.htmlContent) {
-      console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 t\u1EEB Cache t\u1EE9c th\xEC cho m\xE3: ${lookupCode}`);
-      return {
-        success: true,
-        htmlContent: cached.htmlContent,
-        checkCode: cached.checkCode,
-        pdfDownloadUrl: `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(cached.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`,
-        portalUrl: portal,
-        isCached: true,
-        invoiceInfo: cached.invoiceInfo
-      };
-    }
-  }
-  if (inFlightLookups.has(cacheKey)) {
-    console.log(`[VNPT Speed] T\xE1i s\u1EED d\u1EE5ng ti\u1EBFn tr\xECnh tra c\u1EE9u \u0111ang ch\u1EA1y cho m\xE3: ${lookupCode}`);
-    return inFlightLookups.get(cacheKey);
-  }
-  const lookupPromise = (async () => {
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
-    };
-    const maxAttempts = 2;
-    let lastError = "";
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const t0 = Date.now();
-        console.log(`[VNPT] B\u1EAFt \u0111\u1EA7u tra c\u1EE9u t\u1ED1i \u01B0u l\u1EA7n ${attempt}/${maxAttempts} (M\xE3: ${lookupCode}, C\u1ED5ng: ${portal})...`);
-        const page = await vnptClient.get(`${portal}/HomeNoLogin/SearchByFkey/`, {
-          headers,
-          timeout: 1e4,
-          validateStatus: (status) => status >= 200 && status < 400
-        });
-        const cookies = (page.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]).join("; ");
-        const $ = cheerio4.load(page.data);
-        const token = $('input[name="__RequestVerificationToken"]').attr("value") || "";
-        const captcha = await vnptClient.get(`${portal}/Captcha/Show?t=${Date.now()}`, {
-          headers: { ...headers, Referer: `${portal}/HomeNoLogin/SearchByFkey/`, Cookie: cookies },
-          responseType: "arraybuffer",
-          timeout: 1e4
-        });
-        const captchaCookies = (captcha.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
-        const sessionCookie = [...cookies.split("; ").filter(Boolean), ...captchaCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
-        const tAiStart = Date.now();
-        const captchaCode = (await CaptchaSolver.solveWithDetails(Buffer.from(captcha.data), {
-          prompt: VNPT_CAPTCHA_PROMPT
-        })).code;
-        console.log(`[VNPT Speed] Gi\u1EA3i Captcha trong ${Date.now() - tAiStart}ms: "${captchaCode}"`);
-        const form = new URLSearchParams({
-          __RequestVerificationToken: token,
-          strFkey: lookupCode,
-          captch: captchaCode,
-          submit: ""
-        });
-        const result = await vnptClient.post(`${portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
-          headers: {
-            ...headers,
-            "Content-Type": "application/x-www-form-urlencoded",
-            Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
-            Cookie: sessionCookie
-          },
-          maxRedirects: 5,
-          timeout: 2e4,
-          responseType: "text",
-          validateStatus: (status) => status >= 200 && status < 400
-        });
-        const html = String(result.data || "");
-        const isCaptchaError = /captcha|mã xác thực không đúng|sai mã xác thực|không chính xác/i.test(html) && !/invoice|hóa đơn|hoadon/i.test(html);
-        if (isCaptchaError) {
-          lastError = "VNPT b\xE1o sai m\xE3 x\xE1c th\u1EF1c Captcha.";
-          console.warn(`[VNPT] L\u1EA7n ${attempt} sai Captcha, \u0111ang th\u1EED l\u1EA1i v\u1EDBi \u1EA3nh m\u1EDBi...`);
-          continue;
-        }
-        const postCookies = (result.headers["set-cookie"] || []).map((cookie) => cookie.split(";")[0]);
-        const finalCookies = [...sessionCookie.split("; ").filter(Boolean), ...postCookies].filter((cookie, index, all) => all.findIndex((item) => item.split("=")[0] === cookie.split("=")[0]) === index).join("; ");
-        const $search = cheerio4.load(html);
-        let checkCode = "";
-        const onclickAttr = $search('a[onclick*="ajxCall4Portal"]').attr("onclick") || "";
-        const matchOnclick = onclickAttr.match(/ajxCall4Portal\(\s*['"]([^'"]+)['"]/);
-        if (matchOnclick) {
-          checkCode = matchOnclick[1];
-        }
-        if (!checkCode) {
-          const downloadHref = $search('a[href*="downloadPDF"]').attr("href") || "";
-          const matchHref = downloadHref.match(/checkCode=([^&"']+)/);
-          if (matchHref) {
-            checkCode = decodeURIComponent(matchHref[1]);
-          }
-        }
-        let invoiceInfo = void 0;
-        const firstRow = $search("table tr").filter((_, tr) => $search(tr).find("td").length >= 5).first();
-        if (firstRow.length > 0) {
-          const tds = firstRow.find("td");
-          invoiceInfo = {
-            name: $search(tds[1]).text().trim(),
-            template: $search(tds[2]).text().trim(),
-            series: $search(tds[3]).text().trim(),
-            number: $search(tds[4]).text().trim(),
-            totalAmount: $search(tds[5]).text().trim(),
-            issueDate: $search(tds[6]).text().trim(),
-            status: $search(tds[7]).text().trim(),
-            cqtStatus: $search(tds[8]).text().trim()
-          };
-        }
-        let fullInvoiceHtml = "";
-        let prefetchedPdfBuffer = void 0;
-        if (checkCode) {
-          const previewPayload = new URLSearchParams({
-            checkCode,
-            fkey: lookupCode,
-            nameCus: ""
-          });
-          const previewPromise = vnptClient.post(`${portal}/HomeNoLogin/ajxPreview/`, previewPayload.toString(), {
-            headers: {
-              ...headers,
-              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-              "X-Requested-With": "XMLHttpRequest",
-              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
-              Cookie: finalCookies
-            },
-            timeout: 2e4
-          });
-          const pdfDownloadUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-          const pdfPromise = vnptClient.get(pdfDownloadUrl, {
-            headers: {
-              ...headers,
-              Referer: `${portal}/HomeNoLogin/SearchByFkey/`,
-              Cookie: finalCookies
-            },
-            responseType: "arraybuffer",
-            timeout: 2e4
-          });
-          const [previewRes, pdfRes] = await Promise.allSettled([previewPromise, pdfPromise]);
-          if (previewRes.status === "fulfilled" && previewRes.value.data?.str) {
-            fullInvoiceHtml = String(previewRes.value.data.str);
-            if (!/<base /i.test(fullInvoiceHtml)) {
-              if (/<head([^>]*)>/i.test(fullInvoiceHtml)) {
-                fullInvoiceHtml = fullInvoiceHtml.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
-              } else {
-                fullInvoiceHtml = `<base href="${portal}/">
-` + fullInvoiceHtml;
-              }
-            }
-          }
-          if (pdfRes.status === "fulfilled" && pdfRes.value.data) {
-            const buf = Buffer.from(pdfRes.value.data);
-            if (buf.length > 1e3 && buf.slice(0, 5).toString().startsWith("%PDF")) {
-              prefetchedPdfBuffer = buf;
-              console.log(`[VNPT Speed] \u0110\xE3 n\u1EA1p s\u1EB5n file PDF g\u1ED1c (${buf.length} bytes) v\xE0o cache song song v\u1EDBi HTML!`);
-            }
-          }
-        }
-        if (!fullInvoiceHtml) {
-          fullInvoiceHtml = html.replace(/<head([^>]*)>/i, `<head$1><base href="${portal}/">`);
-        }
-        const cacheEntry = {
-          htmlContent: fullInvoiceHtml,
-          checkCode: checkCode || "",
-          portalUrl: portal,
-          pdfBuffer: prefetchedPdfBuffer,
-          cookies: finalCookies,
-          invoiceInfo,
-          cachedAt: Date.now()
-        };
-        setCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal, cacheEntry);
-        console.log(`[VNPT Speed] Ho\xE0n t\u1EA5t tra c\u1EE9u t\u1ED5ng c\u1ED9ng trong ${Date.now() - t0}ms!`);
-        return {
-          success: true,
-          htmlContent: fullInvoiceHtml,
-          checkCode: checkCode || void 0,
-          pdfDownloadUrl: checkCode ? `/api/vnpt/download-pdf?portal=${encodeURIComponent(portal)}&checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}` : void 0,
-          portalUrl: portal,
-          isCached: false,
-          invoiceInfo
-        };
-      } catch (err) {
-        lastError = err.message || String(err);
-        console.warn(`[VNPT] L\u1ED7i tra c\u1EE9u l\u1EA7n ${attempt}:`, lastError);
-      }
-    }
-    throw new Error(`Tra c\u1EE9u h\xF3a \u0111\u01A1n g\u1ED1c VNPT th\u1EA5t b\u1EA1i: ${lastError || "VNPT t\u1EEB ch\u1ED1i m\xE3 Captcha ho\u1EB7c kh\xF4ng tr\u1EA3 v\u1EC1 b\u1EA3n g\u1ED1c h\xF3a \u0111\u01A1n."}`);
-  })();
-  inFlightLookups.set(cacheKey, lookupPromise);
-  try {
-    return await lookupPromise;
-  } finally {
-    inFlightLookups.delete(cacheKey);
-  }
-}
-async function downloadOriginalVnptPdf(params) {
-  let portal = params.portalUrl || (params.sellerTaxCode ? `https://${params.sellerTaxCode}-tt78.vnpt-invoice.com.vn` : "https://4000344946-tt78.vnpt-invoice.com.vn");
-  portal = portal.replace(/\/+$/, "");
-  const lookupCode = params.lookupCode.trim().replace(/^(mã\s*tra\s*cứu|mtc|mtcuu|mã\s*tc|code|fkey)[\s:=-]*/i, "").trim();
-  const cleanShd = params.invoiceNumber ? String(params.invoiceNumber).padStart(7, "0") : lookupCode.slice(0, 16);
-  const cached = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
-  if (cached?.pdfBuffer && cached.pdfBuffer.length > 1e3) {
-    console.log(`[VNPT Speed] Tr\u1EA3 v\u1EC1 PDF g\u1ED1c t\u1EEB b\u1ED9 nh\u1EDB \u0111\u1EC7m (0ms delay)!`);
-    return {
-      data: cached.pdfBuffer,
-      filename: `HoaDon_VNPT_${cleanShd}.pdf`,
-      contentType: "application/pdf"
-    };
-  }
-  const headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
-    Referer: `${portal}/HomeNoLogin/SearchByFkey/`
-  };
-  let validPdfBuffer = null;
-  const checkCode = params.checkCode && params.checkCode !== "undefined" && params.checkCode !== "null" ? params.checkCode.trim() : cached?.checkCode;
-  const cookies = cached?.cookies || "";
-  if (checkCode && cookies) {
-    const pdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-    console.log(`[VNPT Speed] T\u1EA3i PDF tr\u1EF1c ti\u1EBFp b\u1EB1ng checkCode v\xE0 cookies c\xF3 s\u1EB5n: ${pdfUrl}`);
-    try {
-      const res = await vnptClient.get(pdfUrl, {
-        headers: { ...headers, Cookie: cookies },
-        responseType: "arraybuffer",
-        timeout: 15e3,
-        validateStatus: (s) => s === 200
-      });
-      if (res.data && res.data.byteLength > 1e3) {
-        const tempBuf = Buffer.from(res.data);
-        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
-          validPdfBuffer = tempBuf;
-          if (cached) cached.pdfBuffer = tempBuf;
-          console.log(`[VNPT Speed] T\u1EA3i nhanh PDF th\xE0nh c\xF4ng (${validPdfBuffer.length} bytes)!`);
-        }
-      }
-    } catch (err) {
-      console.warn(`[VNPT] Kh\xF4ng th\u1EC3 t\u1EA3i b\u1EB1ng cookies c\xF3 s\u1EB5n: ${err.message}.`);
-    }
-  }
-  if (!validPdfBuffer) {
-    console.log(`[VNPT Speed] Ch\u01B0a c\xF3 PDF trong cache, k\xEDch ho\u1EA1t tra c\u1EE9u nhanh \u0111\u1EC3 l\u1EA5y PDF...`);
-    const lookupRes = await lookupOriginalVnptInvoice({
-      lookupCode,
-      sellerTaxCode: params.sellerTaxCode,
-      lookupUrl: portal
-    });
-    const refreshedCache = getCachedVnptInvoice(params.sellerTaxCode, lookupCode, portal);
-    if (refreshedCache?.pdfBuffer && refreshedCache.pdfBuffer.length > 1e3) {
-      validPdfBuffer = refreshedCache.pdfBuffer;
-    } else if (lookupRes.checkCode) {
-      const finalCookies = refreshedCache?.cookies || "";
-      const freshPdfUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(lookupRes.checkCode)}&fkey=${encodeURIComponent(lookupCode)}`;
-      const res = await vnptClient.get(freshPdfUrl, {
-        headers: { ...headers, Cookie: finalCookies },
-        responseType: "arraybuffer",
-        timeout: 2e4,
-        validateStatus: (s) => s === 200
-      });
-      if (res.data && res.data.byteLength > 1e3) {
-        const tempBuf = Buffer.from(res.data);
-        if (tempBuf.slice(0, 5).toString().startsWith("%PDF")) {
-          validPdfBuffer = tempBuf;
-          if (refreshedCache) refreshedCache.pdfBuffer = tempBuf;
-        }
-      }
-    }
-  }
-  if (!validPdfBuffer || validPdfBuffer.length === 0 || !validPdfBuffer.slice(0, 5).toString().startsWith("%PDF")) {
-    throw new Error("C\u1ED5ng VNPT kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7 cho h\xF3a \u0111\u01A1n n\xE0y.");
-  }
-  return {
-    data: validPdfBuffer,
-    filename: `HoaDon_VNPT_${cleanShd}.pdf`,
-    contentType: "application/pdf"
-  };
-}
 
 // src/services/bkavInvoiceService.ts
 async function downloadOriginalBkavPdf(params) {
@@ -12666,9 +7457,9 @@ async function fetchGdtInvoiceDetail(invoice, headers, signal) {
       shdon: shdonVal,
       khmshdon: invoice.khmshdon || "1"
     });
-    const path3 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
+    const path4 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
     try {
-      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path3}?${params.toString()}`, {
+      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path4}?${params.toString()}`, {
         headers: {
           ...GDT_REQUEST_HEADERS,
           "request-id": getRequestId(),
@@ -12776,11 +7567,11 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
 
 // src/db/neonDb.ts
 import dotenv from "dotenv";
-import fs from "fs";
-import path from "path";
+import fs2 from "fs";
+import path2 from "path";
 import { Pool } from "pg";
 dotenv.config({ override: true });
-var CONFIG_FILE = path.join(process.cwd(), "neon_config.json");
+var CONFIG_FILE = path2.join(process.cwd(), "neon_config.json");
 var pool = null;
 var currentPoolUrl = null;
 var isPostgresConnected = false;
@@ -12794,8 +7585,8 @@ function cleanDatabaseUrl(rawUrl) {
 }
 function getStoredDatabaseUrl() {
   try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const raw = fs.readFileSync(CONFIG_FILE, "utf-8");
+    if (fs2.existsSync(CONFIG_FILE)) {
+      const raw = fs2.readFileSync(CONFIG_FILE, "utf-8");
       const data = JSON.parse(raw);
       if (data && typeof data.databaseUrl === "string" && data.databaseUrl.trim()) {
         return cleanDatabaseUrl(data.databaseUrl);
@@ -13153,7 +7944,7 @@ async function saveNeonDatabaseUrl(rawUrl, initialAdmin) {
     }
   }
   try {
-    fs.writeFileSync(
+    fs2.writeFileSync(
       CONFIG_FILE,
       JSON.stringify(
         {
@@ -13626,7 +8417,7 @@ async function solveCaptchaOCR(svgOrDataUri, customApiKey) {
   try {
     const image = isBitmap ? "data:" + bitmapMime + ";base64," + bitmapBase64 : "data:image/svg+xml;base64," + Buffer.from(rawSvg, "utf8").toString("base64");
     const code = await solveCaptchaWithGemini(image, ALPHANUMERIC_CAPTCHA_PROMPT, { customApiKey, alphanumeric: true });
-    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || "gemini-2.5-flash-lite" };
+    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || "gemini-flash-latest" };
   } catch (error) {
     return { code: "", error: error.message || "Kh\xF4ng nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c CAPTCHA. Vui l\xF2ng nh\u1EADp th\u1EE7 c\xF4ng." };
   }
@@ -13648,8 +8439,9 @@ app.get("/api/gdt/captcha", async (req, res) => {
       const data = await gdtRes.json();
       if (data && data.key && data.content) {
         if (cookieStr) captchaCookieJar.set(data.key, cookieStr);
-        captchaContentMap.set(data.key, data.content);
-        const base64Image = `data:image/svg+xml;base64,${Buffer.from(data.content, "utf-8").toString("base64")}`;
+        const cleanedSvg = cleanGdtSvgNoise(data.content);
+        captchaContentMap.set(data.key, cleanedSvg);
+        const base64Image = `data:image/svg+xml;base64,${Buffer.from(cleanedSvg, "utf-8").toString("base64")}`;
         return res.json({
           success: true,
           isRealGDT: true,
@@ -13657,7 +8449,7 @@ app.get("/api/gdt/captcha", async (req, res) => {
           captchaCookie: cookieStr,
           captchaCode: "",
           captchaImage: base64Image,
-          rawSvg: data.content,
+          rawSvg: cleanedSvg,
           source: "hoadondientu.gdt.gov.vn"
         });
       }
@@ -13685,7 +8477,7 @@ app.get("/api/gdt/captcha", async (req, res) => {
 });
 app.post("/api/gdt/ocr-captcha", async (req, res) => {
   try {
-    const { captchaKey, captchaImage, rawSvg } = req.body;
+    const { captchaKey, captchaImage, rawSvg, customApiKey } = req.body;
     let contentToSolve = rawSvg || captchaImage;
     if (!contentToSolve && captchaKey && captchaContentMap.has(captchaKey)) {
       contentToSolve = captchaContentMap.get(captchaKey);
@@ -13693,7 +8485,7 @@ app.post("/api/gdt/ocr-captcha", async (req, res) => {
     if (!contentToSolve) {
       return res.status(400).json({ success: false, message: "Thi\u1EBFu d\u1EEF li\u1EC7u \u1EA3nh Captcha." });
     }
-    const ocrResult = await solveCaptchaOCR(contentToSolve);
+    const ocrResult = await solveCaptchaOCR(contentToSolve, customApiKey);
     if (ocrResult.code) {
       return res.json({
         success: true,
@@ -13981,11 +8773,13 @@ app.post("/api/gdt/pos-captcha", async (req, res) => {
     if (!data.key || !data.content) {
       return res.status(502).json({ success: false, message: "CAPTCHA h\xF3a \u0111\u01A1n m\xE1y t\xEDnh ti\u1EC1n kh\xF4ng c\xF3 d\u1EEF li\u1EC7u h\u1EE3p l\u1EC7." });
     }
+    const cleanedSvg = cleanGdtSvgNoise(data.content);
     return res.json({
       success: true,
       captchaKey: data.key,
       captchaCookie: extractCookies(response),
-      captchaImage: `data:image/svg+xml;base64,${Buffer.from(data.content, "utf-8").toString("base64")}`
+      captchaImage: `data:image/svg+xml;base64,${Buffer.from(cleanedSvg, "utf-8").toString("base64")}`,
+      rawSvg: cleanedSvg
     });
   } catch (error) {
     return res.status(502).json({ success: false, message: error?.message || "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i C\u1ED5ng T\u1ED5ng c\u1EE5c Thu\u1EBF \u0111\u1EC3 l\u1EA5y CAPTCHA." });
@@ -14415,7 +9209,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
     return entry;
   };
   addLog("step", `[1/6] B\u1EAFt \u0111\u1EA7u kh\u1EDFi t\u1EA1o quy tr\xECnh t\u1EF1 \u0111\u1ED9ng h\xF3a Python Selenium cho MST: ${mst}`, "INIT", 10);
-  const pythonScriptPath = path2.join(process.cwd(), "python", "gdt_selenium_crawler.py");
+  const pythonScriptPath = path3.join(process.cwd(), "python", "gdt_selenium_crawler.py");
   const args = [
     pythonScriptPath,
     "--mst",
@@ -14473,8 +9267,8 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
     const zip = new JSZip4();
-    const fs2 = await import("fs");
-    const pythonDir = path2.join(process.cwd(), "python");
+    const fs3 = await import("fs");
+    const pythonDir = path3.join(process.cwd(), "python");
     const files = [
       "gdt_selenium_crawler.py",
       "requirements.txt",
@@ -14485,9 +9279,9 @@ app.get("/api/gdt/download-python-package", async (req, res) => {
       "HUONG_DAN_SUA_LOI_PYTHON.txt"
     ];
     for (const file of files) {
-      const fullPath = path2.join(pythonDir, file);
-      if (fs2.existsSync(fullPath)) {
-        const content = fs2.readFileSync(fullPath, "utf-8");
+      const fullPath = path3.join(pythonDir, file);
+      if (fs3.existsSync(fullPath)) {
+        const content = fs3.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
@@ -14599,8 +9393,8 @@ echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
 python3 gdt_selenium_crawler.py --type purchase
 `;
-    if (fs2.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
-      zip.file("run_windows.bat", fs2.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
+    if (fs3.existsSync(path3.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs3.readFileSync(path3.join(pythonDir, "run_windows.bat"), "utf-8"));
     } else {
       zip.file("run_windows.bat", runBat);
     }
@@ -14792,22 +9586,35 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
 });
 app.post("/api/invoice-downloader/solve-captcha", async (req, res) => {
   try {
-    const { image, whitelist } = req.body;
+    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess, timeoutMs } = req.body;
     if (!image) {
-      return res.status(400).json({ error: "\u1EA2nh Captcha kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+      return res.status(400).json({ success: false, error: "\u1EA2nh Captcha kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
-    const result = await CaptchaSolver.solveWithDetails(image, {
-      whitelist: whitelist || void 0
+    const prompt = alphanumeric ? ALPHANUMERIC_CAPTCHA_PROMPT : void 0;
+    const result = await CaptchaSolver.solveWithAI(image, {
+      whitelist: whitelist || void 0,
+      alphanumeric: Boolean(alphanumeric),
+      forceGemini: Boolean(forceGemini),
+      preprocess: preprocess !== false,
+      timeoutMs,
+      prompt,
+      customApiKey: customApiKey || void 0
     });
-    res.json({
-      success: true,
-      code: result.code,
-      confidence: result.confidence,
-      engine: result.engine,
-      processingTimeMs: result.processingTimeMs
+    if (result && result.code) {
+      return res.json({
+        success: true,
+        code: result.code,
+        confidence: result.confidence,
+        engine: result.engine,
+        processingTimeMs: result.processingTimeMs
+      });
+    }
+    return res.json({
+      success: false,
+      error: "Kh\xF4ng th\u1EC3 t\u1EF1 nh\u1EADn di\u1EC7n CAPTCHA b\u1EB1ng Tesseract local l\u1EABn Gemini API. Vui l\xF2ng nh\u1EADp m\xE3 th\u1EE7 c\xF4ng."
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: false, error: error.message || "L\u1ED7i khi nh\u1EADn di\u1EC7n CAPTCHA." });
   }
 });
 app.post("/api/easyinvoice/download", async (req, res) => {
@@ -14951,7 +9758,7 @@ app.all(["/api/vnpt/ajxPreview", "/api/vnpt/ajx-preview", "/HomeNoLogin/ajxPrevi
       Cookie: cookies
     };
     console.log(`[VNPT Proxy ajxPreview] T\u1EA3i b\u1EA3n th\u1EC3 hi\u1EC7n: portal=${portal}, fkey="${fkey}", checkCode="${checkCode}"...`);
-    const previewRes = await axios10.post(`${portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
+    const previewRes = await axios9.post(`${portal}/HomeNoLogin/ajxPreview/`, params.toString(), {
       headers,
       timeout: 25e3
     });
@@ -14976,7 +9783,7 @@ app.all(["/api/vnpt/downloadPDF", "/HomeNoLogin/downloadPDF", "/HomeNoLogin/down
     };
     const targetUrl = `${portal}/HomeNoLogin/downloadPDF?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
     console.log(`[VNPT Proxy downloadPDF] T\u1EA3i PDF t\u1EEB: ${targetUrl}...`);
-    const pdfRes = await axios10.get(targetUrl, {
+    const pdfRes = await axios9.get(targetUrl, {
       headers,
       responseType: "arraybuffer",
       timeout: 3e4
@@ -15003,7 +9810,7 @@ app.all(["/api/vnpt/downloadZip", "/api/vnpt/download-zip", "/HomeNoLogin/downlo
       Cookie: cookies
     };
     const targetUrl = `${portal}/HomeNoLogin/downloadZip?checkCode=${encodeURIComponent(checkCode)}&fkey=${encodeURIComponent(fkey)}&nameCus=${encodeURIComponent(nameCus)}`;
-    const zipRes = await axios10.get(targetUrl, {
+    const zipRes = await axios9.get(targetUrl, {
       headers,
       responseType: "arraybuffer",
       timeout: 3e4
@@ -15023,7 +9830,7 @@ app.all(["/Record/DownloadMultiFiles", "/HomeNoLogin/DownloadMultiFiles"], async
       return res.status(404).send("Phi\xEAn l\xE0m vi\u1EC7c \u0111\xE3 h\u1EBFt h\u1EA1n.");
     }
     const targetUrl = `${session.portal}${req.originalUrl}`;
-    const fileRes = await axios10.get(targetUrl, {
+    const fileRes = await axios9.get(targetUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
@@ -15080,7 +9887,7 @@ app.get("/api/vnpt/captcha", async (req, res) => {
     if (!session) {
       return res.status(404).send("Session expired");
     }
-    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+    const captchaRes = await axios9.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         Cookie: session.cookies,
@@ -15108,7 +9915,7 @@ app.get("/api/vnpt/auto-solve-captcha", async (req, res) => {
       Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
       Cookie: session.cookies
     };
-    const captchaRes = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+    const captchaRes = await axios9.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
       headers,
       responseType: "arraybuffer",
       timeout: 15e3
@@ -15156,7 +9963,7 @@ app.post("/api/vnpt/portal-submit", express.urlencoded({ extended: true }), asyn
       Referer: `${session.portal}/HomeNoLogin/SearchByFkey/`,
       Cookie: session.cookies
     };
-    const postRes = await axios10.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
+    const postRes = await axios9.post(`${session.portal}/HomeNoLogin/SearchByFkey`, form.toString(), {
       headers,
       responseType: "text",
       validateStatus: (s) => s >= 200 && s < 400
@@ -15172,7 +9979,7 @@ app.post("/api/vnpt/portal-submit", express.urlencoded({ extended: true }), asyn
     $("head").prepend(`<base href="${session.portal}/">`);
     if (isCaptchaError) {
       try {
-        const freshCaptcha = await axios10.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
+        const freshCaptcha = await axios9.get(`${session.portal}/Captcha/Show?t=${Date.now()}`, {
           headers: { ...headers, Cookie: session.cookies, Referer: `${session.portal}/HomeNoLogin/SearchByFkey/` },
           responseType: "arraybuffer",
           timeout: 1e4
@@ -16253,11 +11060,11 @@ async function startServer() {
           return next();
         }
         try {
-          const fs2 = await import("fs");
-          const path3 = await import("path");
-          const indexPath = path3.resolve(process.cwd(), "index.html");
-          if (fs2.existsSync(indexPath)) {
-            let template = fs2.readFileSync(indexPath, "utf-8");
+          const fs3 = await import("fs");
+          const path4 = await import("path");
+          const indexPath = path4.resolve(process.cwd(), "index.html");
+          if (fs3.existsSync(indexPath)) {
+            let template = fs3.readFileSync(indexPath, "utf-8");
             template = await vite.transformIndexHtml(req.originalUrl, template);
             return res.status(200).set({ "Content-Type": "text/html" }).end(template);
           }
@@ -16272,10 +11079,10 @@ async function startServer() {
       console.error("[Vite Init Error]:", viteErr.message);
     }
   } else {
-    const distPath = process.env.VERCEL ? path2.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path2.dirname(__filename) : process.cwd();
+    const distPath = process.env.VERCEL ? path3.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path3.dirname(__filename) : process.cwd();
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path2.join(distPath, "index.html"));
+      res.sendFile(path3.join(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

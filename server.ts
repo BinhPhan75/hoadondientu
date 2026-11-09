@@ -376,9 +376,34 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
       ? 'data:' + bitmapMime + ';base64,' + bitmapBase64
       : 'data:image/svg+xml;base64,' + Buffer.from(rawSvg, 'utf8').toString('base64');
     const code = await solveCaptchaWithGemini(image, ALPHANUMERIC_CAPTCHA_PROMPT, { customApiKey, alphanumeric: true });
-    return { code, modelUsed: process.env.CAPTCHA_AI_MODEL || 'gemini-flash-latest' };
+    return { code, modelUsed: 'gemini-3.1-flash-lite' };
   } catch (error: any) {
-    return { code: '', error: error.message || 'Không nhận diện được CAPTCHA. Vui lòng nhập thủ công.' };
+    // Secondary fallback: Server-side Tesseract if raster bitmap is available
+    if (isBitmap && bitmapBase64) {
+      try {
+        const { solveCaptchaWithTesseract } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver.js');
+        const tessResult = await solveCaptchaWithTesseract(Buffer.from(bitmapBase64, 'base64'), {
+          digitsOnly: false,
+          timeoutMs: 6000
+        });
+        if (tessResult?.code && tessResult.code.length >= 4) {
+          console.log(`[Tesseract Server Fallback] Solved Captcha: "${tessResult.code}"`);
+          return { code: tessResult.code, modelUsed: 'tesseract-server' };
+        }
+      } catch (tessErr) {
+        console.warn('[Server Tesseract fallback notice]:', tessErr);
+      }
+    }
+
+    const errMsg = String(error?.message || error || '');
+    const isQuota = /429|quota|RESOURCE_EXHAUSTED|spending cap/i.test(errMsg);
+    return { 
+      code: '', 
+      isSpendingCap: isQuota,
+      error: isQuota 
+        ? 'Hạn mức AI nhận diện Captcha tạm hết lượt hôm nay. Vui lòng nhìn ảnh và nhập mã thủ công.'
+        : (errMsg || 'Không nhận diện được CAPTCHA. Vui lòng nhập thủ công.') 
+    };
   }
 }
 
@@ -449,7 +474,7 @@ app.get('/api/gdt/captcha', async (req, res) => {
 // 2.1 Dedicated OCR Auto-solve Endpoint
 app.post('/api/gdt/ocr-captcha', async (req, res) => {
   try {
-    const { captchaKey, captchaImage, rawSvg } = req.body;
+    const { captchaKey, captchaImage, rawSvg, customApiKey } = req.body;
     let contentToSolve = rawSvg || captchaImage;
 
     if (!contentToSolve && captchaKey && captchaContentMap.has(captchaKey)) {
@@ -460,7 +485,7 @@ app.post('/api/gdt/ocr-captcha', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Thiếu dữ liệu ảnh Captcha.' });
     }
 
-    const ocrResult = await solveCaptchaOCR(contentToSolve);
+    const ocrResult = await solveCaptchaOCR(contentToSolve, customApiKey);
     if (ocrResult.code) {
       return res.json({
         success: true,
@@ -528,6 +553,15 @@ app.post('/api/gdt/auto-login', async (req, res) => {
       const cleanedSvg = cleanGdtSvgNoise(capData.content);
       const ocrResult = await solveCaptchaOCR(cleanedSvg, customApiKey);
       const solvedCode = (ocrResult.code || '').trim().toUpperCase();
+
+      if (ocrResult.isSpendingCap) {
+        return res.status(400).json({
+          success: false,
+          needManualCaptcha: true,
+          isSpendingCap: true,
+          message: 'Hạn mức AI nhận diện Captcha tạm hết lượt hôm nay. Vui lòng nhìn hình và nhập mã để đăng nhập.'
+        });
+      }
 
       if (!solvedCode || solvedCode.length < 4) {
         console.log(`[Auto-Login] Lần ${attempt}: OCR chưa ra mã ký tự, đổi Captcha mới...`);

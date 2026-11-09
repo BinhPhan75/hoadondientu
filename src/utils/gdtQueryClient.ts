@@ -2,7 +2,6 @@ import { GDTInvoice } from '../types';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
 import { convertSvgToSharpPng } from './captchaOcrHelper';
-import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
 
 export interface QueryInvoicesOptions {
   fromDate: string;
@@ -26,6 +25,7 @@ export interface QueryInvoicesResult {
   invoices: GDTInvoice[];
   status?: number;
   message?: string;
+  error?: string;
   source?: 'proxy' | 'direct_browser';
   posDiagnostics?: Array<{ from: string; to: string; status: string; count?: number; attempts?: number }>;
 }
@@ -65,6 +65,7 @@ export interface CaptchaResult {
   captchaImage: string;
   captchaKey: string;
   captchaCookie?: string;
+  rawSvg?: string;
   source?: 'proxy' | 'direct_browser' | 'fallback';
   error?: string;
 }
@@ -74,7 +75,7 @@ export interface PosCaptchaResult extends CaptchaResult {}
 export interface PosCaptchaSolveResult {
   success: boolean;
   code?: string;
-  engine?: 'gemini' | 'tesseract-local';
+  engine?: 'gemini' | 'gemini-ai' | 'tesseract-local' | string;
   error?: string;
 }
 
@@ -206,6 +207,7 @@ export async function executeGdtPosCaptcha(options: {
         captchaImage: data.captchaImage,
         captchaKey: data.captchaKey,
         captchaCookie: data.captchaCookie || '',
+        rawSvg: data.rawSvg || '',
         source: 'proxy',
       };
     }
@@ -217,35 +219,55 @@ export async function executeGdtPosCaptcha(options: {
 
 export async function executeGdtPosCaptchaSolve(options: {
   captchaImage: string;
+  captchaKey?: string;
+  rawSvg?: string;
   customApiKey?: string;
   forceGemini?: boolean;
 }): Promise<PosCaptchaSolveResult> {
   try {
-    if (!options.captchaImage) {
+    if (!options.captchaImage && !options.rawSvg) {
       return { success: false, error: 'Hình ảnh CAPTCHA rỗng.' };
     }
 
-    let imageSource = options.captchaImage;
+    // Rasterize SVG sang PNG sắc nét trước để cả Gemini và Tesseract trên server đều đọc tốt
+    let payloadImg = options.captchaImage;
     try {
-      imageSource = await convertSvgToSharpPng(options.captchaImage);
-    } catch {
-      imageSource = options.captchaImage;
+      if (typeof window !== 'undefined' && options.captchaImage) {
+        payloadImg = await convertSvgToSharpPng(options.captchaImage);
+      }
+    } catch {}
+
+    // 1. Thử nhận diện bằng Server AI OCR (Gemini 3.1 Flash Lite + Server Tesseract Fallback)
+    try {
+      const ocrResp = await fetch('/api/gdt/ocr-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          captchaImage: payloadImg,
+          captchaKey: options.captchaKey,
+          rawSvg: options.rawSvg,
+          customApiKey: options.customApiKey
+        })
+      });
+
+      if (ocrResp.ok) {
+        const ocrData = await ocrResp.json().catch(() => ({}));
+        if (ocrData?.success && ocrData.captchaCode) {
+          const cleanCode = String(ocrData.captchaCode).trim().toUpperCase();
+          if (cleanCode.length >= 4) {
+            return {
+              success: true,
+              code: cleanCode,
+              engine: ocrData.modelUsed || 'gemini-3.1-flash-lite'
+            };
+          }
+        }
+      }
+    } catch (serverErr) {
+      console.warn('[executeGdtPosCaptchaSolve] Server OCR failed:', serverErr);
     }
 
-    const localResult = await solveCaptchaWithTesseract(imageSource, {
-      digitsOnly: false,
-      timeoutMs: 8000
-    });
-
-    if (localResult && localResult.code) {
-      return {
-        success: true,
-        code: localResult.code.toUpperCase(),
-        engine: 'tesseract-local'
-      };
-    }
-
-    return { success: false, error: 'Không thể tự nhận diện CAPTCHA POS bằng Local OCR.' };
+    return { success: false, error: 'Không thể nhận diện mã CAPTCHA POS.' };
   } catch (error: any) {
     return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA POS.' };
   }

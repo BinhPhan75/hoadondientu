@@ -78,17 +78,20 @@ export default function App() {
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
   const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('live_gdt');
 
-  // Filter Parameters State
-  const [filters, setFilters] = useState<FilterParams>({
-    invoiceType: 'purchase',
-    fromDate: '2025-01-01',
-    toDate: '2026-12-31',
-    status: 'all',
-    cqtCodeStatus: 'all',
-    sellerTaxCode: '',
-    buyerTaxCode: '',
-    searchKeyword: '',
-    taxRateFilter: 'all'
+  // Filter Parameters State - Mặc định năm hiện tại
+  const [filters, setFilters] = useState<FilterParams>(() => {
+    const currentYear = new Date().getFullYear();
+    return {
+      invoiceType: 'purchase',
+      fromDate: `${currentYear}-01-01`,
+      toDate: `${currentYear}-12-31`,
+      status: 'all',
+      cqtCodeStatus: 'all',
+      sellerTaxCode: '',
+      buyerTaxCode: '',
+      searchKeyword: '',
+      taxRateFilter: 'all'
+    };
   });
 
   // Modals Visibility State
@@ -496,6 +499,85 @@ export default function App() {
     });
   }, [invoices]);
 
+  // Tự động tải lại CAPTCHA mới để đăng nhập nếu hết phiên làm việc Cổng Thuế
+  const reloginGdtSession = async (reason = 'Phiên làm việc Cổng Thuế đã hết hạn'): Promise<{ success: boolean; token?: string; cookieHeader?: string }> => {
+    const mst = account.taxCode?.trim();
+    const pwd = account.password?.trim();
+
+    if (!mst || !pwd) {
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'warning',
+        message: `⚠️ [CẦN ĐĂNG NHẬP LẠI] ${reason}. Chưa có đủ MST hoặc Mật khẩu để tự động kết nối lại. Vui lòng nhập thông tin trên thanh bên trái.`
+      }]);
+      setAccount(prev => ({ ...prev, isRealGDT: false }));
+      return { success: false };
+    }
+
+    setConsoleLogs(prev => [...prev, {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString('vi-VN'),
+      level: 'warning',
+      message: `⚠️ [HẾT PHIÊN CỔNG THUẾ] ${reason}. Hệ thống đang tự động tải CAPTCHA mới để đăng nhập kết nối lại Cổng Tổng cục Thuế...`
+    }]);
+
+    try {
+      const loginRes = await executeGdtLogin({
+        taxCode: mst,
+        password: pwd,
+        vietnamProxy: account.vietnamProxy,
+        customApiKey: account.customApiKey
+      });
+
+      if (loginRes.success && loginRes.token) {
+        const newSession = {
+          token: loginRes.token,
+          cookieHeader: loginRes.cookieHeader || ''
+        };
+        setGdtSession(newSession);
+        try {
+          sessionStorage.setItem('gdt_session_tokens', JSON.stringify(newSession));
+        } catch {}
+
+        setAccount(prev => ({
+          ...prev,
+          taxCode: mst,
+          taxpayerName: loginRes.taxpayerName || prev.taxpayerName,
+          address: loginRes.address || prev.address,
+          isRealGDT: true
+        }));
+
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'success',
+          message: `✓ [TỰ ĐỘNG ĐĂNG NHẬP LẠI THÀNH CÔNG] Đã cấp mới phiên làm việc Cổng Thuế cho MST ${mst}. Tiếp tục thực hiện yêu cầu...`
+        }]);
+
+        return { success: true, token: loginRes.token, cookieHeader: loginRes.cookieHeader };
+      }
+
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'error',
+        message: `❌ [TỰ ĐỘNG ĐĂNG NHẬP LẠI THẤT BẠI] ${loginRes.error || 'Chưa vượt được Captcha tự động'}. Vui lòng nhập mã Captcha thủ công ở menu bên trái.`
+      }]);
+      setAccount(prev => ({ ...prev, isRealGDT: false }));
+      return { success: false };
+    } catch (err: any) {
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'error',
+        message: `❌ [LỖI TÁI KẾT NỐI] ${err.message}. Vui lòng thử lại thủ công.`
+      }]);
+      setAccount(prev => ({ ...prev, isRealGDT: false }));
+      return { success: false };
+    }
+  };
+
   // Multi-Month Sequential Execution
   const runPosPhase = async (activeToken: string, activeCookie: string) => {
     const posChunks = generateDayChunks(filters.fromDate, filters.toDate, 5);
@@ -531,48 +613,81 @@ export default function App() {
       let queryRes: Awaited<ReturnType<typeof executeGdtInvoiceQuery>> | null = null;
       let forceGeminiFallback = false;
       let forceManualCaptcha = false;
-      for (let captchaAttempt = 0; captchaAttempt < 3; captchaAttempt++) {
+      const MAX_POS_CAPTCHA_ATTEMPTS = 5;
+
+      for (let captchaAttempt = 0; captchaAttempt < MAX_POS_CAPTCHA_ATTEMPTS; captchaAttempt++) {
+        if (isSyncCancelledRef.current) break;
+
         const captcha = await executeGdtPosCaptcha({
           token: activeToken,
           cookieHeader: activeCookie,
           vietnamProxy: account.vietnamProxy,
         });
         if (!captcha.success) {
-          queryRes = { success: false, invoices: [], message: captcha.error || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
-          break;
-        }
-        const solverResult: PosCaptchaSolveResult = forceManualCaptcha
-          ? { success: false, error: 'Tự nhận diện CAPTCHA không thành công.' }
-          : await executeGdtPosCaptchaSolve({
-              captchaImage: captcha.captchaImage,
-              customApiKey: account.customApiKey,
-              forceGemini: forceGeminiFallback,
-            });
-        forceGeminiFallback = false;
-        let captchaCode = solverResult.success ? solverResult.code || null : null;
-        if (captchaCode) {
-          const engineLabel = solverResult.engine === 'tesseract-local' ? 'Tesseract local' : 'Gemini API';
-          setConsoleLogs(prev => [...prev, {
-            id: Math.random().toString(36).substring(2, 9),
-            timestamp: new Date().toLocaleTimeString('vi-VN'),
-            level: 'step',
-            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] CAPTCHA được nhận diện bằng ${engineLabel}: "${captchaCode}".`,
-          }]);
-        } else {
           setConsoleLogs(prev => [...prev, {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'warning',
-            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] OCR không nhận diện được CAPTCHA. Chuyển sang luồng nhập tay.`,
+            message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Không tải được CAPTCHA từ Cổng Thuế (${captcha.error || 'Lỗi mạng'}). Đang tự động tải lại (lần ${captchaAttempt + 1}/${MAX_POS_CAPTCHA_ATTEMPTS})...`
           }]);
-          captchaCode = await new Promise<string | null>(resolve => {
-            setPendingPosCaptcha({ captcha, rangeLabel: `${chunk.from} -> ${chunk.to}`, resolve });
-          });
+          if (captchaAttempt < MAX_POS_CAPTCHA_ATTEMPTS - 1) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          queryRes = { success: false, invoices: [], message: captcha.error || 'Không tải được CAPTCHA hóa đơn máy tính tiền.' };
+          break;
         }
+
+        const solverResult: PosCaptchaSolveResult = forceManualCaptcha
+          ? { success: false, error: 'Tự nhận diện CAPTCHA không thành công.' }
+          : await executeGdtPosCaptchaSolve({
+              captchaImage: captcha.captchaImage,
+              captchaKey: captcha.captchaKey,
+              rawSvg: captcha.rawSvg,
+              customApiKey: account.customApiKey,
+              forceGemini: forceGeminiFallback,
+            });
+        forceGeminiFallback = false;
+
+        let captchaCode = solverResult.success ? solverResult.code || null : null;
+
+        // Trong quá trình tải hóa đơn máy tính tiền: nếu app không đọc được mã captcha trả về thì phải tự động tải lại captcha mới để xử lý
+        if (!captchaCode) {
+          if (captchaAttempt < MAX_POS_CAPTCHA_ATTEMPTS - 1 && !forceManualCaptcha) {
+            setConsoleLogs(prev => [...prev, {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'warning',
+              message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Không đọc được mã CAPTCHA trả về (lần thử ${captchaAttempt + 1}/${MAX_POS_CAPTCHA_ATTEMPTS}). Đang tự động tải lại CAPTCHA mới từ Cổng Thuế để xử lý tiếp...`,
+            }]);
+            await new Promise(r => setTimeout(r, 600));
+            continue; // TỰ ĐỘNG TẢI LẠI CAPTCHA MỚI!
+          } else {
+            setConsoleLogs(prev => [...prev, {
+              id: Math.random().toString(36).substring(2, 9),
+              timestamp: new Date().toLocaleTimeString('vi-VN'),
+              level: 'warning',
+              message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Đã tự động thử lại ${MAX_POS_CAPTCHA_ATTEMPTS} lần chưa đọc được mã. Chuyển sang luồng nhập tay cho đợt này.`,
+            }]);
+            captchaCode = await new Promise<string | null>(resolve => {
+              setPendingPosCaptcha({ captcha, rangeLabel: `${chunk.from} -> ${chunk.to}`, resolve });
+            });
+          }
+        } else {
+          const engineLabel = solverResult.engine?.includes('gemini') ? 'Gemini AI' : (solverResult.engine === 'tesseract-local' ? 'Tesseract local' : 'Bộ nhận diện tự động');
+          setConsoleLogs(prev => [...prev, {
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString('vi-VN'),
+            level: 'step',
+            message: `✓ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Đã đọc được mã CAPTCHA bằng ${engineLabel}: "${captchaCode}". Đang tra cứu hóa đơn máy tính tiền...`,
+          }]);
+        }
+
         if (!captchaCode) {
           queryRes = { success: false, invoices: [], message: 'Người dùng đã bỏ qua CAPTCHA của đợt này.' };
           break;
         }
+
         queryRes = await executeGdtInvoiceQuery({
           fromDate: chunk.from,
           toDate: chunk.to,
@@ -584,25 +699,30 @@ export default function App() {
           posOnly: true,
           posCaptcha: { key: captcha.captchaKey, code: captchaCode, cookie: captcha.captchaCookie },
         });
-        const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
-        if (!/từ chối CAPTCHA|tu choi CAPTCHA/i.test(diagnostic?.status || '')) break;
-        if (solverResult.engine === 'tesseract-local') {
-          forceGeminiFallback = true;
-          setConsoleLogs(prev => [...prev, {
-            id: Math.random().toString(36).substring(2, 9),
-            timestamp: new Date().toLocaleTimeString('vi-VN'),
-            level: 'warning',
-            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Cổng Thuế từ chối mã do OCR local nhận diện. Lấy CAPTCHA mới và thử lại bằng Gemini API (${captchaAttempt + 1}/3)...`,
-          }]);
-        } else {
-          forceManualCaptcha = true;
-          setConsoleLogs(prev => [...prev, {
-            id: Math.random().toString(36).substring(2, 9),
-            timestamp: new Date().toLocaleTimeString('vi-VN'),
-            level: 'warning',
-            message: `[MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Cổng Thuế từ chối CAPTCHA. Lấy mã mới và chuyển sang nhập thủ công (${captchaAttempt + 1}/3)...`,
-          }]);
+
+        // Kiểm tra xem Cổng Thuế có báo hết phiên (401) trong lúc tải POS không
+        if (queryRes.status === 401) {
+          const relogin = await reloginGdtSession(`Hết phiên khi tra cứu hóa đơn máy tính tiền đợt ${i + 1}/${posChunks.length}`);
+          if (relogin.success && relogin.token) {
+            activeToken = relogin.token;
+            activeCookie = relogin.cookieHeader || activeCookie;
+            continue;
+          }
         }
+
+        const diagnostic = queryRes.posDiagnostics?.find(item => item.from === chunk.from && item.to === chunk.to);
+        const isCaptchaRejected = /từ chối CAPTCHA|tu choi CAPTCHA|CAPTCHA_INVALID/i.test(diagnostic?.status || '') || queryRes.error === 'CAPTCHA_INVALID';
+
+        if (!isCaptchaRejected) break;
+
+        // Nếu Cổng Thuế từ chối CAPTCHA: Tự động tải lại CAPTCHA mới để xử lý tiếp
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'warning',
+          message: `⚠️ [MÁY TÍNH TIỀN ${i + 1}/${posChunks.length}] Cổng Thuế từ chối mã CAPTCHA "${captchaCode}" (lần thử ${captchaAttempt + 1}/${MAX_POS_CAPTCHA_ATTEMPTS}). Đang tự động tải lại CAPTCHA mới để xử lý tiếp...`,
+        }]);
+        await new Promise(r => setTimeout(r, 600));
       }
       if (!queryRes) continue;
 
@@ -867,6 +987,13 @@ export default function App() {
             }
           ]);
         } else if (queryRes.status === 401) {
+          const relogin = await reloginGdtSession(`Hết phiên khi tra cứu ${chunk.label}`);
+          if (relogin.success && relogin.token) {
+            activeToken = relogin.token;
+            activeCookie = relogin.cookieHeader || activeCookie;
+            i--; // Thử lại tháng này với phiên kết nối mới!
+            continue;
+          }
           hasEncounteredError = true;
           setSyncState(prev => ({
             ...prev,
@@ -879,7 +1006,7 @@ export default function App() {
               id: Math.random().toString(36).substring(2, 9),
               timestamp: new Date().toLocaleTimeString('vi-VN'),
               level: 'warning',
-              message: `[CẦN XÁC THỰC LẠI] Khi tra cứu ${chunk.label}: Cổng Thuế yêu cầu xác thực lại. Phiên vẫn giữ nguyên.`
+              message: `[CẦN XÁC THỰC LẠI] Khi tra cứu ${chunk.label}: Cổng Thuế yêu cầu xác thực lại. Vui lòng kiểm tra lại thông tin đăng nhập.`
             }
           ]);
           break;
@@ -1048,6 +1175,86 @@ export default function App() {
             message: `✓ [THỬ LẠI THÀNH CÔNG] Đã lấy thành công ${monthInvoices.length} hóa đơn của ${chunk.label}${sourceTag}!`
           }
         ]);
+      } else if (queryRes.status === 401) {
+        const relogin = await reloginGdtSession(`Hết phiên khi thử lại ${chunk.label}`);
+        if (relogin.success && relogin.token) {
+          activeToken = relogin.token;
+          activeCookie = relogin.cookieHeader || activeCookie;
+          const retryRes = await executeGdtInvoiceQuery({
+            fromDate: chunk.fromDate,
+            toDate: chunk.toDate,
+            invoiceType: 'purchase',
+            size: 50,
+            token: activeToken,
+            cookieHeader: activeCookie,
+            includePos: false,
+            posOnly: false
+          });
+          if (retryRes.success && Array.isArray(retryRes.invoices)) {
+            const monthInvoices: GDTInvoice[] = retryRes.invoices;
+            const purchases = monthInvoices.filter(inv => inv.loaiHdon === 'purchase');
+            const solds = monthInvoices.filter(inv => inv.loaiHdon === 'sold');
+            const pAmount = purchases.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+            const pTax = purchases.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+            const sAmount = solds.reduce((sum, inv) => sum + (inv.tgtcthue || 0), 0);
+            const sTax = solds.reduce((sum, inv) => sum + (inv.tgtthue || 0), 0);
+            const mAmount = pAmount + sAmount;
+            const mTax = pTax + sTax;
+            const mPayment = mAmount + mTax;
+
+            setInvoices(prev => {
+              const map = new Map<string, GDTInvoice>();
+              prev.forEach(item => map.set(item.id, item));
+              monthInvoices.forEach(item => map.set(item.id, item));
+              return Array.from(map.values());
+            });
+            enqueueInvoicesForEnrichment(monthInvoices, activeToken, activeCookie);
+
+            setSyncState(prev => {
+              const updatedChunks = prev.chunks.map((c, idx) => {
+                if (idx === chunkIndex) {
+                  return {
+                    ...c,
+                    status: 'completed' as const,
+                    totalInvoices: monthInvoices.length,
+                    purchaseCount: purchases.length,
+                    soldCount: solds.length,
+                    purchaseAmount: pAmount,
+                    purchaseTax: pTax,
+                    soldAmount: sAmount,
+                    soldTax: sTax,
+                    totalAmount: mAmount,
+                    totalTax: mTax,
+                    totalPayment: mPayment,
+                    invoices: monthInvoices
+                  };
+                }
+                return c;
+              });
+
+              return {
+                ...prev,
+                chunks: updatedChunks
+              };
+            });
+
+            setConsoleLogs(prev => [
+              ...prev,
+              {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString('vi-VN'),
+                level: 'success',
+                message: `✓ [THỬ LẠI THÀNH CÔNG] Đã lấy thành công ${monthInvoices.length} hóa đơn của ${chunk.label} sau khi tự động kết nối lại!`
+              }
+            ]);
+            return;
+          }
+        }
+        const errMsg = 'Phiên làm việc Cổng Thuế cần xác thực Captcha';
+        setSyncState(prev => ({
+          ...prev,
+          chunks: prev.chunks.map((c, idx) => idx === chunkIndex ? { ...c, status: 'failed' as const, errorMessage: errMsg } : c)
+        }));
       } else {
         const errMsg = queryRes.message || 'Lỗi kết nối Cổng Thuế';
         setSyncState(prev => ({
@@ -1160,6 +1367,12 @@ export default function App() {
               }
             ]);
             setIsRefreshing(false);
+            // Mở lại menu bên trái để người dùng nhìn thấy ô nhập Captcha và ảnh
+            setIsSidebarCollapsed(false);
+            if (window.innerWidth < 1024) {
+              setIsMobileSidebarOpen(true);
+            }
+            toast.warning('Vui lòng nhìn hình và nhập mã Captcha ở cột bên trái để tiếp tục.', 'Cần Nhập Captcha');
             return { success: false, error: errMsg, needManualCaptcha: true };
           }
 
@@ -1304,6 +1517,54 @@ export default function App() {
         ]);
         return { success: false, error: queryRes.message };
       } else if (queryRes.status === 401) {
+        const relogin = await reloginGdtSession('Phiên tra cứu Cổng Thuế đã hết hạn');
+        if (relogin.success && relogin.token) {
+          activeToken = relogin.token;
+          activeCookie = relogin.cookieHeader || activeCookie;
+          // Tự động thử lại tra cứu với phiên kết nối mới
+          const retryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
+            fromDate: filters.fromDate,
+            toDate: filters.toDate,
+            invoiceType: 'purchase',
+            size: 50,
+            token: activeToken,
+            cookieHeader: activeCookie,
+            includePos: false,
+            posOnly: false
+          }) : { success: true, invoices: [] as GDTInvoice[] };
+
+          if (retryRes.success && Array.isArray(retryRes.invoices)) {
+            collapseLeftMenu();
+            setInvoices(retryRes.invoices);
+            setHasSearched(true);
+            setSelectedInvoices([]);
+            setDataSourceType('live_gdt');
+            enqueueInvoicesForEnrichment(retryRes.invoices, activeToken, activeCookie);
+            if (includePosInvoices) {
+              const posResult = await runPosPhase(activeToken, activeCookie);
+              setConsoleLogs(prev => [...prev, {
+                id: Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toLocaleTimeString('vi-VN'),
+                level: 'success',
+                message: `Đã hoàn tất pha hóa đơn máy tính tiền: nhận thêm ${posResult.total} hóa đơn (${posResult.failed} đợt lỗi).`
+              }]);
+            }
+            if (includeElectronicInvoices) {
+              setConsoleLogs(prev => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).substring(2, 9),
+                  timestamp: new Date().toLocaleTimeString('vi-VN'),
+                  level: 'success',
+                  message: `[CỔNG THUẾ TRỰC TIẾP] Đã lấy thành công ${retryRes.invoices.length} hóa đơn thực tế sau khi tự động đăng nhập lại!`
+                }
+              ]);
+            }
+            autoCollapseConsole(1200);
+            return { success: true };
+          }
+        }
+
         setHasSearched(true);
         setConsoleLogs(prev => [
           ...prev,
@@ -1386,12 +1647,13 @@ export default function App() {
     ]);
   };
 
-  // Reset Filters
+  // Reset Filters - Mặc định năm hiện tại
   const handleResetFilters = () => {
+    const currentYear = new Date().getFullYear();
     setFilters({
       invoiceType: 'purchase',
-      fromDate: '2025-01-01',
-      toDate: '2026-12-31',
+      fromDate: `${currentYear}-01-01`,
+      toDate: `${currentYear}-12-31`,
       status: 'all',
       cqtCodeStatus: 'all',
       sellerTaxCode: '',
@@ -1406,7 +1668,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'info',
-        message: 'Đã đặt lại các điều kiện lọc về mặc định cả năm 2025.'
+        message: `Đã đặt lại các điều kiện lọc về mặc định năm hiện tại (${currentYear}).`
       }
     ]);
   };
