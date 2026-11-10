@@ -21,7 +21,7 @@ import {
 import { GDTAccountConfig, FilterParams } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
 import { executeGdtCaptcha } from '../utils/gdtQueryClient';
-import { solveCaptchaWithTesseract } from '../services/invoice-engine/captcha/tesseractCaptchaSolver';
+import { solveCaptchaWithClientTemplateMatching } from '../utils/clientTemplateCaptchaSolver';
 
 export interface CrawlerCredentials {
   taxCode: string;
@@ -31,6 +31,7 @@ export interface CrawlerCredentials {
   captchaCookie?: string;
   vietnamProxy?: string;
   customApiKey?: string;
+  attemptNumber?: number;
 }
 
 interface SidebarProps {
@@ -84,66 +85,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [account.taxCode, account.password]);
 
-  // AI OCR Scanner helper với cơ chế ép buộc gán state trực tiếp vào ô input và cập nhật giao diện
-  const handleScanOcr = async (imgToScan?: string, keyToScan?: string, isManualClick = false) => {
-    const rawImg = imgToScan || captchaImg;
-    const targetKey = keyToScan || captchaKey;
-    if (!rawImg) return;
-
-    setIsScanningOcr(true);
-    setOcrSuccess(false);
-    setOcrNotice('Đang nhận diện mã...');
-
-    try {
-      let payloadImg = rawImg;
-      try {
-        payloadImg = await convertSvgToSharpPng(rawImg);
-      } catch {
-        payloadImg = rawImg;
-      }
-
-      const res = await fetch('/api/gdt/ocr-captcha', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ captchaImage: payloadImg, captchaKey: targetKey, customApiKey: account.customApiKey })
-      });
-      
-      const rawText = await res.text();
-      let data: any = null;
-      try {
-        data = JSON.parse(rawText);
-      } catch {}
-
-      if (data && data.success && data.captchaCode) {
-        const detectedCode = String(data.captchaCode).trim().toUpperCase();
-        // Ép buộc cập nhật đồng thời state Captcha và trạng thái hiển thị thành công
-        setCaptchaCode(detectedCode);
-        setOcrSuccess(true);
-        setOcrNotice(null);
-        if (authError) setAuthError(null);
-      } else {
-        setOcrSuccess(false);
-        const errMsg = String(data?.message || '');
-        if (data?.isSpendingCap || /429|quota|resource_exhausted/i.test(errMsg)) {
-          setOcrNotice('Hạn mức AI tạm hết. Vui lòng nhìn ảnh và nhập mã.');
-        } else {
-          setOcrNotice(errMsg || 'Vui lòng nhìn hình và nhập mã thủ công.');
-        }
-      }
-    } catch {
-      setOcrSuccess(false);
-      setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
-    } finally {
-      setIsScanningOcr(false);
-    }
-  };
-
-  // Load Real Captcha from GDT with Dual-Strategy (Server Proxy + Direct Browser Fallback)
-  const fetchCaptcha = async () => {
+  // Tải Captcha từ Cổng Thuế và tự động nhận diện bằng OCR cục bộ (Template Matching + Local Tesseract)
+  const fetchCaptchaAndSolve = async (): Promise<{ key: string; cookie: string; code: string; image: string } | null> => {
     setIsLoadingCaptcha(true);
-    setAuthError(null);
-    setOcrNotice(null);
-    setCaptchaCode('');
+    setOcrNotice('Đang tải và nhận diện mã CAPTCHA...');
     setOcrSuccess(false);
 
     const res = await executeGdtCaptcha();
@@ -153,14 +98,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCaptchaCookie(res.captchaCookie || '');
       setIsRealGdtCaptcha(res.source === 'proxy' || res.source === 'direct_browser');
       setAuthError(null);
+
+      let detected = '';
+
+      // 1. Ưu tiên số 1: Nhận diện vector font Comismsh trực tiếp bằng Vector Zonal Solver (100% Cục bộ)
+      try {
+        const { solveCaptchaFromSvg } = await import('../utils/vectorCaptchaSolver');
+        const svgContent = res.rawSvg || (res.captchaImage.includes('<svg') ? res.captchaImage : '');
+        if (svgContent) {
+          const vRes = await solveCaptchaFromSvg(svgContent);
+          if (vRes && vRes.success && vRes.code && vRes.code.length >= 4) {
+            detected = vRes.code;
+          }
+        }
+      } catch {}
+
+      // 2. Thử qua endpoint OCR vector chuyên dụng trên server (100% Cục bộ)
+      if (!detected || detected.length < 4) {
+        try {
+          const ocrResp = await fetch('/api/gdt/ocr-captcha', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              rawSvg: res.rawSvg,
+              captchaImage: res.captchaImage,
+              captchaKey: res.captchaKey,
+            }),
+          });
+          if (ocrResp.ok) {
+            const ocrData = await ocrResp.json().catch(() => ({}));
+            if (ocrData?.success && ocrData.captchaCode) {
+              const code = String(ocrData.captchaCode).trim().toUpperCase();
+              if (code.length >= 4) detected = code;
+            }
+          }
+        } catch {}
+      }
+
+      // 3. Dự phòng qua Client Template Matching
+      if (!detected || detected.length < 4) {
+        try {
+          const tmRes = await solveCaptchaWithClientTemplateMatching(res.captchaImage, {
+            minConfidenceThreshold: 35,
+            expectedLength: 6,
+          });
+          if (tmRes && tmRes.code && tmRes.code.length >= 4 && !tmRes.code.includes('?')) {
+            detected = tmRes.code;
+          }
+        } catch {}
+      }
+
       setIsLoadingCaptcha(false);
 
-      // TỰ ĐỘNG KÍCH HOẠT NHẬN DIỆN VÀ GÁN KẾT QUẢ NGAY KHI ẢNH VỪA TẢI XONG
-      handleScanOcr(res.captchaImage, res.captchaKey || '');
-      return;
+      if (detected) {
+        setCaptchaCode(detected);
+        setOcrSuccess(true);
+        setOcrNotice(null);
+        return {
+          key: res.captchaKey || '',
+          cookie: res.captchaCookie || '',
+          code: detected,
+          image: res.captchaImage,
+        };
+      } else {
+        setCaptchaCode('');
+        setOcrSuccess(false);
+        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+        return {
+          key: res.captchaKey || '',
+          cookie: res.captchaCookie || '',
+          code: '',
+          image: res.captchaImage,
+        };
+      }
     }
 
-    // If both failed:
     setCaptchaImg('');
     setCaptchaKey('');
     setCaptchaCookie('');
@@ -169,10 +181,131 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsRealGdtCaptcha(false);
     setAuthError('Không thể tải mã Captcha từ Cổng Tổng cục Thuế. Vui lòng bấm "Đổi mã" để thử lại.');
     setIsLoadingCaptcha(false);
+    return null;
+  };
+
+  const handleScanOcr = async (imgToScan?: string, _keyToScan?: string) => {
+    const rawImg = imgToScan || captchaImg;
+    if (!rawImg) return;
+
+    setIsScanningOcr(true);
+    setOcrSuccess(false);
+    setOcrNotice('Đang nhận diện mã...');
+
+    try {
+      // 1. Thử nhận diện trực tiếp bằng Vector Zonal Solver (100% Cục bộ)
+      try {
+        const { solveCaptchaFromSvg } = await import('../utils/vectorCaptchaSolver');
+        let svgContent = '';
+        if (rawImg.includes('<svg')) {
+          svgContent = rawImg;
+        } else if (rawImg.startsWith('data:image/svg+xml;base64,')) {
+          try {
+            svgContent = atob(rawImg.replace('data:image/svg+xml;base64,', ''));
+          } catch {}
+        }
+        if (svgContent) {
+          const vRes = await solveCaptchaFromSvg(svgContent);
+          if (vRes && vRes.success && vRes.code && vRes.code.length >= 4) {
+            setCaptchaCode(vRes.code);
+            setOcrSuccess(true);
+            setOcrNotice(null);
+            if (authError) setAuthError(null);
+            setIsScanningOcr(false);
+            return;
+          }
+        }
+      } catch {}
+
+      // 2. Thử qua endpoint OCR vector chuyên dụng trên server (100% Cục bộ)
+      try {
+        const ocrResp = await fetch('/api/gdt/ocr-captcha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            captchaImage: rawImg,
+            captchaKey: _keyToScan || captchaKey,
+          }),
+        });
+        if (ocrResp.ok) {
+          const ocrData = await ocrResp.json().catch(() => ({}));
+          if (ocrData?.success && ocrData.captchaCode) {
+            const detectedCode = String(ocrData.captchaCode).trim().toUpperCase();
+            if (detectedCode.length >= 4) {
+              setCaptchaCode(detectedCode);
+              setOcrSuccess(true);
+              setOcrNotice(null);
+              if (authError) setAuthError(null);
+              setIsScanningOcr(false);
+              return;
+            }
+          }
+        }
+      } catch {}
+
+      // 3. Thử nhận diện bằng Client Template Matching trước (100% Cục bộ)
+      try {
+        const tmRes = await solveCaptchaWithClientTemplateMatching(rawImg, {
+          minConfidenceThreshold: 35,
+          expectedLength: 6,
+        });
+
+        if (tmRes && tmRes.code && tmRes.code.length >= 4 && !tmRes.code.includes('?')) {
+          setCaptchaCode(tmRes.code);
+          setOcrSuccess(true);
+          setOcrNotice(null);
+          if (authError) setAuthError(null);
+          setIsScanningOcr(false);
+          return;
+        }
+      } catch {}
+
+      // 2. Dự phòng: Tesseract Local trên máy chủ
+      let payloadImg = rawImg;
+      try {
+        payloadImg = await convertSvgToSharpPng(rawImg);
+      } catch {
+        payloadImg = rawImg;
+      }
+
+      const res = await fetch('/api/invoice-downloader/solve-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: payloadImg,
+          alphanumeric: true,
+          localOnly: true,
+          preprocess: false,
+          timeoutMs: 8000,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (data && data.success && data.code) {
+        const detectedCode = String(data.code).trim().toUpperCase();
+        setCaptchaCode(detectedCode);
+        setOcrSuccess(true);
+        setOcrNotice(null);
+        if (authError) setAuthError(null);
+      } else {
+        setOcrSuccess(false);
+        setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+      }
+    } catch {
+      setOcrSuccess(false);
+      setOcrNotice('Vui lòng nhìn hình và nhập mã thủ công.');
+    } finally {
+      setIsScanningOcr(false);
+    }
+  };
+
+  const fetchCaptcha = async () => {
+    await fetchCaptchaAndSolve();
   };
 
   useEffect(() => {
-    fetchCaptcha();
+    fetchCaptchaAndSolve();
   }, []);
 
   const handleMstBlur = () => {
@@ -198,7 +331,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  // Submit flow with Auto-OCR validation
+  // Submit flow với cơ chế tự động đọc và thử lại đăng nhập cho đến khi thành công
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
@@ -212,64 +345,81 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
-    let activeCaptchaCode = captchaCode.trim();
+    if (!account.isRealGDT && !pwd) {
+      setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
+      return;
+    }
 
-    // If user has not authenticated with real GDT yet, check credentials
-    if (!account.isRealGDT) {
-      if (!pwd) {
-        setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
-        return;
-      }
-      
-      // Đợi OCR ngầm đọc mã nếu đang trong tiến trình nhận diện
-      if (!activeCaptchaCode && isScanningOcr) {
-        for (let wait = 0; wait < 8; wait++) {
-          await new Promise(r => setTimeout(r, 250));
-          if (captchaCode.trim()) {
-            activeCaptchaCode = captchaCode.trim();
-            break;
-          }
-        }
-      }
+    let activeKey = captchaKey;
+    let activeCookie = captchaCookie;
+    let activeCode = captchaCode.trim();
 
-      // Nếu vẫn chưa có mã Captcha, hướng dẫn người dùng nhìn ảnh và nhập
-      if (!activeCaptchaCode) {
-        setAuthError('Vui lòng nhìn hình ảnh và nhập mã Captcha vào ô bên cạnh.');
-        if (captchaInputRef.current) {
-          captchaInputRef.current.focus();
-        }
-        return;
+    // Nếu ô Mã Ảnh chưa có giá trị, tự động tải và đọc mã ngay
+    if (!activeCode) {
+      const initSolve = await fetchCaptchaAndSolve();
+      if (initSolve && initSolve.code) {
+        activeKey = initSolve.key;
+        activeCookie = initSolve.cookie;
+        activeCode = initSolve.code;
       }
     }
 
-    const result = await onRunCrawler({
-      taxCode: mst,
-      password: pwd,
-      captchaKey,
-      captchaCode: activeCaptchaCode,
-      captchaCookie,
-      vietnamProxy: account.vietnamProxy,
-      customApiKey: account.customApiKey
-    });
+    if (!activeCode) {
+      setAuthError('Vui lòng nhìn hình ảnh và nhập mã Captcha vào ô bên cạnh.');
+      if (captchaInputRef.current) captchaInputRef.current.focus();
+      return;
+    }
 
-    if (result && result.success) {
-      setIsWafBlocked(false);
-      // Khi nhấn vào bắt đầu truy xuất, nếu kết nối thành công với cổng tổng cục thuế, menu trên trái sẽ tự động ẩn để gọn màn hình
-      if (onCollapseSidebar) onCollapseSidebar();
-      if (onCloseMobileSidebar) onCloseMobileSidebar();
-    } else if (result && !result.success) {
-      if (result.isWafBlocked) {
-        setIsWafBlocked(true);
+    // Tự động lặp lại nếu đăng nhập thất bại do Captcha sai hoặc hết hạn
+    const MAX_LOGIN_RETRIES = 6;
+    for (let attempt = 1; attempt <= MAX_LOGIN_RETRIES; attempt++) {
+      const result = await onRunCrawler({
+        taxCode: mst,
+        password: pwd,
+        captchaKey: activeKey,
+        captchaCode: activeCode,
+        captchaCookie: activeCookie,
+        vietnamProxy: account.vietnamProxy,
+        customApiKey: account.customApiKey,
+        attemptNumber: attempt,
+      });
+
+      if (result && result.success) {
+        setIsWafBlocked(false);
+        if (onCollapseSidebar) onCollapseSidebar();
+        if (onCloseMobileSidebar) onCloseMobileSidebar();
+        return;
       }
-      if (result.needManualCaptcha) {
-        setAuthError('Mã Captcha chưa chính xác hoặc phiên đã hết hạn. Đã đổi ảnh mới, vui lòng nhập lại.');
-      } else if (result.error) {
-        setAuthError(result.error);
+
+      if (result && !result.success) {
+        if (result.isWafBlocked) {
+          setIsWafBlocked(true);
+          return;
+        }
+
+        const errText = (result.error || '').toLowerCase();
+        // Nếu sai mật khẩu hoặc tài khoản không tồn tại, dừng ngay không lặp tiếp
+        if (errText.includes('mật khẩu') || errText.includes('tên đăng nhập')) {
+          setAuthError(result.error);
+          return;
+        }
       }
-      // Tải lại captcha mới để người dùng nhập ngay mà không bị kẹt mã cũ
-      fetchCaptcha();
-      if (captchaInputRef.current) {
-        setTimeout(() => captchaInputRef.current?.focus(), 250);
+
+      // Thất bại do CAPTCHA chưa chính xác hoặc hết hạn:
+      // Tự động tải CAPTCHA mới, giải mã OCR cục bộ, gán mã ảnh vào và gửi tiếp
+      if (attempt < MAX_LOGIN_RETRIES) {
+        const nextSolve = await fetchCaptchaAndSolve();
+        if (nextSolve && nextSolve.code) {
+          activeKey = nextSolve.key;
+          activeCookie = nextSolve.cookie;
+          activeCode = nextSolve.code;
+          await new Promise(r => setTimeout(r, 400));
+        } else {
+          break;
+        }
+      } else {
+        setAuthError(`Đã thử tự động ${MAX_LOGIN_RETRIES} lần chưa vượt được Captcha. Vui lòng nhìn ảnh và nhập mã thủ công.`);
+        fetchCaptchaAndSolve();
       }
     }
   };
@@ -428,13 +578,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {/* Nút bấm đọc OCR và gán vào */}
                 <button
                   type="button"
-                  onClick={() => handleScanOcr(undefined, undefined, true)}
+                  onClick={() => handleScanOcr()}
                   disabled={isScanningOcr || isLoadingCaptcha || !captchaImg}
                   className="text-[11px] text-amber-300 hover:text-amber-200 font-medium flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-md border border-amber-500/30 transition-colors cursor-pointer disabled:opacity-40"
                   title="Quét ảnh Captcha và tự động gán ký tự vào ô bên dưới"
                 >
                   <Sparkles className={`w-3 h-3 ${isScanningOcr ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
-                  <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã AI'}</span>
+                  <span>{isScanningOcr ? 'Đang đọc...' : 'Đọc mã OCR'}</span>
                 </button>
               </div>
 

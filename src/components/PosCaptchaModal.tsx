@@ -36,7 +36,65 @@ export const PosCaptchaModal: React.FC<PosCaptchaModalProps> = ({
       let candidateCode = '';
 
       try {
-        // 1. Thử giải nhanh bằng Template Matching trực tiếp trên Client
+        // 1. Thử giải nhanh bằng Vector Zonal Solver (100% Cục bộ)
+        try {
+          const { solveCaptchaFromSvg } = await import('../utils/vectorCaptchaSolver');
+          let svgContent = '';
+          if (captchaImage.includes('<svg')) {
+            svgContent = captchaImage;
+          } else if (captchaImage.startsWith('data:image/svg+xml;base64,')) {
+            try {
+              svgContent = atob(captchaImage.replace('data:image/svg+xml;base64,', ''));
+            } catch {}
+          }
+
+          if (svgContent) {
+            const vRes = await solveCaptchaFromSvg(svgContent);
+            if (isMounted && vRes && vRes.success && vRes.code && vRes.code.length >= 4) {
+              candidateCode = vRes.code;
+              setCode(vRes.code);
+              setStatusText(`Nhận diện vector cục bộ: ${vRes.code} (${vRes.confidence}%)`);
+              setIsSolving(false);
+              if (!submittedRef.current) {
+                submittedRef.current = true;
+                window.setTimeout(() => {
+                  if (isMounted) onSubmit(vRes.code);
+                }, 300);
+              }
+              return;
+            }
+          }
+        } catch {}
+
+        // 2. Thử qua endpoint OCR vector chuyên dụng trên server (100% Cục bộ)
+        try {
+          const ocrResp = await fetch('/api/gdt/ocr-captcha', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ captchaImage }),
+          });
+          if (ocrResp.ok) {
+            const ocrData = await ocrResp.json().catch(() => ({}));
+            if (isMounted && ocrData?.success && ocrData.captchaCode) {
+              const code = String(ocrData.captchaCode).trim().toUpperCase();
+              if (code.length >= 4) {
+                candidateCode = code;
+                setCode(code);
+                setStatusText(`Bộ giải OCR cục bộ nhận diện: ${code}`);
+                setIsSolving(false);
+                if (!submittedRef.current) {
+                  submittedRef.current = true;
+                  window.setTimeout(() => {
+                    if (isMounted) onSubmit(code);
+                  }, 300);
+                }
+                return;
+              }
+            }
+          }
+        } catch {}
+
+        // 3. Thử giải bằng Template Matching trực tiếp trên Client
         try {
           const tmRes = await solveCaptchaWithClientTemplateMatching(captchaImage, {
             minConfidenceThreshold: 45,

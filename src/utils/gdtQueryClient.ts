@@ -2,6 +2,7 @@ import { GDTInvoice } from '../types';
 import { getInvoiceItemListFromPayload, getLookupCodeFromPayload, getLookupUrlFromPayload, getSellerFromPayload, isMisaSource, isViettelSource, isVnptSource, normalizeInvoiceItem } from './xmlParser';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './gdtDetail';
 import { convertSvgToSharpPng } from './captchaOcrHelper';
+import { solveCaptchaWithClientTemplateMatching } from './clientTemplateCaptchaSolver';
 
 export interface QueryInvoicesOptions {
   fromDate: string;
@@ -229,104 +230,226 @@ export async function executeGdtPosCaptchaSolve(options: {
       return { success: false, error: 'Hình ảnh CAPTCHA rỗng.' };
     }
 
-    // Rasterize SVG sang PNG sắc nét trước để cả Gemini và Tesseract trên server đều đọc tốt
-    let payloadImg = options.captchaImage;
-    try {
-      if (typeof window !== 'undefined' && options.captchaImage) {
-        payloadImg = await convertSvgToSharpPng(options.captchaImage);
-      }
-    } catch {}
+    const source = options.rawSvg || options.captchaImage;
 
-    // 1. Thử nhận diện bằng Server AI OCR (Gemini 3.1 Flash Lite + Server Tesseract Fallback)
+    // 1. Thử giải trực tiếp bằng Vector Zonal Solver (100% Cục bộ)
+    try {
+      const { solveCaptchaFromSvg } = await import('./vectorCaptchaSolver');
+      let svgToSolve = options.rawSvg || '';
+      if (!svgToSolve && options.captchaImage && options.captchaImage.includes('<svg')) {
+        svgToSolve = options.captchaImage;
+      } else if (!svgToSolve && options.captchaImage && options.captchaImage.startsWith('data:image/svg+xml;base64,')) {
+        try {
+          svgToSolve = atob(options.captchaImage.replace('data:image/svg+xml;base64,', ''));
+        } catch {}
+      }
+
+      if (svgToSolve) {
+        const vRes = await solveCaptchaFromSvg(svgToSolve);
+        if (vRes && vRes.success && vRes.code && vRes.code.length >= 4) {
+          return {
+            success: true,
+            code: vRes.code,
+            engine: 'comismsh-vector-zonal',
+          };
+        }
+      }
+    } catch (vErr) {
+      console.warn('[executeGdtPosCaptchaSolve] Direct vector solver notice:', vErr);
+    }
+
+    // 2. Thử gọi endpoint OCR vector cục bộ trên server
     try {
       const ocrResp = await fetch('/api/gdt/ocr-captcha', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          captchaImage: payloadImg,
-          captchaKey: options.captchaKey,
           rawSvg: options.rawSvg,
-          customApiKey: options.customApiKey
-        })
+          captchaImage: options.captchaImage,
+          captchaKey: options.captchaKey,
+        }),
       });
-
       if (ocrResp.ok) {
         const ocrData = await ocrResp.json().catch(() => ({}));
         if (ocrData?.success && ocrData.captchaCode) {
-          const cleanCode = String(ocrData.captchaCode).trim().toUpperCase();
+          const clean = String(ocrData.captchaCode).trim().toUpperCase();
+          if (clean.length >= 4) {
+            return {
+              success: true,
+              code: clean,
+              engine: 'server-vector-zonal',
+            };
+          }
+        }
+      }
+    } catch (ocrErr) {
+      console.warn('[executeGdtPosCaptchaSolve] Server OCR notice:', ocrErr);
+    }
+
+    // 3. Thử qua Template Matching Client
+    try {
+      const tmRes = await solveCaptchaWithClientTemplateMatching(source, {
+        minConfidenceThreshold: 35,
+        expectedLength: 6,
+      });
+
+      if (tmRes && tmRes.code && tmRes.code.length >= 4 && !tmRes.code.includes('?')) {
+        if (tmRes.confidence >= 35 || tmRes.segmentedCount === 6) {
+          return {
+            success: true,
+            code: tmRes.code,
+            engine: 'template-matching-local',
+          };
+        }
+      }
+    } catch (tmErr) {
+      console.warn('[executeGdtPosCaptchaSolve] Client template matching notice:', tmErr);
+    }
+
+    // 2. Dự phòng: Chạy Tesseract OCR Local trên máy chủ Node.js (100% Cục bộ, không dùng Gemini)
+    try {
+      let rasterPng = options.captchaImage;
+      if (typeof window !== 'undefined' && options.captchaImage) {
+        rasterPng = await convertSvgToSharpPng(options.captchaImage);
+      }
+
+      const tessResp = await fetch('/api/invoice-downloader/solve-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: rasterPng,
+          alphanumeric: true,
+          localOnly: true,
+          preprocess: false,
+          timeoutMs: 8000,
+        }),
+      });
+
+      if (tessResp.ok) {
+        const tessData = await tessResp.json().catch(() => ({}));
+        if (tessData?.success && tessData.code) {
+          const cleanCode = String(tessData.code).trim().toUpperCase();
           if (cleanCode.length >= 4) {
             return {
               success: true,
               code: cleanCode,
-              engine: ocrData.modelUsed || 'gemini-3.1-flash-lite'
+              engine: 'tesseract-local',
             };
           }
         }
       }
     } catch (serverErr) {
-      console.warn('[executeGdtPosCaptchaSolve] Server OCR failed:', serverErr);
+      console.warn('[executeGdtPosCaptchaSolve] Local Tesseract error:', serverErr);
     }
 
-    return { success: false, error: 'Không thể nhận diện mã CAPTCHA POS.' };
+    return { success: false, error: 'OCR cục bộ chưa nhận diện được mã CAPTCHA POS.' };
   } catch (error: any) {
     return { success: false, error: error?.message || 'Lỗi khi nhận diện CAPTCHA POS.' };
   }
 }
 
 export async function executeGdtAutoLogin(options: AutoLoginOptions): Promise<LoginResult> {
-  const { taxCode, password, vietnamProxy, customApiKey } = options;
+  const { taxCode, password, vietnamProxy } = options;
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 35000);
+  // Tự động tải CAPTCHA mới, giải mã OCR cục bộ và gửi đăng nhập
+  const maxAttempts = 5;
+  let lastError = '';
 
-    const res = await fetch('/api/gdt/auto-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        taxCode: taxCode.trim(),
-        password: password.trim(),
-        vietnamProxy,
-        customApiKey
-      }),
-      signal: controller.signal
-    });
-    clearTimeout(timer);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const capRes = await executeGdtCaptcha();
+      if (!capRes.success || !capRes.captchaImage) {
+        continue;
+      }
 
-    const raw = await res.text();
-    let data: any = null;
-    try { data = JSON.parse(raw); } catch {}
+      let solvedCode = '';
 
-    if (res.ok && data?.success && data.session?.token) {
-      return {
-        success: true,
-        token: data.session.token,
-        taxpayerName: data.session.taxpayerName,
-        address: data.session.address,
-        cookieHeader: data.session.cookieHeader,
-        attemptsUsed: data.attemptsUsed,
-        source: 'proxy'
-      };
+      // Thử đọc qua Client Template Matching
+      try {
+        const tmRes = await solveCaptchaWithClientTemplateMatching(capRes.captchaImage, {
+          minConfidenceThreshold: 35,
+          expectedLength: 6,
+        });
+        if (tmRes?.code && tmRes.code.length >= 4 && !tmRes.code.includes('?')) {
+          solvedCode = tmRes.code;
+        }
+      } catch {}
+
+      // Dự phòng Tesseract Local nếu Template Matching chưa ra
+      if (!solvedCode || solvedCode.length < 4) {
+        try {
+          const sharpPng = await convertSvgToSharpPng(capRes.captchaImage);
+          const tessResp = await fetch('/api/invoice-downloader/solve-captcha', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: sharpPng,
+              alphanumeric: true,
+              localOnly: true,
+              preprocess: false,
+              timeoutMs: 8000,
+            }),
+          });
+          const tessData = await tessResp.json().catch(() => ({}));
+          if (tessData?.success && tessData.code) {
+            solvedCode = String(tessData.code).trim().toUpperCase();
+          }
+        } catch {}
+      }
+
+      if (!solvedCode || solvedCode.length < 4) {
+        continue;
+      }
+
+      // Gửi đăng nhập tới Cổng Thuế
+      const loginRes = await fetch('/api/gdt/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taxCode: taxCode.trim(),
+          password: password.trim(),
+          captchaKey: capRes.captchaKey,
+          captchaCode: solvedCode,
+          captchaCookie: capRes.captchaCookie,
+          vietnamProxy,
+        }),
+      });
+
+      const raw = await loginRes.text();
+      let data: any = null;
+      try { data = JSON.parse(raw); } catch {}
+
+      if (loginRes.ok && data?.success && data.session?.token) {
+        return {
+          success: true,
+          token: data.session.token,
+          taxpayerName: data.session.taxpayerName,
+          address: data.session.address,
+          cookieHeader: data.session.cookieHeader,
+          attemptsUsed: attempt,
+          source: 'proxy',
+        };
+      }
+
+      if (data?.message?.toLowerCase().includes('mật khẩu') || data?.message?.toLowerCase().includes('tên đăng nhập')) {
+        return {
+          success: false,
+          error: data.message || 'Mã số thuế hoặc Mật khẩu không chính xác.',
+        };
+      }
+
+      lastError = data?.message || 'Mã CAPTCHA chưa chính xác';
+      await new Promise(r => setTimeout(r, 400));
+    } catch (e: any) {
+      lastError = e?.message || 'Lỗi kết nối';
     }
-
-    return {
-      success: false,
-      isWafBlocked: data?.isWafBlocked || res.status === 403,
-      needManualCaptcha: data?.needManualCaptcha,
-      error: data?.message || 'Không thể tự động đăng nhập Cổng Thuế.'
-    };
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      return {
-        success: false,
-        error: 'Thời gian tự động vượt Captcha kéo dài quá lâu (quá 35s). Vui lòng thử lại hoặc nhập mã thủ công.'
-      };
-    }
-    return {
-      success: false,
-      error: `Lỗi kết nối khi tự động đăng nhập: ${err?.message || err}`
-    };
   }
+
+  return {
+    success: false,
+    needManualCaptcha: true,
+    error: `Tự động đăng nhập chưa thành công sau ${maxAttempts} lần thử (${lastError}). Vui lòng nhập mã thủ công.`,
+  };
 }
 
 export async function executeGdtLogin(options: LoginOptions): Promise<LoginResult> {

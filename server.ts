@@ -13,7 +13,7 @@ import { generateOfficialInvoiceHtml } from './src/utils/officialInvoiceHtml';
 import { OFFICIAL_GDT_INVOICE_XSLT } from './src/utils/xsltTransformer';
 import { invoiceManager, CaptchaSolver } from './src/services/invoice-engine';
 import type { CaptchaSolveResult } from './src/services/invoice-engine/types';
-import { ALPHANUMERIC_CAPTCHA_PROMPT, solveCaptchaWithGemini, VNPT_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
+import { ALPHANUMERIC_CAPTCHA_PROMPT, VNPT_CAPTCHA_PROMPT } from './src/services/invoice-engine/captcha/geminiCaptchaSolver';
 import { downloadOriginalEasyInvoice } from './src/services/easyInvoiceService';
 import { lookupOriginalVnptInvoice, downloadOriginalVnptPdf } from './src/services/vnptInvoiceService';
 import { downloadOriginalViettelPdf, downloadOriginalViettelZip } from './src/services/viettelInvoiceService';
@@ -317,7 +317,25 @@ async function fetchGDT(url: string, options: RequestInit = {}, maxRetries = 1, 
 // Clean GDT SVG noise lines: removes wavy background interference lines (<path stroke="..." fill="none"/>)
 function cleanGdtSvgNoise(svg: string): string {
   if (!svg || typeof svg !== 'string') return svg;
-  return svg.replace(/<path[^>]*stroke=[^>]*fill="none"[^>]*\/>/gi, '');
+  let cleaned = svg
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']none["'][^>]*\/?>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']none["'][^>]*><\/path>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']transparent["'][^>]*\/?>/gi, '')
+    .replace(/<path\b[^>]*\bfill\s*=\s*["']transparent["'][^>]*><\/path>/gi, '')
+    .replace(/<path\b[^>]*\bstroke\s*=\s*["'][^"']+["'][^>]*\/?>/gi, (match) => {
+      if (!match.includes('fill=') || match.includes('fill="none"') || match.includes("fill='none'")) {
+        return '';
+      }
+      return match;
+    })
+    .replace(/<line\b[^>]*\/?>/gi, '')
+    .replace(/<polyline\b[^>]*\/?>/gi, '');
+
+  if (cleaned.includes('<svg') && !cleaned.includes('fill="#ffffff"') && !cleaned.includes('fill="white"')) {
+    cleaned = cleaned.replace(/<svg\b([^>]*)>/i, '<svg$1><rect width="100%" height="100%" fill="#ffffff"/>');
+  }
+
+  return cleaned;
 }
 
 interface OCRResult {
@@ -328,11 +346,10 @@ interface OCRResult {
   isSpendingCap?: boolean;
 }
 
-// Multi-Tier Captcha OCR Engine for GDT Portal
-// Tier 1: SVG direct extraction (if text present)
-// Tier 2: Gemini Vision AI (if key available)
-// Tier 3: Không dùng OCR cục bộ; Gemini là bộ giải Captcha duy nhất
-async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Promise<OCRResult> {
+// 100% Local Captcha OCR Engine (No Gemini API, Zero external dependency)
+// Tier 1: SVG direct text extraction (if text present)
+// Tier 2: Local Tesseract OCR for rasterized PNG/BMP
+async function solveCaptchaOCR(svgOrDataUri: string, _customApiKey?: string): Promise<OCRResult> {
   if (!svgOrDataUri) return { code: '', error: 'Dữ liệu ảnh Captcha rỗng' };
 
   let rawSvg = svgOrDataUri;
@@ -369,42 +386,45 @@ async function solveCaptchaOCR(svgOrDataUri: string, customApiKey?: string): Pro
         return { code: cleanChars, modelUsed: 'svg-direct' };
       }
     }
-  }
 
-  try {
-    const image = isBitmap
-      ? 'data:' + bitmapMime + ';base64,' + bitmapBase64
-      : 'data:image/svg+xml;base64,' + Buffer.from(rawSvg, 'utf8').toString('base64');
-    const code = await solveCaptchaWithGemini(image, ALPHANUMERIC_CAPTCHA_PROMPT, { customApiKey, alphanumeric: true });
-    return { code, modelUsed: 'gemini-3.1-flash-lite' };
-  } catch (error: any) {
-    // Secondary fallback: Server-side Tesseract if raster bitmap is available
-    if (isBitmap && bitmapBase64) {
-      try {
-        const { solveCaptchaWithTesseract } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver.js');
-        const tessResult = await solveCaptchaWithTesseract(Buffer.from(bitmapBase64, 'base64'), {
-          digitsOnly: false,
-          timeoutMs: 6000
-        });
-        if (tessResult?.code && tessResult.code.length >= 4) {
-          console.log(`[Tesseract Server Fallback] Solved Captcha: "${tessResult.code}"`);
-          return { code: tessResult.code, modelUsed: 'tesseract-server' };
-        }
-      } catch (tessErr) {
-        console.warn('[Server Tesseract fallback notice]:', tessErr);
+    // Tier 1.5: High-precision Vector Path & Euler Hole Matching for GDT Comismsh font (100% Cục bộ)
+    try {
+      const { solveCaptchaFromSvg } = await import('./src/utils/vectorCaptchaSolver');
+      const vResult = await solveCaptchaFromSvg(rawSvg);
+      if (vResult.success && vResult.code && vResult.code.length >= 4) {
+        console.log(`[SVG Vector Solver] Solved Captcha: "${vResult.code}" (${vResult.confidence}%) in ${vResult.executionTimeMs}ms`);
+        return {
+          code: vResult.code,
+          modelUsed: `comismsh-vector-zonal (${vResult.confidence}%)`
+        };
       }
+    } catch (metricErr) {
+      console.warn('[SVG Vector Solver notice]:', metricErr);
     }
-
-    const errMsg = String(error?.message || error || '');
-    const isQuota = /429|quota|RESOURCE_EXHAUSTED|spending cap/i.test(errMsg);
-    return { 
-      code: '', 
-      isSpendingCap: isQuota,
-      error: isQuota 
-        ? 'Hạn mức AI nhận diện Captcha tạm hết lượt hôm nay. Vui lòng nhìn ảnh và nhập mã thủ công.'
-        : (errMsg || 'Không nhận diện được CAPTCHA. Vui lòng nhập thủ công.') 
-    };
   }
+
+  // Tier 2: Local Tesseract OCR (100% Cục bộ)
+  if (isBitmap && bitmapBase64) {
+    try {
+      const { solveCaptchaWithTesseract } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver');
+      const tessResult = await solveCaptchaWithTesseract(Buffer.from(bitmapBase64, 'base64'), {
+        digitsOnly: false,
+        preprocessPosCaptcha: true,
+        timeoutMs: 8000
+      });
+      if (tessResult?.code && tessResult.code.length >= 4) {
+        console.log(`[Tesseract Local] Solved Captcha: "${tessResult.code}" (${Math.round(tessResult.confidence)}%)`);
+        return { code: tessResult.code, modelUsed: 'tesseract-local' };
+      }
+    } catch (tessErr: any) {
+      console.warn('[Tesseract Local Notice]:', tessErr?.message || tessErr);
+    }
+  }
+
+  return {
+    code: '',
+    error: 'Bộ nhận diện OCR cục bộ chưa đọc được mã rõ ràng.'
+  };
 }
 
 // 1. Health check
@@ -549,22 +569,13 @@ app.post('/api/gdt/auto-login', async (req, res) => {
       captchaCookieJar.set(capData.key, cookieStr);
       captchaContentMap.set(capData.key, capData.content);
 
-      // 2. Làm sạch nhiễu và giải Captcha
+      // 2. Làm sạch nhiễu và giải Captcha cục bộ
       const cleanedSvg = cleanGdtSvgNoise(capData.content);
       const ocrResult = await solveCaptchaOCR(cleanedSvg, customApiKey);
       const solvedCode = (ocrResult.code || '').trim().toUpperCase();
 
-      if (ocrResult.isSpendingCap) {
-        return res.status(400).json({
-          success: false,
-          needManualCaptcha: true,
-          isSpendingCap: true,
-          message: 'Hạn mức AI nhận diện Captcha tạm hết lượt hôm nay. Vui lòng nhìn hình và nhập mã để đăng nhập.'
-        });
-      }
-
       if (!solvedCode || solvedCode.length < 4) {
-        console.log(`[Auto-Login] Lần ${attempt}: OCR chưa ra mã ký tự, đổi Captcha mới...`);
+        console.log(`[Auto-Login] Lần ${attempt}: OCR cục bộ chưa ra mã ký tự, đổi Captcha mới...`);
         continue;
       }
 
@@ -3601,7 +3612,7 @@ async function startServer() {
     });
   }
 
-  // 2. Mở cổng lắng nghe PORT sau khi middleware đã sẵn sàng
+  // 2. Mở cổng lắng nghe PORT (mặc định 3000 cho AI Studio preview và iframe)
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
     // Khởi tạo Database Neon bất đồng bộ trong nền
@@ -3613,6 +3624,21 @@ async function startServer() {
       // Silent catch
     });
   });
+
+  // Nếu môi trường Cloud Run hoặc container chỉ định PORT khác (ví dụ: 8080), lắng nghe thêm cổng đó
+  const secondaryPortStr = process.env.PORT;
+  if (secondaryPortStr) {
+    const secondaryPort = parseInt(secondaryPortStr, 10);
+    if (!isNaN(secondaryPort) && secondaryPort > 0 && secondaryPort !== PORT) {
+      try {
+        app.listen(secondaryPort, '0.0.0.0', () => {
+          console.log(`GDT E-Invoice Server also listening on Cloud Run PORT http://0.0.0.0:${secondaryPort}`);
+        });
+      } catch (err: any) {
+        console.warn(`[Secondary Port Listen Notice]:`, err.message);
+      }
+    }
+  }
 }
 
 export default app;
