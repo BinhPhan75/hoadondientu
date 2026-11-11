@@ -1,7 +1,6 @@
 node_modules/
 build/
 dist/
-api/
 release/
 desktop-release/
 desktop-test/

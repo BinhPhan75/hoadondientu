@@ -150,7 +150,8 @@ export function extractVectorFeatures(d: string): {
 }
 
 export function parseOpenTypeBuffer(buf: ArrayBuffer | Buffer): opentype.Font {
-  const parseFn = (opentype as any).parse || (opentype as any).default?.parse || (opentype as any).default;
+  const ot: any = opentype;
+  const parseFn = ot.parse || (ot['default'] && ot['default'].parse) || ot['default'];
   if (typeof parseFn !== 'function') {
     throw new Error('opentype.parse is not available');
   }
