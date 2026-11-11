@@ -5,7 +5,6 @@ const path = require('path');
 process.env.NODE_ENV = 'production';
 // Use a desktop-only port so an older app instance cannot serve this UI.
 process.env.PORT = process.env.PORT || '3217';
-process.env.AUTH_WEBAPP_URL = process.env.AUTH_WEBAPP_URL || 'https://pmhoadondientu.vercel.app';
 
 let serverStarted = false;
 let gdtWindow = null;
@@ -57,24 +56,13 @@ function loadDesktopEnvironment() {
     console.warn(`[Desktop] Không tìm thấy file .env. Đã kiểm tra: ${candidates.join(', ')}`);
   }
 
-  return envPath || candidates[0];
 }
 
 function startLocalApi() {
   try {
-    const envPath = loadDesktopEnvironment();
+    loadDesktopEnvironment();
     require(path.join(__dirname, '..', 'dist', 'server.cjs'));
     serverStarted = true;
-
-    if (!process.env.AUTH_WEBAPP_URL &&
-        !process.env.POSTGRES_URL &&
-        !process.env.POSTGRES_PRISMA_URL &&
-        !process.env.DATABASE_URL &&
-        !process.env.NEON_DATABASE_URL &&
-        !process.env.POSTGRES_URL_NON_POOLING &&
-        !process.env.DATABASE_URL_UNPOOLED) {
-      console.warn(`[Desktop] Chưa cấu hình xác thực. Đặt AUTH_WEBAPP_URL hoặc DATABASE_URL trong ${envPath}`);
-    }
   } catch (error) {
     dialog.showErrorBox('Không thể khởi động máy chủ cục bộ', error.message);
     app.quit();

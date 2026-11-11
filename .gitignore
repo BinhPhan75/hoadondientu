@@ -1,4 +1,5 @@
 node_modules/
+neon_config.json
 build/
 dist/
 release/

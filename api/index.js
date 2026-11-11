@@ -419,11 +419,11 @@ async function loadComismshFont() {
     try {
       if (typeof process !== "undefined" && process.versions && process.versions.node) {
         try {
-          const fs3 = await import("fs");
-          const path4 = await import("path");
-          const fontPath = path4.resolve(process.cwd(), "public/fonts/Comismsh.ttf");
-          if (fs3.existsSync(fontPath)) {
-            const buf = fs3.readFileSync(fontPath);
+          const fs2 = await import("fs");
+          const path3 = await import("path");
+          const fontPath = path3.resolve(process.cwd(), "public/fonts/Comismsh.ttf");
+          if (fs2.existsSync(fontPath)) {
+            const buf = fs2.readFileSync(fontPath);
             fontInstance = parseOpenTypeBuffer(buf);
             return fontInstance;
           }
@@ -614,10 +614,10 @@ var init_vectorCaptchaSolver = __esm({
 });
 
 // server.ts
-import dotenv2 from "dotenv";
+import dotenv from "dotenv";
 import express from "express";
-import path3 from "path";
-import crypto2 from "crypto";
+import path2 from "path";
+import crypto3 from "crypto";
 import { spawn } from "child_process";
 import JSZip4 from "jszip";
 import { ProxyAgent } from "undici";
@@ -5958,6 +5958,45 @@ import * as cheerio3 from "cheerio";
 import JSZip2 from "jszip";
 import https3 from "https";
 init_tesseractCaptchaSolver();
+
+// src/utils/easyInvoicePrint.ts
+var EASY_INVOICE_PRINT_STYLE_ID = "easyinvoice-pagination-fix";
+function prepareEasyInvoiceHtml(html) {
+  if (!html || new RegExp(`id=["']${EASY_INVOICE_PRINT_STYLE_ID}["']`, "i").test(html)) {
+    return html;
+  }
+  const style = `<style id="${EASY_INVOICE_PRINT_STYLE_ID}">
+    @page { size: A4 portrait; margin: 8mm; }
+    html, body { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; }
+    .main-page, .invoice-container, .invoice-content, .invoice-body, #invoice, #invoiceContent {
+      height: auto !important;
+      min-height: 0 !important;
+      max-height: none !important;
+      overflow: visible !important;
+    }
+    table { width: 100%; page-break-inside: auto !important; break-inside: auto !important; }
+    thead { display: table-header-group !important; }
+    tfoot { display: table-footer-group !important; }
+    tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+    @media print {
+      html, body { height: auto !important; overflow: visible !important; }
+      .main-page, .invoice-container, .invoice-content, .invoice-body, #invoice, #invoiceContent {
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+      table { page-break-inside: auto !important; break-inside: auto !important; }
+      thead { display: table-header-group !important; }
+      tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+    }
+  </style>`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${style}</head>`);
+  if (/<head(?:\s[^>]*)?>/i.test(html)) return html.replace(/<head(?:\s[^>]*)?>/i, (match) => `${match}${style}`);
+  return html.replace(/<html(?:\s[^>]*)?>/i, (match) => `${match}<head>${style}</head>`);
+}
+
+// src/services/easyInvoiceService.ts
 var httpsAgent2 = new https3.Agent({ rejectUnauthorized: false });
 var isServerless2 = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
@@ -6095,7 +6134,7 @@ async function downloadOriginalEasyInvoice(params) {
       }
       const scriptMatch = postRes.data.match(/showInv\([^;]+,\s*'([^']+)'\);/);
       const token = scriptMatch ? scriptMatch[1] : "";
-      const invoiceHtml = invData.str || "";
+      const invoiceHtml = prepareEasyInvoiceHtml(invData.str || "");
       const b64Html = Buffer.from(invoiceHtml, "utf-8").toString("base64");
       let downloadFileName = `HOADON_${sellerTaxCode || "EASYINVOICE"}_${khhdon || "HD"}_${shdon || lookupCode}`;
       if (params.viewOnly && invoiceHtml) {
@@ -7070,8 +7109,8 @@ async function downloadOriginalThaiSonPdf(params) {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError("Th\xE1i S\u01A1n thi\u1EBFu M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n.", "THAISON", "LOOKUP_DATA_MISSING", 422);
   const signal = AbortSignal.timeout(Math.min(params.timeoutMs || 45e3, 45e3));
   const cookies = /* @__PURE__ */ new Map();
-  const request = async (path4, init = {}) => {
-    let url = new URL(path4, THAISON_PORTAL_URL);
+  const request = async (path3, init = {}) => {
+    let url = new URL(path3, THAISON_PORTAL_URL);
     let method = init.method || "GET";
     let body = init.body;
     for (let hop = 0; hop < 5; hop++) {
@@ -7896,9 +7935,9 @@ async function fetchGdtInvoiceDetail(invoice, headers, signal) {
       shdon: shdonVal,
       khmshdon: invoice.khmshdon || "1"
     });
-    const path4 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
+    const path3 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
     try {
-      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path4}?${params.toString()}`, {
+      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path3}?${params.toString()}`, {
         headers: {
           ...GDT_REQUEST_HEADERS,
           "request-id": getRequestId(),
@@ -8004,606 +8043,41 @@ function mergeGdtInvoiceDetail(invoice, detail, exportedXml = "") {
   };
 }
 
-// src/db/neonDb.ts
-import dotenv from "dotenv";
-import fs2 from "fs";
-import path2 from "path";
-import { Pool } from "pg";
-dotenv.config({ override: true });
-var CONFIG_FILE = path2.join(process.cwd(), "neon_config.json");
-var pool = null;
-var currentPoolUrl = null;
-var isPostgresConnected = false;
-var isTableInitialized = false;
-var lastPostgresError = null;
-function cleanDatabaseUrl(rawUrl) {
-  if (!rawUrl) return "";
-  let url = rawUrl.trim().replace(/^["']|["']$/g, "").trim();
-  url = url.replace(/([?&])channel_binding=[^&]*(&|$)/gi, (_m, p1, p2) => p2 ? p1 : "");
-  return url;
-}
-function getStoredDatabaseUrl() {
+// src/utils/pmktBridgeAuth.ts
+import crypto2 from "crypto";
+function verifyPmktBridgeToken(token, secret = process.env.PMKT_BRIDGE_SECRET) {
+  if (!secret || Buffer.byteLength(secret, "utf8") < 32) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return false;
   try {
-    if (fs2.existsSync(CONFIG_FILE)) {
-      const raw = fs2.readFileSync(CONFIG_FILE, "utf-8");
-      const data = JSON.parse(raw);
-      if (data && typeof data.databaseUrl === "string" && data.databaseUrl.trim()) {
-        return cleanDatabaseUrl(data.databaseUrl);
-      }
+    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    if (header?.alg !== "HS256") return false;
+    if (typeof claims?.sub !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claims.sub) || claims.iss !== "pmkt-v2" || !(claims.aud === "hoadondientu" || Array.isArray(claims.aud) && claims.aud.includes("hoadondientu")) || typeof claims.exp !== "number" || !Number.isFinite(claims.exp) || claims.exp <= Date.now() / 1e3 || claims.nbf !== void 0 && (typeof claims.nbf !== "number" || claims.nbf > Date.now() / 1e3)) {
+      return false;
     }
+    const expected = crypto2.createHmac("sha256", secret).update(`${parts[0]}.${parts[1]}`).digest();
+    const actual = Buffer.from(parts[2], "base64url");
+    return actual.length === expected.length && crypto2.timingSafeEqual(actual, expected);
   } catch {
+    return false;
   }
-  return "";
-}
-function getDatabaseConfig() {
-  try {
-    dotenv.config({ override: true });
-  } catch {
-  }
-  const storedUrl = getStoredDatabaseUrl();
-  if (storedUrl) {
-    return {
-      source: "CONFIG_FILE",
-      url: storedUrl
-    };
-  }
-  const candidates = [
-    ["POSTGRES_URL", process.env.POSTGRES_URL],
-    ["DATABASE_URL", process.env.DATABASE_URL],
-    ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
-    ["POSTGRES_URL_NON_POOLING", process.env.POSTGRES_URL_NON_POOLING],
-    ["DATABASE_URL_UNPOOLED", process.env.DATABASE_URL_UNPOOLED],
-    ["NEON_DATABASE_URL", process.env.NEON_DATABASE_URL]
-  ];
-  const selected = candidates.find(([, value2]) => value2 && value2.trim());
-  let url = cleanDatabaseUrl(selected?.[1] || "");
-  if (!url && process.env.POSTGRES_HOST && process.env.POSTGRES_USER) {
-    const user = encodeURIComponent(process.env.POSTGRES_USER || "");
-    const pass = encodeURIComponent(process.env.POSTGRES_PASSWORD || "");
-    const host = process.env.POSTGRES_HOST;
-    const db = process.env.POSTGRES_DATABASE || "postgres";
-    url = `postgresql://${user}:${pass}@${host}/${db}?sslmode=require`;
-    return {
-      source: "POSTGRES_HOST_CONFIG",
-      url
-    };
-  }
-  return {
-    source: selected ? selected[0] : "NONE",
-    url
-  };
-}
-function getDatabaseUrl() {
-  return getDatabaseConfig().url;
-}
-function getMaskedDatabaseUrl() {
-  const url = getDatabaseUrl();
-  if (!url) return "";
-  try {
-    const u = new URL(url);
-    const pass = u.password ? "***" : "";
-    return `${u.protocol}//${u.username}:${pass}@${u.host}${u.pathname}`;
-  } catch {
-    return url.replace(/:([^:@]+)@/, ":***@");
-  }
-}
-function safeDatabaseError(error) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "postgresql://[redacted]").replace(/password=[^&\s]+/gi, "password=[redacted]");
-}
-function getPostgresPool() {
-  const databaseUrl = getDatabaseUrl();
-  if (!databaseUrl) {
-    return null;
-  }
-  if (pool && currentPoolUrl !== databaseUrl) {
-    try {
-      pool.end();
-    } catch {
-    }
-    pool = null;
-    isPostgresConnected = false;
-    isTableInitialized = false;
-  }
-  if (!pool) {
-    try {
-      const isLocalhost = databaseUrl.includes("localhost") || databaseUrl.includes("127.0.0.1");
-      pool = new Pool({
-        connectionString: databaseUrl,
-        ssl: isLocalhost ? false : { rejectUnauthorized: false },
-        max: process.env.VERCEL ? 3 : 10,
-        connectionTimeoutMillis: 5e3,
-        idleTimeoutMillis: 15e3
-      });
-      currentPoolUrl = databaseUrl;
-      pool.on("error", (err) => {
-        isPostgresConnected = false;
-        lastPostgresError = safeDatabaseError(err);
-      });
-    } catch (err) {
-      lastPostgresError = safeDatabaseError(err);
-      return null;
-    }
-  }
-  return pool;
-}
-async function resetPostgresPool() {
-  if (pool) {
-    try {
-      await pool.end();
-    } catch {
-    }
-    pool = null;
-  }
-  currentPoolUrl = null;
-  isPostgresConnected = false;
-  isTableInitialized = false;
-  lastPostgresError = null;
-}
-function calculateExpiryDate(startDate, durationMonths) {
-  const expiry = new Date(startDate);
-  expiry.setMonth(expiry.getMonth() + Number(durationMonths || 1));
-  expiry.setHours(23, 59, 59, 999);
-  return expiry;
-}
-function enrichUserWithStatus(user) {
-  const now = /* @__PURE__ */ new Date();
-  const expiresAt = new Date(user.expires_at);
-  const diffTime = expiresAt.getTime() - now.getTime();
-  const daysRemaining = Math.ceil(diffTime / (1e3 * 60 * 60 * 24));
-  const isExpired = daysRemaining < 0 || !user.is_active;
-  let status = "active";
-  if (!user.is_active) {
-    status = "disabled";
-  } else if (daysRemaining < 0) {
-    status = "expired";
-  } else if (daysRemaining <= 7) {
-    status = "expiring_soon";
-  }
-  return {
-    ...user,
-    days_remaining: Math.max(0, daysRemaining),
-    is_expired: isExpired,
-    status
-  };
-}
-var inMemoryUsers = /* @__PURE__ */ new Map();
-var isMemoryInitialized = false;
-function initInMemoryStore() {
-  if (isMemoryInitialized) return;
-  const now = /* @__PURE__ */ new Date();
-  const adminExpiry = calculateExpiryDate(now, 120);
-  const userExpiry = calculateExpiryDate(now, 12);
-  const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim() || "admin";
-  const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim() || "admin";
-  const initialAdminName = (process.env.ADMIN_INITIAL_FULLNAME || "").trim() || "Qu\u1EA3n tr\u1ECB vi\xEAn Demo";
-  inMemoryUsers.set(initialAdminUser.toLowerCase(), {
-    id: 1,
-    username: initialAdminUser,
-    password: initialAdminPass,
-    full_name: initialAdminName,
-    role: "admin",
-    duration_months: 120,
-    created_at: now.toISOString(),
-    expires_at: adminExpiry.toISOString(),
-    is_active: true,
-    notes: "T\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn (Ch\u1EBF \u0111\u1ED9 d\u1EF1 ph\xF2ng khi ch\u01B0a k\u1EBFt n\u1ED1i Neon)"
-  });
-  isMemoryInitialized = true;
-}
-async function initDatabase() {
-  initInMemoryStore();
-  const databaseConfig = getDatabaseConfig();
-  const databaseUrl = databaseConfig.url;
-  if (!databaseUrl) {
-    isPostgresConnected = false;
-    lastPostgresError = null;
-    return {
-      success: true,
-      type: "in_memory_mock",
-      message: "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock). \u0110\u1EC3 l\u01B0u tr\u1EEF v\u0129nh vi\u1EC5n, b\u1EA1n c\xF3 th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL."
-    };
-  }
-  const p = getPostgresPool();
-  if (!p) {
-    isPostgresConnected = false;
-    return {
-      success: true,
-      type: "in_memory_mock",
-      message: `C\u01A1 s\u1EDF d\u1EEF li\u1EC7u t\u1EA1m th\u1EDDi ch\u01B0a k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c (${lastPostgresError || "L\u1ED7i kh\xF4ng x\xE1c \u0111\u1ECBnh"}), chuy\u1EC3n sang ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m.`
-    };
-  }
-  try {
-    await p.query("SELECT 1;");
-    if (!isTableInitialized) {
-      await p.query(`
-        CREATE TABLE IF NOT EXISTS web_users (
-          id SERIAL PRIMARY KEY,
-          username VARCHAR(50) UNIQUE NOT NULL,
-          password VARCHAR(255) NOT NULL,
-          full_name VARCHAR(255),
-          role VARCHAR(20) DEFAULT 'user',
-          duration_months INTEGER DEFAULT 1,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-          is_active BOOLEAN DEFAULT TRUE,
-          notes TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-      `);
-      const initialAdminUser = (process.env.ADMIN_INITIAL_USERNAME || "").trim();
-      const initialAdminPass = (process.env.ADMIN_INITIAL_PASSWORD || "").trim();
-      if (initialAdminUser && initialAdminPass) {
-        try {
-          const countRes = await p.query("SELECT COUNT(*) as count FROM web_users;");
-          const count = parseInt(countRes.rows[0]?.count || "0", 10);
-          if (count === 0) {
-            const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
-            await p.query(`
-              INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-              ON CONFLICT (username) DO NOTHING;
-            `, [
-              initialAdminUser,
-              initialAdminPass,
-              process.env.ADMIN_INITIAL_FULLNAME || "Qu\u1EA3n tr\u1ECB vi\xEAn",
-              "admin",
-              120,
-              (/* @__PURE__ */ new Date()).toISOString(),
-              adminExpiry.toISOString(),
-              true,
-              "T\xE0i kho\u1EA3n kh\u1EDFi t\u1EA1o t\u1EEB c\u1EA5u h\xECnh ban \u0111\u1EA7u"
-            ]);
-          }
-        } catch {
-        }
-      }
-      isTableInitialized = true;
-    }
-    isPostgresConnected = true;
-    lastPostgresError = null;
-    return {
-      success: true,
-      type: "neon_postgres",
-      message: `\u0110\xE3 k\u1EBFt n\u1ED1i th\xE0nh c\xF4ng t\u1EDBi c\u01A1 s\u1EDF d\u1EEF li\u1EC7u.`
-    };
-  } catch (err) {
-    const safeErr = safeDatabaseError(err);
-    lastPostgresError = safeErr;
-    isPostgresConnected = false;
-    console.warn(`[Database Init] Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL: ${safeErr} - Ho\u1EA1t \u0111\u1ED9ng b\u1EB1ng In-Memory Mock`);
-    return {
-      success: true,
-      type: "in_memory_mock",
-      message: `\u0110ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-memory mock) do PostgreSQL ch\u01B0a s\u1EB5n s\xE0ng: ${safeErr}`
-    };
-  }
-}
-async function getDatabaseStatus() {
-  initInMemoryStore();
-  const databaseConfig = getDatabaseConfig();
-  const dbConfigured = Boolean(databaseConfig.url);
-  if (dbConfigured) {
-    const p = getPostgresPool();
-    if (p) {
-      try {
-        await p.query("SELECT 1;");
-        const res = await p.query("SELECT COUNT(*) as count FROM web_users;");
-        const totalUsers = parseInt(res.rows[0]?.count || "0", 10);
-        isPostgresConnected = true;
-        lastPostgresError = null;
-        return {
-          connected: true,
-          type: "neon_postgres",
-          message: "C\u01A1 s\u1EDF d\u1EEF li\u1EC7u PostgreSQL \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1ED5n \u0111\u1ECBnh",
-          totalUsers,
-          databaseUrlConfigured: true,
-          connectionSource: databaseConfig.source,
-          maskedUrl: getMaskedDatabaseUrl()
-        };
-      } catch (err) {
-        lastPostgresError = safeDatabaseError(err);
-        isPostgresConnected = false;
-      }
-    }
-  }
-  return {
-    connected: true,
-    type: "in_memory_mock",
-    message: dbConfigured ? `Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i PostgreSQL (${lastPostgresError || "L\u1ED7i m\u1EA1ng"}), h\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng v\u1EDBi In-Memory Mock.` : "H\u1EC7 th\u1ED1ng \u0111ang ho\u1EA1t \u0111\u1ED9ng \u1EDF ch\u1EBF \u0111\u1ED9 b\u1ED9 nh\u1EDB \u0111\u1EC7m (In-Memory Mock).",
-    totalUsers: inMemoryUsers.size,
-    databaseUrlConfigured: dbConfigured,
-    connectionSource: dbConfigured ? databaseConfig.source : "IN_MEMORY",
-    maskedUrl: getMaskedDatabaseUrl()
-  };
-}
-async function saveNeonDatabaseUrl(rawUrl, initialAdmin) {
-  const cleaned = cleanDatabaseUrl(rawUrl);
-  if (!cleaned) {
-    return { success: false, message: "Chu\u1ED7i k\u1EBFt n\u1ED1i kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng." };
-  }
-  const testPool = new Pool({
-    connectionString: cleaned,
-    ssl: cleaned.includes("localhost") ? false : { rejectUnauthorized: false },
-    connectionTimeoutMillis: 7e3
-  });
-  try {
-    await testPool.query("SELECT 1;");
-  } catch (err) {
-    try {
-      await testPool.end();
-    } catch {
-    }
-    const safeErr = safeDatabaseError(err);
-    let friendly = safeErr;
-    if (safeErr.includes("password authentication failed")) {
-      friendly = "M\u1EADt kh\u1EA9u x\xE1c th\u1EF1c c\u01A1 s\u1EDF d\u1EEF li\u1EC7u kh\xF4ng ch\xEDnh x\xE1c.";
-    }
-    return {
-      success: false,
-      message: `K\u1EBFt n\u1ED1i c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\u1EA5t b\u1EA1i: ${friendly}`
-    };
-  }
-  try {
-    await testPool.query(`
-      CREATE TABLE IF NOT EXISTS web_users (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password VARCHAR(255) NOT NULL,
-        full_name VARCHAR(255),
-        role VARCHAR(20) DEFAULT 'user',
-        duration_months INTEGER DEFAULT 1,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-        is_active BOOLEAN DEFAULT TRUE,
-        notes TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_web_users_username ON web_users(username);
-    `);
-    if (initialAdmin?.username && initialAdmin?.password) {
-      const adminExpiry = calculateExpiryDate(/* @__PURE__ */ new Date(), 120);
-      await testPool.query(`
-        INSERT INTO web_users (username, password, full_name, role, duration_months, created_at, expires_at, is_active, notes)
-        VALUES ($1, $2, $3, 'admin', 120, $4, $5, true, $6)
-        ON CONFLICT (username) DO NOTHING;
-      `, [
-        initialAdmin.username.trim(),
-        initialAdmin.password.trim(),
-        initialAdmin.fullName || "Qu\u1EA3n tr\u1ECB vi\xEAn",
-        (/* @__PURE__ */ new Date()).toISOString(),
-        adminExpiry.toISOString(),
-        "Kh\u1EDFi t\u1EA1o qua c\u1EA5u h\xECnh"
-      ]);
-    }
-  } catch {
-  } finally {
-    try {
-      await testPool.end();
-    } catch {
-    }
-  }
-  try {
-    fs2.writeFileSync(
-      CONFIG_FILE,
-      JSON.stringify(
-        {
-          databaseUrl: cleaned,
-          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-        },
-        null,
-        2
-      ),
-      "utf-8"
-    );
-    await resetPostgresPool();
-    await initDatabase();
-    return {
-      success: true,
-      connected: true,
-      message: "\u0110\xE3 k\u1EBFt n\u1ED1i v\xE0 l\u01B0u c\u1EA5u h\xECnh c\u01A1 s\u1EDF d\u1EEF li\u1EC7u th\xE0nh c\xF4ng!"
-    };
-  } catch (err) {
-    return {
-      success: false,
-      message: `Kh\xF4ng th\u1EC3 l\u01B0u c\u1EA5u h\xECnh: ${err.message}`
-    };
-  }
-}
-async function findUserByUsername(username) {
-  const cleanUsername = (username || "").trim();
-  if (!cleanUsername) return null;
-  const p = getPostgresPool();
-  if (p && isPostgresConnected) {
-    try {
-      const res = await p.query(
-        "SELECT * FROM web_users WHERE LOWER(username) = LOWER($1) LIMIT 1;",
-        [cleanUsername]
-      );
-      if (res.rows.length > 0) {
-        return enrichUserWithStatus(res.rows[0]);
-      }
-      return null;
-    } catch (err) {
-      console.warn(`[findUserByUsername] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
-    }
-  }
-  initInMemoryStore();
-  const lower = cleanUsername.toLowerCase();
-  const memoryUser = inMemoryUsers.get(lower);
-  if (memoryUser) {
-    return enrichUserWithStatus(memoryUser);
-  }
-  if (lower === "admin") {
-    const adminUser = Array.from(inMemoryUsers.values()).find((u) => u.role === "admin");
-    if (adminUser) return enrichUserWithStatus(adminUser);
-  }
-  return null;
-}
-async function getAllUsers() {
-  const p = getPostgresPool();
-  if (p && isPostgresConnected) {
-    try {
-      const res = await p.query("SELECT * FROM web_users ORDER BY id DESC;");
-      return res.rows.map(enrichUserWithStatus);
-    } catch (err) {
-      console.warn(`[getAllUsers] PostgreSQL query failed, checking in-memory store:`, safeDatabaseError(err));
-    }
-  }
-  initInMemoryStore();
-  return Array.from(inMemoryUsers.values()).sort((a, b) => Number(b.id) - Number(a.id)).map(enrichUserWithStatus);
-}
-async function createUser(params) {
-  const cleanUsername = (params.username || "").trim();
-  const cleanPassword = (params.password || "").trim();
-  if (!cleanUsername) {
-    return { success: false, error: "M\xE3 s\u1ED1 thu\u1EBF (T\xEAn \u0111\u0103ng nh\u1EADp) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" };
-  }
-  if (!cleanPassword) {
-    return { success: false, error: "M\u1EADt kh\u1EA9u kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" };
-  }
-  const durationMonths = Number(params.durationMonths) || 1;
-  const now = /* @__PURE__ */ new Date();
-  const expiresAt = calculateExpiryDate(now, durationMonths);
-  const role = params.role || "user";
-  const p = getPostgresPool();
-  if (p && isPostgresConnected) {
-    try {
-      const checkRes = await p.query("SELECT id FROM web_users WHERE LOWER(username) = LOWER($1);", [cleanUsername]);
-      if (checkRes.rows.length > 0) {
-        return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
-      }
-      const insertRes = await p.query(`
-        INSERT INTO web_users (username, password, full_name, role, duration_months, expires_at, is_active, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING *;
-      `, [
-        cleanUsername,
-        cleanPassword,
-        params.fullName || "",
-        role,
-        durationMonths,
-        expiresAt.toISOString(),
-        true,
-        params.notes || ""
-      ]);
-      const newUser = enrichUserWithStatus(insertRes.rows[0]);
-      return { success: true, user: newUser };
-    } catch (err) {
-      console.warn(`[createUser] PostgreSQL insert failed, falling back to in-memory store:`, safeDatabaseError(err));
-    }
-  }
-  initInMemoryStore();
-  const lower = cleanUsername.toLowerCase();
-  if (inMemoryUsers.has(lower)) {
-    return { success: false, error: `T\xE0i kho\u1EA3n / M\xE3 s\u1ED1 thu\u1EBF "${cleanUsername}" \u0111\xE3 t\u1ED3n t\u1EA1i trong h\u1EC7 th\u1ED1ng.` };
-  }
-  const newId = inMemoryUsers.size + 1;
-  const record = {
-    id: newId,
-    username: cleanUsername,
-    password: cleanPassword,
-    full_name: params.fullName || "",
-    role,
-    duration_months: durationMonths,
-    created_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    is_active: true,
-    notes: params.notes || ""
-  };
-  inMemoryUsers.set(lower, record);
-  return { success: true, user: enrichUserWithStatus(record) };
-}
-async function updateUser(id, params) {
-  const p = getPostgresPool();
-  if (p && isPostgresConnected) {
-    try {
-      const curRes = await p.query("SELECT * FROM web_users WHERE id = $1;", [id]);
-      if (curRes.rows.length === 0) {
-        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
-      }
-      const current = curRes.rows[0];
-      let expiresAt2 = new Date(current.expires_at);
-      if (params.extendMonths) {
-        const baseDate = expiresAt2.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt2;
-        expiresAt2 = calculateExpiryDate(baseDate, params.extendMonths);
-      } else if (params.newExpiresAt) {
-        expiresAt2 = new Date(params.newExpiresAt);
-      }
-      const password = params.password !== void 0 && params.password.trim() !== "" ? params.password.trim() : current.password;
-      const fullName = params.fullName !== void 0 ? params.fullName : current.full_name;
-      const isActive = params.isActive !== void 0 ? params.isActive : current.is_active;
-      const notes = params.notes !== void 0 ? params.notes : current.notes;
-      const updateRes = await p.query(`
-        UPDATE web_users
-        SET password = $1, full_name = $2, expires_at = $3, is_active = $4, notes = $5
-        WHERE id = $6
-        RETURNING *;
-      `, [password, fullName, expiresAt2.toISOString(), isActive, notes, id]);
-      return { success: true, user: enrichUserWithStatus(updateRes.rows[0]) };
-    } catch (err) {
-      console.warn(`[updateUser] PostgreSQL update failed, falling back to in-memory store:`, safeDatabaseError(err));
-    }
-  }
-  initInMemoryStore();
-  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
-  if (!existing) {
-    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y t\xE0i kho\u1EA3n ng\u01B0\u1EDDi d\xF9ng." };
-  }
-  let expiresAt = new Date(existing.expires_at);
-  if (params.extendMonths) {
-    const baseDate = expiresAt.getTime() < Date.now() ? /* @__PURE__ */ new Date() : expiresAt;
-    expiresAt = calculateExpiryDate(baseDate, params.extendMonths);
-  } else if (params.newExpiresAt) {
-    expiresAt = new Date(params.newExpiresAt);
-  }
-  if (params.password !== void 0 && params.password.trim() !== "") {
-    existing.password = params.password.trim();
-  }
-  if (params.fullName !== void 0) {
-    existing.full_name = params.fullName;
-  }
-  if (params.isActive !== void 0) {
-    existing.is_active = params.isActive;
-  }
-  if (params.notes !== void 0) {
-    existing.notes = params.notes;
-  }
-  existing.expires_at = expiresAt.toISOString();
-  inMemoryUsers.set(existing.username.toLowerCase(), existing);
-  return { success: true, user: enrichUserWithStatus(existing) };
-}
-async function deleteUser(id) {
-  const p = getPostgresPool();
-  if (p && isPostgresConnected) {
-    try {
-      const curRes = await p.query("SELECT role, username FROM web_users WHERE id = $1;", [id]);
-      if (curRes.rows.length === 0) {
-        return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng" };
-      }
-      if (curRes.rows[0].role === "admin" || curRes.rows[0].username === "admin") {
-        return { success: false, error: "Kh\xF4ng th\u1EC3 x\xF3a t\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn Master." };
-      }
-      await p.query("DELETE FROM web_users WHERE id = $1;", [id]);
-      return { success: true };
-    } catch (err) {
-      console.warn(`[deleteUser] PostgreSQL delete failed, falling back to in-memory store:`, safeDatabaseError(err));
-    }
-  }
-  initInMemoryStore();
-  const existing = Array.from(inMemoryUsers.values()).find((u) => String(u.id) === String(id));
-  if (!existing) {
-    return { success: false, error: "Kh\xF4ng t\xECm th\u1EA5y ng\u01B0\u1EDDi d\xF9ng" };
-  }
-  if (existing.role === "admin" || existing.username.toLowerCase() === "admin") {
-    return { success: false, error: "Kh\xF4ng th\u1EC3 x\xF3a t\xE0i kho\u1EA3n Qu\u1EA3n tr\u1ECB vi\xEAn Master." };
-  }
-  inMemoryUsers.delete(existing.username.toLowerCase());
-  return { success: true };
 }
 
 // server.ts
-dotenv2.config({ override: true });
+dotenv.config({ override: true });
 var app = express();
+function getPmktAppOrigin() {
+  const configuredOrigin = process.env.PMKT_APP_ORIGIN || "https://pmkt.nghiatingold.com";
+  try {
+    const url = new URL(configuredOrigin);
+    const isSecure = url.protocol === "https:";
+    const isLocalhost = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    return url.origin === configuredOrigin && (isSecure || isLocalhost) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
 function resolvePort() {
   const portIdx = process.argv.indexOf("--port");
   if (portIdx !== -1 && process.argv[portIdx + 1]) {
@@ -8624,11 +8098,17 @@ var PORT = resolvePort();
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  const pmktOrigin = getPmktAppOrigin();
+  res.setHeader("Content-Security-Policy", `frame-ancestors ${pmktOrigin || "'none'"}`);
+  const vary = res.getHeader("Vary");
+  res.setHeader("Vary", vary ? `${vary}, Origin` : "Origin");
+  if (pmktOrigin && req.get("Origin") === pmktOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", pmktOrigin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  }
   if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
+    return req.get("Origin") && req.get("Origin") !== pmktOrigin ? res.sendStatus(403) : res.sendStatus(204);
   }
   next();
 });
@@ -8640,9 +8120,22 @@ app.use((req, res, next) => {
     }
   }
   if (!req.url.startsWith("/api")) {
-    if (req.url.startsWith("/auth") || req.url.startsWith("/admin") || req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/easyinvoice") || req.url.startsWith("/vnpt") || req.url.startsWith("/viettel") || req.url.startsWith("/vnpay") || req.url.startsWith("/foursi") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
+    if (req.url.startsWith("/gdt") || req.url.startsWith("/invoice-downloader") || req.url.startsWith("/easyinvoice") || req.url.startsWith("/vnpt") || req.url.startsWith("/viettel") || req.url.startsWith("/vnpay") || req.url.startsWith("/foursi") || req.url.startsWith("/health") || req.url.startsWith("/selenium")) {
       req.url = "/api" + req.url;
     }
+  }
+  next();
+});
+app.use("/api", (req, res, next) => {
+  if (req.path === "/health") return next();
+  const secret = process.env.PMKT_BRIDGE_SECRET;
+  if (!getPmktAppOrigin() || !secret || Buffer.byteLength(secret, "utf8") < 32) {
+    return res.status(503).json({ success: false, message: "Ch\u01B0a c\u1EA5u h\xECnh \u0111\u1EA7y \u0111\u1EE7 t\xEDch h\u1EE3p PMKT tr\xEAn m\xE1y ch\u1EE7." });
+  }
+  const authorization = req.get("Authorization") || "";
+  const match = /^Bearer ([A-Za-z0-9._~-]+)$/.exec(authorization);
+  if (!match || !verifyPmktBridgeToken(match[1])) {
+    return res.status(401).json({ success: false, message: "Phi\xEAn t\xEDch h\u1EE3p PMKT kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c \u0111\xE3 h\u1EBFt h\u1EA1n." });
   }
   next();
 });
@@ -8772,7 +8265,7 @@ async function fetchGDT(url, options = {}, maxRetries = 1, timeoutMs = 12e3, cus
       const mergedCookie = mergeCookieHeaders(f5Cookie, existingCookie);
       const mergedHeaders = {
         ...GDT_HEADERS,
-        "request-id": crypto2.randomUUID ? crypto2.randomUUID() : `req_${Date.now()}`,
+        "request-id": crypto3.randomUUID ? crypto3.randomUUID() : `req_${Date.now()}`,
         "End-Point": "/",
         "Action": "",
         ...callerHeaders
@@ -9261,7 +8754,7 @@ app.post("/api/gdt/pos-captcha", async (req, res) => {
 });
 app.post("/api/gdt/invoice-detail", async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
-  const rawAuth = req.headers.authorization || bodyToken || "";
+  const rawAuth = bodyToken || "";
   const authHeader = rawAuth && rawAuth.trim() && rawAuth.trim() !== "Bearer" ? rawAuth.trim() : currentSession?.token || "";
   const rawCookie = req.headers["x-gdt-cookie"] || bodyCookie || "";
   const cookieHeader = rawCookie && rawCookie.trim() ? rawCookie.trim() : currentSession?.cookieHeader || "";
@@ -9309,7 +8802,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   if (toDate && typeof toDate === "string" && !dateRegex.test(toDate.trim())) {
     toDate = void 0;
   }
-  const authHeader = req.headers.authorization || bodyToken || currentSession?.token || "";
+  const authHeader = bodyToken || currentSession?.token || "";
   const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
     return res.status(401).json({
@@ -9683,7 +9176,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
     return entry;
   };
   addLog("step", `[1/6] B\u1EAFt \u0111\u1EA7u kh\u1EDFi t\u1EA1o quy tr\xECnh t\u1EF1 \u0111\u1ED9ng h\xF3a Python Selenium cho MST: ${mst}`, "INIT", 10);
-  const pythonScriptPath = path3.join(process.cwd(), "python", "gdt_selenium_crawler.py");
+  const pythonScriptPath = path2.join(process.cwd(), "python", "gdt_selenium_crawler.py");
   const args = [
     pythonScriptPath,
     "--mst",
@@ -9741,8 +9234,8 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
     const zip = new JSZip4();
-    const fs3 = await import("fs");
-    const pythonDir = path3.join(process.cwd(), "python");
+    const fs2 = await import("fs");
+    const pythonDir = path2.join(process.cwd(), "python");
     const files = [
       "gdt_selenium_crawler.py",
       "requirements.txt",
@@ -9753,9 +9246,9 @@ app.get("/api/gdt/download-python-package", async (req, res) => {
       "HUONG_DAN_SUA_LOI_PYTHON.txt"
     ];
     for (const file of files) {
-      const fullPath = path3.join(pythonDir, file);
-      if (fs3.existsSync(fullPath)) {
-        const content = fs3.readFileSync(fullPath, "utf-8");
+      const fullPath = path2.join(pythonDir, file);
+      if (fs2.existsSync(fullPath)) {
+        const content = fs2.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
@@ -9867,8 +9360,8 @@ echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
 python3 gdt_selenium_crawler.py --type purchase
 `;
-    if (fs3.existsSync(path3.join(pythonDir, "run_windows.bat"))) {
-      zip.file("run_windows.bat", fs3.readFileSync(path3.join(pythonDir, "run_windows.bat"), "utf-8"));
+    if (fs2.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs2.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
     } else {
       zip.file("run_windows.bat", runBat);
     }
@@ -11126,381 +10619,6 @@ app.all("/api/thaison/download-xml", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-var runtimeAuthTokenSecret = null;
-function getAuthTokenSecret() {
-  const envSecret = process.env.AUTH_TOKEN_SECRET || process.env.POSTGRES_URL || process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.POSTGRES_PRISMA_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.DATABASE_URL_UNPOOLED;
-  if (envSecret) {
-    return envSecret;
-  }
-  if (!runtimeAuthTokenSecret) {
-    runtimeAuthTokenSecret = crypto2.randomBytes(32).toString("hex");
-    console.warn("[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.");
-  }
-  return runtimeAuthTokenSecret;
-}
-function getWebAppAuthUrl(req) {
-  if (process.env.VERCEL) {
-    return "";
-  }
-  const configuredUrl = (process.env.AUTH_WEBAPP_URL || "").trim();
-  if (!configuredUrl) {
-    return "";
-  }
-  const normalizedUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`;
-  const trimmed = normalizedUrl.replace(/\/+$/, "");
-  if (req) {
-    const host = req.get("host");
-    if (host && (trimmed.includes(host) || host.includes("vercel.app"))) {
-      return "";
-    }
-  }
-  return trimmed;
-}
-function mapRemoteUser(user) {
-  if (!user || typeof user.username !== "string") return null;
-  return {
-    id: user.id ?? user.username,
-    username: user.username,
-    password: "",
-    full_name: user.fullName || user.full_name || "",
-    role: user.role === "admin" ? "admin" : "user",
-    duration_months: Number(user.durationMonths ?? user.duration_months) || 1,
-    created_at: user.createdAt || user.created_at || (/* @__PURE__ */ new Date()).toISOString(),
-    expires_at: user.expiresAt || user.expires_at || (/* @__PURE__ */ new Date(864e13)).toISOString(),
-    is_active: user.isActive !== false && user.is_active !== false,
-    notes: user.notes || "",
-    days_remaining: Math.max(0, Number(user.daysRemaining ?? user.days_remaining) || 0),
-    is_expired: user.isExpired === true || user.is_expired === true,
-    status: user.status || "active"
-  };
-}
-async function getRemoteAuthUser(token) {
-  const authUrl = getWebAppAuthUrl();
-  if (!authUrl) return null;
-  const response = await fetch(`${authUrl}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!response.ok) return null;
-  const payload = await response.json();
-  return mapRemoteUser(payload.user);
-}
-async function proxyWebAppRequest(req, route, method) {
-  const authUrl = getWebAppAuthUrl();
-  const headers = {
-    Authorization: req.headers.authorization || ""
-  };
-  const options = { method, headers };
-  if (method !== "GET" && method !== "DELETE") {
-    headers["Content-Type"] = "application/json";
-    options.body = JSON.stringify(req.body || {});
-  }
-  const response = await fetch(`${authUrl}${route}`, options);
-  const payload = await response.json().catch(() => ({
-    success: false,
-    message: `Webapp tr\u1EA3 v\u1EC1 HTTP ${response.status}.`
-  }));
-  return { status: response.status, payload };
-}
-function createWebToken(username) {
-  const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString("base64url");
-  const signature = crypto2.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
-  return `${payload}.${signature}`;
-}
-function getUsernameFromToken(token) {
-  const [payload, signature] = token.split(".");
-  if (!payload || !signature) return null;
-  const expected = crypto2.createHmac("sha256", getAuthTokenSecret()).update(payload).digest("base64url");
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !crypto2.timingSafeEqual(actualBuffer, expectedBuffer)) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return typeof parsed.username === "string" ? parsed.username : null;
-  } catch {
-    return null;
-  }
-}
-function formatUserForClient(user) {
-  return {
-    id: user.id,
-    username: user.username,
-    fullName: user.full_name || "",
-    role: user.role,
-    durationMonths: user.duration_months,
-    createdAt: user.created_at,
-    expiresAt: user.expires_at,
-    isActive: user.is_active,
-    notes: user.notes || "",
-    daysRemaining: user.days_remaining,
-    isExpired: user.is_expired,
-    status: user.status
-  };
-}
-function formatUserForAdmin(user) {
-  return {
-    ...formatUserForClient(user),
-    password: user.password
-    // Cung cấp để Admin có thể xem/copy gửi cho khách hàng
-  };
-}
-async function authenticateWebUser(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ success: false, message: "Vui l\xF2ng \u0111\u0103ng nh\u1EADp h\u1EC7 th\u1ED1ng." });
-  }
-  const token = authHeader.substring(7).trim();
-  if (getWebAppAuthUrl(req)) {
-    try {
-      const remoteUser = await getRemoteAuthUser(token);
-      if (!remoteUser || !remoteUser.is_active) {
-        return res.status(401).json({ success: false, message: "Phi\xEAn \u0111\u0103ng nh\u1EADp webapp \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng \u0111\u0103ng nh\u1EADp l\u1EA1i." });
-      }
-      if (remoteUser.is_expired && remoteUser.role !== "admin") {
-        return res.status(403).json({ success: false, expired: true, message: "T\xE0i kho\u1EA3n \u0111\xE3 h\u1EBFt h\u1EA1n s\u1EED d\u1EE5ng." });
-      }
-      req.webUser = remoteUser;
-      return next();
-    } catch (error) {
-      console.error("[Desktop Remote Auth Error]:", error.message);
-      return res.status(502).json({ success: false, message: "Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c m\xE1y ch\u1EE7 x\xE1c th\u1EF1c webapp." });
-    }
-  }
-  const username = getUsernameFromToken(token);
-  if (!username) {
-    return res.status(401).json({ success: false, message: "Phi\xEAn \u0111\u0103ng nh\u1EADp \u0111\xE3 h\u1EBFt h\u1EA1n. Vui l\xF2ng \u0111\u0103ng nh\u1EADp l\u1EA1i." });
-  }
-  const user = await findUserByUsername(username);
-  if (!user || !user.is_active) {
-    return res.status(401).json({ success: false, message: "T\xE0i kho\u1EA3n kh\xF4ng t\u1ED3n t\u1EA1i ho\u1EB7c \u0111\xE3 b\u1ECB kh\xF3a." });
-  }
-  if (user.is_expired && user.role !== "admin") {
-    return res.status(403).json({
-      success: false,
-      expired: true,
-      message: `T\xE0i kho\u1EA3n c\u1EE7a b\u1EA1n \u0111\xE3 h\u1EBFt h\u1EA1n s\u1EED d\u1EE5ng (${new Date(user.expires_at).toLocaleDateString("vi-VN")}). Vui l\xF2ng li\xEAn h\u1EC7 qu\u1EA3n tr\u1ECB vi\xEAn \u0111\u1EC3 gia h\u1EA1n.`
-    });
-  }
-  req.webUser = user;
-  next();
-}
-function requireAdmin(req, res, next) {
-  const user = req.webUser;
-  if (!user || user.role !== "admin") {
-    return res.status(403).json({ success: false, message: "B\u1EA1n kh\xF4ng c\xF3 quy\u1EC1n qu\u1EA3n tr\u1ECB vi\xEAn." });
-  }
-  next();
-}
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\u1EADp M\xE3 s\u1ED1 thu\u1EBF v\xE0 m\u1EADt kh\u1EA9u." });
-    }
-    const authUrl = getWebAppAuthUrl(req);
-    if (authUrl) {
-      const remoteResponse = await fetch(`${authUrl}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password })
-      });
-      const remotePayload = await remoteResponse.json().catch(() => ({}));
-      if (!remoteResponse.ok || remotePayload.success === false) {
-        return res.status(remoteResponse.status || 502).json(remotePayload);
-      }
-      if (!remotePayload.token || !remotePayload.user) {
-        return res.status(502).json({ success: false, message: "Webapp tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u \u0111\u0103ng nh\u1EADp kh\xF4ng h\u1EE3p l\u1EC7." });
-      }
-      return res.json(remotePayload);
-    }
-    const dbInit = await initDatabase();
-    if (!dbInit.success) {
-      return res.status(200).json({
-        success: false,
-        message: dbInit.message || "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i \u0111\u1EBFn c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng ki\u1EC3m tra l\u1EA1i c\u1EA5u h\xECnh DATABASE_URL."
-      });
-    }
-    let user;
-    try {
-      user = await findUserByUsername(username);
-    } catch (dbErr) {
-      return res.status(200).json({
-        success: false,
-        message: "L\u1ED7i truy v\u1EA5n c\u01A1 s\u1EDF d\u1EEF li\u1EC7u. Vui l\xF2ng th\u1EED l\u1EA1i sau."
-      });
-    }
-    if (!user) {
-      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
-    }
-    if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: "T\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c m\u1EADt kh\u1EA9u kh\xF4ng ch\xEDnh x\xE1c." });
-    }
-    if (!user.is_active) {
-      return res.status(403).json({ success: false, message: "T\xE0i kho\u1EA3n n\xE0y \u0111ang b\u1ECB t\u1EA1m kh\xF3a. Vui l\xF2ng li\xEAn h\u1EC7 qu\u1EA3n tr\u1ECB vi\xEAn." });
-    }
-    if (user.is_expired && user.role !== "admin") {
-      const expiryFormatted = new Date(user.expires_at).toLocaleDateString("vi-VN");
-      return res.status(403).json({
-        success: false,
-        expired: true,
-        message: `T\xE0i kho\u1EA3n c\u1EE7a b\u1EA1n \u0111\xE3 h\u1EBFt h\u1EA1n s\u1EED d\u1EE5ng v\xE0o ng\xE0y ${expiryFormatted}. Vui l\xF2ng li\xEAn h\u1EC7 qu\u1EA3n tr\u1ECB vi\xEAn \u0111\u1EC3 gia h\u1EA1n g\xF3i c\u01B0\u1EDBc.`
-      });
-    }
-    const token = createWebToken(user.username);
-    res.json({
-      success: true,
-      token,
-      user: formatUserForClient(user)
-    });
-  } catch (err) {
-    console.error("[Auth Login Error]:", err);
-    res.status(500).json({ success: false, message: err.message || "L\u1ED7i x\u1EED l\xFD \u0111\u0103ng nh\u1EADp" });
-  }
-});
-app.get("/api/auth/me", authenticateWebUser, async (req, res) => {
-  res.json({
-    success: true,
-    user: formatUserForClient(req.webUser)
-  });
-});
-app.post("/api/auth/logout", (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.substring(7).trim();
-  }
-  res.json({ success: true });
-});
-app.get("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result = await proxyWebAppRequest(req, "/api/admin/users", "GET");
-      return res.status(result.status).json(result.payload);
-    }
-    const dbInit = await initDatabase();
-    if (!dbInit.success) {
-      return res.status(200).json({ success: false, message: dbInit.message });
-    }
-    const users = await getAllUsers();
-    res.json({
-      success: true,
-      users: users.map(formatUserForAdmin)
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.post("/api/admin/users", authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result2 = await proxyWebAppRequest(req, "/api/admin/users", "POST");
-      return res.status(result2.status).json(result2.payload);
-    }
-    const { username, password, fullName, durationMonths, notes, role } = req.body;
-    const result = await createUser({
-      username,
-      password,
-      fullName,
-      durationMonths: Number(durationMonths) || 1,
-      notes,
-      role: role === "admin" ? "admin" : "user"
-    });
-    if (!result.success || !result.user) {
-      return res.status(400).json({ success: false, message: result.error || "Kh\xF4ng th\u1EC3 t\u1EA1o ng\u01B0\u1EDDi d\xF9ng" });
-    }
-    res.json({
-      success: true,
-      user: formatUserForAdmin(result.user)
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.put("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result2 = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, "PUT");
-      return res.status(result2.status).json(result2.payload);
-    }
-    const { password, fullName, extendMonths, newExpiresAt, isActive, notes } = req.body;
-    const result = await updateUser(req.params.id, {
-      password,
-      fullName,
-      extendMonths: extendMonths ? Number(extendMonths) : void 0,
-      newExpiresAt,
-      isActive,
-      notes
-    });
-    if (!result.success || !result.user) {
-      return res.status(400).json({ success: false, message: result.error || "C\u1EADp nh\u1EADt th\u1EA5t b\u1EA1i" });
-    }
-    res.json({
-      success: true,
-      user: formatUserForAdmin(result.user)
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.delete("/api/admin/users/:id", authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result2 = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, "DELETE");
-      return res.status(result2.status).json(result2.payload);
-    }
-    const result = await deleteUser(req.params.id);
-    if (!result.success) {
-      return res.status(400).json({ success: false, message: result.error });
-    }
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.get("/api/admin/db-status", async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      return res.json({
-        success: true,
-        connected: true,
-        type: "remote_webapp",
-        message: "X\xE1c th\u1EF1c t\xE0i kho\u1EA3n \u0111\u01B0\u1EE3c th\u1EF1c hi\u1EC7n b\u1EDFi webapp.",
-        maskedUrl: ""
-      });
-    }
-    const status = await getDatabaseStatus();
-    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.get("/api/neon/config", async (req, res) => {
-  try {
-    const status = await getDatabaseStatus();
-    res.json({
-      success: true,
-      ...status,
-      maskedUrl: getMaskedDatabaseUrl()
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-app.post("/api/neon/test-and-save", async (req, res) => {
-  try {
-    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
-    if (!databaseUrl || typeof databaseUrl !== "string") {
-      return res.status(400).json({ success: false, message: "Vui l\xF2ng cung c\u1EA5p chu\u1ED7i k\u1EBFt n\u1ED1i DATABASE_URL h\u1EE3p l\u1EC7." });
-    }
-    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
-      username: initialAdminUsername,
-      password: initialAdminPassword
-    });
-    return res.json(result);
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
 process.on("uncaughtException", (err) => {
   console.error("[Process uncaughtException]:", err);
 });
@@ -11534,11 +10652,11 @@ async function startServer() {
           return next();
         }
         try {
-          const fs3 = await import("fs");
-          const path4 = await import("path");
-          const indexPath = path4.resolve(process.cwd(), "index.html");
-          if (fs3.existsSync(indexPath)) {
-            let template = fs3.readFileSync(indexPath, "utf-8");
+          const fs2 = await import("fs");
+          const path3 = await import("path");
+          const indexPath = path3.resolve(process.cwd(), "index.html");
+          if (fs2.existsSync(indexPath)) {
+            let template = fs2.readFileSync(indexPath, "utf-8");
             template = await vite.transformIndexHtml(req.originalUrl, template);
             return res.status(200).set({ "Content-Type": "text/html" }).end(template);
           }
@@ -11553,20 +10671,14 @@ async function startServer() {
       console.error("[Vite Init Error]:", viteErr.message);
     }
   } else {
-    const distPath = process.env.VERCEL ? path3.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path3.dirname(__filename) : process.cwd();
+    const distPath = process.env.VERCEL ? path2.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path2.dirname(__filename) : process.cwd();
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path3.join(distPath, "index.html"));
+      res.sendFile(path2.join(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    initDatabase().then((dbInitResult) => {
-      if (dbInitResult.success) {
-        console.log(`[Database Init] \u2713 ${dbInitResult.message}`);
-      }
-    }).catch(() => {
-    });
   });
   const secondaryPortStr = process.env.PORT;
   if (secondaryPortStr) {

@@ -24,20 +24,22 @@ import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/se
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
 import { resolveInvoiceProvider } from './src/utils/providerRouting';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
-import {
-  initDatabase,
-  getDatabaseStatus,
-  getMaskedDatabaseUrl,
-  saveNeonDatabaseUrl,
-  findUserByUsername,
-  getAllUsers,
-  createUser,
-  updateUser,
-  deleteUser,
-  WebUserView
-} from './src/db/neonDb';
+import { verifyPmktBridgeToken } from './src/utils/pmktBridgeAuth';
 
 const app = express();
+
+function getPmktAppOrigin(): string | null {
+  const configuredOrigin = process.env.PMKT_APP_ORIGIN || 'https://pmkt.nghiatingold.com';
+
+  try {
+    const url = new URL(configuredOrigin);
+    const isSecure = url.protocol === 'https:';
+    const isLocalhost = url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);
+    return url.origin === configuredOrigin && (isSecure || isLocalhost) ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
 
 function resolvePort(): number {
   const portIdx = process.argv.indexOf('--port');
@@ -60,13 +62,20 @@ const PORT = resolvePort();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Enable CORS
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  const pmktOrigin = getPmktAppOrigin();
+  res.setHeader('Content-Security-Policy', `frame-ancestors ${pmktOrigin || "'none'"}`);
+  const vary = res.getHeader('Vary');
+  res.setHeader('Vary', vary ? `${vary}, Origin` : 'Origin');
+  if (pmktOrigin && req.get('Origin') === pmktOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', pmktOrigin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return req.get('Origin') && req.get('Origin') !== pmktOrigin
+      ? res.sendStatus(403)
+      : res.sendStatus(204);
   }
   next();
 });
@@ -83,8 +92,6 @@ app.use((req, res, next) => {
 
   if (!req.url.startsWith('/api')) {
     if (
-      req.url.startsWith('/auth') ||
-      req.url.startsWith('/admin') ||
       req.url.startsWith('/gdt') ||
       req.url.startsWith('/invoice-downloader') ||
       req.url.startsWith('/easyinvoice') ||
@@ -97,6 +104,22 @@ app.use((req, res, next) => {
     ) {
       req.url = '/api' + req.url;
     }
+  }
+  next();
+});
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
+
+  const secret = process.env.PMKT_BRIDGE_SECRET;
+  if (!getPmktAppOrigin() || !secret || Buffer.byteLength(secret, 'utf8') < 32) {
+    return res.status(503).json({ success: false, message: 'Chưa cấu hình đầy đủ tích hợp PMKT trên máy chủ.' });
+  }
+
+  const authorization = req.get('Authorization') || '';
+  const match = /^Bearer ([A-Za-z0-9._~-]+)$/.exec(authorization);
+  if (!match || !verifyPmktBridgeToken(match[1])) {
+    return res.status(401).json({ success: false, message: 'Phiên tích hợp PMKT không hợp lệ hoặc đã hết hạn.' });
   }
   next();
 });
@@ -865,7 +888,7 @@ app.post('/api/gdt/pos-captcha', async (req, res) => {
 // Fetch one invoice detail without delaying the list endpoint.
 app.post('/api/gdt/invoice-detail', async (req, res) => {
   const { invoice, token: bodyToken, cookieHeader: bodyCookie } = req.body || {};
-  const rawAuth = (req.headers.authorization as string) || bodyToken || '';
+  const rawAuth = bodyToken || '';
   const authHeader = (rawAuth && rawAuth.trim() && rawAuth.trim() !== 'Bearer') ? rawAuth.trim() : (currentSession?.token || '');
   const rawCookie = (req.headers['x-gdt-cookie'] as string) || bodyCookie || '';
   const cookieHeader = (rawCookie && rawCookie.trim()) ? rawCookie.trim() : (currentSession?.cookieHeader || '');
@@ -927,7 +950,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
     toDate = undefined;
   }
 
-  const authHeader = (req.headers.authorization as string) || bodyToken || currentSession?.token || '';
+  const authHeader = bodyToken || currentSession?.token || '';
   const cookieHeader = (req.headers['x-gdt-cookie'] as string) || bodyCookie || currentSession?.cookieHeader || '';
 
   if (!authHeader) {
@@ -3086,460 +3109,6 @@ app.all('/api/thaison/download-xml', async (req, res) => {
   }
 });
 
-// ============================================================================
-// WEB AUTHENTICATION & NEON DATABASE MANAGEMENT ROUTES
-// ============================================================================
-
-interface WebSessionInfo {
-  token: string;
-  username: string;
-  role: 'admin' | 'user';
-  createdAt: number;
-}
-let runtimeAuthTokenSecret: string | null = null;
-
-function getAuthTokenSecret(): string {
-  const envSecret = process.env.AUTH_TOKEN_SECRET ||
-    process.env.POSTGRES_URL ||
-    process.env.DATABASE_URL ||
-    process.env.NEON_DATABASE_URL ||
-    process.env.POSTGRES_PRISMA_URL ||
-    process.env.POSTGRES_URL_NON_POOLING ||
-    process.env.DATABASE_URL_UNPOOLED;
-
-  if (envSecret) {
-    return envSecret;
-  }
-
-  if (!runtimeAuthTokenSecret) {
-    runtimeAuthTokenSecret = crypto.randomBytes(32).toString('hex');
-    console.warn('[Security Warning]: AUTH_TOKEN_SECRET environment variable is not set. Generated a secure random secret for runtime.');
-  }
-
-  return runtimeAuthTokenSecret;
-}
-
-function getWebAppAuthUrl(req?: express.Request): string {
-  // Khi chạy trên Vercel hoặc môi trường Web Server, không proxy sang webapp khác
-  if (process.env.VERCEL) {
-    return '';
-  }
-  // Chỉ kích hoạt proxy nếu có biến môi trường AUTH_WEBAPP_URL được cấu hình rõ ràng (dành cho app Desktop)
-  const configuredUrl = (process.env.AUTH_WEBAPP_URL || '').trim();
-  if (!configuredUrl) {
-    return '';
-  }
-  const normalizedUrl = /^https?:\/\//i.test(configuredUrl) ? configuredUrl : `https://${configuredUrl}`;
-  const trimmed = normalizedUrl.replace(/\/+$/, '');
-
-  // Tránh tự proxy vào chính mình nếu domain trùng với host hiện tại
-  if (req) {
-    const host = req.get('host');
-    if (host && (trimmed.includes(host) || host.includes('vercel.app'))) {
-      return '';
-    }
-  }
-
-  return trimmed;
-}
-
-function mapRemoteUser(user: any): WebUserView | null {
-  if (!user || typeof user.username !== 'string') return null;
-  return {
-    id: user.id ?? user.username,
-    username: user.username,
-    password: '',
-    full_name: user.fullName || user.full_name || '',
-    role: user.role === 'admin' ? 'admin' : 'user',
-    duration_months: Number(user.durationMonths ?? user.duration_months) || 1,
-    created_at: user.createdAt || user.created_at || new Date().toISOString(),
-    expires_at: user.expiresAt || user.expires_at || new Date(8640000000000000).toISOString(),
-    is_active: user.isActive !== false && user.is_active !== false,
-    notes: user.notes || '',
-    days_remaining: Math.max(0, Number(user.daysRemaining ?? user.days_remaining) || 0),
-    is_expired: user.isExpired === true || user.is_expired === true,
-    status: user.status || 'active'
-  };
-}
-
-async function getRemoteAuthUser(token: string): Promise<WebUserView | null> {
-  const authUrl = getWebAppAuthUrl();
-  if (!authUrl) return null;
-  const response = await fetch(`${authUrl}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!response.ok) return null;
-  const payload = await response.json() as { user?: any };
-  return mapRemoteUser(payload.user);
-}
-
-async function proxyWebAppRequest(
-  req: express.Request,
-  route: string,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE'
-): Promise<{ status: number; payload: any }> {
-  const authUrl = getWebAppAuthUrl();
-  const headers: Record<string, string> = {
-    Authorization: req.headers.authorization || ''
-  };
-  const options: RequestInit = { method, headers };
-  if (method !== 'GET' && method !== 'DELETE') {
-    headers['Content-Type'] = 'application/json';
-    options.body = JSON.stringify(req.body || {});
-  }
-  const response = await fetch(`${authUrl}${route}`, options);
-  const payload = await response.json().catch(() => ({
-    success: false,
-    message: `Webapp trả về HTTP ${response.status}.`
-  }));
-  return { status: response.status, payload };
-}
-
-function createWebToken(username: string): string {
-  const payload = Buffer.from(JSON.stringify({ username, issuedAt: Date.now() })).toString('base64url');
-  const signature = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
-  return `${payload}.${signature}`;
-}
-
-function getUsernameFromToken(token: string): string | null {
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature) return null;
-
-  const expected = crypto.createHmac('sha256', getAuthTokenSecret()).update(payload).digest('base64url');
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return typeof parsed.username === 'string' ? parsed.username : null;
-  } catch {
-    return null;
-  }
-}
-
-function formatUserForClient(user: WebUserView) {
-  return {
-    id: user.id,
-    username: user.username,
-    fullName: user.full_name || '',
-    role: user.role,
-    durationMonths: user.duration_months,
-    createdAt: user.created_at,
-    expiresAt: user.expires_at,
-    isActive: user.is_active,
-    notes: user.notes || '',
-    daysRemaining: user.days_remaining,
-    isExpired: user.is_expired,
-    status: user.status
-  };
-}
-
-function formatUserForAdmin(user: WebUserView) {
-  return {
-    ...formatUserForClient(user),
-    password: user.password // Cung cấp để Admin có thể xem/copy gửi cho khách hàng
-  };
-}
-
-async function authenticateWebUser(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập hệ thống.' });
-  }
-
-  const token = authHeader.substring(7).trim();
-  if (getWebAppAuthUrl(req)) {
-    try {
-      const remoteUser = await getRemoteAuthUser(token);
-      if (!remoteUser || !remoteUser.is_active) {
-        return res.status(401).json({ success: false, message: 'Phiên đăng nhập webapp đã hết hạn. Vui lòng đăng nhập lại.' });
-      }
-      if (remoteUser.is_expired && remoteUser.role !== 'admin') {
-        return res.status(403).json({ success: false, expired: true, message: 'Tài khoản đã hết hạn sử dụng.' });
-      }
-      (req as any).webUser = remoteUser;
-      return next();
-    } catch (error: any) {
-      console.error('[Desktop Remote Auth Error]:', error.message);
-      return res.status(502).json({ success: false, message: 'Không kết nối được máy chủ xác thực webapp.' });
-    }
-  }
-
-  const username = getUsernameFromToken(token);
-  if (!username) {
-    return res.status(401).json({ success: false, message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.' });
-  }
-
-  const user = await findUserByUsername(username);
-  if (!user || !user.is_active) {
-    return res.status(401).json({ success: false, message: 'Tài khoản không tồn tại hoặc đã bị khóa.' });
-  }
-
-  if (user.is_expired && user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      expired: true,
-      message: `Tài khoản của bạn đã hết hạn sử dụng (${new Date(user.expires_at).toLocaleDateString('vi-VN')}). Vui lòng liên hệ quản trị viên để gia hạn.`
-    });
-  }
-
-  (req as any).webUser = user;
-  next();
-}
-
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const user = (req as any).webUser;
-  if (!user || user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Bạn không có quyền quản trị viên.' });
-  }
-  next();
-}
-
-// 1. Đăng nhập hệ thống Web
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'Vui lòng nhập Mã số thuế và mật khẩu.' });
-    }
-
-    const authUrl = getWebAppAuthUrl(req);
-    if (authUrl) {
-      const remoteResponse = await fetch(`${authUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const remotePayload = await remoteResponse.json().catch(() => ({}));
-      if (!remoteResponse.ok || remotePayload.success === false) {
-        return res.status(remoteResponse.status || 502).json(remotePayload);
-      }
-      if (!remotePayload.token || !remotePayload.user) {
-        return res.status(502).json({ success: false, message: 'Webapp trả về dữ liệu đăng nhập không hợp lệ.' });
-      }
-      return res.json(remotePayload);
-    }
-
-    const dbInit = await initDatabase();
-    if (!dbInit.success) {
-      return res.status(200).json({
-        success: false,
-        message: dbInit.message || 'Không thể kết nối đến cơ sở dữ liệu. Vui lòng kiểm tra lại cấu hình DATABASE_URL.'
-      });
-    }
-
-    let user;
-    try {
-      user = await findUserByUsername(username);
-    } catch (dbErr: any) {
-      return res.status(200).json({
-        success: false,
-        message: 'Lỗi truy vấn cơ sở dữ liệu. Vui lòng thử lại sau.'
-      });
-    }
-
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
-    }
-
-    if (user.password !== password.trim()) {
-      return res.status(401).json({ success: false, message: 'Tên đăng nhập hoặc mật khẩu không chính xác.' });
-    }
-
-    if (!user.is_active) {
-      return res.status(403).json({ success: false, message: 'Tài khoản này đang bị tạm khóa. Vui lòng liên hệ quản trị viên.' });
-    }
-
-    if (user.is_expired && user.role !== 'admin') {
-      const expiryFormatted = new Date(user.expires_at).toLocaleDateString('vi-VN');
-      return res.status(403).json({
-        success: false,
-        expired: true,
-        message: `Tài khoản của bạn đã hết hạn sử dụng vào ngày ${expiryFormatted}. Vui lòng liên hệ quản trị viên để gia hạn gói cước.`
-      });
-    }
-
-    const token = createWebToken(user.username);
-
-    res.json({
-      success: true,
-      token,
-      user: formatUserForClient(user)
-    });
-  } catch (err: any) {
-    console.error('[Auth Login Error]:', err);
-    res.status(500).json({ success: false, message: err.message || 'Lỗi xử lý đăng nhập' });
-  }
-});
-
-// 2. Lấy thông tin phiên làm việc hiện tại
-app.get('/api/auth/me', authenticateWebUser, async (req, res) => {
-  res.json({
-    success: true,
-    user: formatUserForClient((req as any).webUser)
-  });
-});
-
-// 3. Đăng xuất
-app.post('/api/auth/logout', (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7).trim();
-  }
-  res.json({ success: true });
-});
-
-// 4. Quản trị: Lấy danh sách tất cả tài khoản người dùng
-app.get('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result = await proxyWebAppRequest(req, '/api/admin/users', 'GET');
-      return res.status(result.status).json(result.payload);
-    }
-    const dbInit = await initDatabase();
-    if (!dbInit.success) {
-      return res.status(200).json({ success: false, message: dbInit.message });
-    }
-    const users = await getAllUsers();
-    res.json({
-      success: true,
-      users: users.map(formatUserForAdmin)
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 5. Quản trị: Tạo tài khoản người dùng mới
-app.post('/api/admin/users', authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result = await proxyWebAppRequest(req, '/api/admin/users', 'POST');
-      return res.status(result.status).json(result.payload);
-    }
-    const { username, password, fullName, durationMonths, notes, role } = req.body;
-    const result = await createUser({
-      username,
-      password,
-      fullName,
-      durationMonths: Number(durationMonths) || 1,
-      notes,
-      role: role === 'admin' ? 'admin' : 'user'
-    });
-
-    if (!result.success || !result.user) {
-      return res.status(400).json({ success: false, message: result.error || 'Không thể tạo người dùng' });
-    }
-
-    res.json({
-      success: true,
-      user: formatUserForAdmin(result.user)
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 6. Quản trị: Cập nhật thông tin / gia hạn / đổi mật khẩu
-app.put('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'PUT');
-      return res.status(result.status).json(result.payload);
-    }
-    const { password, fullName, extendMonths, newExpiresAt, isActive, notes } = req.body;
-    const result = await updateUser(req.params.id, {
-      password,
-      fullName,
-      extendMonths: extendMonths ? Number(extendMonths) : undefined,
-      newExpiresAt,
-      isActive,
-      notes
-    });
-
-    if (!result.success || !result.user) {
-      return res.status(400).json({ success: false, message: result.error || 'Cập nhật thất bại' });
-    }
-
-    res.json({
-      success: true,
-      user: formatUserForAdmin(result.user)
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 7. Quản trị: Xóa người dùng
-app.delete('/api/admin/users/:id', authenticateWebUser, requireAdmin, async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      const result = await proxyWebAppRequest(req, `/api/admin/users/${encodeURIComponent(req.params.id)}`, 'DELETE');
-      return res.status(result.status).json(result.payload);
-    }
-    const result = await deleteUser(req.params.id);
-    if (!result.success) {
-      return res.status(400).json({ success: false, message: result.error });
-    }
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 8. Trạng thái kết nối Neon Database
-app.get('/api/admin/db-status', async (req, res) => {
-  try {
-    if (getWebAppAuthUrl(req)) {
-      return res.json({
-        success: true,
-        connected: true,
-        type: 'remote_webapp',
-        message: 'Xác thực tài khoản được thực hiện bởi webapp.',
-        maskedUrl: ''
-      });
-    }
-    const status = await getDatabaseStatus();
-    res.json({ success: true, ...status, maskedUrl: getMaskedDatabaseUrl() });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 9. Lấy cấu hình và trạng thái Neon (Dành cho hộp thoại thiết lập kết nối)
-app.get('/api/neon/config', async (req, res) => {
-  try {
-    const status = await getDatabaseStatus();
-    res.json({
-      success: true,
-      ...status,
-      maskedUrl: getMaskedDatabaseUrl()
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// 10. Kiểm tra và lưu chuỗi kết nối Neon mới
-app.post('/api/neon/test-and-save', async (req, res) => {
-  try {
-    const { databaseUrl, initialAdminUsername, initialAdminPassword } = req.body;
-    if (!databaseUrl || typeof databaseUrl !== 'string') {
-      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp chuỗi kết nối DATABASE_URL hợp lệ.' });
-    }
-    const result = await saveNeonDatabaseUrl(databaseUrl.trim(), {
-      username: initialAdminUsername,
-      password: initialAdminPassword
-    });
-    return res.json(result);
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
 // Global process safety handlers
 process.on('uncaughtException', (err) => {
   console.error('[Process uncaughtException]:', err);
@@ -3615,14 +3184,6 @@ async function startServer() {
   // 2. Mở cổng lắng nghe PORT (mặc định 3000 cho AI Studio preview và iframe)
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`GDT E-Invoice Server running on http://0.0.0.0:${PORT}`);
-    // Khởi tạo Database Neon bất đồng bộ trong nền
-    initDatabase().then(dbInitResult => {
-      if (dbInitResult.success) {
-        console.log(`[Database Init] ✓ ${dbInitResult.message}`);
-      }
-    }).catch(() => {
-      // Silent catch
-    });
   });
 
   // Nếu môi trường Cloud Run hoặc container chỉ định PORT khác (ví dụ: 8080), lắng nghe thêm cổng đó

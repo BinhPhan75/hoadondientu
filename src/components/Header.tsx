@@ -8,30 +8,21 @@ import {
   FolderArchive, 
   Menu, 
   PanelLeftClose, 
-  PanelLeftOpen,
-  Users,
-  LogOut,
-  Clock,
-  ShieldCheck,
-  Database
+  PanelLeftOpen
 } from 'lucide-react';
 import { GDTAccountConfig, GDTInvoice } from '../types';
-import { WebUser } from '../types/auth';
 
 interface HeaderProps {
   account: GDTAccountConfig;
   selectedInvoices: GDTInvoice[];
   totalInvoicesCount: number;
   dataSourceType?: 'live_gdt' | 'imported_xml';
-  currentUser?: WebUser | null;
   onOpenConfig: () => void;
   onOpenBatchDownload: () => void;
   onExportExcel: () => void;
   onRefreshData: () => void;
   isRefreshing: boolean;
   onLogout: () => void;
-  onOpenAdminUsers?: () => void;
-  onLogoutWeb?: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
 }
@@ -40,22 +31,14 @@ export const Header: React.FC<HeaderProps> = ({
   account,
   selectedInvoices,
   totalInvoicesCount,
-  currentUser,
   onOpenConfig,
   onOpenBatchDownload,
   onExportExcel,
   onRefreshData,
   isRefreshing,
-  onOpenAdminUsers,
-  onLogoutWeb,
   isSidebarCollapsed,
   onToggleSidebar
 }) => {
-  const isAdmin = currentUser?.role === 'admin';
-  const expiryFormatted = currentUser?.expiresAt 
-    ? new Date(currentUser.expiresAt).toLocaleDateString('vi-VN') 
-    : '';
-
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shrink-0 shadow-2xs">
       {/* Main Header */}
@@ -88,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
                 Hóa đơn mua vào
               </span>
               <span className="text-xs font-mono font-semibold text-slate-900 shrink-0">
-                MST: {account.taxCode || currentUser?.username || '(Chưa nhập)'}
+                MST: {account.taxCode || '(Chưa nhập)'}
               </span>
             </div>
             {account.taxpayerName && (
@@ -129,60 +112,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenConfig}
             className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
-            title="Cấu hình tài khoản Tổng cục Thuế (Lưu riêng tại máy này)"
+          title="Cấu hình tài khoản Cổng Tổng cục Thuế"
           >
             <Settings className="w-4 h-4" />
           </button>
-
-          {/* Vertical Divider */}
-          <div className="h-5 w-px bg-slate-200 mx-1 hidden sm:block" />
-
-          {/* WEB USER & ADMIN STATUS */}
-          {currentUser && (
-            <div className="flex items-center gap-2">
-              {isAdmin ? (
-                /* Admin Management Button */
-                <button
-                  onClick={onOpenAdminUsers}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100/70 border border-indigo-200 rounded-lg transition-all cursor-pointer shadow-2xs"
-                  title="Mở bảng Quản trị Người dùng"
-                >
-                  <Users className="w-3.5 h-3.5 text-indigo-600" />
-                  <span className="hidden sm:inline">Quản lý User</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-indigo-200/80 text-indigo-800 font-semibold">Admin</span>
-                </button>
-              ) : (
-                /* Subscription Plan / Expiry Badge for User */
-                <div
-                  className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border font-medium ${
-                    currentUser.daysRemaining <= 7
-                      ? 'bg-amber-50 text-amber-800 border-amber-300'
-                      : 'bg-slate-50 text-slate-700 border-slate-200'
-                  }`}
-                  title={`Gói cước MST ${currentUser.username} có thời hạn đến ngày ${expiryFormatted}`}
-                >
-                  <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <span>Hạn dùng:</span>
-                  <span className="font-semibold text-slate-900">{currentUser.daysRemaining} ngày</span>
-                  <span className="text-[11px] text-slate-500 hidden lg:inline">({expiryFormatted})</span>
-                </div>
-              )}
-
-              {/* Web Logout Button */}
-              {onLogoutWeb && (
-                <button
-                  onClick={onLogoutWeb}
-                  className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                  title={`Đăng xuất khỏi tài khoản web (${currentUser.username})`}
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </header>
   );
 };
-

@@ -118,6 +118,12 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     }
   }, [isOpen]);
 
+  useEffect(() => {
+    setTaxCode(currentConfig.taxCode || '');
+    setPassword(currentConfig.password || '');
+    setRememberMe(currentConfig.rememberMe ?? true);
+  }, [currentConfig.taxCode, currentConfig.password, currentConfig.rememberMe]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -403,7 +409,7 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 onChange={(e) => setRememberMe(e.target.checked)}
                 className="w-4 h-4 text-blue-600 rounded-md border-slate-300 focus:ring-blue-500"
               />
-              <span className="text-xs text-slate-600 font-medium">Ghi nhớ cấu hình tài khoản trên trình duyệt</span>
+              <span className="text-xs text-slate-600 font-medium">Ghi nhớ tùy chọn không nhạy cảm trên trình duyệt</span>
             </label>
           </div>
 

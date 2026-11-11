@@ -142,6 +142,7 @@ export async function ensureFontLoaded(): Promise<boolean> {
       try {
         const res = await fetch('/fonts/Comismsh.ttf');
         if (res.ok) {
+          const buf = await res.arrayBuffer();
           const ot: any = opentype;
           const parseFn = ot.parse || (ot['default'] && ot['default'].parse) || ot['default'];
           if (typeof parseFn === 'function') {

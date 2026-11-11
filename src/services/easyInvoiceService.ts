@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import https from 'https';
 import { solveCaptchaWithGemini, EASYINVOICE_CAPTCHA_PROMPT } from './invoice-engine/captcha/geminiCaptchaSolver';
 import { solveCaptchaWithTesseract } from './invoice-engine/captcha/tesseractCaptchaSolver';
+import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -330,7 +331,7 @@ export async function downloadOriginalEasyInvoice(
       const scriptMatch = postRes.data.match(/showInv\([^;]+,\s*'([^']+)'\);/);
       const token = scriptMatch ? scriptMatch[1] : '';
 
-      const invoiceHtml = invData.str || '';
+      const invoiceHtml = prepareEasyInvoiceHtml(invData.str || '');
       const b64Html = Buffer.from(invoiceHtml, 'utf-8').toString('base64');
 
       let downloadFileName = `HOADON_${sellerTaxCode || 'EASYINVOICE'}_${khhdon || 'HD'}_${shdon || lookupCode}`;

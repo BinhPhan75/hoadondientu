@@ -29,6 +29,7 @@ import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templat
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
+import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -48,10 +49,13 @@ const prepareOriginalInvoiceHtml = (html: string): string => {
   const style = `<style id="gdt-original-page-style">
     @page { size: A4; margin: 0; }
     html, body { margin: 0 !important; padding: 0 !important; background: #fff; }
-    table { max-width: 100%; }
+    table { max-width: 100%; page-break-inside: auto !important; break-inside: auto !important; }
     thead { display: table-header-group; }
     tfoot { display: table-footer-group; }
     tr, img, .invoice-row, .invoice-item { break-inside: avoid; page-break-inside: avoid; }
+    html, body, .main-page, .invoice-container, .invoice-content, .invoice-body, #invoice, #invoiceContent {
+      height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important;
+    }
     .page-break, .pageBreak, .invoice-page { break-after: page; page-break-after: always; }
     @media print { body { background: #fff; } }
   </style>`;
@@ -543,12 +547,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const isCurrent = () => openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence;
     setOriginalLoadError(null);
     setIsDownloadingEasyInvoice(true);
-    setEasyInvoiceDownloadStatus('Đang tải hóa đơn gốc...');
+    setEasyInvoiceDownloadStatus('Đang tải dữ liệu và các dòng hàng hóa của hóa đơn...');
     try {
       const blob = await loadOriginalInvoice(target);
       if (!isCurrent()) return;
       if (blob.type.includes('text/html')) {
-        const html = await blob.text();
+        const html = prepareEasyInvoiceHtml(await blob.text());
         if (!isCurrent()) return;
         setOriginalEasyInvoiceHtml(html);
       } else {
@@ -906,7 +910,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             {isDownloadingEasyInvoice && !originalProviderPdfUrl && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-3 bg-emerald-950/80 border border-emerald-600/60 rounded-lg text-sm text-emerald-200 flex items-center gap-3 shadow-md">
                 <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
-                <span><strong>Hóa đơn gốc đang được tải về máy...</strong> Khung xem sẽ tự cập nhật khi tải xong.</span>
+                <span role="status" aria-live="polite"><strong>{easyInvoiceDownloadStatus || 'Đang tải hóa đơn gốc...'}</strong> Hóa đơn nhiều dòng có thể cần thêm thời gian; khung xem sẽ tự cập nhật khi tải xong.</span>
+              </div>
+            )}
+            {isLoadingDetail && (
+              <div role="status" aria-live="polite" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-blue-950/80 border border-blue-600/60 rounded-lg text-sm text-blue-200 flex items-center gap-3 shadow-md">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                <span><strong>Đang tải dữ liệu chi tiết hóa đơn và các dòng hàng hóa từ Cổng Thuế...</strong> Vui lòng chờ.</span>
+              </div>
+            )}
+            {isExportingPdf && (
+              <div role="status" aria-live="polite" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-cyan-950/80 border border-cyan-600/60 rounded-lg text-sm text-cyan-200 flex items-center gap-3 shadow-md">
+                <Loader2 className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
+                <span><strong>Đang tạo bản thể hiện PDF dự phòng theo mẫu Tổng cục Thuế...</strong> Hóa đơn nhiều dòng có thể cần thêm thời gian.</span>
               </div>
             )}
 
@@ -1249,7 +1265,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               title="Tạo bản thể hiện dự phòng từ dữ liệu Cổng Thuế"
             >
               <Download className="h-3.5 w-3.5" />
-              {isExportingPdf ? 'Đang tạo PDF...' : 'Tải bản thể hiện dự phòng GDT'}
+              {isExportingPdf ? 'Đang xử lý dữ liệu hóa đơn...' : 'Tải bản thể hiện dự phòng GDT'}
             </button>
           </div>
         </div>

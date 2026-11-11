@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
 import { providerFromPortal } from '../src/utils/providerIdentity';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
@@ -8,6 +9,8 @@ import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
+import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
+import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -45,6 +48,45 @@ test('certificate issuer and seller alone do not identify invoice provider', () 
   for (const [tax, provider] of [['0101243150', 'MISA'], ['0106026495', 'MINVOICE'], ['0100684378', 'VNPT'], ['0100109106', 'VIETTEL'], ['0105987432', 'EASYINVOICE'], ['0302999571', 'LCS'], ['0315744883', '4SI'], ['0102182292', 'VNPAY'], ['0104128565', 'FPT'], ['0107871301', 'CYBERBILL'], ['0101360697', 'BKAV']]) {
     assert.equal(resolveInvoiceProvider({ rawXml: `<HDon><MSTTCGP>${tax}</MSTTCGP></HDon>` }), provider);
   }
+});
+
+test('EasyInvoice print HTML keeps long item tables flowing across pages', () => {
+  const rows = Array.from({ length: 80 }, (_, index) => `<tr><td>${index + 1}</td><td>Hàng hóa ${index + 1}</td></tr>`).join('');
+  const html = `<!doctype html><html><head><style>.main-page{height:297mm;overflow:hidden}thead{display:table-row-group}</style></head><body><div class="main-page"><table><thead><tr><th>STT</th><th>Tên hàng</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
+
+  const prepared = prepareEasyInvoiceHtml(html);
+  assert.equal((prepared.match(new RegExp(EASY_INVOICE_PRINT_STYLE_ID, 'g')) || []).length, 1);
+  assert.match(prepared, /table\s*\{[^}]*page-break-inside:\s*auto\s*!important;[^}]*break-inside:\s*auto\s*!important;/);
+  assert.match(prepared, /thead\s*\{\s*display:\s*table-header-group\s*!important;/);
+  assert.match(prepared, /tr\s*\{\s*page-break-inside:\s*avoid\s*!important;\s*break-inside:\s*avoid\s*!important;/);
+  assert.match(prepared, /overflow:\s*visible\s*!important/);
+  assert.equal((prepared.match(/<tr>/g) || []).length, 81, 'all invoice rows and the header must remain present');
+  assert.equal(prepareEasyInvoiceHtml(prepared), prepared, 'reprocessing should not duplicate print overrides');
+});
+
+test('PMKT bridge JWT requires the expected HS256 issuer, audience, UUID subject, and expiry', () => {
+  const secret = 'integration-test-secret-0123456789';
+  const createToken = (claims: Record<string, unknown>, algorithm = 'HS256') => {
+    const header = Buffer.from(JSON.stringify({ alg: algorithm })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const signingInput = `${header}.${payload}`;
+    const signature = crypto.createHmac('sha256', secret).update(signingInput).digest('base64url');
+    return `${signingInput}.${signature}`;
+  };
+  const standardClaims = {
+    sub: '550e8400-e29b-41d4-a716-446655440000',
+    iss: 'pmkt-v2',
+    aud: 'hoadondientu',
+    exp: Math.floor(Date.now() / 1000) + 60
+  };
+
+  assert.equal(verifyPmktBridgeToken(createToken(standardClaims), secret), true);
+  assert.equal(verifyPmktBridgeToken(createToken({ ...standardClaims, exp: 1 }), secret), false);
+  assert.equal(verifyPmktBridgeToken(createToken({ ...standardClaims, iss: 'untrusted' }), secret), false);
+  assert.equal(verifyPmktBridgeToken(createToken({ ...standardClaims, aud: 'other-app' }), secret), false);
+  assert.equal(verifyPmktBridgeToken(createToken({ ...standardClaims, sub: 'not-a-uuid' }), secret), false);
+  assert.equal(verifyPmktBridgeToken(createToken(standardClaims, 'none'), secret), false);
+  assert.equal(verifyPmktBridgeToken(createToken(standardClaims), 'too-short'), false);
 });
 
 const minvoice = new MinvoiceDriver();
