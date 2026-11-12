@@ -349,10 +349,93 @@ export async function downloadOriginalEasyInvoice(
         };
       }
 
-      // Thử gọi endpoint tải PDF chính thức từ server EasyInvoice
+      // 1. Thử tải trực tiếp file PDF chính thức đã phát hành từ server EasyInvoice
+      if (token) {
+        try {
+          console.log('[EasyInvoice] Thử tải PDF chính thức từ /Invoice/DownloadPdf...');
+          const directPdfRes = await axios.get(`${currentDomain}/Invoice/DownloadPdf?token=${encodeURIComponent(token)}`, {
+            headers: {
+              'Cookie': cookie,
+              'Referer': `${currentDomain}/Search/Index`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            },
+            responseType: 'arraybuffer',
+            timeout: 8000,
+            httpsAgent,
+          });
+
+          if (directPdfRes.status === 200 && directPdfRes.data && directPdfRes.data.length > 500) {
+            const directBuf = Buffer.from(directPdfRes.data);
+            if (directBuf.toString('utf-8', 0, 5).startsWith('%PDF')) {
+              console.log(`[EasyInvoice] Tải trực tiếp PDF gốc thành công qua /Invoice/DownloadPdf (${(directBuf.length / 1024).toFixed(1)} KB)`);
+              return {
+                success: true,
+                filename: `${downloadFileName}.pdf`,
+                contentType: 'application/pdf',
+                buffer: directBuf,
+                pdfBase64: directBuf.toString('base64'),
+                htmlContent: invoiceHtml,
+                captchaSolved: code
+              };
+            }
+          }
+        } catch (directPdfErr: any) {
+          console.log('[EasyInvoice] /Invoice/DownloadPdf chưa có file, thử tiếp endpoint khác:', directPdfErr.message);
+        }
+
+        try {
+          console.log('[EasyInvoice] Thử tải PDF qua /Invoice/DownloadPdfAndFileAttach...');
+          const directAttachRes = await axios.get(`${currentDomain}/Invoice/DownloadPdfAndFileAttach?token=${encodeURIComponent(token)}`, {
+            headers: {
+              'Cookie': cookie,
+              'Referer': `${currentDomain}/Search/Index`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            },
+            responseType: 'arraybuffer',
+            timeout: 8000,
+            httpsAgent,
+          });
+
+          if (directAttachRes.status === 200 && directAttachRes.data && directAttachRes.data.length > 500) {
+            const attachBuf = Buffer.from(directAttachRes.data);
+            if (attachBuf.toString('utf-8', 0, 5).startsWith('%PDF')) {
+              console.log(`[EasyInvoice] Tải PDF thành công qua /Invoice/DownloadPdfAndFileAttach (${(attachBuf.length / 1024).toFixed(1)} KB)`);
+              return {
+                success: true,
+                filename: `${downloadFileName}.pdf`,
+                contentType: 'application/pdf',
+                buffer: attachBuf,
+                pdfBase64: attachBuf.toString('base64'),
+                htmlContent: invoiceHtml,
+                captchaSolved: code
+              };
+            } else if (attachBuf.length > 4 && attachBuf[0] === 0x50 && attachBuf[1] === 0x4B) {
+              const zip = new JSZip();
+              const unzipped = await zip.loadAsync(attachBuf);
+              const pdfFile = Object.values(unzipped.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.pdf'));
+              if (pdfFile) {
+                const pdfBuf = await pdfFile.async('nodebuffer');
+                return {
+                  success: true,
+                  filename: pdfFile.name,
+                  contentType: 'application/pdf',
+                  buffer: pdfBuf,
+                  pdfBase64: pdfBuf.toString('base64'),
+                  htmlContent: invoiceHtml,
+                  captchaSolved: code
+                };
+              }
+            }
+          }
+        } catch (attachErr: any) {
+          console.log('[EasyInvoice] /Invoice/DownloadPdfAndFileAttach chưa có file:', attachErr.message);
+        }
+      }
+
+      // 2. Thử gọi endpoint tạo gói PDF từ HTML có bổ sung ngắt trang chuẩn
       if (token && b64Html) {
         try {
-          console.log('[EasyInvoice] Gọi API tạo gói PDF chính thức...');
+          console.log('[EasyInvoice] Gọi API tạo gói PDF từ HTML...');
           const pdfGenRes = await axios.post(
             `${currentDomain}/Invoice/DownloadPdfAndFileAttachFromAvailableHtml`,
             new URLSearchParams({ token, html: b64Html }).toString(),

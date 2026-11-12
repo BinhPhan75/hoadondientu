@@ -491,14 +491,24 @@ export function renderDefaultTemplate(
     .print-actions {
       display: none !important;
     }
-    table, tr, td, th {
-      page-break-inside: avoid;
+    table {
+      page-break-inside: auto !important;
+      break-inside: auto !important;
+      width: 100% !important;
+    }
+    tr, td, th {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
     }
     table thead {
-      display: table-row-group !important;
+      display: table-header-group !important;
+    }
+    table tfoot {
+      display: table-footer-group !important;
     }
     .table-horizontal-wrapper {
-      page-break-inside: avoid;
+      page-break-inside: auto !important;
+      break-inside: auto !important;
       padding-top: 5px;
     }
     .main-page {

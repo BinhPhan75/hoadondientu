@@ -45,22 +45,60 @@ interface InvoiceDetailModalProps {
 // Keep the provider's own HTML pagination when it is displayed inside the modal.
 // This is especially important for EasyInvoice invoices with many line items.
 const prepareOriginalInvoiceHtml = (html: string): string => {
-  if (!html || /id=["']gdt-original-page-style["']/i.test(html)) return html;
+  if (!html) return html;
+
+  // Gỡ bỏ inline height và overflow:hidden trên thẻ .VATTEMP hoặc container
+  let processedHtml = html
+    .replace(/<div([^>]*class=["'][^"']*(?:VATTEMP|invtable|invoice-content|content)[^"']*["'][^>]*)style=["']([^"']*)["']/gi, (match, p1, style) => {
+      const cleanStyle = style
+        .replace(/(?:max-)?height\s*:\s*[^;]+;?/gi, 'height: auto !important;')
+        .replace(/overflow\s*:\s*[^;]+;?/gi, 'overflow: visible !important;');
+      return `<div${p1}style="${cleanStyle}"`;
+    });
+
+  if (/id=["']gdt-original-page-style["']/i.test(processedHtml)) return processedHtml;
   const style = `<style id="gdt-original-page-style">
-    @page { size: A4; margin: 0; }
-    html, body { margin: 0 !important; padding: 0 !important; background: #fff; }
-    table { max-width: 100%; page-break-inside: auto !important; break-inside: auto !important; }
-    thead { display: table-header-group; }
-    tfoot { display: table-footer-group; }
-    tr, img, .invoice-row, .invoice-item { break-inside: avoid; page-break-inside: avoid; }
-    html, body, .main-page, .invoice-container, .invoice-content, .invoice-body, #invoice, #invoiceContent {
-      height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important;
+    @page { size: A4 portrait; margin: 8mm 6mm; }
+    html, body { 
+      margin: 0 !important; 
+      padding: 0 !important; 
+      background: #fff !important; 
+      height: auto !important; 
+      overflow: visible !important; 
+    }
+    .VATTEMP, .VATTEMP .content, .VATTEMP #main-content, .VATTEMP .invtable, .VATTEMP .invtable-content,
+    .main-page, .invoice-container, .invoice-content, .invoice-body, #invoice, #invoiceContent,
+    .table-invoice, .tbl-custom, .inv-table, .container, #container, .panel-body {
+      height: auto !important; 
+      min-height: 0 !important; 
+      max-height: none !important; 
+      overflow: visible !important; 
+      position: relative !important;
+    }
+    table, .invtable, .table-invoice, .res-tb { 
+      width: 100% !important; 
+      max-width: 100%; 
+      page-break-inside: auto !important; 
+      break-inside: auto !important; 
+    }
+    thead, .invtable thead { display: table-header-group !important; }
+    tfoot, .invtable tfoot { display: table-footer-group !important; }
+    tr, .invtable tr, .prds tr, .data, img, .invoice-row, .invoice-item { 
+      break-inside: avoid !important; 
+      page-break-inside: avoid !important; 
     }
     .page-break, .pageBreak, .invoice-page { break-after: page; page-break-after: always; }
-    @media print { body { background: #fff; } }
+    .ft-sign, #footer, .footer, .sign-dx, .nextpage { 
+      break-inside: avoid !important; 
+      page-break-inside: avoid !important; 
+    }
+    @media print { 
+      body { background: #fff !important; } 
+      .print-actions, #inbt { display: none !important; }
+    }
   </style>`;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${style}</head>`);
-  return `${style}${html}`;
+  if (/<\/head>/i.test(processedHtml)) return processedHtml.replace(/<\/head>/i, `${style}</head>`);
+  return `${style}${processedHtml}`;
 };
 
 export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
@@ -116,6 +154,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     : null;
 
   const [originalEasyInvoiceHtml, setOriginalEasyInvoiceHtml] = useState<string | null>(null);
+  const [easyInvoiceViewMode, setEasyInvoiceViewMode] = useState<'pdf' | 'html'>('html');
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
@@ -538,7 +577,66 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const handleViewOriginalEasyInvoice = async () => handleViewOriginalProvider();
+  const handleViewOriginalEasyInvoice = async () => {
+    if (!effectiveInvoice) return;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    if (!lookupCode) {
+      alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
+      return;
+    }
+
+    setIsDownloadingEasyInvoice(true);
+    setEasyInvoiceDownloadStatus('Đang kết nối Cổng EasyInvoice & xử lý dữ liệu...');
+    setOriginalLoadError(null);
+    try {
+      const resp = await fetch('/api/easyinvoice/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lookupCode: lookupCode.trim(),
+          sellerTaxCode: effectiveInvoice.nbmst,
+          lookupUrl: lookupDetails.lookupUrl || currentProviderMeta.portalUrl,
+          khhdon: effectiveInvoice.khhdon,
+          shdon: effectiveInvoice.shdon
+        })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || 'Tải hóa đơn từ EasyInvoice thất bại.');
+      }
+
+      if (data.htmlContent) {
+        const prepared = prepareEasyInvoiceHtml(data.htmlContent);
+        setOriginalEasyInvoiceHtml(prepared);
+        setEasyInvoiceViewMode('html');
+      }
+
+      if (data.pdfBase64) {
+        const byteCharacters = atob(data.pdfBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: data.contentType || 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        setOriginalProviderPdfUrl(blobUrl);
+      }
+
+      setEasyInvoiceDownloadStatus('Đã nạp bản thể hiện EasyInvoice thành công!');
+      setTimeout(() => setEasyInvoiceDownloadStatus(null), 3000);
+    } catch (err: any) {
+      console.warn('[InvoiceDetailModal] Thử nạp qua luồng dự phòng:', err.message);
+      try {
+        await handleViewOriginalProvider();
+      } catch (fallbackErr: any) {
+        setOriginalLoadError(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message || fallbackErr.message}`);
+      }
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
+  };
 
   const handleViewOriginalProvider = async () => {
     if (!effectiveInvoice) return;
@@ -907,16 +1005,32 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 {originalLoadError}
               </div>
             )}
-            {isDownloadingEasyInvoice && !originalProviderPdfUrl && (
-              <div className="w-full max-w-[820px] mb-3 px-4 py-3 bg-emerald-950/80 border border-emerald-600/60 rounded-lg text-sm text-emerald-200 flex items-center gap-3 shadow-md">
-                <Loader2 className="w-4 h-4 animate-spin text-emerald-400 shrink-0" />
-                <span role="status" aria-live="polite"><strong>{easyInvoiceDownloadStatus || 'Đang tải hóa đơn gốc...'}</strong> Hóa đơn nhiều dòng có thể cần thêm thời gian; khung xem sẽ tự cập nhật khi tải xong.</span>
+            {isDownloadingEasyInvoice && (
+              <div className="w-full max-w-[820px] mb-3 px-4 py-3.5 bg-emerald-950/90 border border-emerald-500 rounded-lg text-sm text-emerald-100 flex items-center gap-3.5 shadow-lg ring-1 ring-emerald-500/40">
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-400 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold text-white flex items-center gap-2">
+                    <span>{easyInvoiceDownloadStatus || 'Đang tải hóa đơn gốc từ Cổng EasyInvoice...'}</span>
+                    <span className="text-[11px] font-normal px-2 py-0.5 bg-emerald-800 text-emerald-200 rounded-full animate-pulse">Đang xử lý</span>
+                  </div>
+                  <div className="text-xs text-emerald-200 mt-1 leading-relaxed">
+                    Hệ thống đang tự động giải mã Captcha và xử lý phân trang A4 cho hóa đơn. Hóa đơn có nhiều dòng hàng hóa có thể mất thêm vài giây để hoàn tất.
+                  </div>
+                </div>
               </div>
             )}
             {isLoadingDetail && (
-              <div role="status" aria-live="polite" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-blue-950/80 border border-blue-600/60 rounded-lg text-sm text-blue-200 flex items-center gap-3 shadow-md">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
-                <span><strong>Đang tải dữ liệu chi tiết hóa đơn và các dòng hàng hóa từ Cổng Thuế...</strong> Vui lòng chờ.</span>
+              <div role="status" aria-live="polite" className="w-full max-w-[820px] mb-3 px-4 py-3.5 bg-blue-950/90 border border-blue-500 rounded-lg text-sm text-blue-100 flex items-center gap-3.5 shadow-lg ring-1 ring-blue-500/40">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-400 shrink-0" />
+                <div className="flex-1">
+                  <div className="font-semibold text-white flex items-center gap-2">
+                    <span>Đang tải dữ liệu chi tiết hóa đơn & các dòng hàng hóa từ Cổng Thuế...</span>
+                    <span className="text-[11px] font-normal px-2 py-0.5 bg-blue-800 text-blue-200 rounded-full animate-pulse">Đang nạp</span>
+                  </div>
+                  <div className="text-xs text-blue-200 mt-1 leading-relaxed">
+                    Hóa đơn có nhiều dòng hàng hóa (nhiều trang) cần thêm thời gian để giải mã và đồng bộ đủ danh mục mặt hàng. Khung xem sẽ tự động cập nhật ngay khi hoàn tất, vui lòng chờ trong giây lát...
+                  </div>
+                </div>
               </div>
             )}
             {isExportingPdf && (
@@ -945,6 +1059,42 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 >
                   Quay lại Mẫu chuẩn GDT
                 </button>
+              </div>
+            )}
+
+            {/* Format toggle for EasyInvoice if HTML original is loaded */}
+            {isEasyInvoice && originalEasyInvoiceHtml && (
+              <div className="w-full max-w-[820px] mb-2 flex items-center justify-between bg-slate-800/90 px-3 py-2 rounded-lg border border-slate-700">
+                <div className="text-xs text-slate-300 font-medium flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>Chế độ hiển thị EasyInvoice:</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEasyInvoiceViewMode('html')}
+                    className={`px-3 py-1 text-xs rounded-md font-medium transition-all cursor-pointer ${
+                      easyInvoiceViewMode === 'html'
+                        ? 'bg-emerald-600 text-white font-semibold shadow-xs'
+                        : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    Bản thể hiện HTML A4 (Đa trang chuẩn)
+                  </button>
+                  {originalProviderPdfUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEasyInvoiceViewMode('pdf')}
+                      className={`px-3 py-1 text-xs rounded-md font-medium transition-all cursor-pointer ${
+                        easyInvoiceViewMode === 'pdf'
+                          ? 'bg-emerald-600 text-white font-semibold shadow-xs'
+                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      Bản PDF gốc
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
@@ -977,6 +1127,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       title="Bản thể hiện mẫu 4Si từ dochoadon.lcssoft.com.vn"
                       className="w-full h-[1200px] border-0 bg-white"
                     />
+                  ) : isEasyInvoice && easyInvoiceViewMode === 'html' && originalEasyInvoiceHtml ? (
+                    <iframe
+                      ref={iframeRef}
+                      srcDoc={prepareOriginalInvoiceHtml(originalEasyInvoiceHtml)}
+                      title={`Bản gốc HTML ${currentProviderMeta.name}`}
+                      className="w-full h-[1200px] border-0 bg-white"
+                      sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
+                    />
                   ) : originalProviderPdfUrl ? (
                     <iframe
                       src={originalProviderPdfUrl}
@@ -991,6 +1149,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       className="w-full h-[1200px] border-0 bg-white"
                       sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                     />
+                  ) : isLoadingDetail ? (
+                    <div className="min-h-[600px] flex flex-col items-center justify-center p-8 text-center bg-white">
+                      <div className="relative mb-4">
+                        <div className="w-14 h-14 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                        <FileText className="w-6 h-6 text-blue-600 absolute inset-0 m-auto" />
+                      </div>
+                      <h3 className="text-base font-bold text-slate-800">Đang tải dữ liệu chi tiết hóa đơn từ Cổng Thuế...</h3>
+                      <p className="text-xs text-slate-500 mt-2 max-w-md leading-relaxed">
+                        Hệ thống đang tải toàn bộ danh mục sản phẩm, số lượng, đơn giá và thuế suất từ Tổng cục Thuế. Hóa đơn có nhiều dòng hàng hóa có thể mất từ 3 - 10 giây.
+                      </p>
+                      <div className="mt-4 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium border border-blue-200">
+                        Đang đồng bộ HĐ {effectiveInvoice.shdon || ''} ({effectiveInvoice.khhdon || ''})
+                      </div>
+                    </div>
                   ) : (
                     <div className="min-h-[1160px] bg-white p-6 text-slate-800">
                       <div className="mx-auto mt-6 max-w-3xl">

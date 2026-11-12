@@ -29,14 +29,8 @@ import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, execu
 import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult } from './utils/gdtQueryClient';
 import { RefreshCw } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
-import { installPmktBridge, PmktBridgeState, watchPmktBridgeRefresh } from './utils/pmktBridge';
-
 export default function App() {
   const { toast, showAlert } = useNotification();
-  const [bridgeState, setBridgeState] = useState<PmktBridgeState>({
-    status: 'checking',
-    message: 'Đang kiểm tra kết nối PMKT.'
-  });
 
   // Account Configuration State (from localStorage or default)
   const [account, setAccount] = useState<GDTAccountConfig>(() => {
@@ -116,25 +110,7 @@ export default function App() {
   // Keep the GDT credential form visible when the module first opens.
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
-  useEffect(() => {
-    const stopBridge = installPmktBridge((state) => {
-      setBridgeState(state);
-      if (state.taxpayer) {
-        setAccount(prev => ({
-          ...prev,
-          taxCode: state.taxpayer!.taxCode,
-          password: state.taxpayer!.password,
-          taxpayerName: `DOANH NGHIỆP NỘP THUẾ (MST: ${state.taxpayer!.taxCode})`,
-          isRealGDT: false
-        }));
-      }
-    });
-    const stopRefreshWatcher = watchPmktBridgeRefresh(setBridgeState);
-    return () => {
-      stopBridge();
-      stopRefreshWatcher();
-    };
-  }, []);
+
 
   const collapseLeftMenu = () => {
     setIsSidebarCollapsed(true);
@@ -1778,17 +1754,6 @@ export default function App() {
       setIsConfigModalOpen(true);
     }
   };
-
-  if (bridgeState.status !== 'connected' && bridgeState.status !== 'refreshing') {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white p-6">
-        <div className={`w-10 h-10 border-3 rounded-full mb-4 ${bridgeState.status === 'awaiting' || bridgeState.status === 'checking' ? 'border-cyan-400 border-t-transparent animate-spin' : 'border-amber-400'}`} />
-        <div className="text-base font-semibold text-white">Tích hợp phần mềm PMKT</div>
-        <div className="max-w-xl text-center text-sm text-slate-300 mt-3">{bridgeState.message}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937]">
       {/* 1. Left Sidebar (High Density Dark Theme) */}
@@ -1857,11 +1822,6 @@ export default function App() {
           onToggleSidebar={handleToggleSidebar}
         />
 
-        {bridgeState.status === 'refreshing' && (
-          <div className="bg-amber-100 text-amber-950 px-4 py-2 text-xs font-medium border-b border-amber-200">
-            {bridgeState.message}
-          </div>
-        )}
 
         {/* Stats Bar */}
         <TaxSummaryDashboard invoices={filteredInvoices} />

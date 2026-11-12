@@ -24,22 +24,8 @@ import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/se
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
 import { resolveInvoiceProvider } from './src/utils/providerRouting';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
-import { verifyPmktBridgeToken } from './src/utils/pmktBridgeAuth';
 
 const app = express();
-
-function getPmktAppOrigin(): string | null {
-  const configuredOrigin = process.env.PMKT_APP_ORIGIN || 'https://pmkt.nghiatingold.com';
-
-  try {
-    const url = new URL(configuredOrigin);
-    const isSecure = url.protocol === 'https:';
-    const isLocalhost = url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);
-    return url.origin === configuredOrigin && (isSecure || isLocalhost) ? url.origin : null;
-  } catch {
-    return null;
-  }
-}
 
 function resolvePort(): number {
   const portIdx = process.argv.indexOf('--port');
@@ -62,20 +48,13 @@ const PORT = resolvePort();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// CORS & Headers cho hoạt động độc lập (Standalone / Preview / Production)
 app.use((req, res, next) => {
-  const pmktOrigin = getPmktAppOrigin();
-  res.setHeader('Content-Security-Policy', `frame-ancestors ${pmktOrigin || "'none'"}`);
-  const vary = res.getHeader('Vary');
-  res.setHeader('Vary', vary ? `${vary}, Origin` : 'Origin');
-  if (pmktOrigin && req.get('Origin') === pmktOrigin) {
-    res.setHeader('Access-Control-Allow-Origin', pmktOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gdt-cookie');
   if (req.method === 'OPTIONS') {
-    return req.get('Origin') && req.get('Origin') !== pmktOrigin
-      ? res.sendStatus(403)
-      : res.sendStatus(204);
+    return res.sendStatus(204);
   }
   next();
 });
@@ -104,22 +83,6 @@ app.use((req, res, next) => {
     ) {
       req.url = '/api' + req.url;
     }
-  }
-  next();
-});
-
-app.use('/api', (req, res, next) => {
-  if (req.path === '/health') return next();
-
-  const secret = process.env.PMKT_BRIDGE_SECRET;
-  if (!getPmktAppOrigin() || !secret || Buffer.byteLength(secret, 'utf8') < 32) {
-    return res.status(503).json({ success: false, message: 'Chưa cấu hình đầy đủ tích hợp PMKT trên máy chủ.' });
-  }
-
-  const authorization = req.get('Authorization') || '';
-  const match = /^Bearer ([A-Za-z0-9._~-]+)$/.exec(authorization);
-  if (!match || !verifyPmktBridgeToken(match[1])) {
-    return res.status(401).json({ success: false, message: 'Phiên tích hợp PMKT không hợp lệ hoặc đã hết hạn.' });
   }
   next();
 });
