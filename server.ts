@@ -1703,6 +1703,11 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
         shdon: customInfo.invoiceNo ? String(customInfo.invoiceNo).trim() : undefined
       });
       if (req.query.format === 'binary') {
+        if (easy.htmlContent && req.query.preferPdf !== 'true') {
+          res.setHeader('Content-Type', 'text/html; charset=utf-8');
+          res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(easy.filename.replace(/\.pdf$/i, '.html'))}"`);
+          return res.send(Buffer.from(easy.htmlContent, 'utf-8'));
+        }
         res.setHeader('Content-Type', easy.contentType);
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(easy.filename)}"`);
         return res.send(easy.buffer);

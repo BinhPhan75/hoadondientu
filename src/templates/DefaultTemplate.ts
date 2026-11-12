@@ -477,21 +477,39 @@ export function renderDefaultTemplate(
 
   @page {
     size: A4 portrait;
-    margin: 0 !important;
+    margin: 8mm 6mm !important;
   }
 
   @media print {
-    body {
-      width: auto;
-      height: auto;
-      margin: 0 auto;
-      background: transparent !important;
+    html, body {
+      width: 100% !important;
+      height: auto !important;
+      margin: 0 !important;
+      background: #ffffff !important;
       padding: 0 !important;
     }
     .print-actions {
       display: none !important;
     }
-    table {
+    .print-page {
+      width: 100% !important;
+      min-height: 0 !important;
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .main-page {
+      margin: 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+      min-height: 0 !important;
+      height: auto !important;
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 4mm 2mm !important;
+    }
+    table, .res-tb {
       page-break-inside: auto !important;
       break-inside: auto !important;
       width: 100% !important;
@@ -500,10 +518,10 @@ export function renderDefaultTemplate(
       page-break-inside: avoid !important;
       break-inside: avoid !important;
     }
-    table thead {
+    thead, table thead {
       display: table-header-group !important;
     }
-    table tfoot {
+    tfoot, table tfoot {
       display: table-footer-group !important;
     }
     .table-horizontal-wrapper {
@@ -511,16 +529,9 @@ export function renderDefaultTemplate(
       break-inside: auto !important;
       padding-top: 5px;
     }
-    .main-page {
-      margin: 0 auto;
-      width: initial;
-      min-height: 296mm;
-      background: #fff !important;
-      border: 3px double rgba(145, 87, 21, 0.69) !important;
-      box-shadow: none !important;
-    }
     .ft-sign {
       page-break-inside: avoid !important;
+      break-inside: avoid !important;
       page-break-after: auto;
     }
     .fd-end {

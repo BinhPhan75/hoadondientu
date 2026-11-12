@@ -577,11 +577,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const handleViewOriginalEasyInvoice = async () => {
+  const handleViewOriginalEasyInvoice = async (silent = false) => {
     if (!effectiveInvoice) return;
-    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
+    const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
     if (!lookupCode) {
-      alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
+      if (!silent) alert('Hóa đơn này không có mã tra cứu (FKey) để tải từ cổng EasyInvoice.');
       return;
     }
 
@@ -631,10 +631,34 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       try {
         await handleViewOriginalProvider();
       } catch (fallbackErr: any) {
-        setOriginalLoadError(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message || fallbackErr.message}`);
+        if (!silent) {
+          setOriginalLoadError(`Không thể tự động tải hóa đơn từ Cổng EasyInvoice: ${err.message || fallbackErr.message}`);
+        }
       }
     } finally {
       setIsDownloadingEasyInvoice(false);
+    }
+  };
+
+  const handlePrintHtml = () => {
+    if (iframeRef.current && iframeRef.current.contentWindow) {
+      try {
+        iframeRef.current.contentWindow.focus();
+        iframeRef.current.contentWindow.print();
+        return;
+      } catch (err) {
+        console.warn('Không thể in trực tiếp qua iframe, dùng cửa sổ in dự phòng:', err);
+      }
+    }
+    const htmlToPrint = originalEasyInvoiceHtml || originalVnptHtml;
+    if (htmlToPrint) {
+      const printWindow = window.open('', '_blank');
+      if (printWindow) {
+        printWindow.document.write(prepareOriginalInvoiceHtml(htmlToPrint));
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => printWindow.print(), 400);
+      }
     }
   };
 
@@ -709,7 +733,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice?.rawXml || !provider || provider === 'MISA') return;
+    if (!effectiveInvoice || provider === 'MISA') return;
+    if (provider === 'EASYINVOICE') {
+      const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
+      if (code) {
+        void handleViewOriginalEasyInvoice(true);
+      }
+      return;
+    }
+    if (!effectiveInvoice?.rawXml) return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
 
@@ -797,6 +829,30 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const isVnpayInvoice = autoDetectedProvider === 'VNPAY';
   const isVietcombankInvoice = isVnpayInvoice && /vietcombank\.com\.vn/i.test(directLookupUrl);
   const is4SiInvoice = autoDetectedProvider === '4SI' || autoDetectedProvider === 'LCS_SOFT';
+
+  const easyInvoiceLookupCode = lookupDetails.lookupCode || effectiveInvoice?.lookupCode || effectiveInvoice?.mhdon || '';
+  const easyInvoicePortalUrl = React.useMemo(() => {
+    if (!effectiveInvoice) return 'https://tracuu.easyinvoice.vn';
+    const code = (easyInvoiceLookupCode || '').trim();
+    const sellerTax = (effectiveInvoice.nbmst || '').trim().replace(/[^0-9\-]/g, '');
+    let url = (lookupDetails.lookupUrl || '').trim();
+    if (url && /easyinvoice/i.test(url)) {
+      let clean = url.split('?')[0].replace(/\/+$/, '');
+      if (!/\/Search\/Index$/i.test(clean)) {
+        clean = `${clean}/Search/Index`;
+      }
+      return code ? `${clean}?fkey=${encodeURIComponent(code)}` : clean;
+    }
+    if (sellerTax) {
+      const cleanDigits = sellerTax.replace(/[^0-9]/g, '');
+      return code
+        ? `http://${cleanDigits}hd.easyinvoice.com.vn/Search/Index?fkey=${encodeURIComponent(code)}`
+        : `http://${cleanDigits}hd.easyinvoice.com.vn/Search/Index`;
+    }
+    return code
+      ? `https://tracuu.easyinvoice.vn/Search/Index?fkey=${encodeURIComponent(code)}`
+      : 'https://tracuu.easyinvoice.vn/Search/Index';
+  }, [lookupDetails.lookupUrl, easyInvoiceLookupCode, effectiveInvoice?.nbmst]);
 
   if (renderError) {
     return (
@@ -913,6 +969,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <Sparkles className="w-3 h-3 text-amber-400" />
                   NCC: {currentProviderMeta.shortName}
                 </span>
+                {isEasyInvoice && easyInvoicePortalUrl && (
+                  <a
+                    href={easyInvoicePortalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-0.5 rounded-md bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 text-[10px] font-semibold border border-amber-500/40 flex items-center gap-1 transition-colors cursor-pointer"
+                    title={`Mở trực tiếp Cổng tra cứu EasyInvoice (${effectiveInvoice.nbmst || ''}) trên tab mới`}
+                  >
+                    <ExternalLink className="w-2.5 h-2.5 text-amber-400" />
+                    <span>Mở link tra cứu EasyInvoice ↗</span>
+                  </a>
+                )}
                 {is4SiInvoice && (
                   <span className="px-2 py-0.5 rounded-md bg-purple-900/40 text-purple-300 text-[10px] font-mono font-medium border border-purple-700/50 flex items-center gap-1" title="Hóa đơn 4Si của Công ty L.C.S (lcssoft.com.vn) - Hỗ trợ đọc qua dochoadon.lcssoft.com.vn">
                     <span>LCS Soft / 4Si</span>
@@ -1064,12 +1132,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
             {/* Format toggle for EasyInvoice if HTML original is loaded */}
             {isEasyInvoice && originalEasyInvoiceHtml && (
-              <div className="w-full max-w-[820px] mb-2 flex items-center justify-between bg-slate-800/90 px-3 py-2 rounded-lg border border-slate-700">
+              <div className="w-full max-w-[820px] mb-2 flex items-center justify-between flex-wrap gap-2 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 shadow-sm">
                 <div className="text-xs text-slate-300 font-medium flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  <span>Chế độ hiển thị EasyInvoice:</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Bản thể hiện EasyInvoice:</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => setEasyInvoiceViewMode('html')}
@@ -1078,6 +1146,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                         : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
+                    title="Xem bản thể hiện HTML đa trang chuẩn A4 (tất cả các dòng hiển thị đầy đủ, không bị co ép)"
                   >
                     Bản thể hiện HTML A4 (Đa trang chuẩn)
                   </button>
@@ -1090,11 +1159,84 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                           ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                           : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                       }`}
+                      title="Xem file PDF từ máy chủ EasyInvoice (máy chủ EasyInvoice nén tất cả các dòng vào 1 trang)"
                     >
-                      Bản PDF gốc
+                      Bản PDF gốc EasyInvoice
                     </button>
                   )}
+                  {easyInvoiceViewMode === 'html' && (
+                    <button
+                      type="button"
+                      onClick={handlePrintHtml}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-700 hover:bg-emerald-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="In hóa đơn chuẩn A4 đa trang qua hộp thoại in trình duyệt"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>In A4</span>
+                    </button>
+                  )}
+                  {easyInvoicePortalUrl && (
+                    <a
+                      href={easyInvoicePortalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-600/50 flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Mở link tra cứu trực tiếp trên Cổng EasyInvoice (Đã dán sẵn mã FKey)"
+                    >
+                      <ExternalLink className="w-3 h-3 text-amber-400" />
+                      <span>Cổng EasyInvoice ↗</span>
+                    </a>
+                  )}
                 </div>
+              </div>
+            )}
+
+            {/* Thông báo hướng dẫn khi đang xem PDF bị co 1 trang của EasyInvoice */}
+            {isEasyInvoice && !originalEasyInvoiceHtml && originalProviderPdfUrl && (
+              <div className="w-full max-w-[820px] mb-2 px-3.5 py-2.5 bg-amber-950/80 border border-amber-600/60 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md flex-wrap">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    Bản PDF từ Cổng EasyInvoice bị nén dồn nhiều dòng vào 1 trang. Nhấn nút bên cạnh để xem bản thể hiện HTML phân trang chuẩn A4.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleViewOriginalEasyInvoice(false)}
+                    disabled={isDownloadingEasyInvoice}
+                    className="px-3 py-1 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-600 rounded transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                  >
+                    {isDownloadingEasyInvoice ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+                    <span>Xem bản HTML đa trang</span>
+                  </button>
+                  {easyInvoicePortalUrl && (
+                    <a
+                      href={easyInvoicePortalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 text-xs font-semibold text-amber-200 bg-amber-900 hover:bg-amber-800 border border-amber-600 rounded transition-colors cursor-pointer flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Mở link tra cứu</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {isEasyInvoice && originalEasyInvoiceHtml && easyInvoiceViewMode === 'pdf' && originalProviderPdfUrl && (
+              <div className="w-full max-w-[820px] mb-2 px-3 py-1.5 bg-slate-800/90 border border-slate-700 rounded-lg text-xs text-slate-300 flex items-center justify-between gap-2 flex-wrap">
+                <span>
+                  Đang xem file PDF nén từ EasyInvoice. Chuyển sang <strong>Bản thể hiện HTML A4</strong> để xem và in từng trang rõ ràng.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEasyInvoiceViewMode('html')}
+                  className="px-2.5 py-0.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded cursor-pointer"
+                >
+                  Xem bản HTML đa trang
+                </button>
               </div>
             )}
 
@@ -1220,114 +1362,119 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {originalProviderPdfUrl ? (
+            {/* 1. Nếu có file PDF gốc đã nạp, hiển thị nút Tải PDF gốc đã lưu */}
+            {originalProviderPdfUrl && (
               <a
                 href={originalProviderPdfUrl}
-                download={`HoaDon_${effectiveInvoice.khhdon}_${effectiveInvoice.shdon}.pdf`}
-                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600 bg-emerald-950 px-3 py-1.5 text-xs font-semibold text-emerald-200"
+                download={`HoaDon_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}.pdf`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600 bg-emerald-950/80 hover:bg-emerald-900 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition-colors cursor-pointer shadow-xs"
+                title="Tải tệp PDF nhận được từ nhà cung cấp"
               >
                 <Download className="h-3.5 w-3.5" />
-                Tải PDF gốc đã lưu
+                <span>Tải PDF gốc đã lưu</span>
               </a>
+            )}
+
+            {/* 2. Provider Actions - Luôn luôn hiển thị theo nhà cung cấp */}
+            {isEasyInvoice ? (
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                {/* Nút MỞ LINK TRA CỨU TRỰC TIẾP TỪ NHÀ CUNG CẤP EASYINVOICE */}
+                {easyInvoicePortalUrl && (
+                  <a
+                    href={easyInvoicePortalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border text-amber-200 bg-amber-950/90 hover:bg-amber-900 border-amber-500 hover:border-amber-400 ring-2 ring-amber-500/40 transition-all cursor-pointer shadow-md"
+                    title={`Mở trực tiếp Cổng tra cứu EasyInvoice (${effectiveInvoice.nbmst || ''}) trên tab mới (Đã dán sẵn mã FKey: ${easyInvoiceLookupCode || ''})`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Mở link tra cứu EasyInvoice</span>
+                  </a>
+                )}
+
+                {/* Nút In hóa đơn chuẩn A4 đa trang khi xem HTML */}
+                {originalEasyInvoiceHtml && (
+                  <button
+                    type="button"
+                    onClick={handlePrintHtml}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
+                    title="In hóa đơn chuẩn A4 đa trang qua hộp thoại in của trình duyệt"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>In hóa đơn A4</span>
+                  </button>
+                )}
+
+                {/* Nút nạp bản thể hiện HTML đa trang nếu chưa có HTML */}
+                {!originalEasyInvoiceHtml && (
+                  <button
+                    type="button"
+                    onClick={() => handleViewOriginalEasyInvoice(false)}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                    title={`Tra cứu mã FKey và hiển thị bản thể hiện HTML đa trang từ EasyInvoice (Mã tra cứu: ${easyInvoiceLookupCode || ''})`}
+                  >
+                    {isDownloadingEasyInvoice ? (
+                      <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                    )}
+                    <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tải...') : 'Xem bản HTML đa trang'}</span>
+                  </button>
+                )}
+              </div>
             ) : isMisaInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
                 {directLookupUrl && (
                   <button
                     type="button"
                     onClick={() => setMisaPortalUrl(directLookupUrl)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 cursor-pointer"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span>{misaPortalUrl ? 'Đang mở tra cứu MISA' : 'Mở tra cứu MISA'}</span>
                   </button>
                 )}
-                {directLookupUrl && misaPortalUrl && (
-                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
+                {directLookupUrl && (
+                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 cursor-pointer">
                     <ExternalLink className="w-3 h-3" />
                     <span>Mở cửa sổ riêng</span>
                   </a>
                 )}
               </div>
-            ) : isEasyInvoice ? (
-              <div className="inline-flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={handleViewOriginalEasyInvoice}
-                  disabled={isDownloadingEasyInvoice}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title={`Tra cứu mã FKey và hiển thị bản thể hiện gốc EasyInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})`}
-                >
-                  {isDownloadingEasyInvoice ? (
-                    <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-emerald-400" />
-                  )}
-                  <span>{isDownloadingEasyInvoice ? (easyInvoiceDownloadStatus || 'Đang tra cứu...') : 'Xem hóa đơn gốc'}</span>
-                </button>
-                {directLookupUrl && (
-                  <a
-                    href={directLookupUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                    title="Mở cổng tra cứu EasyInvoice (Đã dán sẵn mã FKey)"
-                  >
-                    <ExternalLink className="w-3 h-3 text-slate-400" />
-                    <span>Tra link gốc</span>
-                  </a>
-                )}
-              </div>
             ) : isVnptInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* 1. Nút Xem hóa đơn gốc VNPT trong ứng dụng (tự động nạp bản thể hiện từ VNPT) */}
-                <button
-                  type="button"
-                  onClick={handleViewOriginalProvider}
-                  disabled={isDownloadingEasyInvoice}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
-                    originalVnptHtml
-                      ? 'text-cyan-200 bg-cyan-900 border-cyan-400 ring-1 ring-cyan-400/40'
-                      : 'text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600'
-                  }`}
-                  title={`Tự động nhập mã tra cứu, giải Captcha và hiển thị bản thể hiện gốc VNPT (${lookupDetails.lookupCode || ''})`}
-                >
-                  {isLoadingVnptOriginal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5" />
-                  )}
-                  <span>{isLoadingVnptOriginal ? 'Đang nạp HĐ gốc...' : originalVnptHtml ? 'Đang xem bản gốc VNPT' : 'Xem hóa đơn gốc VNPT'}</span>
-                </button>
-
-                {/* 2. Nút chuyển về xem mẫu nội bộ nếu đang xem bản thể hiện VNPT */}
+                {!originalVnptHtml && (
+                  <button
+                    type="button"
+                    onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-cyan-300 bg-cyan-950/70 hover:bg-cyan-900 border-cyan-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  >
+                    {isLoadingVnptOriginal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{isLoadingVnptOriginal ? 'Đang nạp HĐ gốc...' : 'Xem hóa đơn gốc VNPT'}</span>
+                  </button>
+                )}
                 {originalVnptHtml && (
                   <button
                     type="button"
                     onClick={() => setOriginalVnptHtml(null)}
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                    title="Chuyển về xem mẫu thể hiện nội bộ"
                   >
                     <span>Mẫu nội bộ</span>
                   </button>
                 )}
-
-                {/* 3. Nút tải file PDF gốc VNPT */}
-                <button
-                  type="button"
-                  onClick={handleViewOriginalProvider}
-                  disabled={isDownloadingEasyInvoice}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 hover:border-blue-500 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ cổng VNPT (mục Tải file)"
-                >
-                  {isDownloadingVnptPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-blue-400" />
-                  )}
-                  <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
-                </button>
-
-                {/* 4. Nút mở trực tiếp Cổng tra cứu VNPT và tự gán mã vào ô tra cứu */}
+                {!originalProviderPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-blue-300 bg-blue-950/70 hover:bg-blue-900 border-blue-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  >
+                    {isDownloadingVnptPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" /> : <Download className="w-3.5 h-3.5 text-blue-400" />}
+                    <span>{isDownloadingVnptPdf ? 'Đang tải PDF...' : 'Tải PDF gốc VNPT'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -1335,50 +1482,35 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     openVnptDirectPortal(effectiveInvoice?.nbmst, code, lookupDetails.lookupUrl);
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-sky-300 bg-sky-950/70 hover:bg-sky-900 border-sky-700 hover:border-sky-600 transition-all cursor-pointer shadow-xs"
-                  title={`Mở trực tiếp Cổng tra cứu VNPT (${effectiveInvoice?.nbmst || ''}) trên tab mới và tự gán mã tra cứu vào ô tìm kiếm (chỉ cần gõ Captcha)`}
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Tra link gốc</span>
+                  <span>Tra link gốc VNPT</span>
                 </button>
-
               </div>
             ) : isViettelInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* 1. Nút Xem PDF gốc Viettel */}
-                <button
-                  type="button"
-                  onClick={handleViewOriginalProvider}
-                  disabled={isDownloadingEasyInvoice}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-60 ${
-                    originalViettelPdfUrl
-                      ? 'text-rose-200 bg-rose-950 border-rose-500 ring-1 ring-rose-500/40'
-                      : 'text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700'
-                  }`}
-                  title={`Tải và xem trực tiếp bản PDF gốc ký số từ Viettel (Mã bí mật: ${lookupDetails.lookupCode || ''})`}
-                >
-                  {isLoadingViettelOriginal ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
-                  ) : (
-                    <Eye className="w-3.5 h-3.5 text-rose-400" />
-                  )}
-                  <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : originalViettelPdfUrl ? 'Đang xem PDF gốc Viettel' : 'Xem PDF gốc Viettel'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleViewOriginalProvider}
-                  disabled={isDownloadingEasyInvoice}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 hover:border-rose-600 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                  title="Tải trực tiếp file PDF hóa đơn gốc đã ký số từ máy chủ Viettel (1-click tải)"
-                >
-                  {isDownloadingViettelPdf ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5 text-rose-400" />
-                  )}
-                  <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
-                </button>
-
+                {!originalViettelPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  >
+                    {isLoadingViettelOriginal ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" /> : <Eye className="w-3.5 h-3.5 text-rose-400" />}
+                    <span>{isLoadingViettelOriginal ? 'Đang mở HĐ gốc...' : 'Xem PDF gốc Viettel'}</span>
+                  </button>
+                )}
+                {!originalProviderPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-rose-300 bg-rose-950/70 hover:bg-rose-900 border-rose-700 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+                  >
+                    {isDownloadingViettelPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" /> : <Download className="w-3.5 h-3.5 text-rose-400" />}
+                    <span>{isDownloadingViettelPdf ? 'Đang tải PDF...' : 'Tải PDF gốc Viettel'}</span>
+                  </button>
+                )}
               </div>
             ) : isVietcombankInvoice ? (
               <div className="inline-flex items-center gap-1.5">
@@ -1386,45 +1518,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   href="https://einvoice.vietcombank.com.vn/"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
-                  title="Mở tra cứu hóa đơn điện tử Vietcombank (einvoice.vietcombank.com.vn)"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 transition-all cursor-pointer shadow-xs"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Cổng Vietcombank</span>
                 </a>
-                {directLookupUrl && !directLookupUrl.includes('vietcombank.com.vn') && (
-                  <a
-                    href={directLookupUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30 transition-all cursor-pointer shadow-xs"
-                    title={`Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Cổng VNPAY</span>
-                  </a>
-                )}
               </div>
             ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
               <a
                 href={directLookupUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border transition-all cursor-pointer shadow-xs ${
-                  isMisaInvoice
-                    ? 'text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30'
-                    : isVnpayInvoice
-                    ? 'text-indigo-300 bg-indigo-950/70 hover:bg-indigo-900 border-indigo-600 hover:border-indigo-500 ring-1 ring-indigo-500/30'
-                    : 'text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700'
-                }`}
-                title={isMisaInvoice 
-                  ? `Tải hóa đơn gốc từ Cổng MISA meInvoice (Mã tra cứu: ${lookupDetails.lookupCode || ''})` 
-                  : isVnpayInvoice
-                  ? `Tra cứu hóa đơn Cổng VNPAY Invoice (Tự động điền MST ${effectiveInvoice?.nbmst || ''} & Mã tra cứu ${lookupDetails.lookupCode || ''})`
-                  : `Mở cổng tra cứu hóa đơn trực tiếp (${currentProviderMeta.name})`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900/80 border-cyan-700 transition-all cursor-pointer shadow-xs"
               >
-                <ExternalLink className={`w-3.5 h-3.5 ${isMisaInvoice ? 'text-emerald-400' : isVnpayInvoice ? 'text-indigo-400' : 'text-cyan-400'}`} />
-                <span>{isMisaInvoice ? 'Tải hóa đơn gốc' : isVnpayInvoice ? 'Tra cứu VNPAY' : 'Tra cứu Cổng NCC'}</span>
+                <ExternalLink className="w-3.5 h-3.5 text-cyan-400" />
+                <span>{isVnpayInvoice ? 'Tra cứu VNPAY' : 'Tra cứu Cổng NCC'}</span>
               </a>
             ) : null}
 
