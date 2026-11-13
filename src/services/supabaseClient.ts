@@ -28,19 +28,27 @@ const STORAGE_KEY_REMEMBER_AUTH = 'supabase_remember_login';
 
 // Fallback or environment credentials
 export const getSupabaseConfig = (): SupabaseConfig => {
-  const customUrl = localStorage.getItem(STORAGE_KEY_CONFIG_URL) || '';
-  const customKey = localStorage.getItem(STORAGE_KEY_CONFIG_KEY) || '';
+  const envUrl = (
+    (import.meta as any).env?.VITE_SUPABASE_URL ||
+    (import.meta as any).env?.SUPABASE_URL ||
+    (typeof process !== 'undefined' ? (process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL) : '') ||
+    ''
+  ).trim();
 
-  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+  const envKey = (
+    (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ||
+    (import.meta as any).env?.SUPABASE_ANON_KEY ||
+    (typeof process !== 'undefined' ? (process.env?.VITE_SUPABASE_ANON_KEY || process.env?.SUPABASE_ANON_KEY) : '') ||
+    ''
+  ).trim();
 
-  const url = customUrl.trim() || envUrl.trim() || 'https://default-tax-einvoice.supabase.co';
-  const anonKey = customKey.trim() || envKey.trim() || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
+  const customUrl = (localStorage.getItem(STORAGE_KEY_CONFIG_URL) || '').trim();
+  const customKey = (localStorage.getItem(STORAGE_KEY_CONFIG_KEY) || '').trim();
 
-  const isConfigured = Boolean(
-    (customUrl.trim() && customKey.trim()) ||
-    (envUrl.trim() && envKey.trim())
-  );
+  const url = envUrl || customUrl || 'https://default-tax-einvoice.supabase.co';
+  const anonKey = envKey || customKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
+
+  const isConfigured = Boolean((envUrl && envKey) || (customUrl && customKey));
 
   return { url, anonKey, isConfigured };
 };

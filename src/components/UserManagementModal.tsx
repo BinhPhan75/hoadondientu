@@ -171,11 +171,6 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
           <div className="flex items-center justify-between">
             <div className="text-xs text-slate-600 font-medium">
               Tổng số tài khoản: <strong className="text-slate-900">{users.length}</strong>
-              {!isConfigured && (
-                <span className="ml-2 text-amber-600 text-[11px] font-normal">
-                  (Đang chạy chế độ tài khoản cục bộ / cấu hình Supabase qua màn hình đăng nhập)
-                </span>
-              )}
             </div>
 
             <div className="flex items-center gap-2">
