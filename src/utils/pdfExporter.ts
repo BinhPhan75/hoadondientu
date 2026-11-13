@@ -71,17 +71,20 @@ export async function exportInvoiceToPdfFile(
       targetElement = tempContainer.querySelector('.main-page, .invoice-container, .print-page') as HTMLElement || tempContainer;
     }
 
-    // High resolution canvas options for crisp text & borders
+    // Optimized canvas options for fast rendering while retaining sharp text & borders
     const canvas = await html2canvas(targetElement, {
-      scale: 2.5,
+      scale: 1.8,
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
-      windowWidth: 820
+      windowWidth: 820,
+      imageTimeout: 3000,
+      removeContainer: true
     });
 
     if (tempContainer) {
       document.body.removeChild(tempContainer);
+      tempContainer = null;
     }
 
     // Standard A4 dimensions in mm: 210 x 297
@@ -103,10 +106,11 @@ export async function exportInvoiceToPdfFile(
     const pageHeightPx = Math.max(1, Math.floor(pageContentHeight * pixelsPerMm));
     const pageCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
 
-    // Slice the rendered invoice into A4 pages instead of shrinking a long
-    // table onto one page. This preserves readable text for invoices with
-    // many line items.
+    // Slice the rendered invoice into A4 pages with fast JPEG encoding
     for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      if (pageIndex > 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
       const sourceY = pageIndex * pageHeightPx;
       const sourceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
       const pageCanvas = document.createElement('canvas');
@@ -135,12 +139,14 @@ export async function exportInvoiceToPdfFile(
       }
       const pageImageHeight = sourceHeight / pixelsPerMm;
       pdf.addImage(
-        pageCanvas.toDataURL('image/jpeg', 0.98),
+        pageCanvas.toDataURL('image/jpeg', 0.88),
         'JPEG',
         margin,
         margin,
         contentWidth,
-        pageImageHeight
+        pageImageHeight,
+        undefined,
+        'FAST'
       );
     }
 
@@ -187,11 +193,13 @@ export async function generateGdtPdfBytes(
     const targetElement = (tempContainer.querySelector('.main-page, .invoice-container, .print-page') as HTMLElement) || tempContainer;
 
     const canvas = await html2canvas(targetElement, {
-      scale: 2.5,
+      scale: 1.8,
       useCORS: true,
       logging: false,
       backgroundColor: '#ffffff',
-      windowWidth: 820
+      windowWidth: 820,
+      imageTimeout: 3000,
+      removeContainer: true
     });
 
     const pdf = new jsPDF({
@@ -211,6 +219,9 @@ export async function generateGdtPdfBytes(
     const pageCount = Math.max(1, Math.ceil(canvas.height / pageHeightPx));
 
     for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+      if (pageIndex > 0) {
+        await new Promise(r => setTimeout(r, 0));
+      }
       const sourceY = pageIndex * pageHeightPx;
       const sourceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
       const pageCanvas = document.createElement('canvas');
@@ -238,12 +249,14 @@ export async function generateGdtPdfBytes(
       }
       const pageImageHeight = sourceHeight / pixelsPerMm;
       pdf.addImage(
-        pageCanvas.toDataURL('image/jpeg', 0.98),
+        pageCanvas.toDataURL('image/jpeg', 0.88),
         'JPEG',
         margin,
         margin,
         contentWidth,
-        pageImageHeight
+        pageImageHeight,
+        undefined,
+        'FAST'
       );
     }
 
