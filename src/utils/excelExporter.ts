@@ -44,7 +44,7 @@ export function exportInvoicesToExcel(invoices: GDTInvoice[], title: string = 'B
     totalPayment += inv.tgtttbso;
 
     const itemsSummary = inv.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join('; ');
-    const taxRatesSummary = Array.from(new Set(inv.items.map(i => i.taxRate))).join(', ') || '10%';
+    const taxRatesSummary = formatTaxRateExcel(inv);
 
     let statusText = 'Gốc (Mới)';
     if (inv.tthdon === 2) statusText = 'Hóa đơn Thay thế';
@@ -59,7 +59,7 @@ export function exportInvoicesToExcel(invoices: GDTInvoice[], title: string = 'B
       inv.khmshdon,
       inv.khhdon,
       inv.shdon,
-      inv.tdlap.replace('T', ' ').substring(0, 19),
+      formatDateDDMMYYYY(inv.tdlap),
       inv.mhdon || 'Không có',
       inv.nbmst,
       inv.nbten,
@@ -199,8 +199,8 @@ export function exportComprehensiveMultiMonthReport(
     summaryRows.push([
       index + 1,
       chunk.label,
-      chunk.fromDate,
-      chunk.toDate,
+      formatDateDDMMYYYY(chunk.fromDate),
+      formatDateDDMMYYYY(chunk.toDate),
       pCount,
       pAmount,
       pTax,
@@ -306,7 +306,7 @@ function createVatSubSheet(invoices: GDTInvoice[], title: string, type: 'purchas
     const partnerTaxCode = type === 'sold' ? inv.nmmst : inv.nbmst;
     const partnerName = type === 'sold' ? inv.nmten : inv.nbten;
     const itemsSummary = inv.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join('; ');
-    const taxRatesSummary = Array.from(new Set(inv.items.map(i => i.taxRate))).join(', ') || '10%';
+    const taxRatesSummary = formatTaxRateExcel(inv);
 
     let statusText = 'Gốc';
     if (inv.tthdon === 2) statusText = 'Thay thế';
@@ -318,7 +318,7 @@ function createVatSubSheet(invoices: GDTInvoice[], title: string, type: 'purchas
       inv.khmshdon,
       inv.khhdon,
       inv.shdon,
-      inv.tdlap.replace('T', ' ').substring(0, 19),
+      formatDateDDMMYYYY(inv.tdlap),
       inv.mhdon || '',
       partnerTaxCode,
       partnerName,
@@ -404,7 +404,7 @@ function createAllInvoicesSheet(invoices: GDTInvoice[]): XLSX.WorkSheet {
     sumPayment += inv.tgtttbso;
 
     const monthTag = inv.tdlap ? `T${inv.tdlap.substring(5, 7)}/${inv.tdlap.substring(0, 4)}` : '';
-    const taxRatesSummary = Array.from(new Set(inv.items.map(i => i.taxRate))).join(', ') || '10%';
+    const taxRatesSummary = formatTaxRateExcel(inv);
 
     let statusText = 'Gốc';
     if (inv.tthdon === 2) statusText = 'Thay thế';
@@ -418,7 +418,7 @@ function createAllInvoicesSheet(invoices: GDTInvoice[]): XLSX.WorkSheet {
       inv.khmshdon,
       inv.khhdon,
       inv.shdon,
-      inv.tdlap.replace('T', ' ').substring(0, 19),
+      formatDateDDMMYYYY(inv.tdlap),
       inv.mhdon || '',
       inv.nbmst,
       inv.nbten,
@@ -482,4 +482,112 @@ function setStandardColumnWidths(ws: XLSX.WorkSheet) {
 
 function formatVNDNumber(num: number): string {
   return new Intl.NumberFormat('vi-VN').format(Math.round(num));
+}
+
+/**
+ * Định dạng Ngày lập theo chuẩn Việt Nam dd/mm/yyyy
+ * Hỗ trợ các định dạng ngày phổ biến từ Cổng Tổng cục Thuế:
+ * - YYYY-MM-DDTHH:mm:ss
+ * - YYYY-MM-DD
+ * - YYYY/MM/DD
+ * - DD-MM-YYYY hoặc timestamp
+ */
+export function formatDateDDMMYYYY(dateStr?: string): string {
+  if (!dateStr) return '';
+  const str = String(dateStr).trim();
+
+  // 1. Trường hợp ISO: YYYY-MM-DD hoặc YYYY/MM/DD
+  const matchIso = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (matchIso) {
+    const yyyy = matchIso[1];
+    const mm = matchIso[2].padStart(2, '0');
+    const dd = matchIso[3].padStart(2, '0');
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  // 2. Trường hợp đã là DD-MM-YYYY hoặc DD/MM/YYYY
+  const matchDmY = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (matchDmY) {
+    const dd = matchDmY[1].padStart(2, '0');
+    const mm = matchDmY[2].padStart(2, '0');
+    const yyyy = matchDmY[3];
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  // 3. Fallback phân tích Date object
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+
+  return str;
+}
+
+/**
+ * Chuẩn hóa thuế suất hiển thị luôn có dấu % (ví dụ: 10%, 8%, 5%, 0%)
+ */
+export function normalizeTaxRatePercent(val: string | number): string {
+  const str = String(val).trim();
+  if (!str) return '';
+  if (str.endsWith('%')) return str;
+
+  // Nếu là số: 10 -> 10%, 8 -> 8%, 0.08 -> 8%
+  if (/^\d+(\.\d+)?$/.test(str)) {
+    const num = parseFloat(str);
+    if (num > 0 && num < 1) {
+      return `${Math.round(num * 100)}%`;
+    }
+    return `${str}%`;
+  }
+
+  const upper = str.toUpperCase();
+  if (upper === 'KCT') return 'KCT';
+  if (upper === 'KKKNT') return 'KKKNT';
+  return str.includes('%') ? str : `${str}%`;
+}
+
+/**
+ * Lấy chuỗi thuế suất % cho hóa đơn xuất Excel
+ */
+export function formatTaxRateExcel(inv: GDTInvoice): string {
+  const rates: string[] = [];
+
+  // 1. Lấy từ danh sách dòng hàng hóa (items)
+  if (Array.isArray(inv.items) && inv.items.length > 0) {
+    inv.items.forEach(item => {
+      const raw = item.taxRate || item.tsuat;
+      if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+        rates.push(normalizeTaxRatePercent(raw));
+      } else if (item.taxRatePercent !== undefined && item.taxRatePercent !== null) {
+        rates.push(`${item.taxRatePercent}%`);
+      }
+    });
+  }
+
+  // 2. Lấy từ bảng phân bổ thuế (vatBreakdown) nếu items trống
+  if (rates.length === 0 && Array.isArray(inv.vatBreakdown) && inv.vatBreakdown.length > 0) {
+    inv.vatBreakdown.forEach(vb => {
+      if (vb.taxRate) {
+        rates.push(normalizeTaxRatePercent(vb.taxRate));
+      }
+    });
+  }
+
+  // 3. Nếu vẫn trống, suy luận từ tỷ lệ Tiền thuế / Tiền chưa thuế
+  if (rates.length === 0) {
+    if (inv.tgtthue === 0 && inv.tgtcthue > 0) {
+      rates.push('0%');
+    } else if (inv.tgtcthue > 0 && inv.tgtthue > 0) {
+      const ratio = Math.round((inv.tgtthue / inv.tgtcthue) * 100);
+      rates.push(`${ratio}%`);
+    } else {
+      rates.push('10%');
+    }
+  }
+
+  const unique = Array.from(new Set(rates.filter(Boolean)));
+  return unique.length > 0 ? unique.join(', ') : '10%';
 }

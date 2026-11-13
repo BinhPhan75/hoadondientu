@@ -18,6 +18,7 @@ import * as XLSX from 'xlsx';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { useNotification } from '../context/NotificationContext';
+import { formatDateDDMMYYYY, formatTaxRateExcel } from '../utils/excelExporter';
 
 interface BatchDownloadModalProps {
   isOpen: boolean;
@@ -137,7 +138,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
             inv.khmshdon,
             inv.khhdon,
             inv.shdon,
-            inv.tdlap.replace('T', ' '),
+            formatDateDDMMYYYY(inv.tdlap),
             inv.mhdon || 'Không có',
             inv.nbmst,
             inv.nbten,
@@ -145,7 +146,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
             inv.nmten,
             inv.items.map(i => i.itemName).join('; '),
             inv.tgtcthue,
-            inv.items[0]?.taxRate || '10%',
+            formatTaxRateExcel(inv),
             inv.tgtthue,
             inv.tgtttbso
           ]);
