@@ -29,8 +29,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   onSave,
   onClose,
 }) => {
-  const [taxCode, setTaxCode] = useState(currentConfig.taxCode || '');
-  const [password, setPassword] = useState(currentConfig.password || '');
+  const [taxCode, setTaxCode] = useState(() => currentConfig.taxCode || localStorage.getItem('gdt_saved_tax_code') || '');
+  const [password, setPassword] = useState(() => currentConfig.password || localStorage.getItem('gdt_saved_password') || '');
   const [showPassword, setShowPassword] = useState(false);
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaKey, setCaptchaKey] = useState('');
@@ -119,8 +119,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
-    setTaxCode(currentConfig.taxCode || '');
-    setPassword(currentConfig.password || '');
+    setTaxCode(currentConfig.taxCode || localStorage.getItem('gdt_saved_tax_code') || '');
+    setPassword(currentConfig.password || localStorage.getItem('gdt_saved_password') || '');
     setRememberMe(currentConfig.rememberMe ?? true);
   }, [currentConfig.taxCode, currentConfig.password, currentConfig.rememberMe]);
 
@@ -163,6 +163,12 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           type: 'success', 
           text: 'Xác thực thành công! Đã kết nối phiên làm việc Cổng Thuế.' 
         });
+
+        // Lưu thông tin MST và mật khẩu đăng nhập cổng thuế ở local máy người dùng
+        try {
+          localStorage.setItem('gdt_saved_tax_code', taxCode.trim());
+          localStorage.setItem('gdt_saved_password', password);
+        } catch {}
 
         const updatedConfig: GDTAccountConfig = {
           ...currentConfig,

@@ -58,8 +58,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCollapseSidebar
 }) => {
   const [showPassword, setShowPassword] = useState(false);
-  const [localMst, setLocalMst] = useState(account.taxCode || '');
-  const [localPassword, setLocalPassword] = useState(account.password || '');
+  const [localMst, setLocalMst] = useState(() => account.taxCode || localStorage.getItem('gdt_saved_tax_code') || '');
+  const [localPassword, setLocalPassword] = useState(() => account.password || localStorage.getItem('gdt_saved_password') || '');
   
   // Captcha & AI OCR State
   const [captchaCode, setCaptchaCode] = useState('');
@@ -310,11 +310,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleMstBlur = () => {
     const trimmed = localMst.trim();
+    try {
+      if (trimmed) localStorage.setItem('gdt_saved_tax_code', trimmed);
+    } catch {}
     if (trimmed !== account.taxCode) {
       onUpdateAccount({
         ...account,
         taxCode: trimmed,
-        taxpayerName: `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})`,
+        taxpayerName: trimmed ? `DOANH NGHIỆP NỘP THUẾ (MST: ${trimmed})` : 'Chưa đăng nhập CQT',
         isRealGDT: false // Reset authenticated state on MST change
       });
     }
@@ -322,6 +325,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handlePasswordBlur = () => {
     const trimmed = localPassword.trim();
+    try {
+      if (trimmed) localStorage.setItem('gdt_saved_password', trimmed);
+    } catch {}
     if (trimmed !== account.password) {
       onUpdateAccount({
         ...account,
@@ -349,6 +355,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setAuthError('Vui lòng nhập Mật khẩu do Cơ quan Thuế cấp.');
       return;
     }
+
+    // Luôn lưu thông tin MST và mật khẩu vào local máy người dùng
+    try {
+      localStorage.setItem('gdt_saved_tax_code', mst);
+      if (pwd) localStorage.setItem('gdt_saved_password', pwd);
+    } catch {}
 
     let activeKey = captchaKey;
     let activeCookie = captchaCookie;

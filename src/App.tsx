@@ -29,32 +29,41 @@ import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, execu
 import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult } from './utils/gdtQueryClient';
 import { RefreshCw } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
+import { LoginScreen } from './components/LoginScreen';
+import { UserManagementModal } from './components/UserManagementModal';
+import { 
+  getStoredUserSession, 
+  logoutSupabase, 
+  SupabaseUser 
+} from './services/supabaseClient';
+
 export default function App() {
   const { toast, showAlert } = useNotification();
 
-  // Account Configuration State (from localStorage or default)
+  // Supabase User Authentication Gate
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(() => {
+    return getStoredUserSession();
+  });
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+
+  // Account Configuration State (Lưu lại thông tin MST và Mật khẩu ở local máy người dùng)
   const [account, setAccount] = useState<GDTAccountConfig>(() => {
-    const saved = localStorage.getItem('gdt_account_config');
     let parsed: any = null;
-    if (saved) {
-      try {
-        parsed = JSON.parse(saved);
-        const safeConfig = { ...parsed, taxCode: '', password: '' };
-        if (safeConfig.rememberMe === false) {
-          localStorage.removeItem('gdt_account_config');
-        } else {
-          localStorage.setItem('gdt_account_config', JSON.stringify(safeConfig));
-        }
-      } catch {
-        localStorage.removeItem('gdt_account_config');
-      }
-    }
+    try {
+      const saved = localStorage.getItem('gdt_account_config');
+      if (saved) parsed = JSON.parse(saved);
+    } catch {}
+
+    // Nạp lại thông tin MST và mật khẩu đã lưu ở local máy người dùng, không bắt nhập lại khi reload
+    const savedMst = parsed?.taxCode || localStorage.getItem('gdt_saved_tax_code') || '';
+    const savedPwd = parsed?.password || localStorage.getItem('gdt_saved_password') || '';
     const hasActiveSession = Boolean(sessionStorage.getItem('gdt_session_tokens'));
+
     return {
-      taxCode: '',
-      password: '',
+      taxCode: savedMst,
+      password: savedPwd,
       customApiKey: parsed?.customApiKey || '',
-      taxpayerName: parsed?.taxpayerName || 'Chưa đăng nhập CQT',
+      taxpayerName: parsed?.taxpayerName || (savedMst ? `DOANH NGHIỆP NỘP THUẾ (MST: ${savedMst})` : 'Chưa đăng nhập CQT'),
       address: parsed?.address || '',
       rememberMe: parsed?.rememberMe ?? true,
       autoSaveSession: parsed?.autoSaveSession ?? true,
@@ -200,16 +209,16 @@ export default function App() {
     }
   ]);
 
-  // Save account to localStorage if rememberMe is enabled
+  // Lưu thông tin MST và mật khẩu đăng nhập Cổng Thuế ở local máy người dùng
   useEffect(() => {
     if (account.rememberMe) {
-      localStorage.setItem('gdt_account_config', JSON.stringify({
-        ...account,
-        taxCode: '',
-        password: ''
-      }));
+      localStorage.setItem('gdt_account_config', JSON.stringify(account));
+      if (account.taxCode) localStorage.setItem('gdt_saved_tax_code', account.taxCode);
+      if (account.password) localStorage.setItem('gdt_saved_password', account.password);
     } else {
       localStorage.removeItem('gdt_account_config');
+      localStorage.removeItem('gdt_saved_tax_code');
+      localStorage.removeItem('gdt_saved_password');
     }
   }, [account]);
 
@@ -1725,35 +1734,28 @@ export default function App() {
     handleRunCrawler();
   };
 
-  // Handle Logout
+  // Handle Logout (Đăng xuất tài khoản hệ thống Supabase)
   const handleLogout = async () => {
-    if (confirm('Bạn có chắc muốn đăng xuất phiên làm việc với Tổng cục Thuế?')) {
+    if (confirm('Bạn có chắc muốn đăng xuất tài khoản hệ thống không?')) {
       try {
-        await fetch('/api/gdt/logout', { method: 'POST' });
-      } catch (e) {
-        // ignore
-      }
-      setAccount({
-        taxCode: '',
-        password: '',
-        taxpayerName: 'Chưa đăng nhập',
-        rememberMe: false,
-        autoSaveSession: false,
-        isRealGDT: false
-      });
+        await fetch('/api/gdt/logout', { method: 'POST' }).catch(() => {});
+      } catch {}
+
+      await logoutSupabase();
+      setCurrentUser(null);
+      sessionStorage.removeItem('gdt_session_tokens');
       setInvoices([]);
       setSelectedInvoices([]);
       setHasSearched(false);
-      try {
-        localStorage.removeItem('gdt_saved_invoices');
-        sessionStorage.removeItem('gdt_session_tokens');
-        localStorage.removeItem('gdt_sidebar_collapsed');
-      } catch {}
-      // Mở lại menu bên trái để người dùng đăng nhập tài khoản khác
-      setIsSidebarCollapsed(false);
-      setIsConfigModalOpen(true);
     }
   };
+
+  // Yêu cầu đăng nhập bằng tài khoản lưu thông tin ở Supabase khi bắt đầu mở app
+  // Sau khi đăng nhập thành công mới chuyển đến giao diện tra cứu
+  if (!currentUser) {
+    return <LoginScreen onLoginSuccess={(user) => setCurrentUser(user)} />;
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937]">
       {/* 1. Left Sidebar (High Density Dark Theme) */}
@@ -1818,6 +1820,8 @@ export default function App() {
           onRefreshData={handleRunCrawler}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
+          currentUser={currentUser}
+          onOpenUserManagement={() => setIsUserManagementOpen(true)}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={handleToggleSidebar}
         />
@@ -1972,6 +1976,13 @@ export default function App() {
           onDismiss={() => setShowFloatingBadge(false)}
         />
       )}
+
+      {/* Supabase User Management Modal (Admin) */}
+      <UserManagementModal
+        isOpen={isUserManagementOpen}
+        onClose={() => setIsUserManagementOpen(false)}
+        currentUser={currentUser}
+      />
     </div>
   );
 }
