@@ -939,7 +939,7 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   // Chunk the requested period into <= 1-month slices to satisfy GDT's API rule
   const dateChunks = splitDateRangeIntoMonthlyChunks(rawFrom, rawTo);
-  const posDateChunks = splitDateRangeIntoFixedChunks(rawFrom, rawTo, 5);
+  const posDateChunks = splitDateRangeIntoFixedChunks(rawFrom, rawTo, 10);
   const rawToken = authHeader.replace(/^Bearer\s+/i, '').trim();
   const tokenHeader = rawToken ? `Bearer ${rawToken}` : '';
 
