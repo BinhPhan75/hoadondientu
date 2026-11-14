@@ -111,8 +111,8 @@ export function generateMonthChunks(fromDateStr: string, toDateStr: string): Mon
   });
 }
 
-/** Split a range into inclusive fixed-size windows for the GDT POS endpoint. */
-export function generateDayChunks(fromDateStr: string, toDateStr: string, daysPerChunk = 5): Array<{ from: string; to: string }> {
+/** Split a range into inclusive fixed-size windows for the GDT POS endpoint (đã đổi mặc định thành 10 ngày). */
+export function generateDayChunks(fromDateStr: string, toDateStr: string, daysPerChunk = 10): Array<{ from: string; to: string }> {
   if (!fromDateStr || !toDateStr || !Number.isFinite(daysPerChunk) || daysPerChunk < 1) return [];
   const parse = (value: string) => {
     const [year, month, day] = value.split('-').map(Number);
