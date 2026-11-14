@@ -594,14 +594,14 @@ export default function App() {
 
   // Multi-Month Sequential Execution
   const runPosPhase = async (activeToken: string, activeCookie: string) => {
-    const posChunks = generateDayChunks(filters.fromDate, filters.toDate, 5);
+    const posChunks = generateDayChunks(filters.fromDate, filters.toDate, 10);
     if (posChunks.length === 0) return { total: 0, failed: 0 };
 
     setConsoleLogs(prev => [...prev, {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toLocaleTimeString('vi-VN'),
       level: 'step',
-      message: `[HÓA ĐƠN MÁY TÍNH TIỀN] Chuyển sang tra cứu ${posChunks.length} đợt, mỗi đợt tối đa 5 ngày. Mỗi đợt sẽ lấy CAPTCHA mới.`
+      message: `[HÓA ĐƠN MÁY TÍNH TIỀN] Chuyển sang tra cứu ${posChunks.length} đợt, mỗi đợt tối đa 10 ngày. Mỗi đợt sẽ lấy CAPTCHA mới.`
     }]);
 
     let total = 0;
@@ -1097,9 +1097,9 @@ export default function App() {
       }
     }
 
-    // POS invoices use a separate GDT endpoint and a fresh CAPTCHA per 5-day window.
+    // POS invoices use a separate GDT endpoint and a fresh CAPTCHA per 10-day window.
     if (includePosInvoices && !isSyncCancelledRef.current && !hasEncounteredError) {
-      setSyncState(prev => ({ ...prev, currentMonthLabel: 'Hóa đơn máy tính tiền (5 ngày/lần)' }));
+      setSyncState(prev => ({ ...prev, currentMonthLabel: 'Hóa đơn máy tính tiền (10 ngày/lần)' }));
       const posResult = await runPosPhase(activeToken, activeCookie);
       runningTotalInvoices += posResult.total;
       runningPurchases += posResult.total;

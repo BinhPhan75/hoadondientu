@@ -38,7 +38,15 @@ export function exportInvoicesToExcel(invoices: GDTInvoice[], title: string = 'B
   let totalTax = 0;
   let totalPayment = 0;
 
-  invoices.forEach((inv, index) => {
+  // Sắp xếp theo ngày lập hóa đơn (tdlap): tăng dần
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    const timeA = new Date(a.tdlap || 0).getTime();
+    const timeB = new Date(b.tdlap || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return (a.shdon || '').localeCompare(b.shdon || '', undefined, { numeric: true });
+  });
+
+  sortedInvoices.forEach((inv, index) => {
     totalBeforeTax += inv.tgtcthue;
     totalTax += inv.tgtthue;
     totalPayment += inv.tgtttbso;
@@ -62,7 +70,7 @@ export function exportInvoicesToExcel(invoices: GDTInvoice[], title: string = 'B
       formatDateDDMMYYYY(inv.tdlap),
       inv.mhdon || 'Không có',
       inv.nbmst,
-      inv.nbten,
+      toProperCase(inv.nbten),
       inv.nmmst,
       inv.nmten,
       itemsSummary,
@@ -298,13 +306,21 @@ function createVatSubSheet(invoices: GDTInvoice[], title: string, type: 'purchas
   let sumTax = 0;
   let sumPayment = 0;
 
-  invoices.forEach((inv, idx) => {
+  // Sắp xếp theo ngày lập hóa đơn (tdlap): tăng dần
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    const timeA = new Date(a.tdlap || 0).getTime();
+    const timeB = new Date(b.tdlap || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return (a.shdon || '').localeCompare(b.shdon || '', undefined, { numeric: true });
+  });
+
+  sortedInvoices.forEach((inv, idx) => {
     sumBeforeTax += inv.tgtcthue;
     sumTax += inv.tgtthue;
     sumPayment += inv.tgtttbso;
 
     const partnerTaxCode = type === 'sold' ? inv.nmmst : inv.nbmst;
-    const partnerName = type === 'sold' ? inv.nmten : inv.nbten;
+    const partnerName = type === 'sold' ? inv.nmten : toProperCase(inv.nbten);
     const itemsSummary = inv.items.map(i => `${i.itemName} (${i.quantity} ${i.unit})`).join('; ');
     const taxRatesSummary = formatTaxRateExcel(inv);
 
@@ -398,7 +414,15 @@ function createAllInvoicesSheet(invoices: GDTInvoice[]): XLSX.WorkSheet {
   let sumTax = 0;
   let sumPayment = 0;
 
-  invoices.forEach((inv, idx) => {
+  // Sắp xếp theo ngày lập hóa đơn (tdlap): tăng dần
+  const sortedInvoices = [...invoices].sort((a, b) => {
+    const timeA = new Date(a.tdlap || 0).getTime();
+    const timeB = new Date(b.tdlap || 0).getTime();
+    if (timeA !== timeB) return timeA - timeB;
+    return (a.shdon || '').localeCompare(b.shdon || '', undefined, { numeric: true });
+  });
+
+  sortedInvoices.forEach((inv, idx) => {
     sumBeforeTax += inv.tgtcthue;
     sumTax += inv.tgtthue;
     sumPayment += inv.tgtttbso;
@@ -421,7 +445,7 @@ function createAllInvoicesSheet(invoices: GDTInvoice[]): XLSX.WorkSheet {
       formatDateDDMMYYYY(inv.tdlap),
       inv.mhdon || '',
       inv.nbmst,
-      inv.nbten,
+      toProperCase(inv.nbten),
       inv.nmmst,
       inv.nmten,
       inv.tgtcthue,
@@ -590,4 +614,19 @@ export function formatTaxRateExcel(inv: GDTInvoice): string {
 
   const unique = Array.from(new Set(rates.filter(Boolean)));
   return unique.length > 0 ? unique.join(', ') : '10%';
+}
+
+/**
+ * Chuyển đổi tên người bán sang định dạng viết hoa đầu mỗi từ theo chuẩn hàm PROPER trong Excel.
+ * Ví dụ: "CÔNG TY TNHH VÀNG BẠC TKJ" -> "Công Ty Tnhh Vàng Bạc Tkj"
+ * Hoạt động chính xác với đầy đủ ký tự tiếng Việt có dấu.
+ */
+export function toProperCase(text?: string): string {
+  if (!text) return '';
+  const str = String(text).trim();
+  if (!str) return '';
+
+  return str
+    .toLowerCase()
+    .replace(/(^|[\s\-\/\(\)\.,_])([a-zA-ZÀ-ỹ])/g, (_, boundary, char) => boundary + char.toUpperCase());
 }

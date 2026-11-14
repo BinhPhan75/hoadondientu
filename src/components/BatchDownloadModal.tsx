@@ -18,7 +18,7 @@ import * as XLSX from 'xlsx';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { useNotification } from '../context/NotificationContext';
-import { formatDateDDMMYYYY, formatTaxRateExcel } from '../utils/excelExporter';
+import { formatDateDDMMYYYY, formatTaxRateExcel, toProperCase } from '../utils/excelExporter';
 
 interface BatchDownloadModalProps {
   isOpen: boolean;
@@ -131,7 +131,15 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
           'Mặt hàng', 'Tiền chưa thuế', 'Thuế suất', 'Tiền thuế GTGT', 'Tổng thanh toán'
         ]);
 
-        invoices.forEach((inv, idx) => {
+        // Sắp xếp theo ngày lập hóa đơn (tdlap): tăng dần
+        const sortedInvoices = [...invoices].sort((a, b) => {
+          const timeA = new Date(a.tdlap || 0).getTime();
+          const timeB = new Date(b.tdlap || 0).getTime();
+          if (timeA !== timeB) return timeA - timeB;
+          return (a.shdon || '').localeCompare(b.shdon || '', undefined, { numeric: true });
+        });
+
+        sortedInvoices.forEach((inv, idx) => {
           rows.push([
             idx + 1,
             inv.loaiHdon === 'purchase' ? 'Mua vào' : 'Bán ra',
@@ -141,7 +149,7 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
             formatDateDDMMYYYY(inv.tdlap),
             inv.mhdon || 'Không có',
             inv.nbmst,
-            inv.nbten,
+            toProperCase(inv.nbten),
             inv.nmmst,
             inv.nmten,
             inv.items.map(i => i.itemName).join('; '),
