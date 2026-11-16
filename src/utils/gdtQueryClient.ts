@@ -518,7 +518,7 @@ export async function executeGdtInvoiceQuery(options: QueryInvoicesOptions): Pro
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 28000);
+    const timeoutId = setTimeout(() => controller.abort(), 55000);
 
     const res = await fetch('/api/gdt/query-invoices', {
       method: 'POST',
