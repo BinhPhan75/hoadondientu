@@ -1553,7 +1553,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'step',
-        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu ${filters.invoiceType === 'sold' ? 'HÓA ĐƠN BÁN RA' : filters.invoiceType === 'both' ? 'HÓA ĐƠN MUA VÀO & BÁN RA' : 'HÓA ĐƠN MUA VÀO'} (${[
+        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu ${queryInvoiceType === 'sold' ? 'HÓA ĐƠN BÁN RA' : queryInvoiceType === 'both' ? 'HÓA ĐƠN MUA VÀO & BÁN RA' : 'HÓA ĐƠN MUA VÀO'} (${[
           includeElectronicInvoices ? 'hóa đơn điện tử' : '',
           includePosInvoices ? 'hóa đơn máy tính tiền' : ''
         ].filter(Boolean).join(' và ')}) cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
@@ -1573,6 +1573,12 @@ export default function App() {
       }) : { success: true, invoices: [] as GDTInvoice[] };
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: queryRes.invoices.length > 0 ? 'success' : 'warning',
+          message: `[KẾT QUẢ API ${queryInvoiceType.toUpperCase()}] CQT trả ${queryRes.invoices.length} hóa đơn điện tử thông thường. ${queryRes.invoices.length === 0 ? 'Nếu biết kỳ này có hóa đơn, kiểm tra Network → query-invoices và Vercel Logs.' : ''}`
+        }]);
         // Tự động ẩn menu bên trái để gọn màn hình
         collapseLeftMenu();
         setInvoices(prev => {
@@ -1736,7 +1742,13 @@ export default function App() {
     setFilters(prev => ({ ...prev, invoiceType: type }));
     const scope = `${account.taxCode?.trim() || ''}|${filters.fromDate}|${filters.toDate}`;
     const wasQueried = queryScopeRef.current === scope && queriedReportScopesRef.current.has(`${scope}|${type}`);
-    if (gdtSession?.token && account.isRealGDT && !isRefreshing && !wasQueried) {
+    if (account.taxCode?.trim() && !isRefreshing && !wasQueried) {
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'step',
+        message: `[CHUYỂN BẢNG KÊ] Bắt đầu tải ${type === 'sold' ? 'BÁN RA' : 'MUA VÀO'} từ CQT cho kỳ ${filters.fromDate} → ${filters.toDate}.`
+      }]);
       void handleRunCrawler(undefined, type);
     }
   };
