@@ -370,6 +370,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
       if (pwd) localStorage.setItem('gdt_saved_password', pwd);
     } catch {}
 
+    // Reuse an authenticated GDT session. Do not force another CAPTCHA on
+    // each report search, including when the Sidebar selection is "both".
+    let sessionAvailable = false;
+    try {
+      const raw = sessionStorage.getItem('gdt_session_tokens');
+      const session = raw ? JSON.parse(raw) : null;
+      sessionAvailable = Boolean(session?.token && String(session.token).trim());
+    } catch {}
+
+    if (account.isRealGDT && sessionAvailable && mst === account.taxCode?.trim()) {
+      const result = await onRunCrawler({
+        taxCode: mst,
+        password: pwd,
+        invoiceType: submittedInvoiceType,
+        fromDate: submittedFromDate,
+        toDate: submittedToDate
+      });
+      if (result?.success) {
+        if (onCollapseSidebar) onCollapseSidebar();
+        if (onCloseMobileSidebar) onCloseMobileSidebar();
+        return;
+      }
+      // Only re-authenticate when the session itself is no longer valid.
+      const errorText = String(result?.error || '');
+      if (!/phiên|xác thực|401|token|đăng nhập/i.test(errorText)) {
+        setAuthError(errorText || 'Tra cứu không thành công. Xem Nhật ký hệ thống.');
+        return;
+      }
+    }
+
     let activeKey = captchaKey;
     let activeCookie = captchaCookie;
     let activeCode = captchaCode.trim();
