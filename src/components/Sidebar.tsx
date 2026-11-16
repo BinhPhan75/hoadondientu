@@ -33,6 +33,9 @@ export interface CrawlerCredentials {
   vietnamProxy?: string;
   customApiKey?: string;
   attemptNumber?: number;
+  invoiceType?: 'purchase' | 'sold' | 'both';
+  fromDate?: string;
+  toDate?: string;
 }
 
 interface SidebarProps {
@@ -346,6 +349,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     const mst = localMst.trim();
     const pwd = localPassword.trim();
+    // Freeze the exact Sidebar selection when submit begins, before CAPTCHA.
+    const submittedInvoiceType = filters.invoiceType;
+    const submittedFromDate = filters.fromDate;
+    const submittedToDate = filters.toDate;
 
     if (!mst) {
       setAuthError('Vui lòng nhập Mã số thuế (MST).');
@@ -395,6 +402,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         vietnamProxy: account.vietnamProxy,
         customApiKey: account.customApiKey,
         attemptNumber: attempt,
+        invoiceType: submittedInvoiceType,
+        fromDate: submittedFromDate,
+        toDate: submittedToDate,
       });
 
       if (result && result.success) {
