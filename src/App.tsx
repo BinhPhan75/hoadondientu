@@ -679,7 +679,34 @@ export default function App() {
   };
 
   // Multi-Month Sequential Execution
-  const runPosPhase = async (activeToken: string, activeCookie: string, queryInvoiceType: 'purchase' | 'sold' | 'both' = filters.invoiceType, queryFromDate: string = filters.fromDate, queryToDate: string = filters.toDate) => {
+  const runPosPhase = async (activeToken: string, activeCookie: string, queryInvoiceType: 'purchase' | 'sold' | 'both' = filters.invoiceType, queryFromDate: string = filters.fromDate, queryToDate: string = filters.toDate): Promise<{ total: number; failed: number }> => {
+    // The POS endpoints are separate per invoice direction, and a CAPTCHA
+    // belongs to one query. Do not share one CAPTCHA between purchase and sold.
+    if (queryInvoiceType === 'both') {
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'step',
+        message: '[POS CẢ HAI] Pha 1/2: Tra cứu POS MUA VÀO. Sau khi hoàn tất sẽ chuyển sang POS BÁN RA với CAPTCHA mới.'
+      }]);
+      const purchase = await runPosPhase(activeToken, activeCookie, 'purchase', queryFromDate, queryToDate);
+      if (isSyncCancelledRef.current) return purchase;
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: 'step',
+        message: '[POS CẢ HAI] Pha 2/2: Tra cứu POS BÁN RA, độc lập với CAPTCHA và kết quả mua vào.'
+      }]);
+      const sold = await runPosPhase(activeToken, activeCookie, 'sold', queryFromDate, queryToDate);
+      setConsoleLogs(prev => [...prev, {
+        id: Math.random().toString(36).substring(2, 9),
+        timestamp: new Date().toLocaleTimeString('vi-VN'),
+        level: purchase.failed + sold.failed > 0 ? 'warning' : 'success',
+        message: `[POS CẢ HAI] Hoàn tất: mua vào ${purchase.total} hóa đơn, bán ra ${sold.total} hóa đơn; ${purchase.failed + sold.failed} đợt lỗi.`
+      }]);
+      return { total: purchase.total + sold.total, failed: purchase.failed + sold.failed };
+    }
+
     const posChunks = generateDayChunks(queryFromDate, queryToDate, 10);
     if (posChunks.length === 0) return { total: 0, failed: 0 };
 
@@ -687,7 +714,7 @@ export default function App() {
       id: Math.random().toString(36).substring(2, 9),
       timestamp: new Date().toLocaleTimeString('vi-VN'),
       level: 'step',
-      message: `[HÓA ĐƠN MÁY TÍNH TIỀN] Chuyển sang tra cứu ${posChunks.length} đợt, mỗi đợt tối đa 10 ngày. Mỗi đợt sẽ lấy CAPTCHA mới.`
+      message: `[POS ${queryInvoiceType === 'sold' ? 'BÁN RA' : 'MUA VÀO'}] Chuyển sang tra cứu ${posChunks.length} đợt, mỗi đợt tối đa 10 ngày; mỗi đợt lấy CAPTCHA mới.`
     }]);
 
     let total = 0;
@@ -878,8 +905,8 @@ export default function App() {
         if (posRequestFailed) failed++;
         setInvoices(prev => {
           const map = new Map<string, GDTInvoice>();
-          prev.forEach(item => map.set(item.id, item));
-          posInvoices.forEach(item => map.set(item.id, item));
+          prev.forEach(item => map.set(`${item.loaiHdon}|${item.id}`, item));
+          posInvoices.forEach(item => map.set(`${item.loaiHdon}|${item.id}`, item));
           return Array.from(map.values());
         });
         enqueueInvoicesForEnrichment(posInvoices, activeToken, activeCookie);
