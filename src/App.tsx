@@ -83,6 +83,10 @@ export default function App() {
     } catch {}
     return [];
   });
+  // Scope results to the tax account and period. Keep the other report type only
+  // when loading the same scope; never mix invoices from different periods.
+  const queryScopeRef = React.useRef('');
+  const queriedReportScopesRef = React.useRef<Set<string>>(new Set());
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [selectedInvoices, setSelectedInvoices] = useState<GDTInvoice[]>([]);
   const [dataSourceType, setDataSourceType] = useState<'live_gdt' | 'imported_xml'>('live_gdt');
@@ -620,7 +624,7 @@ export default function App() {
   };
 
   // Multi-Month Sequential Execution
-  const runPosPhase = async (activeToken: string, activeCookie: string) => {
+  const runPosPhase = async (activeToken: string, activeCookie: string, queryInvoiceType: 'purchase' | 'sold' | 'both' = filters.invoiceType) => {
     const posChunks = generateDayChunks(filters.fromDate, filters.toDate, 10);
     if (posChunks.length === 0) return { total: 0, failed: 0 };
 
@@ -721,7 +725,7 @@ export default function App() {
         queryRes = await executeGdtInvoiceQuery({
           fromDate: chunk.from,
           toDate: chunk.to,
-          invoiceType: filters.invoiceType,
+          invoiceType: queryInvoiceType,
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie,
@@ -792,7 +796,7 @@ export default function App() {
             queryRes = await executeGdtInvoiceQuery({
               fromDate: chunk.from,
               toDate: chunk.to,
-              invoiceType: filters.invoiceType,
+              invoiceType: queryInvoiceType,
               size: 50,
               token: activeToken,
               cookieHeader: activeCookie,
@@ -864,12 +868,12 @@ export default function App() {
     mst: string,
     includeElectronicInvoices: boolean,
     includePosInvoices: boolean,
+    queryInvoiceType: 'purchase' | 'sold' | 'both',
   ) => {
     const chunks = generateMonthChunks(filters.fromDate, filters.toDate);
     if (chunks.length === 0) return { success: false, error: 'Khoảng thời gian không hợp lệ' };
 
-    // A live query must never retain sample or previous-session invoices.
-    setInvoices([]);
+    // The caller already cleared only the requested report type for this scope.
     setSelectedInvoices([]);
     setDataSourceType('live_gdt');
 
@@ -981,7 +985,7 @@ export default function App() {
         const queryRes = await executeGdtInvoiceQuery({
           fromDate: chunk.fromDate,
           toDate: chunk.toDate,
-          invoiceType: filters.invoiceType,
+          invoiceType: queryInvoiceType,
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie,
@@ -1127,9 +1131,10 @@ export default function App() {
     // POS invoices use a separate GDT endpoint and a fresh CAPTCHA per 10-day window.
     if (includePosInvoices && !isSyncCancelledRef.current && !hasEncounteredError) {
       setSyncState(prev => ({ ...prev, currentMonthLabel: 'Hóa đơn máy tính tiền (10 ngày/lần)' }));
-      const posResult = await runPosPhase(activeToken, activeCookie);
+      const posResult = await runPosPhase(activeToken, activeCookie, queryInvoiceType);
       runningTotalInvoices += posResult.total;
-      runningPurchases += posResult.total;
+      if (queryInvoiceType === 'sold') runningSolds += posResult.total;
+      else runningPurchases += posResult.total;
       hasEncounteredError = hasEncounteredError || posResult.failed > 0;
       setSyncState(prev => ({
         ...prev,
@@ -1362,7 +1367,8 @@ export default function App() {
   };
 
   // Run Crawler / Query real invoices from GDT
-  const handleRunCrawler = async (credentials?: CrawlerCredentials) => {
+  const handleRunCrawler = async (credentials?: CrawlerCredentials, requestedType?: 'purchase' | 'sold' | 'both') => {
+    const queryInvoiceType = requestedType ?? filters.invoiceType;
     const includeElectronicInvoices = account.includeElectronicInvoices ?? true;
     const includePosInvoices = account.includePosInvoices ?? true;
     if (!includeElectronicInvoices && !includePosInvoices) {
@@ -1376,13 +1382,22 @@ export default function App() {
     }
     // Mở rộng console để người dùng theo dõi nhật ký thời gian thực
     setIsConsoleCollapsed(false);
-    // A refresh starts a new result set immediately, including when login fails.
-    setInvoices([]);
+    // The requested report's rows are cleared below after checking query scope.
     setSelectedInvoices([]);
     setDataSourceType('live_gdt');
     try { localStorage.removeItem('gdt_saved_invoices'); } catch {}
     const mst = credentials?.taxCode?.trim() || account.taxCode?.trim() || '';
     const pwd = credentials?.password?.trim() || account.password?.trim() || '';
+    const queryScope = `${mst}|${filters.fromDate}|${filters.toDate}`;
+    if (queryScopeRef.current !== queryScope) {
+      queryScopeRef.current = queryScope;
+      queriedReportScopesRef.current.clear();
+      setInvoices([]);
+    } else {
+      setInvoices(prev => queryInvoiceType === 'both'
+        ? []
+        : prev.filter(inv => inv.loaiHdon !== queryInvoiceType));
+    }
 
     if (!mst) {
       toast.warning('Vui lòng nhập Mã số thuế để tra cứu.', 'Thiếu Mã Số Thuế');
@@ -1515,14 +1530,20 @@ export default function App() {
       }
     }
 
-    // Start every live search from a clean result set; never mix old/sample data.
-    setInvoices([]);
+    // Preserve the other report type within the same MST and date range.
     setSelectedInvoices([]);
     setDataSourceType('live_gdt');
 
     // Step 2: Check if multi-month range is requested (> 1 month)
     if (isMultiMonthRange(filters.fromDate, filters.toDate)) {
-      return await runMultiMonthQuery(activeToken, activeCookie, mst, includeElectronicInvoices, includePosInvoices);
+      const multiResult = await runMultiMonthQuery(activeToken, activeCookie, mst, includeElectronicInvoices, includePosInvoices, queryInvoiceType);
+      if (multiResult.success && queryScopeRef.current === queryScope && !isSyncCancelledRef.current) {
+        if (queryInvoiceType === 'both') {
+          queriedReportScopesRef.current.add(`${queryScope}|purchase`);
+          queriedReportScopesRef.current.add(`${queryScope}|sold`);
+        } else queriedReportScopesRef.current.add(`${queryScope}|${queryInvoiceType}`);
+      }
+      return multiResult;
     }
 
     // Step 3: Single-month Query from GDT
@@ -1543,7 +1564,7 @@ export default function App() {
       const queryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
         fromDate: filters.fromDate,
         toDate: filters.toDate,
-        invoiceType: filters.invoiceType,
+        invoiceType: queryInvoiceType,
         size: 50,
         token: activeToken,
         cookieHeader: activeCookie,
@@ -1554,13 +1575,24 @@ export default function App() {
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
         // Tự động ẩn menu bên trái để gọn màn hình
         collapseLeftMenu();
-        setInvoices(queryRes.invoices);
+        setInvoices(prev => {
+          const otherTypes = queryInvoiceType === 'both' ? [] : prev.filter(inv => inv.loaiHdon !== queryInvoiceType);
+          const merged = new Map<string, GDTInvoice>();
+          [...otherTypes, ...queryRes.invoices].forEach(inv => merged.set(`${inv.loaiHdon}|${inv.id}`, inv));
+          return Array.from(merged.values());
+        });
         setHasSearched(true);
+        if (queryScopeRef.current === queryScope) {
+          if (queryInvoiceType === 'both') {
+            queriedReportScopesRef.current.add(`${queryScope}|purchase`);
+            queriedReportScopesRef.current.add(`${queryScope}|sold`);
+          } else queriedReportScopesRef.current.add(`${queryScope}|${queryInvoiceType}`);
+        }
         setSelectedInvoices([]);
         setDataSourceType('live_gdt');
         enqueueInvoicesForEnrichment(queryRes.invoices, activeToken, activeCookie);
         if (includePosInvoices) {
-          const posResult = await runPosPhase(activeToken, activeCookie);
+          const posResult = await runPosPhase(activeToken, activeCookie, queryInvoiceType);
           setConsoleLogs(prev => [...prev, {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
@@ -1604,7 +1636,7 @@ export default function App() {
           const retryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
             fromDate: filters.fromDate,
             toDate: filters.toDate,
-            invoiceType: filters.invoiceType,
+            invoiceType: queryInvoiceType,
             size: 50,
             token: activeToken,
             cookieHeader: activeCookie,
@@ -1614,13 +1646,24 @@ export default function App() {
 
           if (retryRes.success && Array.isArray(retryRes.invoices)) {
             collapseLeftMenu();
-            setInvoices(retryRes.invoices);
+            setInvoices(prev => {
+              const otherTypes = queryInvoiceType === 'both' ? [] : prev.filter(inv => inv.loaiHdon !== queryInvoiceType);
+              const merged = new Map<string, GDTInvoice>();
+              [...otherTypes, ...retryRes.invoices].forEach(inv => merged.set(`${inv.loaiHdon}|${inv.id}`, inv));
+              return Array.from(merged.values());
+            });
             setHasSearched(true);
+            if (queryScopeRef.current === queryScope) {
+              if (queryInvoiceType === 'both') {
+                queriedReportScopesRef.current.add(`${queryScope}|purchase`);
+                queriedReportScopesRef.current.add(`${queryScope}|sold`);
+              } else queriedReportScopesRef.current.add(`${queryScope}|${queryInvoiceType}`);
+            }
             setSelectedInvoices([]);
             setDataSourceType('live_gdt');
             enqueueInvoicesForEnrichment(retryRes.invoices, activeToken, activeCookie);
             if (includePosInvoices) {
-              const posResult = await runPosPhase(activeToken, activeCookie);
+              const posResult = await runPosPhase(activeToken, activeCookie, queryInvoiceType);
               setConsoleLogs(prev => [...prev, {
                 id: Math.random().toString(36).substring(2, 9),
                 timestamp: new Date().toLocaleTimeString('vi-VN'),
@@ -1683,6 +1726,18 @@ export default function App() {
       return { success: false, error: err.message };
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Switching report tabs should fetch the selected invoice direction if not loaded yet.
+  // Pass the requested direction explicitly: React state updates are asynchronous.
+  const selectReportTab = (type: 'purchase' | 'sold') => {
+    setActiveReportTab(type);
+    setFilters(prev => ({ ...prev, invoiceType: type }));
+    const scope = `${account.taxCode?.trim() || ''}|${filters.fromDate}|${filters.toDate}`;
+    const wasQueried = queryScopeRef.current === scope && queriedReportScopesRef.current.has(`${scope}|${type}`);
+    if (gdtSession?.token && account.isRealGDT && !isRefreshing && !wasQueried) {
+      void handleRunCrawler(undefined, type);
     }
   };
 
@@ -1861,8 +1916,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                setActiveReportTab('purchase');
-                setFilters(prev => ({ ...prev, invoiceType: 'purchase' }));
+                selectReportTab('purchase');
               }}
               className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                 activeReportTab === 'purchase'
@@ -1883,8 +1937,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => {
-                setActiveReportTab('sold');
-                setFilters(prev => ({ ...prev, invoiceType: 'sold' }));
+                selectReportTab('sold');
               }}
               className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
                 activeReportTab === 'sold'
@@ -1936,12 +1989,10 @@ export default function App() {
             account={account}
             filters={filters}
             onSwitchToPurchase={() => {
-              setActiveReportTab('purchase');
-              setFilters(prev => ({ ...prev, invoiceType: 'purchase' }));
+              selectReportTab('purchase');
             }}
             onSwitchToSold={() => {
-              setActiveReportTab('sold');
-              setFilters(prev => ({ ...prev, invoiceType: 'sold' }));
+              selectReportTab('sold');
             }}
           />
         ) : (
