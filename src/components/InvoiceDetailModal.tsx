@@ -384,16 +384,16 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleDownloadPdfFile = async () => {
     if (!effectiveInvoice || isExportingPdf) return;
     setIsExportingPdf(true);
-    toast.info('Đang xử lý hóa đơn...', 'Thông Báo');
+    toast.info('Hệ thống đang xử lý tạo bản thể hiện PDF dự phòng, vui lòng đợi trong giây lát...');
     try {
       // The fallback must never auto-select a supplier template. Supplier
       // templates are only used for genuine provider originals above.
       const success = await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, 'red', 'DEFAULT');
       if (success) {
-        toast.success('Đã tải PDF Tổng cục thuế thành công!');
+        toast.success('Đã xuất bản thể hiện PDF dự phòng GDT thành công!');
       }
     } catch (err: any) {
-      toast.error(`Không thể tạo bản PDF Tổng cục thuế: ${err?.message || String(err)}`);
+      toast.error(`Không thể tạo bản PDF dự phòng: ${err?.message || String(err)}`);
     } finally {
       setIsExportingPdf(false);
     }
@@ -1553,49 +1553,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             ) : null}
 
-            {/* Nút Tải PDF Tổng cục thuế */}
+            {/* Generic fallback from CQT data; never use a supplier template here. */}
             <button
               type="button"
               onClick={handleDownloadPdfFile}
               disabled={isExportingPdf}
               className="inline-flex items-center gap-1.5 rounded-md border border-blue-600 bg-blue-700 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-600 disabled:opacity-60 disabled:cursor-not-allowed transition-all shadow-xs cursor-pointer"
-              title="Tải bản thể hiện PDF từ dữ liệu Cổng Tổng cục thuế"
+              title="Tạo bản thể hiện dự phòng từ dữ liệu Cổng Thuế"
             >
               {isExportingPdf ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-200" />
-                  <span>Đang xử lý hóa đơn...</span>
+                  <span>Hệ thống đang xử lý...</span>
                 </>
               ) : (
                 <>
                   <Download className="h-3.5 w-3.5" />
-                  <span>Tải PDF Tổng cục thuế</span>
+                  <span>Tải bản thể hiện dự phòng GDT</span>
                 </>
               )}
             </button>
           </div>
         </div>
       </div>
-
-      {/* Thông báo giữa màn hình khi bấm Tải PDF Tổng cục thuế: "Đang xử lý hóa đơn" */}
-      {isExportingPdf && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs animate-fadeIn pointer-events-auto">
-          <div className="bg-slate-900 border border-blue-500/50 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-3.5 max-w-sm mx-4 text-center ring-1 ring-white/10 animate-scaleUp">
-            <div className="w-14 h-14 rounded-full bg-blue-600/20 border border-blue-400/40 flex items-center justify-center text-blue-400 shadow-inner">
-              <Loader2 className="w-7 h-7 animate-spin text-blue-400" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-white tracking-wide">Đang xử lý hóa đơn</h3>
-              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
-                Hệ thống đang kết xuất bản thể hiện PDF Tổng cục thuế, vui lòng đợi trong giây lát...
-              </p>
-            </div>
-            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden mt-1">
-              <div className="bg-blue-500 h-full w-2/3 animate-pulse rounded-full"></div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

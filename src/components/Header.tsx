@@ -31,7 +31,6 @@ interface HeaderProps {
   onOpenUserManagement?: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
-  activeReportTab?: 'purchase' | 'sold' | 'declaration';
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -47,8 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onOpenUserManagement,
   isSidebarCollapsed,
-  onToggleSidebar,
-  activeReportTab = 'purchase'
+  onToggleSidebar
 }) => {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shrink-0 shadow-2xs">
@@ -78,18 +76,8 @@ export const Header: React.FC<HeaderProps> = ({
 
           <div className="truncate">
             <div className="flex items-center gap-2">
-              <span className={`text-[11px] font-semibold tracking-wide px-2 py-0.5 rounded-md border shrink-0 ${
-                activeReportTab === 'declaration'
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                  : activeReportTab === 'sold'
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
-              }`}>
-                {activeReportTab === 'declaration' 
-                  ? 'Tờ khai thuế GTGT (01/GTGT)' 
-                  : activeReportTab === 'sold' 
-                    ? 'Bảng kê bán ra (01-1/GTGT)' 
-                    : 'Bảng kê mua vào (01-2/GTGT)'}
+              <span className="text-[11px] font-semibold tracking-wide text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80 shrink-0">
+                Hóa đơn mua vào
               </span>
               <span className="text-xs font-mono font-semibold text-slate-900 shrink-0">
                 MST: {account.taxCode || '(Chưa nhập)'}
