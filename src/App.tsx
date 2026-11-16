@@ -448,7 +448,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'success',
-        message: `Đã xuất Bảng kê Excel gồm ${listToExport.length} hóa đơn chuẩn mẫu Thông tư 119/2014/TT-BTC.`
+        message: `Đã xuất Excel gồm ${listToExport.length} hóa đơn (${listToExport.filter(i => i.loaiHdon === 'purchase').length} mua vào, ${listToExport.filter(i => i.loaiHdon === 'sold').length} bán ra).`
       }
     ]);
   };
@@ -2020,7 +2020,7 @@ export default function App() {
           dataSourceType={dataSourceType}
           onOpenConfig={() => setIsConfigModalOpen(true)}
           onOpenBatchDownload={() => setIsBatchDownloadModalOpen(true)}
-          onExportExcel={() => handleExportExcel(selectedInvoices.length > 0 ? selectedInvoices : filteredInvoices)}
+          onExportExcel={() => handleExportExcel(invoices)}
           onRefreshData={handleRunCrawler}
           isRefreshing={isRefreshing}
           onLogout={handleLogout}
