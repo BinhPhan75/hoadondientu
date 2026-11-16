@@ -38,34 +38,41 @@ import {
   SupabaseUser 
 } from './services/supabaseClient';
 
-// Query purchase and sold independently to avoid silent partial results.
-async function executeReportInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
+// Query each invoice direction independently: do not lose successful data if
+// the other direction times out or is rejected by GDT.
+async function executeReportInvoiceQuery(
+  options: QueryInvoicesOptions,
+  onPartial?: (type: 'purchase' | 'sold', invoices: GDTInvoice[]) => void
+): Promise<QueryInvoicesResult> {
   if (options.invoiceType !== 'both' || options.posOnly || options.includePos) {
     return executeGdtInvoiceQuery(options);
   }
 
-  const purchase = await executeGdtInvoiceQuery({ ...options, invoiceType: 'purchase' });
-  if (!purchase.success) {
-    return {
-      ...purchase,
-      message: `Lỗi tải hóa đơn mua vào: ${purchase.message || purchase.error || 'Không rõ nguyên nhân'}`
-    };
-  }
-
-  await new Promise(resolve => setTimeout(resolve, 400));
-
+  // Sold first because the reported combined-mode failure was missing sold.
   const sold = await executeGdtInvoiceQuery({ ...options, invoiceType: 'sold' });
-  if (!sold.success) {
-    return {
-      ...sold,
-      message: `Đã tải ${purchase.invoices.length} hóa đơn mua vào, nhưng tải hóa đơn bán ra thất bại: ${sold.message || sold.error || 'Không rõ nguyên nhân'}`
-    };
-  }
+  if (sold.success) onPartial?.('sold', sold.invoices);
+
+  await new Promise(resolve => setTimeout(resolve, 600));
+
+  const purchase = await executeGdtInvoiceQuery({ ...options, invoiceType: 'purchase' });
+  if (purchase.success) onPartial?.('purchase', purchase.invoices);
 
   const byIdentity = new Map<string, GDTInvoice>();
-  [...purchase.invoices, ...sold.invoices].forEach(inv => {
-    byIdentity.set(`${inv.loaiHdon}|${inv.id}`, inv);
-  });
+  if (sold.success) for (const inv of sold.invoices) byIdentity.set(`sold|${inv.id}`, inv);
+  if (purchase.success) for (const inv of purchase.invoices) byIdentity.set(`purchase|${inv.id}`, inv);
+
+  if (!sold.success || !purchase.success) {
+    const failures = [
+      !sold.success ? `Bán ra: ${sold.message || sold.error || 'Không lấy được dữ liệu'}` : '',
+      !purchase.success ? `Mua vào: ${purchase.message || purchase.error || 'Không lấy được dữ liệu'}` : ''
+    ].filter(Boolean);
+    return {
+      success: false,
+      status: !sold.success ? sold.status : purchase.status,
+      invoices: Array.from(byIdentity.values()),
+      message: `Chỉ hoàn tất một phần tra cứu. ${failures.join('; ')}`
+    };
+  }
 
   return {
     success: true,
@@ -1609,6 +1616,25 @@ export default function App() {
         cookieHeader: activeCookie,
         includePos: false,
         posOnly: false
+      }, (type, fetched) => {
+        if (queryScopeRef.current !== queryScope) return;
+        // Publish each successful direction immediately instead of waiting
+        // for both requests. This also protects successful partial results.
+        setInvoices(prev => {
+          const map = new Map<string, GDTInvoice>();
+          prev.filter(inv => inv.loaiHdon !== type)
+            .forEach(inv => map.set(`${inv.loaiHdon}|${inv.id}`, inv));
+          fetched.forEach(inv => map.set(`${inv.loaiHdon}|${inv.id}`, inv));
+          return [...map.values()];
+        });
+        queriedReportScopesRef.current.add(`${queryScope}|${type}`);
+        setHasSearched(true);
+        setConsoleLogs(prev => [...prev, {
+          id: Math.random().toString(36).substring(2, 9),
+          timestamp: new Date().toLocaleTimeString('vi-VN'),
+          level: 'success',
+          message: `[CẢ HAI - ${type === 'sold' ? 'BÁN RA' : 'MUA VÀO'}] Hoàn tất lượt riêng: ${fetched.length} hóa đơn.`
+        }]);
       }) : { success: true, invoices: [] as GDTInvoice[] };
 
       if (queryRes.success && Array.isArray(queryRes.invoices)) {
@@ -1616,7 +1642,7 @@ export default function App() {
           id: Math.random().toString(36).substring(2, 9),
           timestamp: new Date().toLocaleTimeString('vi-VN'),
           level: queryRes.invoices.length > 0 ? 'success' : 'warning',
-          message: `[KẾT QUẢ API ${queryInvoiceType.toUpperCase()}] CQT trả ${queryRes.invoices.length} hóa đơn điện tử thông thường. ${queryRes.invoices.length === 0 ? 'Nếu biết kỳ này có hóa đơn, kiểm tra Network → query-invoices và Vercel Logs.' : ''}`
+          message: `[KẾT QUẢ API ${queryInvoiceType.toUpperCase()}] Tổng ${queryRes.invoices.length} hóa đơn (${queryRes.invoices.filter(inv => inv.loaiHdon === 'purchase').length} mua vào, ${queryRes.invoices.filter(inv => inv.loaiHdon === 'sold').length} bán ra).`
         }]);
         // Tự động ẩn menu bên trái để gọn màn hình
         collapseLeftMenu();
@@ -1751,7 +1777,7 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toLocaleTimeString('vi-VN'),
             level: 'error',
-            message: `[TRA CỨU THẤT BẠI] ${queryRes.message || 'Không thể lấy dữ liệu từ Cổng Thuế'}`
+            message: `[TRA CỨU CHƯA ĐẦY ĐỦ] ${queryRes.message || 'Không thể lấy dữ liệu từ Cổng Thuế'}. Đã giữ các hóa đơn tải thành công.`
           }
         ]);
         return { success: false, error: queryRes.message };
@@ -1778,7 +1804,11 @@ export default function App() {
   // Pass the requested direction explicitly: React state updates are asynchronous.
   const selectReportTab = (type: 'purchase' | 'sold') => {
     setActiveReportTab(type);
-    setFilters(prev => ({ ...prev, invoiceType: type }));
+    // Sidebar 'both' is a query mode, not the currently visible report tab.
+    // Keep it selected so the combined result can be browsed without re-querying.
+    setFilters(prev => prev.invoiceType === 'both'
+      ? prev
+      : ({ ...prev, invoiceType: type }));
     const scope = `${account.taxCode?.trim() || ''}|${filters.fromDate}|${filters.toDate}`;
     const wasQueried = queryScopeRef.current === scope && queriedReportScopesRef.current.has(`${scope}|${type}`);
     if (account.taxCode?.trim() && !isRefreshing && !wasQueried) {
