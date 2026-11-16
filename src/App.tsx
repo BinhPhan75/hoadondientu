@@ -27,7 +27,7 @@ import { resolveInvoiceProvider } from './utils/providerRouting';
 import { loadOriginalInvoice } from './services/originalInvoiceLoader';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, executeGdtPosCaptcha, executeGdtPosCaptchaSolve } from './utils/gdtQueryClient';
 import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult } from './utils/gdtQueryClient';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ArrowDownLeft, ArrowUpRight, FileText } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 import { LoginScreen } from './components/LoginScreen';
 import { UserManagementModal } from './components/UserManagementModal';
