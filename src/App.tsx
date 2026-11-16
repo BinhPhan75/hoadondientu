@@ -430,7 +430,10 @@ export default function App() {
       toast.warning('Không có dữ liệu hóa đơn nào để xuất Excel.', 'Chưa Có Dữ Liệu');
       return;
     }
-    const typeLabel = filters.invoiceType === 'sold' ? 'Ban_Ra' : filters.invoiceType === 'both' ? 'Mua_Vao_Ban_Ra' : 'Mua_Vao';
+    const hasPurchase = listToExport.some(inv => inv.loaiHdon === 'purchase');
+    const hasSold = listToExport.some(inv => inv.loaiHdon === 'sold');
+    const exportType: 'purchase' | 'sold' | 'both' = hasPurchase && hasSold ? 'both' : hasSold ? 'sold' : 'purchase';
+    const typeLabel = exportType === 'sold' ? 'Ban_Ra' : exportType === 'both' ? 'Mua_Vao_Ban_Ra' : 'Mua_Vao';
     exportInvoicesToExcel(
       listToExport, 
       `Bang_Ke_Hoa_Don_TT119_${typeLabel}_MST_${account.taxCode || 'GDT'}`,
@@ -438,7 +441,7 @@ export default function App() {
         taxCode: account.taxCode,
         taxpayerName: account.taxpayerName,
         periodLabel: `${filters.fromDate} đến ${filters.toDate}`,
-        invoiceType: filters.invoiceType
+        invoiceType: exportType
       }
     );
     autoCollapseConsole(1200);
