@@ -384,7 +384,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleDownloadPdfFile = async () => {
     if (!effectiveInvoice || isExportingPdf) return;
     setIsExportingPdf(true);
-    toast.info('Hệ thống đang xử lý tạo bản thể hiện PDF dự phòng, vui lòng đợi trong giây lát...');
+    // Allow React to paint the centered progress overlay before PDF work begins.
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     try {
       // The fallback must never auto-select a supplier template. Supplier
       // templates are only used for genuine provider originals above.
@@ -944,11 +945,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
       {/* Thông báo đang xử lý tệp PDF dự phòng */}
       {isExportingPdf && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-blue-900/95 border-2 border-blue-400 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs font-semibold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200">
-          <Loader2 className="w-5 h-5 animate-spin text-blue-300 shrink-0" />
-          <div>
-            <p className="text-sm font-bold text-white">Hệ thống đang xử lý tạo bản PDF dự phòng...</p>
-            <p className="text-[11px] text-blue-200 font-normal">Vui lòng chờ trong giây lát, hệ thống đang kết xuất trang in (không cần bấm lại).</p>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 backdrop-blur-[2px] pointer-events-none">
+          <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border border-blue-300/70 bg-slate-900 px-10 py-7 shadow-2xl text-white">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-300" />
+            <p className="text-lg font-bold">Đang xử lý hóa đơn</p>
           </div>
         </div>
       )}
@@ -1569,7 +1569,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               ) : (
                 <>
                   <Download className="h-3.5 w-3.5" />
-                  <span>Tải bản thể hiện dự phòng GDT</span>
+                  <span>Tải PDF Tổng cục thuế</span>
                 </>
               )}
             </button>
