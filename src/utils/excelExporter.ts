@@ -9,6 +9,37 @@ export interface ExportExcelOptions {
 }
 
 /**
+ * Some GDT POS summary records contain only the payment total while the
+ * before-tax amount is absent. Use payment less reported VAT solely as a
+ * clearly annotated fallback for export; never infer missing VAT itself.
+ */
+function getInvoiceExportAmounts(inv: GDTInvoice): {
+  beforeTax: number;
+  tax: number;
+  payment: number;
+  inferredFromPayment: boolean;
+} {
+  const asAmount = (value: unknown): number => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value.trim());
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+  const tax = asAmount(inv.tgtthue);
+  const payment = asAmount(inv.tgtttbso);
+  const reportedBeforeTax = asAmount(inv.tgtcthue);
+  const inferredFromPayment = Boolean(inv.isPos && reportedBeforeTax === 0 && payment > 0 && payment >= tax);
+  return {
+    beforeTax: inferredFromPayment ? payment - tax : reportedBeforeTax,
+    tax,
+    payment,
+    inferredFromPayment
+  };
+}
+
+/**
  * Phân loại nhóm thuế suất theo Thông tư 119/2014/TT-BTC
  */
 export function classifyVatRateCategory(inv: GDTInvoice): 'kct' | '0' | '5' | '8' | '10' {
@@ -85,13 +116,15 @@ export function createPurchaseSheetTT119(
   let g1Tax = 0;
 
   group1.forEach((inv, idx) => {
-    g1Amount += (inv.tgtcthue || 0);
-    g1Tax += (inv.tgtthue || 0);
+    const amounts = getInvoiceExportAmounts(inv);
+    g1Amount += amounts.beforeTax;
+    g1Tax += amounts.tax;
 
     const invoiceNo = inv.shdon ? String(inv.shdon).padStart(7, '0') : '';
     const noteParts: string[] = [];
     if (inv.khhdon) noteParts.push(`Ký hiệu: ${inv.khhdon}`);
     if (inv.isPos) noteParts.push('Máy tính tiền');
+    if (amounts.inferredFromPayment) noteParts.push('Tạm tính doanh số từ tổng thanh toán trừ thuế; cần đối chiếu hóa đơn gốc');
     if (inv.tthdon === 2) noteParts.push('HĐ Thay thế');
     if (inv.tthdon === 3) noteParts.push('HĐ Điều chỉnh');
     const taxRateStr = formatTaxRateExcel(inv);
@@ -103,8 +136,8 @@ export function createPurchaseSheetTT119(
       formatDateDDMMYYYY(inv.tdlap),
       toProperCase(inv.nbten),
       inv.nbmst || '',
-      inv.tgtcthue || 0,
-      inv.tgtthue || 0,
+      amounts.beforeTax,
+      amounts.tax,
       noteParts.join('; ')
     ]);
   });
@@ -127,17 +160,18 @@ export function createPurchaseSheetTT119(
     rows.push([]);
     rows.push(['2. Hàng hóa, dịch vụ không đủ điều kiện khấu trừ:']);
     group2.forEach((inv, idx) => {
-      g2Amount += (inv.tgtcthue || 0);
-      g2Tax += (inv.tgtthue || 0);
+      const amounts = getInvoiceExportAmounts(inv);
+      g2Amount += amounts.beforeTax;
+      g2Tax += amounts.tax;
       rows.push([
         idx + 1,
         inv.shdon || '',
         formatDateDDMMYYYY(inv.tdlap),
         toProperCase(inv.nbten),
         inv.nbmst || '',
-        inv.tgtcthue || 0,
+        amounts.beforeTax,
         0,
-        `HĐ Bị hủy; Ký hiệu: ${inv.khhdon || ''}`
+        `HĐ Bị hủy; Ký hiệu: ${inv.khhdon || ''}${amounts.inferredFromPayment ? '; Tạm tính từ tổng thanh toán, cần đối chiếu' : ''}`
       ]);
     });
     rows.push([
