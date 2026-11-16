@@ -49,13 +49,24 @@ async function executeReportInvoiceQuery(
   }
 
   // Sold first because the reported combined-mode failure was missing sold.
-  const sold = await executeGdtInvoiceQuery({ ...options, invoiceType: 'sold' });
+  let sold = await executeGdtInvoiceQuery({ ...options, invoiceType: 'sold' });
   if (sold.success) onPartial?.('sold', sold.invoices);
 
   await new Promise(resolve => setTimeout(resolve, 600));
 
   const purchase = await executeGdtInvoiceQuery({ ...options, invoiceType: 'purchase' });
   if (purchase.success) onPartial?.('purchase', purchase.invoices);
+
+  // A zero sold result can be legitimate, but also occurs on intermittent
+  // GDT query failures. Retry once after the purchase direction completes.
+  if (sold.success && sold.invoices.length === 0 && purchase.success && purchase.invoices.length > 0) {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const soldRetry = await executeGdtInvoiceQuery({ ...options, invoiceType: 'sold' });
+    if (soldRetry.success && soldRetry.invoices.length > 0) {
+      sold = soldRetry;
+      onPartial?.('sold', sold.invoices);
+    }
+  }
 
   const byIdentity = new Map<string, GDTInvoice>();
   if (sold.success) for (const inv of sold.invoices) byIdentity.set(`sold|${inv.id}`, inv);
