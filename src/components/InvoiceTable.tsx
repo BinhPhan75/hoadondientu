@@ -33,11 +33,13 @@ interface InvoiceTableProps {
   currentDateRange?: { from: string; to: string };
   currentMst?: string;
   hasSearched?: boolean;
+  invoiceType?: 'purchase' | 'sold' | 'both';
 }
 
 export const InvoiceTable: React.FC<InvoiceTableProps> = ({
   invoices,
   selectedInvoices,
+  invoiceType = 'purchase',
   onToggleSelect,
   onToggleSelectAll,
   onViewDetail,
@@ -105,7 +107,9 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
               <th style={{ width: '100px' }}>Ký hiệu</th>
               <th style={{ width: '85px' }}>Số HĐ</th>
               <th style={{ width: '95px' }}>Ngày lập</th>
-              <th style={{ minWidth: '260px' }}>Bên bán (Nhà cung cấp)</th>
+              <th style={{ minWidth: '260px' }}>
+                {invoiceType === 'sold' ? 'Bên mua (Khách hàng)' : invoiceType === 'both' ? 'Đối tác (Bên bán / Bên mua)' : 'Bên bán (Nhà cung cấp)'}
+              </th>
               <th style={{ width: '120px' }} className="text-right">Tiền chưa thuế</th>
               <th style={{ width: '105px' }} className="text-right">Tiền thuế</th>
               <th style={{ width: '130px' }} className="text-right">Tổng tiền</th>
@@ -262,11 +266,23 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                       {formatDate(inv.tdlap)}
                     </td>
 
-                    {/* Bên bán */}
+                    {/* Đối tác (Bên bán / Bên mua) */}
                     <td>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-semibold text-gray-900 truncate max-w-[240px] text-xs" title={inv.nbten}>
-                          {inv.nbten}
+                        {inv.loaiHdon === 'sold' ? (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-bold shrink-0 bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Bán ra
+                          </span>
+                        ) : invoiceType === 'both' ? (
+                          <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9.5px] font-bold shrink-0 bg-blue-100 text-blue-800 border border-blue-300">
+                            Mua vào
+                          </span>
+                        ) : null}
+                        <span 
+                          className="font-semibold text-gray-900 truncate max-w-[240px] text-xs" 
+                          title={inv.loaiHdon === 'sold' ? (inv.nmten || 'Khách lẻ / Khách hàng không lấy HĐ') : inv.nbten}
+                        >
+                          {inv.loaiHdon === 'sold' ? (inv.nmten || 'Khách lẻ / Khách hàng không lấy HĐ') : inv.nbten}
                         </span>
                         {inv.isPos && (
                           <span
@@ -298,20 +314,27 @@ export const InvoiceTable: React.FC<InvoiceTableProps> = ({
                           );
                         })()}
                       </div>
-                      <div className="flex items-center gap-1 text-[11px] text-gray-500 font-mono mt-0.5">
-                        <span>MST: <strong className="text-gray-700">{inv.nbmst}</strong></span>
-                        <button
-                          onClick={(e) => handleCopyMst(inv.nbmst, e)}
-                          className="hover:text-gray-900 p-0.5 cursor-pointer"
-                          title="Sao chép MST"
-                        >
-                          {copiedMst === inv.nbmst ? (
-                            <Check className="w-2.5 h-2.5 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-2.5 h-2.5" />
-                          )}
-                        </button>
-                      </div>
+                      {(() => {
+                        const targetMst = inv.loaiHdon === 'sold' ? (inv.nmmst || '') : (inv.nbmst || '');
+                        return (
+                          <div className="flex items-center gap-1 text-[11px] text-gray-500 font-mono mt-0.5">
+                            <span>MST: <strong className="text-gray-700">{targetMst || '---'}</strong></span>
+                            {targetMst && (
+                              <button
+                                onClick={(e) => handleCopyMst(targetMst, e)}
+                                className="hover:text-gray-900 p-0.5 cursor-pointer"
+                                title="Sao chép MST"
+                              >
+                                {copiedMst === targetMst ? (
+                                  <Check className="w-2.5 h-2.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-2.5 h-2.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Mã tra cứu trực tiếp */}
                       {inv.lookupCode && (

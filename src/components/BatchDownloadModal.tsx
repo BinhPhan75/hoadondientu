@@ -18,7 +18,7 @@ import * as XLSX from 'xlsx';
 import { GDTInvoice } from '../types';
 import { generateGDTInvoiceXml } from '../utils/xmlGenerator';
 import { useNotification } from '../context/NotificationContext';
-import { formatDateDDMMYYYY, formatTaxRateExcel, toProperCase } from '../utils/excelExporter';
+import { formatDateDDMMYYYY, formatTaxRateExcel, toProperCase, createPurchaseSheetTT119, createSoldSheetTT119 } from '../utils/excelExporter';
 
 interface BatchDownloadModalProps {
   isOpen: boolean;
@@ -115,11 +115,28 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
 
       }
 
-      // 3. Add Excel Summary file
+      // 3. Add Excel Summary file chuẩn Thông tư 119/2014/TT-BTC
       if (includeExcel) {
         setProgress(90);
-        setStatusText('Đang tạo Bảng kê hóa đơn tổng hợp Excel (TT78)...');
+        setStatusText('Đang tạo Bảng kê hóa đơn tổng hợp Excel (TT 119/2014/TT-BTC)...');
 
+        const wb = XLSX.utils.book_new();
+        const purchaseInvoices = invoices.filter(i => i.loaiHdon === 'purchase');
+        const soldInvoices = invoices.filter(i => i.loaiHdon === 'sold');
+
+        // Sheet 1: Mua vào (nếu có)
+        if (purchaseInvoices.length > 0) {
+          const wsPurchase = createPurchaseSheetTT119(purchaseInvoices);
+          XLSX.utils.book_append_sheet(wb, wsPurchase, '01-2_GTGT_Mua_Vao');
+        }
+
+        // Sheet 2: Bán ra (nếu có)
+        if (soldInvoices.length > 0) {
+          const wsSold = createSoldSheetTT119(soldInvoices);
+          XLSX.utils.book_append_sheet(wb, wsSold, '01-1_GTGT_Ban_Ra');
+        }
+
+        // Sheet 3: Chi tiết toàn bộ các dòng hóa đơn
         const rows: (string | number)[][] = [];
         rows.push(['BẢNG KÊ HÓA ĐƠN ĐIỆN TỬ TẢI VỀ TỪ TỔNG CỤC THUẾ (hoadondientu.gdt.gov.vn)']);
         rows.push([`Ngày xuất tệp: ${new Date().toLocaleString('vi-VN')}`]);
@@ -160,11 +177,11 @@ export const BatchDownloadModal: React.FC<BatchDownloadModalProps> = ({
           ]);
         });
 
-        const ws = XLSX.utils.aoa_to_sheet(rows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Bang_Ke_Hoa_Don');
+        const wsDetail = XLSX.utils.aoa_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, wsDetail, 'Bang_Ke_Chi_Tiet');
+
         const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-        zip.file('Bang_Ke_Tong_Hop_Hoa_Don_GDT.xlsx', excelBuffer);
+        zip.file('Bang_Ke_Hoa_Don_TT119.xlsx', excelBuffer);
       }
 
       setProgress(96);

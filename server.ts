@@ -1224,47 +1224,87 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
 
   try {
     let results: any[] = [];
-    // User requirement: "Phần mềm chỉ cần chức năng lấy hóa đơn mua vào ko cần bán ra"
-    const purchaseList = posOnly ? [] : await fetchAllChunksForType('purchase', 'query');
-    if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
-      // Check if session was created recently (< 10 min). If recent, keep session intact.
-      const isFresh = currentSession?.createdAt && (Date.now() - currentSession.createdAt < 10 * 60 * 1000);
-      if (!isFresh) {
-        currentSession = null;
+    const shouldFetchPurchase = invoiceType === 'purchase' || invoiceType === 'both';
+    const shouldFetchSold = invoiceType === 'sold' || invoiceType === 'both';
+
+    // 1. Tra cứu Hóa đơn mua vào (Standard Query)
+    if (shouldFetchPurchase && !posOnly) {
+      const purchaseList = await fetchAllChunksForType('purchase', 'query');
+      if ((purchaseList as any)?.error === 'AUTH_EXPIRED') {
+        const isFresh = currentSession?.createdAt && (Date.now() - currentSession.createdAt < 10 * 60 * 1000);
+        if (!isFresh) currentSession = null;
+        return res.status(401).json({
+          success: false,
+          isExpired: true,
+          sessionValid: Boolean(isFresh),
+          message: 'Phiên làm việc Cổng Tổng cục Thuế cần xác thực lại. Vui lòng nhập mã Captcha để tiếp tục.'
+        });
       }
-      return res.status(401).json({
-        success: false,
-        isExpired: true,
-        sessionValid: Boolean(isFresh),
-        message: 'Phiên làm việc Cổng Tổng cục Thuế cần xác thực lại. Vui lòng nhập mã Captcha để tiếp tục.'
-      });
+
+      if ((purchaseList as any)?.error === 'WAF_BLOCKED') {
+        return res.status(403).json({
+          success: false,
+          isWafBlocked: true,
+          sessionValid: true,
+          invoices: [],
+          message: 'Cổng Tổng cục Thuế tạm thời từ chối truy vấn (HTTP 403: Yêu cầu bị hạn chế). Phiên đăng nhập của bạn vẫn còn hiệu lực. Vui lòng thử lại sau giây lát.'
+        });
+      }
+
+      if (Array.isArray(purchaseList)) {
+        results = results.concat(purchaseList);
+      }
     }
 
-    if ((purchaseList as any)?.error === 'WAF_BLOCKED') {
-      // 403 Forbidden / WAF block: The session is VALID! Do NOT destroy session!
-      return res.status(403).json({
-        success: false,
-        isWafBlocked: true,
-        sessionValid: true,
-        invoices: [],
-        message: 'Cổng Tổng cục Thuế tạm thời từ chối truy vấn (HTTP 403: Yêu cầu bị hạn chế). Phiên đăng nhập của bạn vẫn còn hiệu lực. Vui lòng thử lại sau giây lát.'
-      });
+    // 2. Tra cứu Hóa đơn bán ra (Standard Query)
+    if (shouldFetchSold && !posOnly) {
+      if (shouldFetchPurchase && results.length > 0) {
+        await sleep(350);
+      }
+      const soldList = await fetchAllChunksForType('sold', 'query');
+      if ((soldList as any)?.error === 'AUTH_EXPIRED') {
+        const isFresh = currentSession?.createdAt && (Date.now() - currentSession.createdAt < 10 * 60 * 1000);
+        if (!isFresh) currentSession = null;
+        return res.status(401).json({
+          success: false,
+          isExpired: true,
+          sessionValid: Boolean(isFresh),
+          message: 'Phiên làm việc Cổng Tổng cục Thuế cần xác thực lại. Vui lòng nhập mã Captcha để tiếp tục.'
+        });
+      }
+
+      if ((soldList as any)?.error === 'WAF_BLOCKED') {
+        return res.status(403).json({
+          success: false,
+          isWafBlocked: true,
+          sessionValid: true,
+          invoices: [],
+          message: 'Cổng Tổng cục Thuế tạm thời từ chối truy vấn (HTTP 403: Yêu cầu bị hạn chế). Phiên đăng nhập của bạn vẫn còn hiệu lực. Vui lòng thử lại sau giây lát.'
+        });
+      }
+
+      if (Array.isArray(soldList)) {
+        results = results.concat(soldList);
+      }
     }
 
-    if (Array.isArray(purchaseList)) {
-      results = results.concat(purchaseList);
-    }
-
-    // Hóa đơn khởi tạo từ máy tính tiền (POS) nằm ở một cổng dữ liệu riêng
-    // của GDT (/api/sco-query). Thử lấy nhưng KHÔNG BAO GIỜ được làm hỏng phiên hoặc báo lỗi toàn cục.
+    // 3. Tra cứu Hóa đơn khởi tạo từ máy tính tiền (POS / sco-query)
     try {
-      if (!includePos && !posOnly) {
-        return res.json({ success: true, isRealGDT: true, invoices: results, count: results.length, chunksQueried: dateChunks.length, message: `Đã truy xuất ${results.length} hóa đơn thường từ Cổng Tổng cục Thuế.` });
-      }
-      await sleep(250);
-      const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query', posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
-      if (Array.isArray(posPurchaseList)) {
-        results = results.concat(posPurchaseList);
+      if (includePos || posOnly) {
+        if (shouldFetchPurchase) {
+          await sleep(250);
+          const posPurchaseList = await fetchAllChunksForType('purchase', 'sco-query', posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
+          if (Array.isArray(posPurchaseList)) {
+            results = results.concat(posPurchaseList);
+          }
+        }
+        if (shouldFetchSold) {
+          await sleep(250);
+          const posSoldList = await fetchAllChunksForType('sold', 'sco-query', posOnly ? [{ from: rawFrom, to: rawTo }] : posDateChunks);
+          if (Array.isArray(posSoldList)) {
+            results = results.concat(posSoldList);
+          }
+        }
       }
     } catch (posErr: any) {
       console.info('[GDT sco-query POS notice]:', posErr?.message || posErr);

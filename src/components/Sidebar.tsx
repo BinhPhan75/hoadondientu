@@ -16,7 +16,8 @@ import {
   X,
   Globe2,
   Database,
-  PanelLeftClose
+  PanelLeftClose,
+  ChevronDown
 } from 'lucide-react';
 import { GDTAccountConfig, FilterParams } from '../types';
 import { convertSvgToSharpPng } from '../utils/captchaOcrHelper';
@@ -810,10 +811,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
 
-          {/* Invoice Type Fixed to Purchase */}
-          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/40 border border-slate-700/50 rounded-lg">
-            <span className="text-xs text-slate-400 font-medium">Phạm vi tra cứu</span>
-            <span className="text-xs font-semibold text-blue-400">Hóa đơn mua vào</span>
+          {/* Invoice Type Selector (Listbox) */}
+          <div className="space-y-1.5 rounded-lg border border-slate-700/50 bg-slate-800/40 p-2.5">
+            <label className="text-[11px] text-slate-300 font-medium flex items-center justify-between">
+              <span>Phạm vi tra cứu:</span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                filters.invoiceType === 'sold'
+                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                  : filters.invoiceType === 'both'
+                    ? 'bg-purple-950 text-purple-300 border border-purple-700/60'
+                    : 'bg-blue-950 text-blue-300 border border-blue-700/60'
+              }`}>
+                {filters.invoiceType === 'sold' ? 'Bán ra' : filters.invoiceType === 'both' ? 'Cả hai' : 'Mua vào'}
+              </span>
+            </label>
+            <div className="relative">
+              <select
+                value={filters.invoiceType || 'purchase'}
+                onChange={(e) => onFilterChange({ ...filters, invoiceType: e.target.value as 'purchase' | 'sold' | 'both' })}
+                className="w-full text-xs py-2 pl-3 pr-8 bg-slate-900 border border-slate-700 rounded-md text-slate-100 font-medium focus:ring-1 focus:ring-blue-500 focus:border-blue-500 appearance-none cursor-pointer hover:border-slate-500 transition-colors shadow-inner"
+              >
+                <option value="purchase">📥 Hóa đơn mua vào (Đầu vào)</option>
+                <option value="sold">📤 Hóa đơn bán ra (Đầu ra)</option>
+                <option value="both">🔄 Cả mua vào & bán ra</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-400">
+                <ChevronDown className="w-3.5 h-3.5" />
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2 rounded-lg border border-slate-700/50 bg-slate-800/40 p-3">

@@ -72,7 +72,7 @@ export const MultiMonthSyncModal: React.FC<MultiMonthSyncModalProps> = ({
       const d = inv.tdlap.substring(0, 10);
       return d >= chunk.fromDate && d <= chunk.toDate;
     });
-    exportSingleMonthToExcel(monthInvoices, chunk.label, account.taxCode);
+    exportSingleMonthToExcel(monthInvoices, chunk.label, account.taxCode, account.taxpayerName);
   };
 
   // Tax calculations

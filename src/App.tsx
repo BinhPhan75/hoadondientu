@@ -251,8 +251,11 @@ export default function App() {
   // Filter Invoices according to all criteria (Strictly Purchase Invoices Only)
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
-      // 1. Strictly Purchase Invoices Only as required
-      if (inv.loaiHdon !== 'purchase') {
+      // 1. Invoice Type Filter (Purchase / Sold / Both)
+      if (filters.invoiceType === 'purchase' && inv.loaiHdon !== 'purchase') {
+        return false;
+      }
+      if (filters.invoiceType === 'sold' && inv.loaiHdon !== 'sold') {
         return false;
       }
 
@@ -347,14 +350,24 @@ export default function App() {
   // Không dựng PDF nội bộ: mở chi tiết để người dùng xem/tải bản gốc từ cổng NCC.
   const handleDownloadPdf = (invoice: GDTInvoice) => setSelectedInvoiceForDetail(invoice);
 
-  // Export Excel
+  // Export Excel chuẩn Thông tư 119/2014/TT-BTC
   const handleExportExcel = (targetInvoices?: GDTInvoice[]) => {
     const listToExport = targetInvoices && targetInvoices.length > 0 ? targetInvoices : filteredInvoices;
     if (listToExport.length === 0) {
       toast.warning('Không có dữ liệu hóa đơn nào để xuất Excel.', 'Chưa Có Dữ Liệu');
       return;
     }
-    exportInvoicesToExcel(listToExport, `Bang_Ke_Hoa_Don_GDT_${account.taxCode}`);
+    const typeLabel = filters.invoiceType === 'sold' ? 'Ban_Ra' : filters.invoiceType === 'both' ? 'Mua_Vao_Ban_Ra' : 'Mua_Vao';
+    exportInvoicesToExcel(
+      listToExport, 
+      `Bang_Ke_Hoa_Don_TT119_${typeLabel}_MST_${account.taxCode || 'GDT'}`,
+      {
+        taxCode: account.taxCode,
+        taxpayerName: account.taxpayerName,
+        periodLabel: `${filters.fromDate} đến ${filters.toDate}`,
+        invoiceType: filters.invoiceType
+      }
+    );
     autoCollapseConsole(1200);
     setConsoleLogs(prev => [
       ...prev,
@@ -362,7 +375,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'success',
-        message: `Đã xuất Bảng kê Excel gồm ${listToExport.length} hóa đơn chuẩn Thông tư 78.`
+        message: `Đã xuất Bảng kê Excel gồm ${listToExport.length} hóa đơn chuẩn mẫu Thông tư 119/2014/TT-BTC.`
       }
     ]);
   };
@@ -694,7 +707,7 @@ export default function App() {
         queryRes = await executeGdtInvoiceQuery({
           fromDate: chunk.from,
           toDate: chunk.to,
-          invoiceType: 'purchase',
+          invoiceType: filters.invoiceType,
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie,
@@ -765,7 +778,7 @@ export default function App() {
             queryRes = await executeGdtInvoiceQuery({
               fromDate: chunk.from,
               toDate: chunk.to,
-              invoiceType: 'purchase',
+              invoiceType: filters.invoiceType,
               size: 50,
               token: activeToken,
               cookieHeader: activeCookie,
@@ -954,7 +967,7 @@ export default function App() {
         const queryRes = await executeGdtInvoiceQuery({
           fromDate: chunk.fromDate,
           toDate: chunk.toDate,
-          invoiceType: 'purchase',
+          invoiceType: filters.invoiceType,
           size: 50,
           token: activeToken,
           cookieHeader: activeCookie,
@@ -1163,7 +1176,7 @@ export default function App() {
       const queryRes = await executeGdtInvoiceQuery({
         fromDate: chunk.fromDate,
         toDate: chunk.toDate,
-        invoiceType: 'purchase',
+        invoiceType: filters.invoiceType,
         size: 50,
         token: activeToken,
         cookieHeader: activeCookie,
@@ -1237,7 +1250,7 @@ export default function App() {
           const retryRes = await executeGdtInvoiceQuery({
             fromDate: chunk.fromDate,
             toDate: chunk.toDate,
-            invoiceType: 'purchase',
+            invoiceType: filters.invoiceType,
             size: 50,
             token: activeToken,
             cookieHeader: activeCookie,
@@ -1505,10 +1518,10 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         timestamp: new Date().toLocaleTimeString('vi-VN'),
         level: 'step',
-        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu ${[
+        message: `[KẾT NỐI TỔNG CỤC THUẾ] Bắt đầu tra cứu ${filters.invoiceType === 'sold' ? 'HÓA ĐƠN BÁN RA' : filters.invoiceType === 'both' ? 'HÓA ĐƠN MUA VÀO & BÁN RA' : 'HÓA ĐƠN MUA VÀO'} (${[
           includeElectronicInvoices ? 'hóa đơn điện tử' : '',
           includePosInvoices ? 'hóa đơn máy tính tiền' : ''
-        ].filter(Boolean).join(' và ')} cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
+        ].filter(Boolean).join(' và ')}) cho MST ${mst} (Kỳ: ${filters.fromDate} -> ${filters.toDate})...`
       }
     ]);
 
@@ -1516,7 +1529,7 @@ export default function App() {
       const queryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
         fromDate: filters.fromDate,
         toDate: filters.toDate,
-        invoiceType: 'purchase',
+        invoiceType: filters.invoiceType,
         size: 50,
         token: activeToken,
         cookieHeader: activeCookie,
@@ -1577,7 +1590,7 @@ export default function App() {
           const retryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
             fromDate: filters.fromDate,
             toDate: filters.toDate,
-            invoiceType: 'purchase',
+            invoiceType: filters.invoiceType,
             size: 50,
             token: activeToken,
             cookieHeader: activeCookie,
@@ -1828,7 +1841,7 @@ export default function App() {
 
 
         {/* Stats Bar */}
-        <TaxSummaryDashboard invoices={filteredInvoices} />
+        <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />
 
         {/* Search & Filter Bar */}
         <SearchFilterBar
@@ -1868,6 +1881,7 @@ export default function App() {
           <InvoiceTable
             invoices={filteredInvoices}
             selectedInvoices={selectedInvoices}
+            invoiceType={filters.invoiceType}
             onToggleSelect={handleToggleSelect}
             onToggleSelectAll={handleToggleSelectAll}
             onViewDetail={(inv) => setSelectedInvoiceForDetail(inv)}

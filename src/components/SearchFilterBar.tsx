@@ -51,7 +51,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             type="text"
             value={filters.searchKeyword}
             onChange={(e) => onFilterChange({ ...filters, searchKeyword: e.target.value })}
-            placeholder="Tìm số HĐ, MST, nhà cung cấp..."
+            placeholder="Tìm số HĐ, MST, đối tác..."
             className="w-full pl-8 pr-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 text-slate-900 placeholder:text-slate-400 transition-all font-sans"
           />
         </div>

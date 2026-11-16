@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onExportExcel}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100/70 border border-emerald-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
-            title="Xuất bảng kê Excel Thông tư 78"
+            title="Xuất bảng kê Excel mẫu Thông tư 119/2014/TT-BTC"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
             <span className="hidden md:inline">Xuất Excel</span>
