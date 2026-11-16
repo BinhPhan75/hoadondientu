@@ -1076,7 +1076,22 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       }
 
       if (!attemptSucceeded || !data) {
-        console.warn(`[GDT Query ${source}/${type}] Could not retrieve page ${page} for ${chunkFrom}..${chunkTo}`);
+        console.warn(`[GDT Query ${source}/${type}] Failed page ${page} for ${chunkFrom}..${chunkTo}`);
+        if (source === 'query') return { error: 'GDT_FETCH_FAILED' };
+        break;
+      }
+
+      const dataPayload = data?.data ?? data;
+      const listKeys = ['datas', 'rows', 'content', 'items', 'results', 'result', 'dshdon'];
+      const hasInvoiceArray = Array.isArray(data) || Array.isArray(dataPayload) ||
+        listKeys.some(key => Array.isArray(data?.[key]) || Array.isArray(dataPayload?.[key]));
+      if (!hasInvoiceArray) {
+        console.warn(`[GDT Query ${source}/${type}] Unexpected response structure`, {
+          keys: Object.keys(data || {}).slice(0, 15),
+          code: data?.code ?? data?.errorCode ?? null,
+          message: String(data?.message ?? data?.error ?? '').slice(0, 150)
+        });
+        if (source === 'query') return { error: 'GDT_INVALID_RESPONSE' };
         break;
       }
 
@@ -1215,6 +1230,9 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
       if ((chunkResult as any)?.error === 'WAF_BLOCKED') {
         return { error: 'WAF_BLOCKED' };
       }
+      if (source === 'query' && (chunkResult as any)?.error) {
+        return chunkResult;
+      }
       if (Array.isArray(chunkResult)) {
         allInvoices = allInvoices.concat(chunkResult);
       }
@@ -1251,6 +1269,13 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
         });
       }
 
+      if ((purchaseList as any)?.error && !Array.isArray(purchaseList)) {
+        return res.status(502).json({
+          success: false,
+          message: `Không thể tải hóa đơn mua vào từ CQT (${(purchaseList as any).error}). Kiểm tra Vercel Logs.`
+        });
+      }
+
       if (Array.isArray(purchaseList)) {
         results = results.concat(purchaseList);
       }
@@ -1280,6 +1305,13 @@ app.post('/api/gdt/query-invoices', async (req, res) => {
           sessionValid: true,
           invoices: [],
           message: 'Cổng Tổng cục Thuế tạm thời từ chối truy vấn (HTTP 403: Yêu cầu bị hạn chế). Phiên đăng nhập của bạn vẫn còn hiệu lực. Vui lòng thử lại sau giây lát.'
+        });
+      }
+
+      if ((soldList as any)?.error && !Array.isArray(soldList)) {
+        return res.status(502).json({
+          success: false,
+          message: `Không thể tải hóa đơn bán ra từ CQT (${(soldList as any).error}). Kiểm tra Vercel Logs.`
         });
       }
 
