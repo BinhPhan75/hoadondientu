@@ -103,6 +103,19 @@ export default function App() {
     };
   });
 
+  // Active Report Tab: 'purchase' (Bảng kê mua vào 01-2) | 'sold' (Bảng kê bán ra 01-1) | 'declaration' (Tờ khai 01/GTGT)
+  const [activeReportTab, setActiveReportTab] = useState<'purchase' | 'sold' | 'declaration'>('purchase');
+
+  useEffect(() => {
+    if (activeReportTab !== 'declaration') {
+      if (filters.invoiceType === 'sold') {
+        setActiveReportTab('sold');
+      } else if (filters.invoiceType === 'purchase') {
+        setActiveReportTab('purchase');
+      }
+    }
+  }, [filters.invoiceType]);
+
   // Modals Visibility State
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isBatchDownloadModalOpen, setIsBatchDownloadModalOpen] = useState(false);
@@ -248,16 +261,6 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [syncState.isCompleted]);
-
-  // Tabs for purchase, sold, and VAT declaration reports.
-  const [activeReportTab, setActiveReportTab] = useState<'purchase' | 'sold' | 'declaration'>('purchase');
-
-  useEffect(() => {
-    if (activeReportTab !== 'declaration') {
-      if (filters.invoiceType === 'sold') setActiveReportTab('sold');
-      if (filters.invoiceType === 'purchase') setActiveReportTab('purchase');
-    }
-  }, [filters.invoiceType]);
 
   // Filter Invoices according to all criteria (Strictly Purchase Invoices Only)
   const filteredInvoices = useMemo(() => {
@@ -1851,7 +1854,6 @@ export default function App() {
           activeReportTab={activeReportTab}
         />
 
-
         {/* Thanh chuyển đổi Báo cáo: Bảng kê mua vào | Bảng kê bán ra | Tờ khai thuế GTGT */}
         <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-3 shrink-0 shadow-2xs">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
@@ -1944,62 +1946,62 @@ export default function App() {
           />
         ) : (
           <>
-          {/* Stats Bar */}
-          <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />
-  
-          {/* Search & Filter Bar */}
-          <SearchFilterBar
-            filters={filters}
-            onFilterChange={setFilters}
-            onResetFilters={handleResetFilters}
-            totalFilteredCount={filteredInvoices.length}
-          />
-  
-          {/* Background Item & Service Enrichment Indicator */}
-          {enrichStatus.isEnriching && (
-            <div className="bg-emerald-50 border-y border-emerald-200 px-4 py-2 flex items-center justify-between text-xs text-emerald-900 shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <RefreshCw className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-emerald-950">
-                    Đang tự động lấy tên hàng hóa, dịch vụ và XML từ Tổng cục Thuế:
-                  </span>
-                  <span className="bg-emerald-200/90 text-emerald-900 px-2 py-0.5 rounded text-[11px] font-bold font-mono">
-                    {enrichStatus.completed} / {enrichStatus.total} hóa đơn
-                  </span>
-                  {enrichStatus.currentInvoice && (
-                    <span className="text-emerald-700 text-[11px] font-mono">
-                      ({enrichStatus.currentInvoice})
+            {/* Stats Bar */}
+            <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />
+
+            {/* Search & Filter Bar */}
+            <SearchFilterBar
+              filters={filters}
+              onFilterChange={setFilters}
+              onResetFilters={handleResetFilters}
+              totalFilteredCount={filteredInvoices.length}
+            />
+
+            {/* Background Item & Service Enrichment Indicator */}
+            {enrichStatus.isEnriching && (
+              <div className="bg-emerald-50 border-y border-emerald-200 px-4 py-2 flex items-center justify-between text-xs text-emerald-900 shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-600 shrink-0" />
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-emerald-950">
+                      Đang tự động lấy tên hàng hóa, dịch vụ và XML từ Tổng cục Thuế:
                     </span>
-                  )}
+                    <span className="bg-emerald-200/90 text-emerald-900 px-2 py-0.5 rounded text-[11px] font-bold font-mono">
+                      {enrichStatus.completed} / {enrichStatus.total} hóa đơn
+                    </span>
+                    {enrichStatus.currentInvoice && (
+                      <span className="text-emerald-700 text-[11px] font-mono">
+                        ({enrichStatus.currentInvoice})
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="text-[11px] text-emerald-700 hidden md:block">
+                  (Dữ liệu cập nhật trực tiếp vào danh sách và xuất Excel chuẩn)
                 </div>
               </div>
-              <div className="text-[11px] text-emerald-700 hidden md:block">
-                (Dữ liệu cập nhật trực tiếp vào danh sách và xuất Excel chuẩn)
-              </div>
+            )}
+
+            {/* High Density Scrollable Data Grid Container */}
+            <div className="flex-1 overflow-y-auto bg-[#f9fafb]">
+              <InvoiceTable
+                invoices={filteredInvoices}
+                selectedInvoices={selectedInvoices}
+                invoiceType={filters.invoiceType}
+                onToggleSelect={handleToggleSelect}
+                onToggleSelectAll={handleToggleSelectAll}
+                onViewDetail={(inv) => setSelectedInvoiceForDetail(inv)}
+                onDownloadXml={handleDownloadXml}
+                onDownloadPdf={handleDownloadPdf}
+                onBatchDownloadSelected={() => setIsBatchDownloadModalOpen(true)}
+                onExportExcelSelected={() => handleExportExcel(selectedInvoices)}
+                onQuickSyncPeriod={handleRunCrawler}
+                onQuickResetPeriod={handleResetFilters}
+                currentDateRange={{ from: filters.fromDate, to: filters.toDate }}
+                currentMst={account.taxCode}
+                hasSearched={hasSearched}
+              />
             </div>
-          )}
-  
-          {/* High Density Scrollable Data Grid Container */}
-          <div className="flex-1 overflow-y-auto bg-[#f9fafb]">
-            <InvoiceTable
-              invoices={filteredInvoices}
-              selectedInvoices={selectedInvoices}
-              invoiceType={filters.invoiceType}
-              onToggleSelect={handleToggleSelect}
-              onToggleSelectAll={handleToggleSelectAll}
-              onViewDetail={(inv) => setSelectedInvoiceForDetail(inv)}
-              onDownloadXml={handleDownloadXml}
-              onDownloadPdf={handleDownloadPdf}
-              onBatchDownloadSelected={() => setIsBatchDownloadModalOpen(true)}
-              onExportExcelSelected={() => handleExportExcel(selectedInvoices)}
-              onQuickSyncPeriod={handleRunCrawler}
-              onQuickResetPeriod={handleResetFilters}
-              currentDateRange={{ from: filters.fromDate, to: filters.toDate }}
-              currentMst={account.taxCode}
-              hasSearched={hasSearched}
-            />
-          </div>
           </>
         )}
 
