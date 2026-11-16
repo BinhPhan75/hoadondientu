@@ -26,7 +26,7 @@ import { getInvoiceOriginalCacheKey } from './utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from './utils/providerRouting';
 import { loadOriginalInvoice } from './services/originalInvoiceLoader';
 import { executeGdtLogin, executeGdtInvoiceQuery, executeGdtInvoiceDetail, executeGdtPosCaptcha, executeGdtPosCaptchaSolve } from './utils/gdtQueryClient';
-import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult } from './utils/gdtQueryClient';
+import type { PosCaptchaResult, PosCaptchaSolveResult, QueryInvoicesResult, QueryInvoicesOptions } from './utils/gdtQueryClient';
 import { RefreshCw, ArrowDownLeft, ArrowUpRight, FileText } from 'lucide-react';
 import { useNotification } from './context/NotificationContext';
 import { LoginScreen } from './components/LoginScreen';
@@ -37,6 +37,42 @@ import {
   logoutSupabase, 
   SupabaseUser 
 } from './services/supabaseClient';
+
+// Query purchase and sold independently to avoid silent partial results.
+async function executeReportInvoiceQuery(options: QueryInvoicesOptions): Promise<QueryInvoicesResult> {
+  if (options.invoiceType !== 'both' || options.posOnly || options.includePos) {
+    return executeGdtInvoiceQuery(options);
+  }
+
+  const purchase = await executeGdtInvoiceQuery({ ...options, invoiceType: 'purchase' });
+  if (!purchase.success) {
+    return {
+      ...purchase,
+      message: `Lỗi tải hóa đơn mua vào: ${purchase.message || purchase.error || 'Không rõ nguyên nhân'}`
+    };
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 400));
+
+  const sold = await executeGdtInvoiceQuery({ ...options, invoiceType: 'sold' });
+  if (!sold.success) {
+    return {
+      ...sold,
+      message: `Đã tải ${purchase.invoices.length} hóa đơn mua vào, nhưng tải hóa đơn bán ra thất bại: ${sold.message || sold.error || 'Không rõ nguyên nhân'}`
+    };
+  }
+
+  const byIdentity = new Map<string, GDTInvoice>();
+  [...purchase.invoices, ...sold.invoices].forEach(inv => {
+    byIdentity.set(`${inv.loaiHdon}|${inv.id}`, inv);
+  });
+
+  return {
+    success: true,
+    invoices: Array.from(byIdentity.values()),
+    source: 'proxy'
+  };
+}
 
 export default function App() {
   const { toast, showAlert } = useNotification();
@@ -269,11 +305,14 @@ export default function App() {
   // Filter Invoices according to all criteria (Strictly Purchase Invoices Only)
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
-      // 1. Invoice Type Filter (Purchase / Sold / Both)
-      if (filters.invoiceType === 'purchase' && inv.loaiHdon !== 'purchase') {
+      // Combined loading still displays one direction at a time in report tabs.
+      const visibleType = filters.invoiceType === 'both'
+        ? (activeReportTab === 'declaration' ? 'both' : activeReportTab)
+        : filters.invoiceType;
+      if (visibleType === 'purchase' && inv.loaiHdon !== 'purchase') {
         return false;
       }
-      if (filters.invoiceType === 'sold' && inv.loaiHdon !== 'sold') {
+      if (visibleType === 'sold' && inv.loaiHdon !== 'sold') {
         return false;
       }
 
@@ -319,7 +358,7 @@ export default function App() {
 
       return true;
     });
-  }, [invoices, filters]);
+  }, [invoices, filters, activeReportTab]);
 
   // Handlers for Row Selection
   const handleToggleSelect = (invoice: GDTInvoice) => {
@@ -982,7 +1021,7 @@ export default function App() {
       ]);
 
       try {
-        const queryRes = await executeGdtInvoiceQuery({
+        const queryRes = await executeReportInvoiceQuery({
           fromDate: chunk.fromDate,
           toDate: chunk.toDate,
           invoiceType: queryInvoiceType,
@@ -1192,7 +1231,7 @@ export default function App() {
     ]);
 
     try {
-      const queryRes = await executeGdtInvoiceQuery({
+      const queryRes = await executeReportInvoiceQuery({
         fromDate: chunk.fromDate,
         toDate: chunk.toDate,
         invoiceType: filters.invoiceType,
@@ -1266,7 +1305,7 @@ export default function App() {
         if (relogin.success && relogin.token) {
           activeToken = relogin.token;
           activeCookie = relogin.cookieHeader || activeCookie;
-          const retryRes = await executeGdtInvoiceQuery({
+          const retryRes = await executeReportInvoiceQuery({
             fromDate: chunk.fromDate,
             toDate: chunk.toDate,
             invoiceType: filters.invoiceType,
@@ -1561,7 +1600,7 @@ export default function App() {
     ]);
 
     try {
-      const queryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
+      const queryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeReportInvoiceQuery({
         fromDate: filters.fromDate,
         toDate: filters.toDate,
         invoiceType: queryInvoiceType,
@@ -1639,7 +1678,7 @@ export default function App() {
           activeToken = relogin.token;
           activeCookie = relogin.cookieHeader || activeCookie;
           // Tự động thử lại tra cứu với phiên kết nối mới
-          const retryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeGdtInvoiceQuery({
+          const retryRes: QueryInvoicesResult = includeElectronicInvoices ? await executeReportInvoiceQuery({
             fromDate: filters.fromDate,
             toDate: filters.toDate,
             invoiceType: queryInvoiceType,
