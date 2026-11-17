@@ -832,12 +832,12 @@ export function getLookupUrlFromPayload(source: any): string {
   if (/^https?:\/\//i.test(suppliedPortal) && providerFromPortal(suppliedPortal) === 'IHOADON') {
     return suppliedPortal;
   }
-  if (tenantPortal) {
-    // If GDT only supplies a generic Thai Son URL, prefer the verified
-    // seller portal. Keep a concrete tenant-specific URL if it was supplied.
-    const genericThaiSon = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(suppliedPortal);
-    if (!suppliedPortal || genericThaiSon) return tenantPortal;
-    return suppliedPortal;
+  if (isThaiSonSource(source)) {
+    const isGeneric = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(suppliedPortal);
+    const specific = /^https:\/\//i.test(suppliedPortal) && !isGeneric &&
+      isTrustedThaiSonPortalUrl(suppliedPortal) ? suppliedPortal : '';
+    if (specific) rememberThaiSonPortalForSeller(sellerMst, specific);
+    return specific || tenantPortal || '';
   }
   if (isLcsSource(source)) {
     return 'https://eip.lcssoft.com.vn/desktop/#/login';
@@ -873,9 +873,8 @@ export function getLookupUrlFromPayload(source: any): string {
     return 'https://ehoadon.bkav.com/tra-cuu';
   }
 
-  if (isThaiSonSource(source)) {
-    return 'https://einvoice.vn/tra-cuu';
-  }
+  // Thai Son without a discovered issuer portal stays unresolved.
+  // Returning einvoice.vn here produced false "wrong lookup code" errors.
 
   if (isCyberBillSource(source)) {
     return 'https://cyberbill.vn/tra-cuu';
