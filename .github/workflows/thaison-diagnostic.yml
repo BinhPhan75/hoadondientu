@@ -92,5 +92,5 @@ jobs:
         shell: bash
         run: |
           npm install --no-package-lock --no-audit --no-fund
-          npx tsx --test tests/provider-downloads.test.ts
+          npx tsx --test tests/thaison-form.test.ts
           npm run lint
