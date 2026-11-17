@@ -387,13 +387,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         fromDate: submittedFromDate,
         toDate: submittedToDate
       });
-      if (result?.success) {
+      if (result && result.success) {
         if (onCollapseSidebar) onCollapseSidebar();
         if (onCloseMobileSidebar) onCloseMobileSidebar();
         return;
       }
       // Only re-authenticate when the session itself is no longer valid.
-      const errorText = String(result?.error || '');
+      const errorText = String((result && result.error) || '');
       if (!/phiên|xác thực|401|token|đăng nhập/i.test(errorText)) {
         setAuthError(errorText || 'Tra cứu không thành công. Xem Nhật ký hệ thống.');
         return;
