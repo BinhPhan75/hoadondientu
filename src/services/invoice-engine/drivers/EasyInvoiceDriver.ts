@@ -7,6 +7,8 @@ import axios from 'axios';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import { ExtractedInvoiceInfo, DownloadResult, DownloadOptions, DriverMetadata } from '../types';
 import { detectProvider } from '../providerDetector';
+import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
+import { easyInvoiceLookupPortals } from '../../../utils/providerIdentity';
 import { GenericFallbackDriver } from './GenericFallbackDriver';
 import { downloadOriginalEasyInvoice } from '../../easyInvoiceService';
 
@@ -40,8 +42,10 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
-    const lookupCode = this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'Fkey', 'Ikey', 'EasyInvoice']) || 
-                       this.extractXmlTag(xmlData, 'MTCuu') || 
+    const xmlLookup = extractLookupDetailsFromXml(xmlData);
+    const lookupCode = xmlLookup.lookupCode ||
+                       this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'Fkey', 'Ikey']) ||
+                       this.extractXmlTag(xmlData, 'MTCuu') ||
                        this.extractXmlTag(xmlData, 'MaTraCuu');
 
     return {
@@ -55,7 +59,7 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
       invoiceDate,
       cqtCode,
       lookupCode,
-      lookupUrl: 'https://easyinvoice.vn/tra-cuu',
+      lookupUrl: easyInvoiceLookupPortals(sellerTaxCode, xmlLookup.lookupUrl).primary,
       rawXml: xmlData
     };
   }
@@ -93,7 +97,7 @@ export class EasyInvoiceDriver extends BaseInvoiceProviderDriver {
             filename: dlRes.filename || this.buildPdfFilename(info),
             isFallback: false,
             captchaSolved: dlRes.captchaSolved,
-            sourceUrl: info.lookupUrl || 'https://tracuu.easyinvoice.vn',
+            sourceUrl: options?.customInfo?.lookupUrl || info.lookupUrl || 'https://tracuu.easyinvoice.vn',
             executionLogs: logs
           };
         }
