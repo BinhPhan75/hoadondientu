@@ -28,7 +28,7 @@ jobs:
               print('STATUS',res.status,'URL',res.url,'BYTES',len(body))
             doc=Page();doc.feed(body)
             print('SCRIPTS',doc.scripts[:20])
-            domains=['const getXml =','const getPdf =','ApiDefine.SearchInvoice.GetXml','Search/DownloadXml','const request2','baseURL','SearchInvoiceCaptcha','getRecaptchaToken(RECAPTCHA_ACTION_SEARCH_INVOICE)','SearchInvoice.GetPdf','SearchInvoice.GetXml','GetRecaptchaSiteKey']
+            domains=['getXml({','getXml(param','await getXml(','getXml(invoice','getPdf({','getPdf(param','generateUrl =','function generateUrl','axiosInstance =','const axiosInstance','masothue:','sobaomat:','GetXml:','apiBaseURL','apiUrl:']
             for path in doc.scripts[:12]:
               if not path.endswith('.js') and '.js?' not in path:continue
               target=urllib.parse.urljoin(url,path)
@@ -43,8 +43,8 @@ jobs:
                   matches=list(re.finditer(re.escape(needle),src,re.I))
                   if matches:
                     print('TERM',needle,'COUNT',len(matches))
-                    for m in matches[:2]:
-                      print('CTX',src[max(0,m.start()-120):m.end()+900].replace('\n',' ')[:1050])
+                    for m in matches[:4]:
+                      print('CTX',src[max(0,m.start()-120):m.end()+600].replace('\n',' ')[:850])
               except Exception as err:
                 print('SCRIPT_ERROR',type(err).__name__,str(err)[:160])
           except Exception as err:
