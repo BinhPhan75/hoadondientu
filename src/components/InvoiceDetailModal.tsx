@@ -26,7 +26,7 @@ import {
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
-import { easyInvoiceLookupPortals, easyInvoiceLookupUrl } from '../utils/providerIdentity';
+import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller } from '../utils/providerIdentity';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
@@ -674,7 +674,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const target = effectiveInvoice;
     const actualProvider = resolveInvoiceProvider(target);
     const extractedLookup = extractLookupDetails(target.rawXml);
-    const tenantUrl = extractedLookup.lookupUrl || target.lookupUrl || '';
+    const sellerPortal = lookupPortalForSeller(target.nbmst);
+    const recordedPortal = extractedLookup.lookupUrl || target.lookupUrl || '';
+    const isGenericThaiSon = !recordedPortal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(recordedPortal);
+    const tenantUrl = sellerPortal && isGenericThaiSon ? sellerPortal : recordedPortal;
     const isSeparatePortal = actualProvider === 'IHOADON' ||
       /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(tenantUrl);
     // Open the actual issuer portal. No verified server-side PDF API exists
@@ -767,7 +770,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     // iHoaDon needs its own provider workflow. A verified E-Invoice tenant
     // URL must not be sent to the generic Thai Son PDF downloader either.
     const explicitPortal = effectiveInvoice.lookupUrl || '';
-    if (provider === 'IHOADON' ||
+    if (provider === 'IHOADON' || lookupPortalForSeller(effectiveInvoice.nbmst) ||
         /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(explicitPortal)) return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
@@ -805,6 +808,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
     if (!lookupDetails.lookupUrl && effectiveInvoice.lookupUrl) {
       lookupDetails.lookupUrl = effectiveInvoice.lookupUrl;
+    }
+    const sellerThaiSonPortal = lookupPortalForSeller(effectiveInvoice.nbmst);
+    if (sellerThaiSonPortal && (!lookupDetails.lookupUrl ||
+        /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(lookupDetails.lookupUrl))) {
+      lookupDetails.lookupUrl = sellerThaiSonPortal;
     }
 
     // Only solution metadata/portal evidence selects a provider, never the seller.
@@ -850,6 +858,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveTemplateId,
     effectiveInvoice.nbmst
   ) : '';
+
+  const thaiSonLookupCode = lookupDetails.lookupCode || effectiveInvoice?.lookupCode || '';
+  const isThaiSonInvoice = autoDetectedProvider === 'THAISON';
+  const isThaiSonTenant = isThaiSonInvoice &&
+    /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(lookupDetails.lookupUrl || '');
 
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
@@ -1569,6 +1582,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Cổng Vietcombank</span>
                 </a>
+              </div>
+            ) : isThaiSonTenant ? (
+              <div className="inline-flex items-center gap-2 flex-wrap">
+                <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Mở cổng Thái Sơn riêng</span>
+                </a>
+                {thaiSonLookupCode && (
+                  <button type="button" onClick={() => { void navigator.clipboard.writeText(thaiSonLookupCode); }}
+                    title="Sao chép Mã nhận hóa đơn để dán tại cổng nhà cung cấp"
+                    className="px-3 py-1.5 text-xs font-medium border border-slate-600 rounded-md text-slate-200 hover:bg-slate-800">
+                    Mã nhận HĐ: {thaiSonLookupCode} · Sao chép
+                  </button>
+                )}
               </div>
             ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
               <a
