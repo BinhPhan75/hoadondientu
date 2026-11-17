@@ -26,7 +26,7 @@ export interface ThaiSonDownloadResult {
 
 export function parseThaiSonForm(html: string) {
   const $ = cheerio.load(html);
-  const lookupNames = ['MaNhanHoaDon', 'MaTraCuu', 'MaNhanHDon', 'MTCuu'];
+  const lookupNames = ['MA_NHAN_HOA_DON', 'MaNhanHoaDon', 'MaTraCuu', 'MaNhanHDon', 'MTCuu'];
   const named = $('form').filter((_, node) => lookupNames.some(name =>
     $(node).find('input[name="' + name + '"]').length > 0)).first();
 
