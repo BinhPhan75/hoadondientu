@@ -33,8 +33,8 @@ export function easyInvoiceLookupPortals(sellerMst?: string, explicitUrl?: strin
 } {
   const common = 'https://tracuu.easyinvoice.vn/Search/Index';
   const cleanMst = String(sellerMst || '').trim();
-  const seller = /^\\d{10}(?:-?\\d{3})?$/.test(cleanMst)
-    ? `https://${cleanMst.replace(/\\D/g, '')}hd.easyinvoice.com.vn/Search/Index`
+  const seller = /^\d{10}(?:-?\d{3})?$/.test(cleanMst)
+    ? `https://${cleanMst.replace(/\D/g, '')}hd.easyinvoice.com.vn/Search/Index`
     : undefined;
 
   let explicit: string | undefined;
@@ -45,8 +45,8 @@ export function easyInvoiceLookupPortals(sellerMst?: string, explicitUrl?: strin
       if (url.protocol === 'https:' &&
           (host === 'easyinvoice.vn' || host.endsWith('.easyinvoice.vn') ||
            host === 'easyinvoice.com.vn' || host.endsWith('.easyinvoice.com.vn'))) {
-        const cleanPath = url.pathname.replace(/\\/+$/, '');
-        url.pathname = /\\/Search\\/Index$/i.test(cleanPath)
+        const cleanPath = url.pathname.replace(/\/+$/, '');
+        url.pathname = /\/Search\/Index$/i.test(cleanPath)
           ? cleanPath
           : cleanPath === '' || cleanPath === '/' ? '/Search/Index' : cleanPath;
         explicit = url.toString();
