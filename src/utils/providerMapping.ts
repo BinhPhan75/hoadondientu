@@ -1,3 +1,4 @@
+import { easyInvoiceLookupPortals, easyInvoiceLookupUrl } from './providerIdentity';
 import { GDTInvoice } from '../types';
 import { detectProvider } from '../services/invoice-engine/providerDetector';
 
@@ -278,7 +279,7 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
       mst: '0105987432',
       name: 'Công ty Cổ phần Đầu tư Công nghệ và Thương mại Softdreams',
       fullDisplay: '0105987432 - Softdreams EasyInvoice',
-      portalUrl: rawLookupUrl || 'https://easyinvoice.vn',
+      portalUrl: easyInvoiceLookupPortals(nbmst, rawLookupUrl).primary,
       lookupCode: rawLookupCode || '',
       shortBrand: 'EasyInvoice'
     };
@@ -398,10 +399,9 @@ export function buildDirectLookupUrl(
     return `https://www.meinvoice.vn/tra-cuu?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
   }
 
-  // EasyInvoice: thêm tham số fkey vào Search/Index
-  if (info.shortBrand === 'EASYINVOICE' && info.portalUrl) {
-    const cleanUrl = info.portalUrl.split('?')[0].replace(/\/+$/, '').replace(/\/Search\/Index\/?$/i, '');
-    return code ? `${cleanUrl}/Search/Index?fkey=${encodeURIComponent(code)}` : `${cleanUrl}/Search/Index`;
+  // EasyInvoice: respect the explicit XML portal; otherwise use the MST tenant.
+  if (info.shortBrand === 'EasyInvoice') {
+    return easyInvoiceLookupUrl(sellerTaxCode, code, portalUrl);
   }
 
   // VNPT: dẫn tới trang SearchByFkey
