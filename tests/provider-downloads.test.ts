@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
 import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, rememberThaiSonPortalForSeller } from '../src/utils/providerIdentity';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
-import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml } from '../src/utils/xmlParser';
+import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml, getLookupUrlFromPayload } from '../src/utils/xmlParser';
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
@@ -74,6 +74,24 @@ test('Thai Son XML without DCTC does not invent a seller portal', () => {
   assert.equal(info.lookupCode, 'MTZUYWLM8');
   assert.equal(info.lookupUrl, '');
   assert.equal(resolveInvoiceProvider({ rawXml: xml, nbmst: '0102721191-001' }), 'THAISON');
+});
+
+test('Thai Son learns a seller-specific URL from structured GDT metadata', () => {
+  const seller = '0387654321';
+  const specific = 'https://the-seller.einvoice.com.vn/';
+  assert.equal(getLookupUrlFromPayload({
+    nbmst: seller, msttcgp: '0101300842',
+    cttkhac: [{ ttruong: 'ĐCTC', dlieu: specific }]
+  }), specific);
+  assert.equal(lookupPortalForSeller(seller), specific);
+  assert.equal(getLookupUrlFromPayload({
+    nbmst: seller, msttcgp: '0101300842',
+    lookupUrl: 'https://einvoice.vn/tra-cuu'
+  }), specific);
+  assert.equal(getLookupUrlFromPayload({
+    nbmst: '0387654322', msttcgp: '0101300842',
+    lookupUrl: 'https://einvoice.vn/tra-cuu'
+  }), '');
 });
 
 test('Thai Son learns portal from XML DCTC once and reuses it for same MST', () => {
