@@ -8,7 +8,7 @@ import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml, getLookupUr
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
-import { parseThaiSonForm, extractThaiSonDownloadTargets } from '../src/services/thaiSonInvoiceService';
+import { parseThaiSonForm, extractThaiSonDownloadTargets, verifiedThaiSonInvoiceHtml } from '../src/services/thaiSonInvoiceService';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
 import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
@@ -131,6 +131,15 @@ test('Thai Son download discovery follows actual portal controls', () => {
     new URLSearchParams(x.data).get('invoiceId') === '123'));
   assert.ok(targets.some(x => x.path === '/xem-hoa-don/in-pdf?id=123'));
   assert.equal(targets.some(x => x.path.startsWith('javascript:')), false);
+});
+
+test('Thai Son HTML display fallback requires matching seller MST and invoice number', () => {
+  const page = '<html><body><h2>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</h2><p>0301175691-021</p><p>Số: 323797</p><script>alert(1)</script></body></html>';
+  const safe = verifiedThaiSonInvoiceHtml(page, '0301175691-021', '0323797');
+  assert.ok(safe?.includes('323797'));
+  assert.equal(safe?.includes('<script>'), false);
+  assert.equal(verifiedThaiSonInvoiceHtml(page, '0102721191-001', '323797'), undefined);
+  assert.equal(verifiedThaiSonInvoiceHtml(page, '0301175691-021', '2996339'), undefined);
 });
 
 test('MISA and Thai Son domain boundaries do not overlap', () => {
