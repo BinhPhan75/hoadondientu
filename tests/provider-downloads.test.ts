@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
-import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller } from '../src/utils/providerIdentity';
+import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, rememberThaiSonPortalForSeller } from '../src/utils/providerIdentity';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
 import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml } from '../src/utils/xmlParser';
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
@@ -64,18 +64,27 @@ test('Thai Son Co.opmart driver retains tenant portal and unique lookup code', (
   assert.equal(buildDirectLookupUrl(info.lookupUrl, info.lookupCode, 'THAISON', info.sellerTaxCode), info.lookupUrl);
 });
 
-test('Golden Gate POS XML has Ma TC but no DCTC; use its verified invoice portal', () => {
+test('Thai Son XML without DCTC does not invent a seller portal', () => {
   const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>Mã TC</TTruong><DLieu>MTZUYWLM8</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>0102721191-001</MST></NBan></NDHDon></DLHDon></HDon>';
   const raw = extractLookupDetailsFromXml(xml);
   assert.equal(raw.lookupCode, 'MTZUYWLM8');
-  const portal = lookupPortalForSeller('0102721191-001');
-  assert.equal(portal, 'https://vat.ggg.com.vn/');
-  const thai = new ThaiSonDriver();
-  const info = thai.extractInfo(xml);
-  assert.equal(info.provider, 'THAISON');
+  assert.equal(raw.lookupUrl, '');
+  const driver = new ThaiSonDriver();
+  const info = driver.extractInfo(xml);
   assert.equal(info.lookupCode, 'MTZUYWLM8');
-  assert.equal(info.lookupUrl, portal);
+  assert.equal(info.lookupUrl, '');
   assert.equal(resolveInvoiceProvider({ rawXml: xml, nbmst: '0102721191-001' }), 'THAISON');
+});
+
+test('Thai Son learns portal from XML DCTC once and reuses it for same MST', () => {
+  const mst = '0312345678';
+  const xml = `<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>ĐCTC</TTruong><DLieu>https://some-issuer.einvoice.com.vn/</DLieu></TTin><TTin><TTruong>Mã TC</TTruong><DLieu>ABCDEF0123</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>${mst}</MST></NBan></NDHDon></DLHDon></HDon>`;
+  const lookup = extractLookupDetailsFromXml(xml);
+  assert.equal(lookup.lookupUrl, 'https://some-issuer.einvoice.com.vn/');
+  assert.equal(lookupPortalForSeller(mst), 'https://some-issuer.einvoice.com.vn/');
+  const noUrlXml = `<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP></TTChung><NDHDon><NBan><MST>${mst}</MST></NBan></NDHDon></DLHDon></HDon>`;
+  assert.equal(extractLookupDetailsFromXml(noUrlXml).lookupUrl, 'https://some-issuer.einvoice.com.vn/');
+  assert.equal(rememberThaiSonPortalForSeller('9999999999', 'http://localhost:8000/'), false);
 });
 
 test('Thai Son parser accepts either MaNhanHoaDon or MaTraCuu without guessing', () => {
@@ -106,7 +115,7 @@ test('XML solution evidence overrides stale MISA label and seller-based guesses'
   const invoice = { rawXml, provider: 'MISA', lookupUrl: 'https://meinvoice.vn/tra-cuu' };
   assert.equal(resolveInvoiceProvider(invoice), 'THAISON');
   assert.equal(detectProvider(rawXml), 'THAISON');
-  assert.equal(extractLookupDetailsFromXml(rawXml).lookupUrl, 'https://einvoice.vn/tra-cuu');
+  assert.equal(extractLookupDetailsFromXml(rawXml).lookupUrl, '');
   assert.equal(buildDirectLookupUrl('https://einvoice.vn/tra-cuu', 'TS123456', 'THAISON', '0400557356'), 'https://einvoice.vn/tra-cuu');
   assert.equal(isMisaSource({ nbmst: '0400557356', lookupUrl: 'https://einvoice.vn' }), false);
   assert.equal(resolveInvoiceProvider({ msttcgp: '0101300842', lookupUrl: 'https://meinvoice.vn', provider: 'MISA' }), 'THAISON');
