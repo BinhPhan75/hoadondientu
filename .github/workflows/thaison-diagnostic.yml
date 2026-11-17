@@ -53,3 +53,43 @@ jobs:
                 d=dict(attrs);print(tag,{k:d[k][:90] for k in ("name","type","id","method","action","src","onclick","placeholder") if k in d})
           P().feed(sys.stdin.read()[:2000000])' | head -65
           done
+
+      - name: Inspect public site bundle for actual download actions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request, urllib.parse, re, html.parser
+          class Scripts(html.parser.HTMLParser):
+            def __init__(self):
+              super().__init__(); self.urls=[]
+            def handle_starttag(self,tag,attrs):
+              d=dict(attrs)
+              if tag=='script' and d.get('src'): self.urls.append(d['src'])
+          for site in ['https://saigoncoop.einvoice.com.vn/','https://vat.ggg.com.vn/']:
+            print('===',site)
+            try:
+              page=urllib.request.urlopen(urllib.request.Request(site,headers={'User-Agent':'Mozilla/5.0'}),timeout=15).read().decode('utf8','replace')
+              parser=Scripts();parser.feed(page)
+              srcs=[x for x in parser.urls if 'site' in x or 'googleform' in x]
+              for src in srcs[:3]:
+                url=urllib.parse.urljoin(site,src)
+                data=urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'}),timeout=15).read(600000).decode('utf8','replace')
+                print('SCRIPT',src,'size',len(data))
+                pat=re.compile(r'(?i)download|tai.?ve|xem-hoa-don|ta[iy]hoa.?don|pdf|file.?zip|formgr|submit')
+                found=list(pat.finditer(data))
+                print('matches',len(found))
+                seen=set()
+                for m in found[:25]:
+                  snippet=data[max(0,m.start()-100):min(len(data),m.end()+125)].replace('\n',' ')
+                  if snippet in seen:continue
+                  seen.add(snippet)
+                  print('CONTEXT',snippet[:245])
+            except Exception as e: print('ERROR',type(e).__name__,str(e)[:180])
+          PY
+      - name: Validate TypeScript unit tests
+        uses: actions/checkout@v4
+      - name: Run tests
+        shell: bash
+        run: |
+          npm ci --no-audit --no-fund
+          npm test -- --runInBand
