@@ -300,6 +300,8 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   // 10. M-Invoice (minvoice.vn / minvoice.com.vn)
   if (
     msttcgp === '0106026495' ||
+    msttcgp.startsWith('0106026495') ||
+    msttcgp.replace(/\D/g, '').startsWith('0106026495') ||
     provider === 'MINVOICE' ||
     tentcgp.includes('M-INVOICE') ||
     tentcgp.includes('MINVOICE') ||
@@ -309,7 +311,7 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
       mst: '0106026495',
       name: 'Công ty TNHH Hóa đơn điện tử M-Invoice',
       fullDisplay: '0106026495 - Công ty TNHH Hóa đơn điện tử M-Invoice',
-      portalUrl: rawLookupUrl || 'https://tracuuhoadon.minvoice.com.vn',
+      portalUrl: rawLookupUrl || 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don',
       lookupCode: rawLookupCode || '',
       shortBrand: 'M-Invoice'
     };
@@ -440,14 +442,14 @@ export function buildDirectLookupUrl(
     return 'https://dochoadon.lcssoft.com.vn/';
   }
 
-  // M-Invoice: Cổng tra cứu tracuuhoadon.minvoice.com.vn kèm masothue & sobaomat
+  // M-Invoice: Cổng tra cứu tracuuhoadon.minvoice.com.vn kèm masothue (mst) & sobaomat (sbm)
   if (info.shortBrand === 'M-Invoice' || provider === 'MINVOICE') {
     const params = new URLSearchParams();
-    const taxCode = sellerTaxCode || (info.mst !== '0106026495' ? info.mst : '');
-    if (taxCode) params.set('taxCode', taxCode);
-    if (code) params.set('checkCode', code);
+    const taxCode = sellerTaxCode || (info.mst && !info.mst.startsWith('0106026495') ? info.mst : '');
+    if (taxCode) params.set('mst', taxCode.trim());
+    if (code) params.set('sbm', code.trim());
     const qs = params.toString();
-    return qs ? `https://tracuuhoadon.minvoice.com.vn/?${qs}` : 'https://tracuuhoadon.minvoice.com.vn';
+    return qs ? `https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don?${qs}` : 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
   }
 
   // Bkav eHoadon
@@ -930,6 +932,8 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
   // 12. M-Invoice
   if (
     msttcgp === '0106026495' ||
+    msttcgp.startsWith('0106026495') ||
+    msttcgp.replace(/\D/g, '').startsWith('0106026495') ||
     provider === 'MINVOICE' ||
     tentcgp.includes('M-INVOICE') ||
     tentcgp.includes('MINVOICE') ||

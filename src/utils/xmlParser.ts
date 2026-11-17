@@ -585,8 +585,11 @@ export function isMinvoiceSource(source: any): boolean {
   const provider = String(getPayloadValue(source, ['provider', 'Provider']) || '').toUpperCase();
   const lookupUrl = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '').toLowerCase();
 
+  const cleanMst = msttcgp.replace(/\D/g, '');
   return (
     msttcgp === '0106026495' ||
+    msttcgp.startsWith('0106026495') ||
+    cleanMst.startsWith('0106026495') ||
     tentcgp.includes('M-INVOICE') ||
     tentcgp.includes('MINVOICE') ||
     provider === 'MINVOICE' ||
@@ -867,7 +870,7 @@ export function getLookupUrlFromPayload(source: any): string {
   }
 
   if (isMinvoiceSource(source)) {
-    return 'https://tracuuhoadon.minvoice.com.vn';
+    return 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
   }
 
   if (isBkavSource(source)) {
@@ -1178,14 +1181,17 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   const isMinvoice = /minvoice\.vn|minvoice\.com\.vn|tracuuhoadon\.minvoice|0106026495/i.test(rawXml) ||
     /M-INVOICE|MINVOICE/i.test(rawXml);
   if (isMinvoice) {
-    if (!lookupUrl) lookupUrl = 'https://tracuuhoadon.minvoice.com.vn';
+    if (!lookupUrl) lookupUrl = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
     if (!lookupCode) {
       const sobaomat = extractTagValue(rawXml, 'SoBaoMat', '') ||
         extractTagValue(rawXml, 'sobaomat', '') ||
         extractTagValue(rawXml, 'CheckCode', '') ||
         extractTagValue(rawXml, 'checkCode', '') ||
         extractTagValue(rawXml, 'MaBaoMat', '') ||
-        extractTagValue(rawXml, 'mabaomat', '');
+        extractTagValue(rawXml, 'mabaomat', '') ||
+        extraFields.get('so bao mat') ||
+        extraFields.get('ma tra cuu') ||
+        extraFields.get('checkcode');
       if (sobaomat && isLookupCodeCandidate(sobaomat)) {
         lookupCode = sobaomat;
       }

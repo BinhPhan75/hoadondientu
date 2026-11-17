@@ -27,7 +27,7 @@ import {
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
 import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, rememberThaiSonPortalForSeller } from '../utils/providerIdentity';
-import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
+import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
@@ -716,6 +716,27 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } else if (blob.type.includes('application/zip')) {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderZipUrl(url);
+        try {
+          const JSZip = (await import('jszip')).default;
+          const zip = await JSZip.loadAsync(blob);
+          const xmlFile = Object.values(zip.files).find(f => !f.dir && /\.xml$/i.test(f.name));
+          if (xmlFile) {
+            const xmlText = await xmlFile.async('string');
+            if (xmlText && xmlText.includes('<HDon')) {
+              const parsed = parseGDTInvoiceXml(xmlText);
+              if (parsed && parsed.items && parsed.items.length > 0) {
+                setEffectiveInvoice(prev => ({
+                  ...prev,
+                  ...parsed,
+                  rawXml: xmlText,
+                  items: parsed.items
+                }));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[InvoiceDetailModal] Error parsing XML from ZIP:', e);
+        }
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
@@ -921,6 +942,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
   const isViettelInvoice = autoDetectedProvider === 'VIETTEL';
+  const isMinvoiceInvoice = autoDetectedProvider === 'MINVOICE';
   const isEasyInvoice = autoDetectedProvider === 'EASYINVOICE';
   const isVnpayInvoice = autoDetectedProvider === 'VNPAY';
   const isVietcombankInvoice = isVnpayInvoice && /vietcombank\.com\.vn/i.test(directLookupUrl);

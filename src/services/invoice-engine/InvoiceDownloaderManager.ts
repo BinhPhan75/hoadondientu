@@ -259,7 +259,7 @@ export class InvoiceDownloaderManager {
         this.log(`Đang thực thi crawl từ server nhà cung cấp [${selectedDriver.providerCode}]...`, overallLogs);
         const result = await selectedDriver.fetchPdf(invoiceInfo, options);
         if (['THAISON', 'MISA', 'MINVOICE'].includes(selectedDriver.providerCode) &&
-            /^(application\/pdf|application\/zip|application\/xml|text\/xml)/i.test(result.contentType || '')) {
+            /^(application\/pdf|application\/zip)/i.test(result.contentType || '')) {
           const validation = await verifyIssuerInvoiceBytes(result.pdfBuffer, result.contentType, {
             sellerTaxCode: invoiceInfo.sellerTaxCode,
             invoiceNo: invoiceInfo.invoiceNo,

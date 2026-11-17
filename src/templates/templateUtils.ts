@@ -127,7 +127,13 @@ export function buildDirectLookupUrl(
     return url || 'https://tracuu.ihoadon.vn/';
   }
   if (portalProvider === 'THAISON' || provider === 'THAISON') return url || 'https://einvoice.vn/tra-cuu';
-  if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') return 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
+  if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') {
+    const params = new URLSearchParams();
+    if (sellerTaxCode) params.set('mst', sellerTaxCode.trim());
+    if (code) params.set('sbm', code.trim());
+    const qs = params.toString();
+    return qs ? `https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don?${qs}` : 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
+  }
   const isMisa = portalProvider ? portalProvider === 'MISA' : provider === 'MISA';
 
   if (isMisa) {

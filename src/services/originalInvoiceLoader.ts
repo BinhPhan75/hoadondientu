@@ -22,13 +22,10 @@ async function withDownloadSlot<T>(work: () => Promise<T>): Promise<T> {
 export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   const baseCacheKey = getInvoiceOriginalCacheKey(invoice);
   const provider = resolveInvoiceProvider(invoice);
-  // Both providers historically cached unrelated PDFs (e.g. a seller's
-  // "HƯỚNG DẪN" document) under an invoice key. Never reuse those blobs.
-  const cacheKey = provider === 'MINVOICE'
-    ? baseCacheKey + '|minvoice-pdf-only-v2'
-    : provider === 'THAISON' || provider === 'MISA'
-      ? baseCacheKey + '|verified-original-v5'
-      : baseCacheKey;
+  // Providers that had legacy mock/error caches use versioned keys
+  const cacheKey = provider === 'THAISON' || provider === 'MISA' || provider === 'MINVOICE'
+    ? baseCacheKey + '|verified-original-v5'
+    : baseCacheKey;
   const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
   const originalUrl = provider === 'THAISON'
@@ -73,19 +70,10 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
       const blob = await response.blob();
       const head = await blob.slice(0, 256).text();
       const isPdf = head.startsWith('%PDF-');
-      if (provider === 'MINVOICE' && !isPdf) {
-        throw new Error('M-invoice không trả về PDF gốc; không thay bằng XML hoặc ZIP.');
-      }
-      const isZip = blob.type.includes('application/zip') ||
-        head.startsWith('PK\\x03\\x04');
-      const isXml = /^(application|text)\/xml/i.test(blob.type) &&
-        /^(?:<\?xml\b|<HDon(?:\s|>))/i.test(head.replace(/^\uFEFF/, '').trimStart());
+      const isZip = blob.type.includes('application/zip');
       const isHtml = blob.type.includes('text/html') && /<(!doctype|html|head|div|style)/i.test(head);
-      if (!isPdf && !isHtml && !isZip && !isXml) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
-      const original = new Blob([blob], {
-        type: isPdf ? 'application/pdf' : isZip ? 'application/zip'
-          : isXml ? 'application/xml' : 'text/html'
-      });
+      if (!isPdf && !isHtml && !isZip) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
+      const original = new Blob([blob], { type: isPdf ? 'application/pdf' : isZip ? 'application/zip' : 'text/html' });
       // Storage quota errors must not trigger another paid provider lookup.
       await writeCachedOriginalPdf(cacheKey, original).catch(error => console.warn('[Original cache]', error));
       return original;
