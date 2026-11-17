@@ -99,6 +99,19 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   const isViettel = msttcgp.replace(/[^0-9]/g, '') === '0100109106' || provider === 'VIETTEL';
   const rawLookupCode = (isViettel ? inv.lookupCode : (inv.lookupCode || inv.mhdon))?.trim() || '';
 
+  // Explicit iHoaDon domain identifies the issuer portal, not Thai Son.
+  // Never guess this provider merely from the seller's tax ID.
+  if (/^https?:\/\/([^/]*\.)?ihoadon\.vn(?:[/:?#]|$)/i.test(rawLookupUrl) || provider === 'IHOADON') {
+    return {
+      mst: msttcgp,
+      name: tentcgp || 'iHoaDon',
+      fullDisplay: tentcgp ? `${msttcgp} - ${tentcgp}` : 'iHoaDon',
+      portalUrl: rawLookupUrl || 'https://tracuu.ihoadon.vn/',
+      lookupCode: (inv.lookupCode || '').trim(),
+      shortBrand: 'iHoaDon'
+    };
+  }
+
   // 1. LCS Soft (PNJ: 0315018466 hoặc MST TCGP: 0302999571 hoặc domain eip.lcssoft.com.vn)
   if (
     msttcgp === '0302999571' ||
@@ -442,8 +455,9 @@ export function buildDirectLookupUrl(
     return code ? `https://ehoadon.bkav.com/tra-cuu?maNhanHDon=${encodeURIComponent(code)}` : 'https://ehoadon.bkav.com/tra-cuu';
   }
 
-  // Thái Sơn E-Invoice
+  // Verified tenant URL must not be rewritten into the shared Thai Son portal.
   if (info.shortBrand === 'Thái Sơn' || provider === 'THAISON') {
+    if (portalUrl && /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:[/:?#]|$)/i.test(portalUrl)) return portalUrl;
     return code ? `https://einvoice.vn/tra-cuu/?manhanhoadon=${encodeURIComponent(code)}` : 'https://einvoice.vn/tra-cuu';
   }
 
@@ -481,6 +495,16 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
   const nbmst = (inv.nbmst || '').replace(/[^0-9]/g, '');
   const nbten = (inv.nbten || '').toUpperCase();
   const rawXml = (inv.rawXml || '').toLowerCase();
+
+  if (provider === 'IHOADON' || /(^|\.)ihoadon\.vn(?:\/|$)/i.test(rawLookupUrl.replace(/^https?:\/\//, ''))) {
+    return {
+      label: 'iHoaDon',
+      color: '#0f766e',
+      badgeClass: 'text-teal-700 bg-teal-50 border-teal-200',
+      title: 'Cổng iHoaDon, khác với Thái Sơn E-Invoice',
+      isDefault: false
+    };
+  }
 
   // Kiểm tra qua hàm phân tích XML chuẩn nếu có rawXml
   if (inv.rawXml) {
@@ -564,6 +588,15 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
           color: '#7e22ce',
           badgeClass: 'text-purple-700 bg-purple-50 border-purple-200',
           title: 'Hóa đơn phát hành qua giải pháp 4Si E-Invoice',
+          isDefault: false
+        };
+      }
+      if (xmlProvider === 'IHOADON') {
+        return {
+          label: 'iHoaDon',
+          color: '#0f766e',
+          badgeClass: 'text-teal-700 bg-teal-50 border-teal-200',
+          title: 'Hóa đơn thuộc cổng iHoaDon',
           isDefault: false
         };
       }
