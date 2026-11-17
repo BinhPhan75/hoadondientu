@@ -1,6 +1,6 @@
 import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
-import { providerFromPortal, lookupPortalForSeller, rememberThaiSonPortalForSeller, isTrustedThaiSonPortalUrl } from './providerIdentity';
+import { providerFromPortal, lookupPortalForSeller, rememberThaiSonPortalForSeller, isTrustedThaiSonPortalUrl, normalizeThaiSonPortalUrl } from './providerIdentity';
 import { detectProvider } from '../services/invoice-engine/providerDetector';
 
 /**
@@ -833,9 +833,10 @@ export function getLookupUrlFromPayload(source: any): string {
     return suppliedPortal;
   }
   if (isThaiSonSource(source)) {
-    const isGeneric = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(suppliedPortal);
-    const specific = /^https:\/\//i.test(suppliedPortal) && !isGeneric &&
-      isTrustedThaiSonPortalUrl(suppliedPortal) ? suppliedPortal : '';
+    const normalizedPortal = normalizeThaiSonPortalUrl(suppliedPortal);
+    const isGeneric = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(normalizedPortal);
+    const specific = normalizedPortal && !isGeneric &&
+      isTrustedThaiSonPortalUrl(normalizedPortal) ? normalizedPortal : '';
     if (specific) rememberThaiSonPortalForSeller(sellerMst, specific);
     return specific || tenantPortal || '';
   }
@@ -1096,9 +1097,14 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   // Learn an explicit issuer portal from signed invoice metadata, never from
   // a seller-MST guess or an unrelated website/certificate URL.
   const xmlSolutionMst = extractTagValue(rawXml, 'MSTTCGP');
-  if (xmlSolutionMst === '0101300842' && /^https?:\/\//i.test(vendorLookupUrl) &&
-      isTrustedThaiSonPortalUrl(vendorLookupUrl)) {
-    rememberThaiSonPortalForSeller(xmlSellerMst, vendorLookupUrl);
+  if (xmlSolutionMst === '0101300842') {
+    const normalized = normalizeThaiSonPortalUrl(vendorLookupUrl);
+    if (normalized && isTrustedThaiSonPortalUrl(normalized)) {
+      rememberThaiSonPortalForSeller(xmlSellerMst, normalized);
+      lookupUrl = normalized;
+    } else {
+      lookupUrl = normalizeThaiSonPortalUrl(lookupUrl) || lookupUrl;
+    }
   }
   if (!lookupUrl && xmlSolutionMst === '0101300842') {
     lookupUrl = lookupPortalForSeller(xmlSellerMst) || '';
