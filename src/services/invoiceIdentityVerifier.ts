@@ -37,6 +37,29 @@ function matchesIdentity(text: string, identity: InvoiceIdentity): OriginalVerif
   return { ok: true, reason: 'MST, ký hiệu và số hóa đơn khớp.' };
 }
 
+function matchXmlInvoice(xml: string, identity: InvoiceIdentity): OriginalVerification {
+  if (xml.length > 5_000_000) return { ok: false, reason: 'XML vượt giới hạn xác minh 5 MB.' };
+  try {
+    const $ = cheerio.load(xml, { xmlMode: true });
+    const invoice = $('HDon').first();
+    const data = invoice.children('DLHDon').first();
+    const seller = data.find('NDHDon > NBan > MST').first().text().trim();
+    const number = data.find('TTChung > SHDon').first().text().trim();
+    const series = data.find('TTChung > KHHDon').first().text().trim();
+    if (!data.length || !seller || !number || !series) {
+      return { ok: false, reason: 'Tệp XML không chứa đầy đủ dữ liệu định danh HDon/DLHDon.' };
+    }
+    if (digits(seller) !== digits(identity.sellerTaxCode) ||
+        invoiceNumber(number) !== invoiceNumber(identity.invoiceNo) ||
+        compact(series) !== compact(identity.invoiceSeries || '')) {
+      return { ok: false, reason: 'XML không khớp MST, ký hiệu hoặc số hóa đơn đang mở.' };
+    }
+    return { ok: true, reason: 'XML khớp đúng MST bên bán, ký hiệu và số hóa đơn.' };
+  } catch {
+    return { ok: false, reason: 'XML bị lỗi cấu trúc, không thể xác minh.' };
+  }
+}
+
 /** Read at most the first two PDF pages; never assume PDF magic bytes imply an invoice. */
 async function extractPdfText(bytes: Buffer): Promise<string> {
   if (bytes.length > 18_000_000) throw new Error('PDF vượt giới hạn xác minh 18 MB.');
@@ -79,6 +102,12 @@ export async function verifyIssuerInvoiceBytes(
     }
   }
 
+  const head = bytes.subarray(0, 150).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  if (/^(?:<\?xml\b|<HDon(?:\s|>))/i.test(head) ||
+      /^(?:application|text)\/xml/i.test(contentType || '')) {
+    return matchXmlInvoice(bytes.toString('utf8'), identity);
+  }
+
   const isZip = bytes.subarray(0, 4).toString('latin1') === 'PK\x03\x04'
     || /^application\/zip/i.test(contentType || '');
   if (isZip) {
@@ -89,16 +118,8 @@ export async function verifyIssuerInvoiceBytes(
       for (const file of xmls.slice(0, 8)) {
         const xml = await file.async('string');
         if (xml.length > 5_000_000) continue;
-        const $ = cheerio.load(xml, { xmlMode: true });
-        const data = $('HDon > DLHDon');
-        const seller = data.find('NDHDon > NBan > MST').first().text();
-        const number = data.find('TTChung > SHDon').first().text();
-        const series = data.find('TTChung > KHHDon').first().text();
-        const expectedSeller = digits(identity.sellerTaxCode);
-        if (digits(seller) !== expectedSeller || !expectedSeller ||
-            invoiceNumber(number) !== invoiceNumber(identity.invoiceNo) ||
-            compact(series) !== compact(identity.invoiceSeries || '')) continue;
-        return { ok: true, reason: 'XML trong ZIP có MST, ký hiệu và số hóa đơn khớp.' };
+        const match = matchXmlInvoice(xml, identity);
+        if (match.ok) return { ok: true, reason: 'ZIP chứa XML đã đối chiếu MST, ký hiệu và số hóa đơn.' };
       }
       return { ok: false, reason: 'ZIP không chứa XML có thông tin khớp hóa đơn đang mở.' };
     } catch {
