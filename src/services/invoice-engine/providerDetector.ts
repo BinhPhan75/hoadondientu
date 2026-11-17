@@ -11,6 +11,7 @@ export type DetectedInvoiceProvider =
   | 'MINVOICE'
   | 'BKAV' 
   | 'THAISON'
+  | 'IHOADON'
   | 'CYBERBILL'
   | 'VNPAY'
   | 'FPT'
