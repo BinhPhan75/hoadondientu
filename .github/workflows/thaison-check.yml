@@ -1,11 +1,15 @@
-name: Thai Son invoice downloader regression
+name: Original invoice download regression
 on:
   push:
     paths:
       - src/services/thaiSonInvoiceService.ts
+      - src/services/originalInvoiceLoader.ts
+      - src/services/invoice-engine/drivers/MisaDriver.ts
+      - src/components/InvoiceDetailModal.tsx
       - src/utils/providerIdentity.ts
       - src/utils/xmlParser.ts
       - tests/thaison-form.test.ts
+      - tests/misa-original.test.ts
       - .github/workflows/thaison-check.yml
   workflow_dispatch:
 permissions:
@@ -22,7 +26,7 @@ jobs:
       - name: Install project dependencies
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Run Thai Son regression tests
-        run: npx tsx --test tests/thaison-form.test.ts
+        run: npx tsx --test tests/thaison-form.test.ts tests/misa-original.test.ts
       - name: Typecheck
         run: npm run lint
       - name: Build
