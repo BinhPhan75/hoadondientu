@@ -1537,10 +1537,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </button>
                 )}
                 {directLookupUrl && (
+                  <button type="button"
+                    onClick={() => {
+                      // Restore the previously working MISA browser viewer.
+                      // A server-side 403 must never prevent using the buyer portal.
+                      setOriginalLoadError(null);
+                      setMisaPortalUrl(directLookupUrl);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-600 text-emerald-200 bg-emerald-950/70 hover:bg-emerald-900">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{misaPortalUrl ? 'Đang xem cổng MISA' : 'Mở hóa đơn MISA'}</span>
+                  </button>
+                )}
+                {directLookupUrl && (
                   <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Cổng MISA (dự phòng)</span>
+                    <span>Mở cửa sổ riêng</span>
                   </a>
                 )}
               </div>
