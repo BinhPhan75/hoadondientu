@@ -793,7 +793,7 @@ export function getLookupCodeFromPayload(source: any): string {
     // mã tra cứu THẬT in trên hóa đơn (kiểm chứng với hóa đơn máy tính tiền
     // thật), nên ưu tiên trước các field phẳng bên dưới có thể không khớp.
     getFromStructuredArrays(source, [
-      'Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC',
+      'Fkey', 'FKey', 'MaTraCuu', 'LookupCode', 'MTCuu', 'MTC', 'Mã TC', 'Ma TC',
       'SoBaoMat', 'Số bảo mật', 'MaSoBaoMat', 'Mã số bảo mật', 'MaBaoMat', 'Mã bảo mật',
       'MaNhanHDon', 'Mã nhận hóa đơn', 'MaNhanHoaDon', 'Mã tra cứu'
     ]),
@@ -825,7 +825,13 @@ export function getLookupUrlFromPayload(source: any): string {
   // Seller-specific confirmed tenant, never apply to all Thai Son clients.
   const sellerMst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan']) || '').trim();
   const tenantPortal = lookupPortalForSeller(sellerMst);
-  const suppliedPortal = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '');
+  const suppliedPortal = String(
+    getFromStructuredArrays(source, ['ĐCTC', 'DCTC', 'Địa chỉ tra cứu', 'Duong dan tra cuu']) ||
+    getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || ''
+  );
+  if (/^https?:\/\//i.test(suppliedPortal) && providerFromPortal(suppliedPortal) === 'IHOADON') {
+    return suppliedPortal;
+  }
   if (tenantPortal) {
     // If GDT only supplies a generic Thai Son URL, prefer the verified
     // seller portal. Keep a concrete tenant-specific URL if it was supplied.
