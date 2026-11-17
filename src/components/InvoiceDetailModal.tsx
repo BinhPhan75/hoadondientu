@@ -134,6 +134,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsDownloadingEasyInvoice(false);
     setOriginalEasyInvoiceHtml(null);
     setMisaPortalUrl(null);
+    setOriginalProviderZipUrl(null);
     if (originalProviderPdfUrl) {
       window.URL.revokeObjectURL(originalProviderPdfUrl);
       setOriginalProviderPdfUrl(null);
@@ -160,6 +161,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [easyInvoiceViewMode, setEasyInvoiceViewMode] = useState<'pdf' | 'html'>('html');
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
+  const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
   const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
@@ -167,6 +169,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   useEffect(() => () => {
     if (originalProviderPdfUrl) URL.revokeObjectURL(originalProviderPdfUrl);
   }, [originalProviderPdfUrl]);
+  useEffect(() => () => {
+    if (originalProviderZipUrl) URL.revokeObjectURL(originalProviderZipUrl);
+  }, [originalProviderZipUrl]);
   useEffect(() => () => {
     openInvoiceIdRef.current = null;
     originalLoadSequence.current++;
@@ -702,6 +707,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         const html = prepareEasyInvoiceHtml(await blob.text());
         if (!isCurrent()) return;
         setOriginalEasyInvoiceHtml(html);
+      } else if (blob.type.includes('application/zip')) {
+        const url = window.URL.createObjectURL(blob);
+        setOriginalProviderZipUrl(url);
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
@@ -1133,6 +1141,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 Đang hiển thị bản HTML nhận từ cổng phát hành Thái Sơn. Đây không phải file PDF gốc có chữ ký số.
               </div>
             )}
+            {originalProviderZipUrl && (
+              <div role="status" className="w-full max-w-[820px] mb-3 px-4 py-2.5 border border-teal-600 bg-teal-950/80 rounded text-xs text-teal-200">
+                Đã nhận tệp ZIP gốc từ cổng phát hành, có chứa hóa đơn XML. Có thể tải ZIP để lưu trữ; không hiển thị ZIP như PDF.
+              </div>
+            )}
             {originalLoadError && !originalProviderPdfUrl && (
               <div role="alert" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-amber-950 border border-amber-700 rounded text-sm text-amber-100">
                 {originalLoadError}
@@ -1430,6 +1443,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* 1. Nếu có file PDF gốc đã nạp, hiển thị nút Tải PDF gốc đã lưu */}
+            {originalProviderZipUrl && (
+              <a href={originalProviderZipUrl}
+                download={`HoaDon_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}.zip`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-teal-600 bg-teal-950/80 hover:bg-teal-900 px-3 py-1.5 text-xs font-semibold text-teal-200">
+                <Download className="h-3.5 w-3.5" />
+                <span>Tải tệp ZIP gốc từ nhà cung cấp</span>
+              </a>
+            )}
             {originalProviderPdfUrl && (
               <a
                 href={originalProviderPdfUrl}
