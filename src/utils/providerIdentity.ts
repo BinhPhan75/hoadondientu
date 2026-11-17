@@ -19,6 +19,28 @@ const PORTALS: Record<string, string[]> = {
 const THAISON_PORTAL_CACHE_KEY = 'thai_son_portals_v1';
 const learnedThaiSonPortals = new Map<string, string>();
 
+/**
+ * Normalize historic HTTP issuer links to HTTPS. Only known Thái Sơn
+ * namespaces can be upgraded; do not rewrite unrelated supplier URLs.
+ */
+export function normalizeThaiSonPortalUrl(input: string | undefined): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const candidate = /^https?:\/\//i.test(raw) ? raw :
+    /^([a-z0-9-]+\.)+(?:einvoice\.com\.vn|einvoice\.vn)$/i.test(raw)
+      ? 'https://' + raw : '';
+  if (!candidate) return '';
+  try {
+    const url = new URL(candidate);
+    const host = url.hostname.toLowerCase();
+    if (!(host === 'einvoice.vn' || host === 'www.einvoice.vn' ||
+      host.endsWith('.einvoice.com.vn') || host === 'vat.ggg.com.vn')) return '';
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port) return '';
+    url.protocol = 'https:';
+    return url.toString();
+  } catch { return ''; }
+}
+
 export function isTrustedThaiSonPortalUrl(value: string): boolean {
   try {
     const url = new URL(value);
