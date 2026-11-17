@@ -25,7 +25,7 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   // Both providers historically cached unrelated PDFs (e.g. a seller's
   // "HƯỚNG DẪN" document) under an invoice key. Never reuse those blobs.
   const cacheKey = provider === 'THAISON' || provider === 'MISA'
-    ? baseCacheKey + '|verified-original-v4'
+    ? baseCacheKey + '|verified-original-v5'
     : baseCacheKey;
   const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
