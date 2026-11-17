@@ -118,6 +118,40 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
   return found.slice(0, 12);
 }
 
+/**
+ * The provider sometimes returns a fully rendered invoice page without
+ * exposing a downloadable PDF. Verify invoice metadata before showing its
+ * HTML as a provider presentation (never call it an original PDF).
+ */
+export function verifiedThaiSonInvoiceHtml(
+  html: string,
+  sellerTaxCode: string | undefined,
+  invoiceNo: string | undefined
+): string | undefined {
+  if (!sellerTaxCode || !invoiceNo || html.length > 2_000_000) return;
+  const $ = cheerio.load(html);
+  const text = $('body').text().replace(/\s+/g, ' ');
+  const compact = text.replace(/\s+/g, '').toLowerCase();
+  const seller = sellerTaxCode.replace(/\s+/g, '').toLowerCase();
+  const number = String(invoiceNo).replace(/^0+/, '') || '0';
+  if (!compact.includes(seller) || !compact.includes(number) ||
+      !/hóa\s*đơn|hoá\s*đơn|hoa\s*don|vat\s*invoice|tax\s*invoice/i.test(text)) {
+    return;
+  }
+  $('script, iframe, object, embed, form, input, button').remove();
+  $('[onload],[onclick],[onerror],[onmouseover],[onfocus]').each((_, node) => {
+    const el = $(node);
+    for (const attr of ['onload', 'onclick', 'onerror', 'onmouseover', 'onfocus']) el.removeAttr(attr);
+  });
+  $('a[href], img[src]').each((_, node) => {
+    const el = $(node);
+    const field = node.tagName === 'a' ? 'href' : 'src';
+    const value = el.attr(field) || '';
+    if (/^\s*(?:javascript|data:text\/html|file):/i.test(value)) el.removeAttr(field);
+  });
+  return $.html();
+}
+
 export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams): Promise<ThaiSonDownloadResult> {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn.', 'THAISON', 'LOOKUP_DATA_MISSING', 422);
   const portal = new URL(params.portalUrl || THAISON_PORTAL_URL);
@@ -198,6 +232,7 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
+      let displayHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
       const queue = extractThaiSonDownloadTargets(html)
         .map(target => ({ ...target, base: result.url, depth: 0 }));
       const seenTargets = new Set<string>();
@@ -228,7 +263,9 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
           const mime = targetResponse.headers.get('content-type') || '';
           if (target.depth < 2 && bytes.length < 1500000 &&
               (/html/i.test(mime) || /<!doctype html|<html/i.test(bytes.subarray(0, 250).toString('utf8')))) {
-            const nested = extractThaiSonDownloadTargets(bytes.toString('utf8'));
+            const innerHtml = bytes.toString('utf8');
+            displayHtml = displayHtml || verifiedThaiSonInvoiceHtml(innerHtml, params.sellerTaxCode, params.invoiceNo);
+            const nested = extractThaiSonDownloadTargets(innerHtml);
             nested.forEach(item => queue.push({ ...item, base: targetResponse.url, depth: target.depth + 1 }));
           }
         } catch (error: any) {
@@ -237,8 +274,17 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         }
       }
       if (!pdfBuffer) {
+        if (displayHtml) {
+          const htmlBuffer = Buffer.from(displayHtml, 'utf8');
+          return {
+            success: true, contentType: 'text/html; charset=utf-8',
+            pdfBuffer: htmlBuffer, pdfBase64: htmlBuffer.toString('base64'),
+            filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + '.html',
+            sourceUrl: result.url
+          };
+        }
         throw new OriginalInvoiceError(
-          'Đã mở cổng ' + host + ' nhưng chưa lấy được tệp PDF từ các liên kết hoặc nút tải do trang cung cấp.',
+          'Đã tra cứu trên cổng ' + host + ' nhưng không tìm thấy PDF hoặc bản HTML hóa đơn có dữ liệu khớp.',
           'THAISON', 'TENANT_DOWNLOAD_UNAVAILABLE', 422, portalBase
         );
       }
