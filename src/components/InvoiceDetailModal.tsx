@@ -123,6 +123,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // tránh việc áp dữ liệu cũ/không khớp vào state và làm crash giao diện.
   const openInvoiceIdRef = useRef<string | null>(invoice?.id ?? null);
   const originalLoadSequence = useRef(0);
+  // Avoid duplicate downloads if the invoice detail re-renders or is refreshed.
+  const minvoiceDownloadedRef = useRef<Set<string>>(new Set());
   openInvoiceIdRef.current = invoice?.id ?? null;
 
   useEffect(() => { setCurrentInvoice(invoice); }, [invoice]);
@@ -717,9 +719,32 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
+        // With M-invoice, looking up the invoice should also save the
+        // verified issuer PDF to the user's Downloads folder. Browsers may
+        // require permission for automatic downloads; retain the manual link.
+        if (actualProvider === 'MINVOICE') {
+          const saveKey = target.id + '|' + String(target.khhdon || '') + '|' +
+            String(target.shdon || '') + '|' + String(target.nbmst || '');
+          if (!minvoiceDownloadedRef.current.has(saveKey)) {
+            const downloadLink = document.createElement('a');
+            downloadLink.href = url;
+            const series = String(target.khhdon || 'HD').replace(/[^A-Za-z0-9_-]/g, '');
+            const number = String(target.shdon || '').replace(/[^0-9]/g, '').padStart(7, '0');
+            downloadLink.download = 'HoaDon_MInvoice_' + series + '_' + number + '.pdf';
+            downloadLink.style.display = 'none';
+            document.body.appendChild(downloadLink);
+            try {
+              downloadLink.click();
+              minvoiceDownloadedRef.current.add(saveKey);
+            } finally {
+              downloadLink.remove();
+            }
+          }
+        }
       }
       setEasyInvoiceDownloadStatus(actualProvider === 'MINVOICE'
-        ? 'Đã tải và xác minh PDF gốc M-invoice.' : 'Đã mở bản gốc lưu trên máy.');
+        ? 'Đã nhận PDF gốc M-invoice và gửi yêu cầu tải xuống máy. Nếu trình duyệt chặn tải tự động, dùng nút Tải PDF gốc đã lưu.'
+        : 'Đã mở bản gốc lưu trên máy.');
     } catch (error: any) {
       if (!isCurrent()) return;
       const provider = resolveInvoiceProvider(target);
