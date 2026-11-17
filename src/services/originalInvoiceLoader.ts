@@ -25,7 +25,7 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   // Both providers historically cached unrelated PDFs (e.g. a seller's
   // "HƯỚNG DẪN" document) under an invoice key. Never reuse those blobs.
   const cacheKey = provider === 'MINVOICE'
-    ? baseCacheKey + '|minvoice-verified-original-xml-v1'
+    ? baseCacheKey + '|minvoice-pdf-only-v2'
     : provider === 'THAISON' || provider === 'MISA'
       ? baseCacheKey + '|verified-original-v5'
       : baseCacheKey;
@@ -73,6 +73,9 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
       const blob = await response.blob();
       const head = await blob.slice(0, 256).text();
       const isPdf = head.startsWith('%PDF-');
+      if (provider === 'MINVOICE' && !isPdf) {
+        throw new Error('M-invoice không trả về PDF gốc; không thay bằng XML hoặc ZIP.');
+      }
       const isZip = blob.type.includes('application/zip') ||
         head.startsWith('PK\\x03\\x04');
       const isXml = /^(application|text)\/xml/i.test(blob.type) &&
