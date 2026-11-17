@@ -21,10 +21,16 @@ export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | und
   const sellerMst = String(invoice.nbmst || '').trim();
   const sellerPortal = lookupPortalForSeller(sellerMst);
   if (sellerPortal && providerFromPortal(sellerPortal)) return providerFromPortal(sellerPortal);
+  // TCGP may be a ten-digit legal entity MST followed by a 3-digit branch
+  // suffix (e.g. 0106026495-001); identify the solution by the root MST.
   const xmlTax = extractTagValue(xml, 'MSTTCGP').replace(/\D/g, '');
   if (SOLUTION_PROVIDERS[xmlTax]) return SOLUTION_PROVIDERS[xmlTax];
+  if (xmlTax.length === 13 && SOLUTION_PROVIDERS[xmlTax.slice(0, 10)])
+    return SOLUTION_PROVIDERS[xmlTax.slice(0, 10)];
   const tax = String(invoice.msttcgp || '').replace(/\D/g, '');
   if (SOLUTION_PROVIDERS[tax]) return SOLUTION_PROVIDERS[tax];
+  if (tax.length === 13 && SOLUTION_PROVIDERS[tax.slice(0, 10)])
+    return SOLUTION_PROVIDERS[tax.slice(0, 10)];
   const portal = providerFromPortal(String(invoice.lookupUrl || ''));
   if (portal) return portal;
   const name = ([extractTagValue(xml, 'TenTCGP'), extractTagValue(xml, 'TCGP'), extractTagValue(xml, 'ToChucGiaiPhap'), invoice.tentcgp || ''].join(' '))
