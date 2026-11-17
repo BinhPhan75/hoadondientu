@@ -8,7 +8,7 @@ import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml, getLookupUr
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
-import { parseThaiSonForm } from '../src/services/thaiSonInvoiceService';
+import { parseThaiSonForm, extractThaiSonDownloadTargets } from '../src/services/thaiSonInvoiceService';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
 import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
@@ -111,6 +111,26 @@ test('Thai Son parser accepts either MaNhanHoaDon or MaTraCuu without guessing',
   assert.equal(orig.formAction, '/tim-hoa-don');
   assert.equal(orig.token, 'T1');
   assert.equal(orig.imagePath, '/captcha');
+});
+
+test('Thai Son download discovery follows actual portal controls', () => {
+  const html = `<html><body>
+    <a href="/xem-hoa-don/tai-pdf?id=123">Tải về</a>
+    <iframe src="/xem-hoa-don/pdf?id=123"></iframe>
+    <form method="post" action="/xem-hoa-don">
+      <input type="hidden" name="invoiceId" value="123" />
+      <button name="btnExport" value="pdf">Tải về</button>
+    </form>
+    <button onclick="window.open('/xem-hoa-don/in-pdf?id=123')">In hóa đơn</button>
+    <a href="javascript:alert(1)">Tải về</a>
+  </body></html>`;
+  const targets = extractThaiSonDownloadTargets(html);
+  assert.ok(targets.some(x => x.path === '/xem-hoa-don/tai-pdf?id=123' && x.method === 'GET'));
+  assert.ok(targets.some(x => x.path === '/xem-hoa-don/pdf?id=123'));
+  assert.ok(targets.some(x => x.path === '/xem-hoa-don' && x.method === 'POST' &&
+    new URLSearchParams(x.data).get('invoiceId') === '123'));
+  assert.ok(targets.some(x => x.path === '/xem-hoa-don/in-pdf?id=123'));
+  assert.equal(targets.some(x => x.path.startsWith('javascript:')), false);
 });
 
 test('MISA and Thai Son domain boundaries do not overlap', () => {
