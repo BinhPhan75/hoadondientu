@@ -1,5 +1,5 @@
 import { GDTInvoice } from '../types';
-import { providerFromPortal } from '../utils/providerIdentity';
+import { providerFromPortal, easyInvoiceLookupUrl } from '../utils/providerIdentity';
 import { extractLookupDetailsFromXml, numberToVietnameseWords } from '../utils/xmlParser';
 
 export { numberToVietnameseWords };
@@ -172,20 +172,7 @@ export function buildDirectLookupUrl(
     /easyinvoice/i.test(url);
 
   if (isEasyInvoice) {
-    let easyUrl = url;
-    if (!easyUrl || !/easyinvoice/i.test(easyUrl)) {
-      easyUrl = sellerTaxCode
-        ? `http://${sellerTaxCode}hd.easyinvoice.com.vn`
-        : 'https://tracuu.easyinvoice.vn';
-    }
-    let cleanUrl = easyUrl.split('?')[0].replace(/\/+$/, '');
-    if (!/\/Search\/Index$/i.test(cleanUrl)) {
-      cleanUrl = `${cleanUrl}/Search/Index`;
-    }
-    if (code) {
-      return `${cleanUrl}?fkey=${encodeURIComponent(code)}`;
-    }
-    return cleanUrl;
+    return easyInvoiceLookupUrl(sellerTaxCode, code, url);
   }
 
   // 4. LCS Soft EIP (PNJ: 0315018466, LCS: 0302999571)
