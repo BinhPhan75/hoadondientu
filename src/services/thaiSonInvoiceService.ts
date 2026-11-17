@@ -250,13 +250,25 @@ export function diagnoseThaiSonSearchPage(html: string) {
 
 export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams): Promise<ThaiSonDownloadResult> {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn.', 'THAISON', 'LOOKUP_DATA_MISSING', 422);
-  const portal = new URL(params.portalUrl || THAISON_PORTAL_URL);
+  // GDT metadata sometimes supplies http:// for a tenant that serves HTTPS.
+  // Always upgrade to TLS for the known Thai Son issuer domains; never send
+  // an invoice lookup code or session cookie over HTTP.
+  const supplied = String(params.portalUrl || THAISON_PORTAL_URL).trim();
+  let portal: URL;
+  try {
+    portal = new URL(supplied);
+  } catch {
+    throw new OriginalInvoiceError('Địa chỉ cổng tra cứu Thái Sơn không hợp lệ.', 'THAISON', 'PORTAL_INVALID', 422);
+  }
   const host = portal.hostname.toLowerCase();
   const supportedHost = host === 'einvoice.vn' || host === 'www.einvoice.vn' ||
     host.endsWith('.einvoice.com.vn') || host === 'vat.ggg.com.vn';
-  if (!supportedHost || portal.protocol !== 'https:' || portal.username || portal.password) {
-    throw new OriginalInvoiceError('Cổng Thái Sơn chưa được xác minh để tải bản gốc: ' + host, 'THAISON', 'PORTAL_NOT_SUPPORTED', 422);
+  if (!supportedHost || portal.username || portal.password || portal.port ||
+      !['http:', 'https:'].includes(portal.protocol)) {
+    throw new OriginalInvoiceError('Tên miền cổng Thái Sơn không nằm trong danh sách được hỗ trợ: ' + host,
+      'THAISON', 'PORTAL_NOT_SUPPORTED', 422);
   }
+  if (portal.protocol === 'http:') portal.protocol = 'https:';
   const portalBase = portal.origin + (host.endsWith('.einvoice.com.vn') || host === 'vat.ggg.com.vn' ? '/' : '/tra-cuu');
   const signal = AbortSignal.timeout(Math.min(params.timeoutMs || 45000, 45000));
   const cookies = new Map<string, string>();
@@ -348,14 +360,17 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       }
       let displayHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
       const advertisedTargets = extractThaiSonDownloadTargets(html);
-      if (!displayHtml && postForm.formFound && advertisedTargets.length === 0) {
+      // The issuer may render site navigation with download-like links on
+      // the search page. These are not proof that invoice lookup succeeded.
+      // A returned search form still means the invoice has not opened.
+      if (!displayHtml && postForm.formFound && postForm.field) {
         console.warn('[ThaiSon] Lookup returned the search form instead of invoice details', {
           host, action: postForm.formAction, lookupField: postForm.field,
           captchaField: postForm.captchaField, responseBytes: resultBody.length
         });
         if (attempt === 0) continue;
         throw new OriginalInvoiceError(
-          'Cổng ' + host + ' vẫn trả về form tra cứu, chưa xác nhận được hóa đơn. Có thể CAPTCHA không được chấp nhận hoặc biểu mẫu dùng yêu cầu AJAX khác.',
+          'Cổng ' + host + ' trả lại biểu mẫu tra cứu thay vì hóa đơn. Kiểm tra CAPTCHA hoặc mã tra cứu trước khi tải file.',
           'THAISON', 'LOOKUP_NOT_COMPLETED', 422, portalBase
         );
       }
