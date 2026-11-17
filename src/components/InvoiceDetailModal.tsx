@@ -796,7 +796,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice) return;
+    if (!effectiveInvoice || provider === 'MISA') return;
     if (provider === 'EASYINVOICE') {
       const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
       if (code) {
@@ -1558,31 +1558,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isMisaInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {!originalProviderPdfUrl && (
-                  <button type="button" onClick={handleViewOriginalProvider}
-                    disabled={isDownloadingEasyInvoice}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-600 text-emerald-200 bg-emerald-950/70 hover:bg-emerald-900 disabled:opacity-60">
-                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc MISA...' : 'Tải PDF gốc MISA'}</span>
+                {directLookupUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setMisaPortalUrl(directLookupUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{misaPortalUrl ? 'Đang mở tra cứu MISA' : 'Mở tra cứu MISA'}</span>
                   </button>
                 )}
                 {directLookupUrl && (
-                  <button type="button"
-                    onClick={() => {
-                      // Restore the previously working MISA browser viewer.
-                      // A server-side 403 must never prevent using the buyer portal.
-                      setOriginalLoadError(null);
-                      setMisaPortalUrl(directLookupUrl);
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-600 text-emerald-200 bg-emerald-950/70 hover:bg-emerald-900">
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>{misaPortalUrl ? 'Đang xem cổng MISA' : 'Mở hóa đơn MISA'}</span>
-                  </button>
-                )}
-                {directLookupUrl && (
-                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700">
-                    <ExternalLink className="w-3.5 h-3.5" />
+                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 cursor-pointer">
+                    <ExternalLink className="w-3 h-3" />
                     <span>Mở cửa sổ riêng</span>
                   </a>
                 )}
