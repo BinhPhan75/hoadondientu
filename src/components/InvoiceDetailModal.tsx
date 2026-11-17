@@ -678,8 +678,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const recordedPortal = extractedLookup.lookupUrl || target.lookupUrl || '';
     const isGenericThaiSon = !recordedPortal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(recordedPortal);
     const tenantUrl = sellerPortal && isGenericThaiSon ? sellerPortal : recordedPortal;
-    const isSeparatePortal = actualProvider === 'IHOADON' ||
-      /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(tenantUrl);
+    const isSeparatePortal = actualProvider === 'IHOADON';
     // Open the actual issuer portal. No verified server-side PDF API exists
     // for every tenant; do not send these invoices to the generic Thai Son API.
     if (isSeparatePortal && /^https?:\/\//i.test(tenantUrl)) {
@@ -767,11 +766,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     if (!effectiveInvoice?.rawXml) return;
-    // iHoaDon needs its own provider workflow. A verified E-Invoice tenant
-    // URL must not be sent to the generic Thai Son PDF downloader either.
-    const explicitPortal = effectiveInvoice.lookupUrl || '';
-    if (provider === 'IHOADON' || lookupPortalForSeller(effectiveInvoice.nbmst) ||
-        /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(explicitPortal)) return;
+    // iHoaDon uses an independent provider workflow.
+    // Thai Son tenant portals now use the original-document downloader.
+    if (provider === 'IHOADON') return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
 
@@ -859,10 +856,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     effectiveInvoice.nbmst
   ) : '';
 
-  const thaiSonLookupCode = lookupDetails.lookupCode || effectiveInvoice?.lookupCode || '';
   const isThaiSonInvoice = autoDetectedProvider === 'THAISON';
-  const isThaiSonTenant = isThaiSonInvoice &&
-    /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(lookupDetails.lookupUrl || '');
 
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
@@ -1583,19 +1577,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Cổng Vietcombank</span>
                 </a>
               </div>
-            ) : isThaiSonTenant ? (
+            ) : isThaiSonInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Mở cổng Thái Sơn riêng</span>
-                </a>
-                {thaiSonLookupCode && (
-                  <button type="button" onClick={() => { void navigator.clipboard.writeText(thaiSonLookupCode); }}
-                    title="Sao chép Mã nhận hóa đơn để dán tại cổng nhà cung cấp"
-                    className="px-3 py-1.5 text-xs font-medium border border-slate-600 rounded-md text-slate-200 hover:bg-slate-800">
-                    Mã nhận HĐ: {thaiSonLookupCode} · Sao chép
+                {!originalProviderPdfUrl && (
+                  <button type="button" onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
+                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>{isDownloadingEasyInvoice ? 'Đang tải hóa đơn gốc Thái Sơn...' : 'Tải bản gốc Thái Sơn'}</span>
                   </button>
+                )}
+                {originalLoadError && directLookupUrl && (
+                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Mở cổng nhà cung cấp khi tải gốc thất bại</span>
+                  </a>
                 )}
               </div>
             ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
