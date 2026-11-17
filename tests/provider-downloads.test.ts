@@ -143,6 +143,28 @@ test('Thai Son HTML display fallback requires matching seller MST and invoice nu
   assert.equal(verifiedThaiSonInvoiceHtml(page, '0301175691-021', '2996339'), undefined);
 });
 
+test('Thai Son real Co.opmart and Golden Gate form: MA_NHAN_HOA_DON with antiforgery token', () => {
+  const html = `<form action="/xem-hoa-don" id="formgr" method="post">
+    <input name="__RequestVerificationToken" type="hidden" value="TOKEN_SAMPLE"/>
+    <input type="hidden" id="idHiden"/>
+    <label>Mã nhận HĐ</label>
+    <input name="MA_NHAN_HOA_DON" type="text" id="MA_NHAN_HOA_DON" />
+    <img src="/DefaultCaptcha/Generate?t=abc" id="CaptchaImage"/>
+    <input name="CaptchaDeText" type="hidden" value="CHECK_SAMPLE"/>
+    <input name="CaptchaInputText" type="text" />
+    <button type="submit">Tìm hóa đơn</button>
+  </form>`;
+  const form = parseThaiSonForm(html);
+  assert.equal(form.formFound, true);
+  assert.equal(form.field, 'MA_NHAN_HOA_DON');
+  assert.equal(form.captchaField, 'CaptchaInputText');
+  assert.equal(form.imagePath, '/DefaultCaptcha/Generate?t=abc');
+  assert.equal(form.formAction, '/xem-hoa-don');
+  assert.equal(form.method, 'POST');
+  assert.equal(form.hiddenFields.__RequestVerificationToken, 'TOKEN_SAMPLE');
+  assert.equal(form.token, 'CHECK_SAMPLE');
+});
+
 test('Thai Son tenant form parser uses actual input names and method', () => {
   const html = '<form action="/kiem-tra" method="get"><label>Mã tra cứu</label><input name="CodeSearch" placeholder="Mã tra cứu"/><input name="Verify" placeholder="Mã kiểm tra"/><img src="/captcha"/></form>';
   const parsed = parseThaiSonForm(html);
