@@ -215,15 +215,15 @@ export async function extractThaiSonOriginalContent(
   try {
     const archive = await JSZip.loadAsync(bytes, { checkCRC32: false });
     const entries = Object.values(archive.files);
-    const pdfs = entries.filter(file => !file.dir && /\\.pdf$/i.test(file.name));
+    const pdfs = entries.filter(file => !file.dir && /\.pdf$/i.test(file.name));
     for (const pdf of pdfs.slice(0, 5)) {
-      if (pdf._data && (pdf._data as any).uncompressedSize > 25_000_000) continue;
+      
       const content = await pdf.async('nodebuffer');
       if (content.subarray(0, 5).toString('latin1') === '%PDF-') {
         return { bytes: content, type: 'application/pdf', extension: '.pdf' };
       }
     }
-    if (entries.some(file => !file.dir && /\\.xml$/i.test(file.name))) {
+    if (entries.some(file => !file.dir && /\.xml$/i.test(file.name))) {
       return { bytes, type: 'application/zip', extension: '.zip' };
     }
   } catch {
