@@ -826,8 +826,12 @@ export function getLookupUrlFromPayload(source: any): string {
   const sellerMst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan']) || '').trim();
   const tenantPortal = lookupPortalForSeller(sellerMst);
   const suppliedPortal = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '');
-  if (tenantPortal && (!suppliedPortal || providerFromPortal(suppliedPortal) === 'THAISON')) {
-    return suppliedPortal || tenantPortal;
+  if (tenantPortal) {
+    // If GDT only supplies a generic Thai Son URL, prefer the verified
+    // seller portal. Keep a concrete tenant-specific URL if it was supplied.
+    const genericThaiSon = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(suppliedPortal);
+    if (!suppliedPortal || genericThaiSon) return tenantPortal;
+    return suppliedPortal;
   }
   if (isLcsSource(source)) {
     return 'https://eip.lcssoft.com.vn/desktop/#/login';
