@@ -314,14 +314,26 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         };
       }
       const html = resultBody.toString('utf8');
-      const error = parseThaiSonForm(html).error;
+      const postForm = parseThaiSonForm(html);
+      const error = postForm.error;
       if (error) {
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
       let displayHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
-      const queue = extractThaiSonDownloadTargets(html)
-        .map(target => ({ ...target, base: result.url, depth: 0 }));
+      const advertisedTargets = extractThaiSonDownloadTargets(html);
+      if (!displayHtml && postForm.formFound && advertisedTargets.length === 0) {
+        console.warn('[ThaiSon] Lookup returned the search form instead of invoice details', {
+          host, action: postForm.formAction, lookupField: postForm.field,
+          captchaField: postForm.captchaField, responseBytes: resultBody.length
+        });
+        if (attempt === 0) continue;
+        throw new OriginalInvoiceError(
+          'Cổng ' + host + ' vẫn trả về form tra cứu, chưa xác nhận được hóa đơn. Có thể CAPTCHA không được chấp nhận hoặc biểu mẫu dùng yêu cầu AJAX khác.',
+          'THAISON', 'LOOKUP_NOT_COMPLETED', 422, portalBase
+        );
+      }
+      const queue = advertisedTargets.map(target => ({ ...target, base: result.url, depth: 0 }));
       const seenTargets = new Set<string>();
       let originalContent: Awaited<ReturnType<typeof extractThaiSonOriginalContent>>;
       // Follow only links and forms advertised by the issuer's page.
