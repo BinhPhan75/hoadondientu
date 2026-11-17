@@ -230,6 +230,24 @@ export async function extractThaiSonOriginalContent(
     // Invalid or unsupported archive; do not treat it as a signed invoice.
   }
 }
+/** Safe structural diagnostics; never include values, cookies, CAPTCHA, or invoice codes. */
+export function diagnoseThaiSonSearchPage(html: string) {
+  const $ = cheerio.load(html);
+  const inputs = $('input[name]').map((_, node) => {
+    const el = $(node);
+    return { name: (el.attr('name') || '').slice(0, 80), type: el.attr('type') || 'text' };
+  }).get().slice(0, 16);
+  const forms = $('form').map((_, node) => {
+    const el = $(node);
+    return { method: el.attr('method') || 'GET', action: (el.attr('action') || '').slice(0, 120) };
+  }).get().slice(0, 8);
+  return {
+    forms, inputs,
+    scripts: $('script[src]').length,
+    clientRendered: !forms.length && (inputs.length === 0 || $('script[src]').length > 0)
+  };
+}
+
 export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams): Promise<ThaiSonDownloadResult> {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn.', 'THAISON', 'LOOKUP_DATA_MISSING', 422);
   const portal = new URL(params.portalUrl || THAISON_PORTAL_URL);
@@ -282,8 +300,15 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       const page = await request(portalBase);
       const form = parseThaiSonForm(await page.text());
       if (!form.formFound || !form.field) {
+        const diagnostics = diagnoseThaiSonSearchPage(await request(portalBase).then(r => r.text()));
+        console.warn('[ThaiSon] Cannot detect native search form', {
+          host, forms: diagnostics.forms, inputs: diagnostics.inputs,
+          scriptCount: diagnostics.scripts, clientRendered: diagnostics.clientRendered
+        });
         throw new OriginalInvoiceError(
-          'Không xác định được trường mã nhận hóa đơn của biểu mẫu tra cứu trên ' + host + '.',
+          diagnostics.clientRendered
+            ? 'Cổng ' + host + ' cần chạy JavaScript để tạo hoặc gửi biểu mẫu tra cứu. Bộ tải HTTP hiện chưa hỗ trợ quy trình JavaScript này.'
+            : 'Không nhận diện được trường mã tra cứu trên ' + host + '. Cần đối chiếu cấu trúc request tra cứu thành công của cổng phát hành.',
           'THAISON', 'LOOKUP_FORM_NOT_FOUND', 422, portalBase
         );
       }
