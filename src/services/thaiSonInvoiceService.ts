@@ -138,16 +138,21 @@ export function verifiedThaiSonInvoiceHtml(
       !/hóa\s*đơn|hoá\s*đơn|hoa\s*don|vat\s*invoice|tax\s*invoice/i.test(text)) {
     return;
   }
-  $('script, iframe, object, embed, form, input, button').remove();
-  $('[onload],[onclick],[onerror],[onmouseover],[onfocus]').each((_, node) => {
+  $('script, iframe, object, embed, form, input, button, meta[http-equiv=refresh]').remove();
+  // The provider HTML is untrusted content. Strip executable attributes
+  // before putting it into a browser srcDoc frame.
+  $('*').each((_, node) => {
+    if (node.type !== 'tag') return;
     const el = $(node);
-    for (const attr of ['onload', 'onclick', 'onerror', 'onmouseover', 'onfocus']) el.removeAttr(attr);
-  });
-  $('a[href], img[src]').each((_, node) => {
-    const el = $(node);
-    const field = node.tagName === 'a' ? 'href' : 'src';
-    const value = el.attr(field) || '';
-    if (/^\s*(?:javascript|data:text\/html|file):/i.test(value)) el.removeAttr(field);
+    const attrs = (node as any).attribs || {};
+    for (const attr of Object.keys(attrs)) {
+      const value = String(attrs[attr] || '');
+      if (/^on/i.test(attr) ||
+          (['href', 'src', 'action', 'formaction', 'xlink:href'].includes(attr.toLowerCase()) &&
+           /^\s*(?:javascript|vbscript|file|data:text\/html):/i.test(value))) {
+        el.removeAttr(attr);
+      }
+    }
   });
   return $.html();
 }
