@@ -721,7 +721,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const provider = resolveInvoiceProvider(target);
       const isMisaCloudDenied = provider === 'MISA' && /(?:HTTP\s*403|MISA.*403)/i.test(error?.message || '');
       setOriginalLoadError(isMisaCloudDenied
-        ? 'MISA từ chối yêu cầu tải từ máy chủ ứng dụng, nhưng mã tra cứu vẫn hợp lệ. Hãy mở cổng MISA bằng nút bên dưới để xem và tải bản gốc trực tiếp trong trình duyệt.'
+        ? 'Máy chủ ứng dụng nhận HTTP 403 từ MISA. Chưa thể kết luận mã tra cứu đúng hay sai. Hệ thống chưa tải được PDF gốc; có thể mở cổng MISA để tra cứu khi cần.'
         : (error.message || 'Không tải được hóa đơn gốc.'));
       setEasyInvoiceDownloadStatus(null);
     } finally {
