@@ -93,14 +93,14 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
           timeoutMs: options?.timeoutMs
         });
 
-        this.createLog(`Đã tải thành công tệp PDF gốc từ cổng Thái Sơn: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
+        this.createLog(`Đã tải bản ${result.contentType.startsWith('application/pdf') ? 'PDF gốc' : 'HTML hiển thị từ cổng phát hành'}: ${result.filename} (${result.pdfBuffer.length} bytes)`, logs);
 
         return {
           success: true,
           pdfBuffer: result.pdfBuffer,
           pdfBase64: result.pdfBase64,
           filename: result.filename,
-          contentType: 'application/pdf',
+          contentType: result.contentType,
           provider: this.providerCode,
           driverName: this.name,
           isFallback: false,
