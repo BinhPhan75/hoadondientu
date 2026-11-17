@@ -42,9 +42,10 @@ export function easyInvoiceLookupPortals(sellerMst?: string, explicitUrl?: strin
     try {
       const url = new URL(explicitUrl);
       const host = url.hostname.toLowerCase();
-      if (url.protocol === 'https:' &&
-          (host === 'easyinvoice.vn' || host.endsWith('.easyinvoice.vn') ||
-           host === 'easyinvoice.com.vn' || host.endsWith('.easyinvoice.com.vn'))) {
+      // A marketing homepage is not an invoice lookup portal.
+      const tenantHost = host.endsWith('.easyinvoice.vn') || host.endsWith('.easyinvoice.com.vn');
+      if (url.protocol === 'https:' && tenantHost &&
+          host !== 'www.easyinvoice.vn' && host !== 'www.easyinvoice.com.vn') {
         const cleanPath = url.pathname.replace(/\/+$/, '');
         url.pathname = /\/Search\/Index$/i.test(cleanPath)
           ? cleanPath
