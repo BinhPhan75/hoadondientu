@@ -115,7 +115,18 @@ export function buildDirectLookupUrl(
   }
 
   const portalProvider = providerFromPortal(url);
-  if (portalProvider === 'THAISON' || provider === 'THAISON') return 'https://einvoice.vn/tra-cuu';
+  // The Co.opmart seller has a verified tenant URL. Never discard an explicit
+  // XML portal or redirect its customers to the generic Thai Son portal.
+  if (portalProvider === 'THAISON' && url) {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'einvoice.vn' && parsed.hostname !== 'www.einvoice.vn') {
+      return url;
+    }
+  }
+  if (portalProvider === 'IHOADON' || provider === 'IHOADON') {
+    return url || 'https://tracuu.ihoadon.vn/';
+  }
+  if (portalProvider === 'THAISON' || provider === 'THAISON') return url || 'https://einvoice.vn/tra-cuu';
   if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') return 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
   const isMisa = portalProvider ? portalProvider === 'MISA' : provider === 'MISA';
 
