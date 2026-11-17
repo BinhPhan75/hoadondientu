@@ -50,6 +50,74 @@ export function parseThaiSonForm(html: string) {
   };
 }
 
+
+type ThaiSonDownloadTarget = {
+  path: string;
+  method: 'GET' | 'POST';
+  data?: string;
+};
+
+/** Discover only download URLs or forms advertised by a successful lookup page. */
+export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarget[] {
+  const $ = cheerio.load(html);
+  const found: ThaiSonDownloadTarget[] = [];
+  const seen = new Set<string>();
+  const add = (path: string, method: 'GET' | 'POST' = 'GET', data?: string) => {
+    const value = path.trim().replace(/&amp;/g, '&');
+    if (!value || value.startsWith('#') || /^(?:javascript|data|file):/i.test(value)) return;
+    const id = [method, value, data || ''].join('|');
+    if (seen.has(id)) return;
+    seen.add(id);
+    found.push({ path: value, method, data });
+  };
+
+  const isDownloadText = (s: string) =>
+    /tải\s*(?:về|xuống|hóa\s*đơn|pdf)|download|save\s*(?:file|invoice|pdf)|xuất\s*pdf|in\s*hóa\s*đơn/i.test(s);
+  const isDownloadPath = (s: string) =>
+    /\.pdf(?:[?#]|$)|(?:tai|download|export|print|pdf|file)/i.test(s);
+
+  $('a[href], iframe[src], embed[src], object[data], source[src]').each((_, node) => {
+    const $el = $(node);
+    const path = $el.attr('href') || $el.attr('src') || $el.attr('data') || '';
+    const label = [$el.text(), $el.attr('title') || '', $el.attr('download') || ''].join(' ');
+    const tag = String((node as { tagName?: string }).tagName || '').toLowerCase();
+    if (['iframe', 'embed', 'object', 'source'].includes(tag) ||
+        isDownloadText(label) || isDownloadPath(path)) add(path);
+  });
+
+  $('button, input[type=submit], input[type=button], a[onclick]').each((_, node) => {
+    const $el = $(node);
+    const label = [$el.text(), $el.attr('value') || '', $el.attr('title') || ''].join(' ');
+    if (!isDownloadText(label)) return;
+    const ownAction = $el.attr('formaction') || $el.attr('data-url') || $el.attr('data-href') || '';
+    if (ownAction) add(ownAction);
+    const onclick = $el.attr('onclick') || '';
+    // Read literal URLs from handlers without executing provider JavaScript.
+    for (const match of onclick.matchAll(/(?:open|href\s*=|assign\s*\(|replace\s*\()\s*\(?\s*['"]([^'"]+)['"]/gi)) {
+      if (match[1]) add(match[1]);
+    }
+    const form = $el.closest('form');
+    if (form.length) {
+      const action = ownAction || form.attr('action') || '';
+      if (action && (isDownloadPath(action) || isDownloadText(label))) {
+        const payload = new URLSearchParams();
+        form.find('input[name], select[name]').each((_, input) => {
+          const el = $(input);
+          const name = el.attr('name') || '';
+          if (name && !['file', 'password'].includes((el.attr('type') || '').toLowerCase())) {
+            payload.set(name, String(el.val() || ''));
+          }
+        });
+        const buttonName = $el.attr('name');
+        if (buttonName) payload.set(buttonName, $el.attr('value') || '');
+        const method = (form.attr('method') || 'GET').toUpperCase() === 'POST' ? 'POST' : 'GET';
+        add(action, method, payload.toString());
+      }
+    }
+  });
+  return found.slice(0, 12);
+}
+
 export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams): Promise<ThaiSonDownloadResult> {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn.', 'THAISON', 'LOOKUP_DATA_MISSING', 422);
   const portal = new URL(params.portalUrl || THAISON_PORTAL_URL);
@@ -121,23 +189,31 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
-      const $ = cheerio.load(html);
-      const advertisedDownload = $('a[href]').map((_, el) => $(el).attr('href') || '').get()
-        .find(href => /(?:tai[-/]hoa[-/]don|download.*pdf|\.pdf(?:\?|$))/i.test(href));
-      const downloadPath = advertisedDownload ||
-        (host === 'einvoice.vn' || host === 'www.einvoice.vn'
-          ? '/tra-cuu/tai-hoa-don-dien-tu?format=pdf'
-          : '');
-      if (!downloadPath) {
+      const targets = extractThaiSonDownloadTargets(html);
+      let pdfBuffer: Buffer | null = null;
+      for (const target of targets) {
+        try {
+          // The request helper checks the origin on every redirect.
+          const targetResponse = await request(target.path, {
+            method: target.method,
+            body: target.method === 'POST' ? target.data : undefined
+          });
+          const bytes = Buffer.from(await targetResponse.arrayBuffer());
+          if (bytes.length > 5 && bytes.subarray(0, 5).toString() === '%PDF-') {
+            pdfBuffer = bytes;
+            break;
+          }
+        } catch (error: any) {
+          // The page may offer multiple formats; continue to the next link.
+          if (signal.aborted) throw error;
+          console.warn('[ThaiSon] Candidate did not yield a PDF:', target.path.slice(0, 140), error?.message);
+        }
+      }
+      if (!pdfBuffer) {
         throw new OriginalInvoiceError(
-          'Đã truy vấn cổng ' + host + ' nhưng chưa xác định được đường tải PDF gốc. Không tự suy đoán endpoint của cổng riêng.',
+          'Đã mở cổng ' + host + ' nhưng chưa lấy được tệp PDF từ các liên kết hoặc nút tải do trang cung cấp.',
           'THAISON', 'TENANT_DOWNLOAD_UNAVAILABLE', 422, portalBase
         );
-      }
-      const pdfResponse = await request(downloadPath);
-      const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
-      if (pdfBuffer.subarray(0, 5).toString() !== '%PDF-') {
-        throw new OriginalInvoiceError('Cổng ' + host + ' không trả về PDF hợp lệ.', 'THAISON', 'INVALID_ORIGINAL_PDF', 502, portalBase);
       }
       return {
         success: true, contentType: 'application/pdf', pdfBuffer, pdfBase64: pdfBuffer.toString('base64'),
