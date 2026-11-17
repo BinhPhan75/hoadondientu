@@ -111,39 +111,79 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     const portal = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
     const taxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
     const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || '').trim();
-    if (!taxCode || !lookupCode || lookupCode === info.cqtCode) {
-      throw new OriginalInvoiceError('MINVOICE thiếu MST bên bán hoặc Số bảo mật. Mã cơ quan thuế không thay thế Số bảo mật.', this.providerCode, 'LOOKUP_DATA_MISSING', 422, portal);
+    if (!/^\d{10}(?:-\d{3})?$/.test(taxCode) || !/^[A-Za-z0-9_-]{6,128}$/.test(lookupCode) ||
+        lookupCode === info.cqtCode) {
+      throw new OriginalInvoiceError(
+        'M-invoice cần đúng MST bên bán và mã tra cứu (Số bảo mật) từ XML, không dùng mã CQT.',
+        this.providerCode, 'LOOKUP_DATA_MISSING', 422, portal
+      );
     }
-    // The public portal now uses reCAPTCHA v3, not an OCR image challenge.
-    if (!options?.recaptchaToken) {
-      throw new OriginalInvoiceError('MINVOICE yêu cầu xác thực Google reCAPTCHA trên cổng tra cứu. Hãy mở cổng MINVOICE để tải PDF gốc.', this.providerCode, 'RECAPTCHA_REQUIRED', 428, portal);
+
+    // The official public SPA requires a valid Google reCAPTCHA v3 token
+    // for PDF requests. Never synthesize or bypass one.
+    if (options?.recaptchaToken) {
+      const url = new URL('/api/Search/SearchInvoiceCaptcha', portal);
+      url.search = new URLSearchParams({
+        masothue: taxCode, sobaomat: lookupCode, type: 'PDF', inchuyendoi: 'false'
+      }).toString();
+      try {
+        const response = await fetch(url.toString(), {
+          headers: {
+            Accept: 'application/pdf,application/octet-stream,*/*',
+            Referer: portal,
+            'X-Recaptcha-Token': options.recaptchaToken,
+          },
+          signal: AbortSignal.timeout(Math.min(options.timeoutMs || 20000, 30000)),
+        });
+        const content = Buffer.from(await response.arrayBuffer());
+        if (response.ok && content.subarray(0, 5).toString('latin1') === '%PDF-') {
+          return {
+            success: true, provider: this.providerCode, driverName: this.name,
+            pdfBuffer: content, pdfBase64: content.toString('base64'),
+            contentType: 'application/pdf', filename: this.buildPdfFilename(info),
+            isFallback: false, sourceUrl: portal, executionLogs: ['M-invoice: nhận bản PDF từ cổng phát hành'],
+          };
+        }
+      } catch (error: any) {
+        console.warn('[MinvoiceDriver] Official PDF lookup failed:', error?.message);
+      }
     }
-    const url = new URL('/api/Search/SearchInvoiceCaptcha', portal);
-    url.search = new URLSearchParams({ masothue: taxCode, sobaomat: lookupCode, type: 'PDF', inchuyendoi: 'false' }).toString();
-    const response = await fetch(url, {
-      headers: { Accept: 'application/pdf', Referer: portal, 'X-Recaptcha-Token': options.recaptchaToken },
-      signal: AbortSignal.timeout(Math.min(options.timeoutMs || 20000, 30000)),
-    }).catch((error: Error) => {
-      throw new OriginalInvoiceError('MINVOICE: ' + error.message, this.providerCode, 'PROVIDER_CONNECTION_FAILED', 502, portal);
-    });
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (response.ok && buffer.subarray(0, 5).toString() === '%PDF-') {
-      return {
-        success: true, provider: this.providerCode, driverName: this.name,
-        pdfBuffer: buffer, pdfBase64: buffer.toString('base64'), contentType: 'application/pdf',
-        filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: url.href, executionLogs: [],
-      };
+
+    // Unlike the PDF operation, the official site's XML download method
+    // does not request a reCAPTCHA token. Download the supplier's XML file
+    // and verify seller MST, series and number in the manager before caching.
+    const source = await this.downloadXml(taxCode, lookupCode, Math.min(options?.timeoutMs || 20000, 30000));
+    if (source) {
+      const prefix = source.subarray(0, 128).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+      let contentType = '';
+      let extension = '';
+      if (/^<\?xml\b|^<HDon(?:\s|>)/i.test(prefix)) {
+        contentType = 'application/xml';
+        extension = '.xml';
+      } else if (source.subarray(0, 4).toString('latin1') === 'PK\x03\x04') {
+        contentType = 'application/zip';
+        extension = '.zip';
+      } else if (source.subarray(0, 5).toString('latin1') === '%PDF-') {
+        contentType = 'application/pdf';
+        extension = '.pdf';
+      }
+      if (contentType) {
+        const safeNo = (info.invoiceNo || '').replace(/[^0-9]/g, '').padStart(7, '0');
+        const safeSeries = (info.invoiceSeries || '').replace(/[^A-Za-z0-9]/g, '');
+        const safeTax = taxCode.replace(/[^0-9-]/g, '');
+        return {
+          success: true, provider: this.providerCode, driverName: this.name,
+          pdfBuffer: source, pdfBase64: source.toString('base64'),
+          contentType,
+          filename: ['HoaDon_MInvoice', safeTax, safeSeries, safeNo].filter(Boolean).join('_') + extension,
+          isFallback: false, sourceUrl: portal,
+          executionLogs: ['M-invoice: tải tệp ' + extension + ' từ cổng phát hành, chờ đối chiếu danh tính hóa đơn'],
+        };
+      }
     }
-    let message = '';
-    try {
-      const body = JSON.parse(buffer.toString('utf8'));
-      message = String(body.message || body.Message || body.error || '').slice(0, 300);
-    } catch { /* HTML error pages are not PDF documents. */ }
-    const captchaRequired = /captcha/i.test(message) || [401, 403, 428].includes(response.status);
     throw new OriginalInvoiceError(
-      captchaRequired ? 'MINVOICE yêu cầu xác thực lại Google reCAPTCHA trên cổng tra cứu.' : ('MINVOICE: ' + (message || 'Không nhận được PDF hợp lệ (HTTP ' + response.status + ').')),
-      this.providerCode, captchaRequired ? 'RECAPTCHA_REQUIRED' : 'ORIGINAL_DOWNLOAD_FAILED',
-      captchaRequired ? 428 : 502, portal,
+      'Cổng M-invoice chưa trả về XML gốc theo MST và mã tra cứu. PDF của cổng yêu cầu xác thực reCAPTCHA v3 trong trình duyệt.',
+      this.providerCode, 'MINVOICE_ORIGINAL_UNAVAILABLE', 502, portal
     );
   }
 
