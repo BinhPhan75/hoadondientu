@@ -2,7 +2,7 @@ import type { GDTInvoice } from '../types';
 import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { extractLookupDetailsFromXml } from '../utils/xmlParser';
-import { lookupPortalForSeller } from '../utils/providerIdentity';
+import { lookupPortalForSeller, normalizeThaiSonPortalUrl } from '../utils/providerIdentity';
 
 const pending = new Map<string, Promise<Blob>>();
 const failures = new Map<string, { expires: number; error: Error }>();
@@ -20,11 +20,18 @@ async function withDownloadSlot<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
-  const cacheKey = getInvoiceOriginalCacheKey(invoice);
+  const baseCacheKey = getInvoiceOriginalCacheKey(invoice);
   const provider = resolveInvoiceProvider(invoice);
+  // Both providers historically cached unrelated PDFs (e.g. a seller's
+  // "HƯỚNG DẪN" document) under an invoice key. Never reuse those blobs.
+  const cacheKey = provider === 'THAISON' || provider === 'MISA'
+    ? baseCacheKey + '|verified-original-v3'
+    : baseCacheKey;
   const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
-  const originalUrl = xmlLookup.lookupUrl || invoice.lookupUrl || '';
+  const originalUrl = provider === 'THAISON'
+    ? (normalizeThaiSonPortalUrl(xmlLookup.lookupUrl || invoice.lookupUrl) || xmlLookup.lookupUrl || invoice.lookupUrl || '')
+    : (xmlLookup.lookupUrl || invoice.lookupUrl || '');
   const isGenericThaiSon = !originalUrl || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(originalUrl);
   // A generic solution-provider page is not evidence of the seller's tenant.
   // Never submit a seller-specific lookup code to an unverified generic portal.
@@ -37,8 +44,9 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   if (inFlight) return inFlight;
   const task = (async () => {
     const legacyKey = [invoice.nbmst || '', invoice.khhdon || '', String(invoice.shdon || '')].join('|').replace(/[^a-zA-Z0-9|_-]/g, '_');
+    const hasPoisonedLegacyCache = provider === 'THAISON' || provider === 'MISA';
     const cached = await readCachedOriginalPdf(cacheKey).catch(() => null)
-      || await readCachedOriginalPdf(legacyKey).catch(() => null);
+      || (!hasPoisonedLegacyCache ? await readCachedOriginalPdf(legacyKey).catch(() => null) : null);
     if (cached) return cached;
     const failed = failures.get(requestKey);
     if (failed && failed.expires > Date.now()) throw failed.error;
