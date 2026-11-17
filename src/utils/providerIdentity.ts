@@ -15,6 +15,9 @@ export const SELLER_LOOKUP_PORTALS: Record<string, string> = {
   // Only this Co.opmart branch has a verified, tenant-specific lookup portal.
   // Never reuse it for every Thai Son/einvoice tenant.
   '0301175691-021': 'https://saigoncoop.einvoice.com.vn/',
+  // Golden Gate's official invoice portal; this XML lacks the DCTC field.
+  '0102721191-001': 'https://vat.ggg.com.vn/',
+  '0102721191': 'https://vat.ggg.com.vn/',
 };
 
 export function lookupPortalForSeller(taxCode: string | undefined): string | undefined {
