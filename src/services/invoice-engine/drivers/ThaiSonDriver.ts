@@ -61,7 +61,7 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
       invoiceDate,
       cqtCode,
       lookupCode,
-      lookupUrl: lookupDetails.lookupUrl || lookupPortalForSeller(sellerTaxCode) || 'https://einvoice.vn/tra-cuu',
+      lookupUrl: lookupDetails.lookupUrl || lookupPortalForSeller(sellerTaxCode) || '',
       rawXml: xmlData,
       additionalData: {
         msttcgp: '0101300842'
@@ -76,7 +76,13 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     if (info.lookupCode && info.lookupCode !== info.cqtCode && !options?.forceFallback) {
       try {
         this.createLog('Đã có Mã nhận hóa đơn Thái Sơn.', logs);
-        const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || 'https://einvoice.vn/tra-cuu';
+        const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || '';
+        if (!portal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(portal)) {
+          throw new OriginalInvoiceError(
+            'Chưa xác định được cổng phát hành của người bán từ XML. Cần một URL cổng hợp lệ; không thể suy ra từ MSTTCGP hay thử mã ngẫu nhiên tại einvoice.vn.',
+            this.providerCode, 'LOOKUP_PORTAL_UNKNOWN', 422
+          );
+        }
         this.createLog('Đang thử tải bản gốc từ cổng hóa đơn Thái Sơn: ' + new URL(portal).hostname, logs);
         const result = await downloadOriginalThaiSonPdf({
           portalUrl: portal,
