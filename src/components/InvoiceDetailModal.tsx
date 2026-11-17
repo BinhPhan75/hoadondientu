@@ -135,6 +135,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setOriginalEasyInvoiceHtml(null);
     setMisaPortalUrl(null);
     setOriginalProviderZipUrl(null);
+    setOriginalProviderXmlUrl(null);
     if (originalProviderPdfUrl) {
       window.URL.revokeObjectURL(originalProviderPdfUrl);
       setOriginalProviderPdfUrl(null);
@@ -162,6 +163,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
   const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
+  const [originalProviderXmlUrl, setOriginalProviderXmlUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
   const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
@@ -172,6 +174,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   useEffect(() => () => {
     if (originalProviderZipUrl) URL.revokeObjectURL(originalProviderZipUrl);
   }, [originalProviderZipUrl]);
+  useEffect(() => () => {
+    if (originalProviderXmlUrl) URL.revokeObjectURL(originalProviderXmlUrl);
+  }, [originalProviderXmlUrl]);
   useEffect(() => () => {
     openInvoiceIdRef.current = null;
     originalLoadSequence.current++;
@@ -711,11 +716,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } else if (blob.type.includes('application/zip')) {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderZipUrl(url);
+      } else if (blob.type.includes('application/xml') || blob.type.includes('text/xml')) {
+        const url = window.URL.createObjectURL(blob);
+        setOriginalProviderXmlUrl(url);
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
       }
-      setEasyInvoiceDownloadStatus('Đã mở bản gốc lưu trên máy.');
+      setEasyInvoiceDownloadStatus(blob.type.includes('xml')
+        ? 'Đã tải và xác minh XML gốc từ M-invoice.' : 'Đã mở bản gốc lưu trên máy.');
     } catch (error: any) {
       if (!isCurrent()) return;
       const provider = resolveInvoiceProvider(target);
@@ -888,6 +897,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setThaiSonPortalRevision(revision => revision + 1);
   };
 
+  const isMinvoiceInvoice = autoDetectedProvider === 'MINVOICE';
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
   const isViettelInvoice = autoDetectedProvider === 'VIETTEL';
@@ -1140,6 +1150,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             {isThaiSonInvoice && originalEasyInvoiceHtml && (
               <div role="status" className="w-full max-w-[820px] mb-3 px-4 py-2.5 border border-teal-600 bg-teal-950/80 rounded text-xs text-teal-200">
                 Đang hiển thị bản HTML nhận từ cổng phát hành Thái Sơn. Đây không phải file PDF gốc có chữ ký số.
+              </div>
+            )}
+            {originalProviderXmlUrl && (
+              <div role="status" className="w-full max-w-[820px] mb-3 px-4 py-2.5 border border-emerald-600 bg-emerald-950/80 rounded text-xs text-emerald-200">
+                Đã tự động lấy và đối chiếu XML từ cổng M-invoice. Đây là tệp dữ liệu hóa đơn; bản thể hiện phía dưới vẫn lấy từ Cổng Thuế, không phải PDF mẫu của nhà cung cấp.
               </div>
             )}
             {originalProviderZipUrl && (
@@ -1444,6 +1459,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
           <div className="flex items-center gap-2.5 flex-wrap">
             {/* 1. Nếu có file PDF gốc đã nạp, hiển thị nút Tải PDF gốc đã lưu */}
+            {originalProviderXmlUrl && (
+              <a href={originalProviderXmlUrl}
+                download={`HoaDon_MInvoice_${effectiveInvoice.khhdon || 'HD'}_${String(effectiveInvoice.shdon || '').padStart(7, '0')}.xml`}
+                className="inline-flex items-center gap-1.5 rounded-md border border-emerald-600 bg-emerald-950/80 hover:bg-emerald-900 px-3 py-1.5 text-xs font-semibold text-emerald-200">
+                <Download className="h-3.5 w-3.5" />
+                <span>Tải XML từ M-invoice đã xác minh</span>
+              </a>
+            )}
             {originalProviderZipUrl && (
               <a href={originalProviderZipUrl}
                 download={`HoaDon_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}.zip`}
@@ -1637,6 +1660,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Cổng Vietcombank</span>
+                </a>
+              </div>
+            ) : isMinvoiceInvoice ? (
+              <div className="inline-flex items-center gap-2 flex-wrap">
+                {!originalProviderXmlUrl && !originalProviderZipUrl && !originalProviderPdfUrl && (
+                  <button type="button" onClick={handleViewOriginalProvider}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-600 text-emerald-200 bg-emerald-950/60 hover:bg-emerald-900 disabled:opacity-60">
+                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>{isDownloadingEasyInvoice ? 'Đang tải dữ liệu M-invoice...' : 'Thử tải bản gốc M-invoice'}</span>
+                  </button>
+                )}
+                <a href="https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don" target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Mở cổng M-invoice (PDF cần reCAPTCHA)</span>
                 </a>
               </div>
             ) : isThaiSonInvoice ? (
