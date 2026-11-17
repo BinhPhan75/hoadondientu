@@ -1,6 +1,6 @@
 import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
-import { providerFromPortal } from './providerIdentity';
+import { providerFromPortal, lookupPortalForSeller } from './providerIdentity';
 import { detectProvider } from '../services/invoice-engine/providerDetector';
 
 /**
@@ -959,6 +959,18 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     return '';
   };
 
+  // Vendor-specific TTKhac/TTin: Co.opmart stores the lookup details as
+  // labels "Mã TC" and "ĐCTC", not as XML tags with these names.
+  const extraFields = new Map<string, string>();
+  for (const block of extractTagBlocks(rawXml, 'TTin')) {
+    const label = normalizeLookupLabel(extractTagValue(block, 'TTruong') || '');
+    const value = cleanLookupValue(extractTagValue(block, 'DLieu') || '');
+    if (label && value) extraFields.set(label, value);
+  }
+  const xmlSellerMst = extractTagBlocks(rawXml, 'NBan')
+    .map(block => extractTagValue(block, 'MST'))
+    .find(Boolean) || '';
+
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
   const codeTags = [
     'SoBaoMat', 'sobaomat', 'SOBAOMAT',
@@ -969,6 +981,8 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     'SecretCode', 'SecurityCode', 'AccessCode'
   ];
   let lookupCode = tagValue(codeTags);
+  const extraLookupCode = extraFields.get('ma tc') || extraFields.get('ma tra cuu') || '';
+  if (!lookupCode && isLookupCodeCandidate(extraLookupCode)) lookupCode = extraLookupCode;
 
   // 2. Kiểm tra chuỗi text khớp regex "Mã tra cứu:" hoặc "Mã nhận hóa đơn:" hoặc "Số bảo mật:"
   if (!lookupCode) {
@@ -1049,6 +1063,8 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   // trừ khi URL đó thực sự chứa đường dẫn tra cứu hóa đơn điện tử
   const urlTags = ['LinkTraCuu', 'WebsiteTraCuu', 'WebTraCuu', 'PortalUrl', 'PortalLink'];
   let lookupUrl = tagValue(urlTags);
+  const vendorLookupUrl = extraFields.get('dctc') || extraFields.get('dia chi tra cuu') || extraFields.get('duong dan tra cuu') || '';
+  if (!lookupUrl && /^https?:\/\//i.test(vendorLookupUrl)) lookupUrl = vendorLookupUrl;
 
   // Nếu thẻ <Website> chứa từ khóa tra cứu HĐĐT mới được chấp nhận
   if (!lookupUrl) {
@@ -1061,6 +1077,10 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   if (!/^https?:\/\//i.test(lookupUrl)) {
     lookupUrl = '';
   }
+  // A seller MST is allowed to provide a tenant-specific fallback only.
+  // This never becomes the shared portal for other Thai Son customers.
+  if (!lookupUrl) lookupUrl = lookupPortalForSeller(xmlSellerMst) || '';
+
   if (!lookupUrl) {
     const urlMatch = rawXml.match(/https?:\/\/[^\s<"']+/gi)?.map(cleanLookupValue)
       .find(value => !/w3\.org|schema\.org/i.test(value) && /tra[-_]?cuu|invoice|einvoice|sinvoice|easyinvoice|4si|meinvoice|vnpt/i.test(value));
