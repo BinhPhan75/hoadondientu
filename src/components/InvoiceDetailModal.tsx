@@ -26,7 +26,7 @@ import {
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
-import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller } from '../utils/providerIdentity';
+import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, rememberThaiSonPortalForSeller } from '../utils/providerIdentity';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
@@ -161,6 +161,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
+  const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
   const [easyInvoiceDownloadStatus, setEasyInvoiceDownloadStatus] = useState<string | null>(null);
   const [originalLoadError, setOriginalLoadError] = useState<string | null>(null);
   useEffect(() => () => {
@@ -766,11 +767,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     if (!effectiveInvoice?.rawXml) return;
+    // No guessing of Thai Son seller portals; register a valid URL once if
+    // neither the XML nor learned cache identifies the seller's portal.
+    const xmlPortal = extractLookupDetails(effectiveInvoice.rawXml).lookupUrl || '';
+    const knownPortal = lookupPortalForSeller(effectiveInvoice.nbmst) || '';
+    const candidate = xmlPortal || knownPortal || effectiveInvoice.lookupUrl || '';
+    if (provider === 'THAISON' && (!candidate ||
+        /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(candidate))) return;
     // iHoaDon uses an independent provider workflow.
     // Thai Son tenant portals now use the original-document downloader.
     if (provider === 'IHOADON') return;
     void handleViewOriginalProvider();
-  }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
+  }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider, thaiSonPortalRevision]);
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -818,9 +826,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (tax) lookupDetails.lookupUrl = `https://${tax}-tt78.vnpt-invoice.com.vn`;
     }
     if (autoDetectedProvider === 'MISA') lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
-    if (autoDetectedProvider === 'THAISON' && !lookupDetails.lookupUrl) {
-      lookupDetails.lookupUrl = 'https://einvoice.vn/tra-cuu';
-    }
+    // Do not guess the issuer portal from the Thai Son software provider.
+    // If the XML has no DCTC, use only an already learned URL for this seller.
     if (autoDetectedProvider === 'MINVOICE') lookupDetails.lookupUrl = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
 
     safeItems = ensureInvoiceItems(effectiveInvoice);
@@ -857,6 +864,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   ) : '';
 
   const isThaiSonInvoice = autoDetectedProvider === 'THAISON';
+  const thaiSonIssuerPortal = isThaiSonInvoice && lookupDetails.lookupUrl &&
+    !/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(lookupDetails.lookupUrl)
+    ? lookupDetails.lookupUrl : '';
+  const configureThaiSonPortal = () => {
+    if (!effectiveInvoice?.nbmst) return;
+    const proposed = window.prompt('Nhập URL cổng tra cứu hóa đơn chính thức của người bán (lưu dùng lại theo MST):', '');
+    if (!proposed) return;
+    if (!rememberThaiSonPortalForSeller(effectiveInvoice.nbmst, proposed)) {
+      setOriginalLoadError('URL không hợp lệ. Chỉ chấp nhận địa chỉ HTTPS công khai.');
+      return;
+    }
+    setOriginalLoadError(null);
+    setThaiSonPortalRevision(revision => revision + 1);
+  };
 
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
@@ -1579,20 +1600,31 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isThaiSonInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                {!originalProviderPdfUrl && (
-                  <button type="button" onClick={handleViewOriginalProvider}
-                    disabled={isDownloadingEasyInvoice}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
-                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>{isDownloadingEasyInvoice ? 'Đang tải hóa đơn gốc Thái Sơn...' : 'Tải bản gốc Thái Sơn'}</span>
-                  </button>
-                )}
-                {originalLoadError && directLookupUrl && (
-                  <a href={directLookupUrl} target="_blank" rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                {thaiSonIssuerPortal ? (
+                  <>
+                    {!originalProviderPdfUrl && (
+                      <button type="button" onClick={handleViewOriginalProvider}
+                        disabled={isDownloadingEasyInvoice}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
+                        {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                        <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc...' : 'Tải bản gốc Thái Sơn'}</span>
+                      </button>
+                    )}
+                    {originalLoadError && (
+                      <a href={thaiSonIssuerPortal} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Kiểm tra cổng nhà cung cấp</span>
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <button type="button" onClick={configureThaiSonPortal}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-700 text-amber-300 hover:bg-amber-950/60"
+                    title="XML không có địa chỉ tra cứu; chỉ cần khai báo một lần cho người bán này">
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Mở cổng nhà cung cấp khi tải gốc thất bại</span>
-                  </a>
+                    <span>Chưa có cổng tra cứu — Thiết lập theo MST</span>
+                  </button>
                 )}
               </div>
             ) : (directLookupUrl && (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
