@@ -10,6 +10,7 @@ import { GenericFallbackDriver } from './GenericFallbackDriver';
 import { downloadOriginalThaiSonPdf } from '../../thaiSonInvoiceService';
 import { OriginalInvoiceError } from '../OriginalInvoiceError';
 import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
+import { lookupPortalForSeller } from '../../../utils/providerIdentity';
 
 export class ThaiSonDriver extends BaseInvoiceProviderDriver {
   readonly name = 'Thái Sơn E-Invoice Driver';
@@ -41,12 +42,13 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     const invoiceDate = this.extractXmlTag(xmlData, 'NLap') || this.extractXmlTag(xmlData, 'nlap') || new Date().toISOString();
     const cqtCode = this.extractXmlTag(xmlData, 'MCCQT') || this.extractXmlTag(xmlData, 'mhdon');
 
+    const lookupDetails = extractLookupDetailsFromXml(xmlData);
     const lookupCode = this.extractXmlTag(xmlData, 'MaNhanHoaDon') ||
                      this.extractXmlTag(xmlData, 'MaNhanHDon') ||
                      this.extractCustomField(xmlData, ['Mã tra cứu', 'MaTraCuu', 'MTCuu', 'Mã nhận hóa đơn']) ||
                      this.extractXmlTag(xmlData, 'MTCuu') || 
                      this.extractXmlTag(xmlData, 'MaTraCuu') ||
-                     extractLookupDetailsFromXml(xmlData).lookupCode;
+                     lookupDetails.lookupCode;
 
     return {
       provider: this.providerCode,
@@ -59,7 +61,7 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
       invoiceDate,
       cqtCode,
       lookupCode,
-      lookupUrl: 'https://einvoice.vn/tra-cuu',
+      lookupUrl: lookupDetails.lookupUrl || lookupPortalForSeller(sellerTaxCode) || 'https://einvoice.vn/tra-cuu',
       rawXml: xmlData,
       additionalData: {
         msttcgp: '0101300842'
@@ -74,8 +76,17 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     if (info.lookupCode && info.lookupCode !== info.cqtCode && !options?.forceFallback) {
       try {
         this.createLog('Đã có Mã nhận hóa đơn Thái Sơn.', logs);
-        this.createLog(`Đang gửi yêu cầu giải Captcha & tải PDF gốc từ cổng Thái Sơn (einvoice.vn)...`, logs);
-
+        const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || 'https://einvoice.vn/tra-cuu';
+        // The standard downloader only supports einvoice.vn. Tenant portals
+        // have independent sessions, form fields and download endpoints.
+        const portalHost = new URL(portal).hostname.toLowerCase();
+        if (portalHost !== 'einvoice.vn' && portalHost !== 'www.einvoice.vn') {
+          throw new OriginalInvoiceError(
+            'Hóa đơn sử dụng cổng riêng ' + portalHost + '. Hãy mở đúng cổng và nhập mã nhận hóa đơn; không dùng API Thái Sơn chung để tải PDF.',
+            this.providerCode, 'TENANT_PORTAL_REQUIRED', 422, portal
+          );
+        }
+        this.createLog('Đang tra cứu trên cổng Thái Sơn chung...', logs);
         const result = await downloadOriginalThaiSonPdf({
           lookupCode: info.lookupCode,
           sellerTaxCode: info.sellerTaxCode,
