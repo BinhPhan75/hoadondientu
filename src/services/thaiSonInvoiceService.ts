@@ -100,6 +100,30 @@ type ThaiSonDownloadTarget = {
   data?: string;
 };
 
+/**
+ * The public portal can advertise an unrelated user guide PDF alongside
+ * genuine invoice controls. Never follow these as invoice downloads.
+ */
+export function isThaiSonHelpDocumentLink(url: string, label = ''): boolean {
+  const cleaned = (url + ' ' + label).normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return /huong[\s_/-]*dan|hdsd|user[\s_/-]*guide|instruction[\s_/-]*manual|help[\s_/-]*document|\/faqs?\/|\/tai[\s_/-]*lieu\/|\/documents?\//i.test(cleaned);
+}
+
+/**
+ * Inspect simple PDF metadata and first compressed streams for guide labels.
+ * This is a negative safety check, not a claim of invoice authenticity.
+ */
+export function isThaiSonHelpPdf(bytes: Buffer): boolean {
+  if (bytes.length < 5 || bytes.subarray(0, 5).toString('latin1') !== '%PDF-') return false;
+  const source = bytes.subarray(0, Math.min(bytes.length, 850_000)).toString('latin1');
+  const guide = /huong[\s_-]*dan[\s_-]*su[\s_-]*dung|h.?.?ng\s+d.?.?n\s+s.?\s+d.ng|user[\s_-]*guide|instruction[\s_-]*manual/i;
+  if (guide.test(source.normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) return true;
+  const title = source.match(/\/Title\s*(\([^)]{1,500}\)|<[0-9A-Fa-f]{6,1000}>)/);
+  if (title && guide.test(title[1].normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) return true;
+  return false;
+}
+
 /** Discover only download URLs or forms advertised by a successful lookup page. */
 export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarget[] {
   const $ = cheerio.load(html);
@@ -107,7 +131,8 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
   const seen = new Set<string>();
   const add = (path: string, method: 'GET' | 'POST' = 'GET', data?: string) => {
     const value = path.trim().replace(/&amp;/g, '&');
-    if (!value || value.startsWith('#') || /^(?:javascript|data|file):/i.test(value)) return;
+    if (!value || value.startsWith('#') || /^(?:javascript|data|file):/i.test(value) ||
+        isThaiSonHelpDocumentLink(value)) return;
     const id = [method, value, data || ''].join('|');
     if (seen.has(id)) return;
     seen.add(id);
@@ -124,6 +149,7 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
     const path = $el.attr('href') || $el.attr('src') || $el.attr('data') || '';
     const label = [$el.text(), $el.attr('title') || '', $el.attr('download') || ''].join(' ');
     const tag = String((node as { tagName?: string }).tagName || '').toLowerCase();
+    if (isThaiSonHelpDocumentLink(path, label)) return;
     if (['iframe', 'embed', 'object', 'source'].includes(tag) ||
         isDownloadText(label) || isDownloadPath(path)) add(path);
   });
@@ -131,7 +157,7 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
   $('button, input[type=submit], input[type=button], a[onclick]').each((_, node) => {
     const $el = $(node);
     const label = [$el.text(), $el.attr('value') || '', $el.attr('title') || ''].join(' ');
-    if (!isDownloadText(label)) return;
+    if (!isDownloadText(label) || isThaiSonHelpDocumentLink('', label)) return;
     const ownAction = $el.attr('formaction') || $el.attr('data-url') || $el.attr('data-href') || '';
     if (ownAction) add(ownAction);
     const onclick = $el.attr('onclick') || '';
@@ -343,7 +369,7 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       });
       const resultBody = Buffer.from(await result.arrayBuffer());
       const directOriginal = await extractThaiSonOriginalContent(resultBody);
-      if (directOriginal) {
+      if (directOriginal && !(directOriginal.extension === '.pdf' && isThaiSonHelpPdf(directOriginal.bytes))) {
         return {
           success: true, contentType: directOriginal.type, pdfBuffer: directOriginal.bytes,
           pdfBase64: directOriginal.bytes.toString('base64'),
@@ -397,9 +423,18 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
           });
           const bytes = Buffer.from(await targetResponse.arrayBuffer());
           const candidate = await extractThaiSonOriginalContent(bytes);
-          if (candidate) {
-            originalContent = candidate;
-            break;
+          if (candidate && !isThaiSonHelpDocumentLink(targetUrl.href) &&
+              !(candidate.extension === '.pdf' && isThaiSonHelpPdf(candidate.bytes))) {
+            // A PDF anywhere on the tenant homepage is not necessarily
+            // the invoice. Require verified invoice context or evidence in
+            // the provider's URL itself that points to this invoice.
+            const digits = (params.invoiceNo || '').replace(/^0+(?=\d)/, '');
+            const evidence = targetUrl.href.includes(params.lookupCode.trim()) ||
+              (digits.length >= 4 && targetUrl.href.includes(digits));
+            if (displayHtml || evidence) {
+              originalContent = candidate;
+              break;
+            }
           }
           const mime = targetResponse.headers.get('content-type') || '';
           if (target.depth < 2 && bytes.length < 1500000 &&
