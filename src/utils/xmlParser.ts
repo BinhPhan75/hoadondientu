@@ -1,6 +1,6 @@
 import { GDTInvoice, InvoiceItem } from '../types';
 import JSZip from 'jszip';
-import { providerFromPortal, lookupPortalForSeller } from './providerIdentity';
+import { providerFromPortal, lookupPortalForSeller, rememberThaiSonPortalForSeller, isTrustedThaiSonPortalUrl } from './providerIdentity';
 import { detectProvider } from '../services/invoice-engine/providerDetector';
 
 /**
@@ -1094,9 +1094,16 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   if (!/^https?:\/\//i.test(lookupUrl)) {
     lookupUrl = '';
   }
-  // A seller MST is allowed to provide a tenant-specific fallback only.
-  // This never becomes the shared portal for other Thai Son customers.
-  if (!lookupUrl) lookupUrl = lookupPortalForSeller(xmlSellerMst) || '';
+  // Learn an explicit issuer portal from signed invoice metadata, never from
+  // a seller-MST guess or an unrelated website/certificate URL.
+  const xmlSolutionMst = extractTagValue(rawXml, 'MSTTCGP');
+  if (xmlSolutionMst === '0101300842' && /^https?:\/\//i.test(vendorLookupUrl) &&
+      isTrustedThaiSonPortalUrl(vendorLookupUrl)) {
+    rememberThaiSonPortalForSeller(xmlSellerMst, vendorLookupUrl);
+  }
+  if (!lookupUrl && xmlSolutionMst === '0101300842') {
+    lookupUrl = lookupPortalForSeller(xmlSellerMst) || '';
+  }
 
   if (!lookupUrl) {
     const urlMatch = rawXml.match(/https?:\/\/[^\s<"']+/gi)?.map(cleanLookupValue)
