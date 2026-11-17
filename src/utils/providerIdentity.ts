@@ -1,6 +1,7 @@
 const PORTALS: Record<string, string[]> = {
   MISA: ['meinvoice.vn', 'misa.vn'],
   THAISON: ['einvoice.vn', 'einvoice.com.vn', 'thaison.vn'],
+  IHOADON: ['ihoadon.vn'],
   MINVOICE: ['minvoice.vn', 'minvoice.com.vn'],
   VIETTEL: ['sinvoice.viettel.vn', 'vinvoice.viettel.vn', 'sinvoice.vn'],
   VNPT: ['vnpt-invoice.com.vn', 'vnpt-invoice.vn', 'invoice.vnpt.vn'],
@@ -9,6 +10,16 @@ const PORTALS: Record<string, string[]> = {
   LCS: ['lcssoft.com.vn'], '4SI': ['4si.vn'], VNPAY: ['vnpayinvoice.vn', 'einvoice.vietcombank.com.vn'],
   CYBERBILL: ['cyberbill.vn'], FPT: ['hoadon.ftg.vn', 'hoadondientu.fpt.com.vn'],
 };
+
+export const SELLER_LOOKUP_PORTALS: Record<string, string> = {
+  // Only this Co.opmart branch has a verified, tenant-specific lookup portal.
+  // Never reuse it for every Thai Son/einvoice tenant.
+  '0301175691-021': 'https://saigoncoop.einvoice.com.vn/xem-hoa-don',
+};
+
+export function lookupPortalForSeller(taxCode: string | undefined): string | undefined {
+  return SELLER_LOOKUP_PORTALS[String(taxCode || '').trim()];
+}
 
 export const SOLUTION_PROVIDERS: Record<string, string> = {
   '0101243150': 'MISA', '0101300842': 'THAISON', '0106026495': 'MINVOICE',
