@@ -198,18 +198,24 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
-      const targets = extractThaiSonDownloadTargets(html);
+      const queue = extractThaiSonDownloadTargets(html)
+        .map(target => ({ ...target, base: result.url, depth: 0 }));
+      const seenTargets = new Set<string>();
       let pdfBuffer: Buffer | null = null;
-      for (const target of targets) {
+      // Follow only links and forms advertised by the issuer's page.
+      // Nested iframe pages can themselves contain the printable PDF URL.
+      while (queue.length && seenTargets.size < 18) {
+        const target = queue.shift()!;
         try {
-          // The request helper checks the origin on every redirect.
-          // Relative actions are relative to the invoice detail page, not
-          // necessarily to the tenant's root lookup form.
-          const targetUrl = new URL(target.path, result.url);
+          const targetUrl = new URL(target.path, target.base);
           if (target.method === 'GET' && target.data) {
             const query = new URLSearchParams(target.data);
             query.forEach((value, name) => targetUrl.searchParams.set(name, value));
           }
+          if (targetUrl.origin !== portal.origin) continue;
+          const unique = target.method + '|' + targetUrl.href + '|' + (target.data || '');
+          if (seenTargets.has(unique)) continue;
+          seenTargets.add(unique);
           const targetResponse = await request(targetUrl.toString(), {
             method: target.method,
             body: target.method === 'POST' ? target.data : undefined
@@ -219,10 +225,15 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
             pdfBuffer = bytes;
             break;
           }
+          const mime = targetResponse.headers.get('content-type') || '';
+          if (target.depth < 2 && bytes.length < 1500000 &&
+              (/html/i.test(mime) || /<!doctype html|<html/i.test(bytes.subarray(0, 250).toString('utf8')))) {
+            const nested = extractThaiSonDownloadTargets(bytes.toString('utf8'));
+            nested.forEach(item => queue.push({ ...item, base: targetResponse.url, depth: target.depth + 1 }));
+          }
         } catch (error: any) {
-          // The page may offer multiple formats; continue to the next link.
           if (signal.aborted) throw error;
-          console.warn('[ThaiSon] Candidate did not yield a PDF:', target.path.slice(0, 140), error?.message);
+          console.warn('[ThaiSon] Provider link did not return PDF:', target.path.slice(0, 140), error?.message);
         }
       }
       if (!pdfBuffer) {
