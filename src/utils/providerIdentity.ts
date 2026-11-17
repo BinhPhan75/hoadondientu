@@ -11,17 +11,61 @@ const PORTALS: Record<string, string[]> = {
   CYBERBILL: ['cyberbill.vn'], FPT: ['hoadon.ftg.vn', 'hoadondientu.fpt.com.vn'],
 };
 
-export const SELLER_LOOKUP_PORTALS: Record<string, string> = {
-  // Only this Co.opmart branch has a verified, tenant-specific lookup portal.
-  // Never reuse it for every Thai Son/einvoice tenant.
-  '0301175691-021': 'https://saigoncoop.einvoice.com.vn/',
-  // Golden Gate's official invoice portal; this XML lacks the DCTC field.
-  '0102721191-001': 'https://vat.ggg.com.vn/',
-  '0102721191': 'https://vat.ggg.com.vn/',
-};
+/**
+ * Learned Thai Son lookup portals keyed by seller MST (not hardcoded domains).
+ * Store the URL only after it comes from invoice XML, or a user verifies it.
+ * Server-side requests receive the resolved URL from the authenticated client.
+ */
+const THAISON_PORTAL_CACHE_KEY = 'thai_son_portals_v1';
+const learnedThaiSonPortals = new Map<string, string>();
+
+export function isTrustedThaiSonPortalUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
+    if (hostname === 'localhost' || hostname.endsWith('.localhost') ||
+        hostname.endsWith('.local') || hostname.endsWith('.internal') ||
+        hostname === 'metadata.google.internal' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname) ||
+        hostname.includes(':') || !hostname.includes('.')) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function rememberThaiSonPortalForSeller(taxCode: string | undefined, url: string): boolean {
+  const seller = String(taxCode || '').trim();
+  if (!/^\d{10}(?:-\d{3})?$/.test(seller) || !isTrustedThaiSonPortalUrl(url)) return false;
+  const clean = new URL(url).origin + '/';
+  learnedThaiSonPortals.set(seller, clean);
+  if (typeof window !== 'undefined') {
+    try {
+      const existing = JSON.parse(window.localStorage.getItem(THAISON_PORTAL_CACHE_KEY) || '{}');
+      window.localStorage.setItem(THAISON_PORTAL_CACHE_KEY,
+        JSON.stringify({ ...existing, [seller]: clean }));
+    } catch {
+      // Storage quota or privacy mode must not block invoice lookup.
+    }
+  }
+  return true;
+}
 
 export function lookupPortalForSeller(taxCode: string | undefined): string | undefined {
-  return SELLER_LOOKUP_PORTALS[String(taxCode || '').trim()];
+  const seller = String(taxCode || '').trim();
+  if (!seller) return undefined;
+  const inMemory = learnedThaiSonPortals.get(seller);
+  if (inMemory) return inMemory;
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(THAISON_PORTAL_CACHE_KEY) || '{}');
+    const url = stored?.[seller];
+    if (typeof url === 'string' && isTrustedThaiSonPortalUrl(url)) {
+      learnedThaiSonPortals.set(seller, url);
+      return url;
+    }
+  } catch {}
+  return undefined;
 }
 
 /**
