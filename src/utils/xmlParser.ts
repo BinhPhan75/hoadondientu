@@ -822,6 +822,13 @@ export function getLookupCodeFromPayload(source: any): string {
 }
 
 export function getLookupUrlFromPayload(source: any): string {
+  // Seller-specific confirmed tenant, never apply to all Thai Son clients.
+  const sellerMst = String(getPayloadValue(source, ['nbmst', 'sellerTaxCode', 'taxCodeNguoiBan']) || '').trim();
+  const tenantPortal = lookupPortalForSeller(sellerMst);
+  const suppliedPortal = String(getPayloadValue(source, ['lookupUrl', 'lookup_url', 'linkTraCuu']) || '');
+  if (tenantPortal && (!suppliedPortal || providerFromPortal(suppliedPortal) === 'THAISON')) {
+    return suppliedPortal || tenantPortal;
+  }
   if (isLcsSource(source)) {
     return 'https://eip.lcssoft.com.vn/desktop/#/login';
   }
