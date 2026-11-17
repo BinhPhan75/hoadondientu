@@ -26,30 +26,72 @@ export interface ThaiSonDownloadResult {
 export function parseThaiSonForm(html: string) {
   const $ = cheerio.load(html);
   const lookupNames = ['MaNhanHoaDon', 'MaTraCuu', 'MaNhanHDon', 'MTCuu'];
-  const form = $('form').filter((_, el) =>
-    lookupNames.some(name => $(el).find('input[name="' + name + '"]').length > 0)
-  ).first();
-  const field = lookupNames.find(name => form.find('input[name="' + name + '"]').length) || 'MaNhanHoaDon';
+  const named = $('form').filter((_, node) => lookupNames.some(name =>
+    $(node).find('input[name="' + name + '"]').length > 0)).first();
+
+  // Tenant portals are white-labelled: names such as MaNhanHoaDon are not
+  // universal. Match by the labelled field, then the first non-captcha text
+  // input belonging to the same form.
+  let form = named;
+  if (!form.length) {
+    form = $('form').filter((_, node) => {
+      const el = $(node);
+      const descriptors = [el.text(), ...el.find('input').map((_, input) => {
+        const field = $(input);
+        return [field.attr('name'),field.attr('id'),field.attr('placeholder'),
+          field.attr('aria-label')].filter(Boolean).join(' ');
+      }).get()].join(' ');
+      return /m[aã]\s*(?:nh[aậ]n\s*h[oó]a\s*[dđ][oơ]n|tra\s*c[uứ]u)|nh[aậ]n\s*h[oó]a\s*[dđ][oơ]n|lookup|fkey/i.test(descriptors);
+    }).first();
+  }
+
+  const findLookupInput = () => {
+    const namedField = lookupNames.find(name => form.find('input[name="' + name + '"]').length > 0);
+    if (namedField) return form.find('input[name="' + namedField + '"]').first();
+    const candidates = form.find('input').filter((_, node) => {
+      const el = $(node);
+      const type = String(el.attr('type') || 'text').toLowerCase();
+      if (!['text','search',''].includes(type)) return false;
+      const label = [el.attr('name'),el.attr('id'),el.attr('placeholder'),el.attr('aria-label')]
+        .filter(Boolean).join(' ');
+      return !/captcha|ki[eể]m\s*tra|x[aá]c\s*th[uự]c|verification|token/i.test(label);
+    });
+    return candidates.first();
+  };
+  const lookupInput = findLookupInput();
+  const field = lookupInput.attr('name') || '';
+  const captchaInput = form.find('input').filter((_, node) => {
+    const el = $(node);
+    const type = String(el.attr('type') || 'text').toLowerCase();
+    return ['text','search',''].includes(type) &&
+      /captcha|ki[eể]m\s*tra|x[aá]c\s*th[uự]c|verification/i.test(
+        [el.attr('name'),el.attr('id'),el.attr('placeholder'),el.attr('aria-label')]
+          .filter(Boolean).join(' '));
+  }).first();
+  const captchaField = captchaInput.attr('name') || 'CaptchaInputText';
   const tokenInput = form.find('input[name="CaptchaDeText"],input[name="CaptchaToken"]').first();
-  const token = tokenInput.val();
   const imagePath = form.find('img#CaptchaImage, img[src*="Captcha"], img[src*="captcha"]').first().attr('src')
     || $('img#CaptchaImage, img[src*="Captcha"], img[src*="captcha"]').first().attr('src');
-  const error = $('.text-danger, .validation-summary-errors, .field-validation-error').text().trim();
-  const hiddenFields: Record<string,string> = {};
-  form.find('input[type="hidden"][name]').each((_, el) => {
-    const name = $(el).attr('name') || '';
-    if (name) hiddenFields[name] = String($(el).val() || '');
+  const error = form.find('.validation-summary-errors, .field-validation-error').text().trim()
+    || $('.validation-summary-errors').text().trim();
+  const hiddenFields: Record<string, string> = {};
+  form.find('input[type="hidden"][name]').each((_, node) => {
+    const el = $(node), name = el.attr('name') || '';
+    if (name) hiddenFields[name] = String(el.val() || '');
   });
+
   return {
-    token: String(token || ''),
+    token: String(tokenInput.val() || ''),
     imagePath,
     error,
     field,
+    captchaField,
+    method: (form.attr('method') || 'POST').toUpperCase() === 'GET' ? 'GET' as const : 'POST' as const,
     formAction: form.attr('action') || '',
-    hiddenFields
+    hiddenFields,
+    formFound: Boolean(form.length)
   };
 }
-
 
 type ThaiSonDownloadTarget = {
   path: string;
@@ -208,6 +250,12 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
     for (let attempt = 0; attempt < 2; attempt++) {
       const page = await request(portalBase);
       const form = parseThaiSonForm(await page.text());
+      if (!form.formFound || !form.field) {
+        throw new OriginalInvoiceError(
+          'Không xác định được trường mã nhận hóa đơn của biểu mẫu tra cứu trên ' + host + '.',
+          'THAISON', 'LOOKUP_FORM_NOT_FOUND', 422, portalBase
+        );
+      }
       if (!form.imagePath) throw new Error('Cổng Thái Sơn không trả về CAPTCHA của biểu mẫu tra cứu; không thể tải PDF tự động trên cổng này.');
       const image = await request(form.imagePath);
       const mime = (image.headers.get('content-type') || 'image/gif').split(';')[0];
@@ -216,11 +264,13 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       signal.throwIfAborted();
       const payload = new URLSearchParams(form.hiddenFields);
       payload.set(form.field, params.lookupCode.trim());
-      payload.set('CaptchaInputText', code);
+      payload.set(form.captchaField, code);
       if (form.token) payload.set('CaptchaDeText', form.token);
-      const result = await request(form.formAction ? new URL(form.formAction, portalBase).toString() : portalBase, {
-        method: 'POST',
-        body: payload.toString(),
+      const actionUrl = new URL(form.formAction || portalBase, portalBase);
+      if (form.method === 'GET') payload.forEach((value, name) => actionUrl.searchParams.set(name, value));
+      const result = await request(actionUrl.toString(), {
+        method: form.method,
+        body: form.method === 'POST' ? payload.toString() : undefined,
       });
       const resultBody = Buffer.from(await result.arrayBuffer());
       if (resultBody.subarray(0, 5).toString() === '%PDF-') {
