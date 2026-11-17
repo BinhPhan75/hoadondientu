@@ -748,6 +748,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     if (!effectiveInvoice?.rawXml) return;
+    // iHoaDon needs its own provider workflow. A verified E-Invoice tenant
+    // URL must not be sent to the generic Thai Son PDF downloader either.
+    const explicitPortal = effectiveInvoice.lookupUrl || '';
+    if (provider === 'IHOADON' ||
+        /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(explicitPortal)) return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider]);
 
@@ -792,7 +797,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (tax) lookupDetails.lookupUrl = `https://${tax}-tt78.vnpt-invoice.com.vn`;
     }
     if (autoDetectedProvider === 'MISA') lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
-    if (autoDetectedProvider === 'THAISON') lookupDetails.lookupUrl = 'https://einvoice.vn/tra-cuu';
+    if (autoDetectedProvider === 'THAISON' && !lookupDetails.lookupUrl) {
+      lookupDetails.lookupUrl = 'https://einvoice.vn/tra-cuu';
+    }
     if (autoDetectedProvider === 'MINVOICE') lookupDetails.lookupUrl = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
 
     safeItems = ensureInvoiceItems(effectiveInvoice);
