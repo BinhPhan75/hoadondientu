@@ -240,7 +240,7 @@ export function verifiedThaiSonInvoiceHtml(
   }
   // Never return a blank search shell as a successful "HTML original".
   // Keep normal issuer HTML only when it already exposes invoice rows.
-  const visibleText = ($('#multi-page').text() || $('body').text()).replace(/\\s+/g, ' ');
+  const visibleText = ($('#multi-page').text() || $('body').text()).replace(/\s+/g, ' ');
   const hasInvoiceTable = $('table tr').length >= 3;
   if (!hasInvoiceTable || !visibleText.trim()) return;
   $('script, iframe, object, embed, form, input, button, meta[http-equiv=refresh]').remove();
