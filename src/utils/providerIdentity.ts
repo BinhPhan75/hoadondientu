@@ -14,7 +14,7 @@ const PORTALS: Record<string, string[]> = {
 export const SELLER_LOOKUP_PORTALS: Record<string, string> = {
   // Only this Co.opmart branch has a verified, tenant-specific lookup portal.
   // Never reuse it for every Thai Son/einvoice tenant.
-  '0301175691-021': 'https://saigoncoop.einvoice.com.vn/xem-hoa-don',
+  '0301175691-021': 'https://saigoncoop.einvoice.com.vn/',
 };
 
 export function lookupPortalForSeller(taxCode: string | undefined): string | undefined {
