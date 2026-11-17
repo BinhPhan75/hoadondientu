@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import JSZip from 'jszip';
 import { solveCaptchaWithGemini, ALPHANUMERIC_CAPTCHA_PROMPT } from './invoice-engine/captcha/geminiCaptchaSolver';
 import { OriginalInvoiceError } from './invoice-engine/OriginalInvoiceError';
 
@@ -199,6 +200,36 @@ export function verifiedThaiSonInvoiceHtml(
   return $.html();
 }
 
+/**
+ * Accept a provider PDF directly, or a provider ZIP. If the ZIP contains
+ * a PDF use it for preview; otherwise retain the signed XML archive.
+ */
+export async function extractThaiSonOriginalContent(
+  bytes: Buffer
+): Promise<{ bytes: Buffer; type: string; extension: '.pdf' | '.zip' } | undefined> {
+  if (bytes.length > 5 && bytes.subarray(0, 5).toString('latin1') === '%PDF-') {
+    return { bytes, type: 'application/pdf', extension: '.pdf' };
+  }
+  if (bytes.length < 4 || bytes.subarray(0, 4).toString('latin1') !== 'PK\u0003\u0004' ||
+      bytes.length > 30_000_000) return;
+  try {
+    const archive = await JSZip.loadAsync(bytes, { checkCRC32: false });
+    const entries = Object.values(archive.files);
+    const pdfs = entries.filter(file => !file.dir && /\\.pdf$/i.test(file.name));
+    for (const pdf of pdfs.slice(0, 5)) {
+      if (pdf._data && (pdf._data as any).uncompressedSize > 25_000_000) continue;
+      const content = await pdf.async('nodebuffer');
+      if (content.subarray(0, 5).toString('latin1') === '%PDF-') {
+        return { bytes: content, type: 'application/pdf', extension: '.pdf' };
+      }
+    }
+    if (entries.some(file => !file.dir && /\\.xml$/i.test(file.name))) {
+      return { bytes, type: 'application/zip', extension: '.zip' };
+    }
+  } catch {
+    // Invalid or unsupported archive; do not treat it as a signed invoice.
+  }
+}
 export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams): Promise<ThaiSonDownloadResult> {
   if (!params.lookupCode?.trim()) throw new OriginalInvoiceError('Thái Sơn thiếu Mã nhận hóa đơn.', 'THAISON', 'LOOKUP_DATA_MISSING', 422);
   const portal = new URL(params.portalUrl || THAISON_PORTAL_URL);
@@ -273,11 +304,12 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         body: form.method === 'POST' ? payload.toString() : undefined,
       });
       const resultBody = Buffer.from(await result.arrayBuffer());
-      if (resultBody.subarray(0, 5).toString() === '%PDF-') {
+      const directOriginal = await extractThaiSonOriginalContent(resultBody);
+      if (directOriginal) {
         return {
-          success: true, contentType: 'application/pdf', pdfBuffer: resultBody,
-          pdfBase64: resultBody.toString('base64'),
-          filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + '.pdf',
+          success: true, contentType: directOriginal.type, pdfBuffer: directOriginal.bytes,
+          pdfBase64: directOriginal.bytes.toString('base64'),
+          filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + directOriginal.extension,
           sourceUrl: result.url
         };
       }
@@ -291,7 +323,7 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       const queue = extractThaiSonDownloadTargets(html)
         .map(target => ({ ...target, base: result.url, depth: 0 }));
       const seenTargets = new Set<string>();
-      let pdfBuffer: Buffer | null = null;
+      let originalContent: Awaited<ReturnType<typeof extractThaiSonOriginalContent>>;
       // Follow only links and forms advertised by the issuer's page.
       // Nested iframe pages can themselves contain the printable PDF URL.
       while (queue.length && seenTargets.size < 18) {
@@ -311,8 +343,9 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
             body: target.method === 'POST' ? target.data : undefined
           });
           const bytes = Buffer.from(await targetResponse.arrayBuffer());
-          if (bytes.length > 5 && bytes.subarray(0, 5).toString() === '%PDF-') {
-            pdfBuffer = bytes;
+          const candidate = await extractThaiSonOriginalContent(bytes);
+          if (candidate) {
+            originalContent = candidate;
             break;
           }
           const mime = targetResponse.headers.get('content-type') || '';
@@ -328,7 +361,7 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
           console.warn('[ThaiSon] Provider link did not return PDF:', target.path.slice(0, 140), error?.message);
         }
       }
-      if (!pdfBuffer) {
+      if (!originalContent) {
         if (displayHtml) {
           const htmlBuffer = Buffer.from(displayHtml, 'utf8');
           return {
@@ -344,8 +377,9 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         );
       }
       return {
-        success: true, contentType: 'application/pdf', pdfBuffer, pdfBase64: pdfBuffer.toString('base64'),
-        filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + '.pdf',
+        success: true, contentType: originalContent.type,
+        pdfBuffer: originalContent.bytes, pdfBase64: originalContent.bytes.toString('base64'),
+        filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + originalContent.extension,
         sourceUrl: portalBase,
       };
     }
