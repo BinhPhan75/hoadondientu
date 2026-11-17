@@ -1,0 +1,52 @@
+name: Temporary M-invoice public portal diagnostic
+on:
+  push:
+    paths: ['.github/workflows/minvoice-inspect.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect M-invoice public website JS without invoice data
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.parse,html.parser,re
+          url='https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don'
+          ua={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/xhtml+xml,*/*'}
+          class Page(html.parser.HTMLParser):
+            def __init__(self): super().__init__();self.scripts=[]
+            def handle_starttag(self,tag,attrs):
+              d=dict(attrs)
+              if tag=='script' and d.get('src'):self.scripts.append(d['src'])
+          try:
+            req=urllib.request.Request(url,headers=ua)
+            with urllib.request.urlopen(req,timeout=20) as res:
+              body=res.read(700000).decode('utf8','replace')
+              print('STATUS',res.status,'URL',res.url,'BYTES',len(body))
+            doc=Page();doc.feed(body)
+            print('SCRIPTS',doc.scripts[:20])
+            domains=['SearchInvoiceCaptcha','SearchInvoice','DownloadXml','grecaptcha','recaptcha','DownloadPDF','api/Search/','sobaomat','masothue','captchatoken']
+            for path in doc.scripts[:12]:
+              if not path.endswith('.js') and '.js?' not in path:continue
+              target=urllib.parse.urljoin(url,path)
+              if urllib.parse.urlparse(target).hostname not in ['tracuuhoadon.minvoice.com.vn','www.tracuuhoadon.minvoice.com.vn']:continue
+              print('SCRIPT',target)
+              try:
+                req2=urllib.request.Request(target,headers=ua)
+                with urllib.request.urlopen(req2,timeout=25) as res:
+                  src=res.read(8000000).decode('utf8','replace')
+                print('JS_BYTES',len(src))
+                for needle in domains:
+                  matches=list(re.finditer(re.escape(needle),src,re.I))
+                  if matches:
+                    print('TERM',needle,'COUNT',len(matches))
+                    for m in matches[:3]:
+                      print('CTX',src[max(0,m.start()-120):m.end()+200].replace('\n',' ')[:350])
+              except Exception as err:
+                print('SCRIPT_ERROR',type(err).__name__,str(err)[:160])
+          except Exception as err:
+            print('ERROR',type(err).__name__,str(err)[:160])
+          PY
