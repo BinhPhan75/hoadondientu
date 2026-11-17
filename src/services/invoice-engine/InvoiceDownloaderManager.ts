@@ -15,6 +15,7 @@ import {
 } from './types';
 import { CaptchaSolver } from './captcha/CaptchaSolver';
 import { OriginalInvoiceError } from './OriginalInvoiceError';
+import { verifyIssuerInvoiceBytes } from '../invoiceIdentityVerifier';
 import { MisaDriver } from './drivers/MisaDriver';
 import { ViettelDriver } from './drivers/ViettelDriver';
 import { FourSiDriver } from './drivers/FourSiDriver';
@@ -257,6 +258,23 @@ export class InvoiceDownloaderManager {
       try {
         this.log(`Đang thực thi crawl từ server nhà cung cấp [${selectedDriver.providerCode}]...`, overallLogs);
         const result = await selectedDriver.fetchPdf(invoiceInfo, options);
+        if (['THAISON', 'MISA'].includes(selectedDriver.providerCode) &&
+            /^(application\/pdf|application\/zip)/i.test(result.contentType || '')) {
+          const validation = await verifyIssuerInvoiceBytes(result.pdfBuffer, result.contentType, {
+            sellerTaxCode: invoiceInfo.sellerTaxCode,
+            invoiceNo: invoiceInfo.invoiceNo,
+            invoiceSeries: invoiceInfo.invoiceSeries,
+          });
+          if (!validation.ok) {
+            this.log('[TỪ CHỐI FILE KHÔNG KHỚP] ' + validation.reason, overallLogs);
+            throw new OriginalInvoiceError(
+              'Tệp trả về chưa được xác thực là đúng hóa đơn gốc: ' + validation.reason,
+              selectedDriver.providerCode, 'ORIGINAL_IDENTITY_MISMATCH', 422,
+              invoiceInfo.lookupUrl,
+            );
+          }
+          this.log('[XÁC MINH BẢN GỐC] ' + validation.reason, overallLogs);
+        }
         
         result.executionLogs = overallLogs.concat(result.executionLogs);
         this.log(`[HOÀN TẤT] Tải PDF gốc thành công trong ${Date.now() - startTime}ms`, result.executionLogs);
