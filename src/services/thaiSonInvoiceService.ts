@@ -298,9 +298,10 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
     // Only a rejected CAPTCHA warrants a new challenge. Other errors stop here.
     for (let attempt = 0; attempt < 2; attempt++) {
       const page = await request(portalBase);
-      const form = parseThaiSonForm(await page.text());
+      const searchPageHtml = await page.text();
+      const form = parseThaiSonForm(searchPageHtml);
       if (!form.formFound || !form.field) {
-        const diagnostics = diagnoseThaiSonSearchPage(await request(portalBase).then(r => r.text()));
+        const diagnostics = diagnoseThaiSonSearchPage(searchPageHtml);
         console.warn('[ThaiSon] Cannot detect native search form', {
           host, forms: diagnostics.forms, inputs: diagnostics.inputs,
           scriptCount: diagnostics.scripts, clientRendered: diagnostics.clientRendered
