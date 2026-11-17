@@ -77,17 +77,9 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
       try {
         this.createLog('Đã có Mã nhận hóa đơn Thái Sơn.', logs);
         const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || 'https://einvoice.vn/tra-cuu';
-        // The standard downloader only supports einvoice.vn. Tenant portals
-        // have independent sessions, form fields and download endpoints.
-        const portalHost = new URL(portal).hostname.toLowerCase();
-        if (portalHost !== 'einvoice.vn' && portalHost !== 'www.einvoice.vn') {
-          throw new OriginalInvoiceError(
-            'Hóa đơn sử dụng cổng riêng ' + portalHost + '. Hãy mở đúng cổng và nhập mã nhận hóa đơn; không dùng API Thái Sơn chung để tải PDF.',
-            this.providerCode, 'TENANT_PORTAL_REQUIRED', 422, portal
-          );
-        }
-        this.createLog('Đang tra cứu trên cổng Thái Sơn chung...', logs);
+        this.createLog('Đang thử tải bản gốc từ cổng hóa đơn Thái Sơn: ' + new URL(portal).hostname, logs);
         const result = await downloadOriginalThaiSonPdf({
+          portalUrl: portal,
           lookupCode: info.lookupCode,
           sellerTaxCode: info.sellerTaxCode,
           invoiceNo: info.invoiceNo,
