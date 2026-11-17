@@ -2,12 +2,13 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
-import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl } from '../src/utils/providerIdentity';
+import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller } from '../src/utils/providerIdentity';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
 import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml } from '../src/utils/xmlParser';
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
+import { parseThaiSonForm } from '../src/services/thaiSonInvoiceService';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
 import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
@@ -61,6 +62,28 @@ test('Thai Son Co.opmart driver retains tenant portal and unique lookup code', (
   assert.equal(info.lookupUrl, 'https://saigoncoop.einvoice.com.vn/');
   assert.equal(resolveInvoiceProvider({ rawXml: xml, nbmst: '0301175691-021' }), 'THAISON');
   assert.equal(buildDirectLookupUrl(info.lookupUrl, info.lookupCode, 'THAISON', info.sellerTaxCode), info.lookupUrl);
+});
+
+test('Golden Gate POS XML has Ma TC but no DCTC; use its verified invoice portal', () => {
+  const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>Mã TC</TTruong><DLieu>MTZUYWLM8</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>0102721191-001</MST></NBan></NDHDon></DLHDon></HDon>';
+  const raw = extractLookupDetailsFromXml(xml);
+  assert.equal(raw.lookupCode, 'MTZUYWLM8');
+  const portal = lookupPortalForSeller('0102721191-001');
+  assert.equal(portal, 'https://vat.ggg.com.vn/');
+  const thai = new ThaiSonDriver();
+  const info = thai.extractInfo(xml);
+  assert.equal(info.provider, 'THAISON');
+  assert.equal(info.lookupCode, 'MTZUYWLM8');
+  assert.equal(info.lookupUrl, portal);
+  assert.equal(resolveInvoiceProvider({ rawXml: xml, nbmst: '0102721191-001' }), 'THAISON');
+});
+
+test('Thai Son parser accepts either MaNhanHoaDon or MaTraCuu without guessing', () => {
+  const orig = parseThaiSonForm('<form action="/tim-hoa-don"><input name="MaTraCuu"/><input name="CaptchaDeText" type="hidden" value="T1"/><img id="CaptchaImage" src="/captcha"/></form>');
+  assert.equal(orig.field, 'MaTraCuu');
+  assert.equal(orig.formAction, '/tim-hoa-don');
+  assert.equal(orig.token, 'T1');
+  assert.equal(orig.imagePath, '/captcha');
 });
 
 test('MISA and Thai Son domain boundaries do not overlap', () => {
