@@ -1,22 +1,26 @@
 import type { GDTInvoice } from '../types';
 import { extractTagValue } from './xmlParser';
-import { providerFromPortal, providerFromXmlPortal, SOLUTION_PROVIDERS } from './providerIdentity';
+import { providerFromPortal, providerFromXmlPortal, SOLUTION_PROVIDERS, lookupPortalForSeller } from './providerIdentity';
 
 const KNOWN_PROVIDERS = new Set([
   'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', '4SI', 'LCS', 'MINVOICE', 'THAISON',
-  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT',
+  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT', 'IHOADON',
 ]);
 
 /** Use invoice portal/solution metadata before older inferred provider labels. */
 export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | undefined): string | undefined {
   if (!invoice) return undefined;
   const xml = String(invoice.rawXml || '');
+  // Explicit issuer portal wins: one e-invoice solution can serve many tenant domains.
   const xmlPortal = providerFromXmlPortal(xml);
   if (xmlPortal) return xmlPortal;
   for (const tag of ['Website', 'Wsite', 'DLTCuu', 'URLTraCuu', 'LinkTraCuu', 'lookupUrl']) {
     const provider = providerFromPortal(extractTagValue(xml, tag));
     if (provider) return provider;
   }
+  const sellerMst = String(invoice.nbmst || '').trim();
+  const sellerPortal = lookupPortalForSeller(sellerMst);
+  if (sellerPortal && providerFromPortal(sellerPortal)) return providerFromPortal(sellerPortal);
   const xmlTax = extractTagValue(xml, 'MSTTCGP').replace(/\D/g, '');
   if (SOLUTION_PROVIDERS[xmlTax]) return SOLUTION_PROVIDERS[xmlTax];
   const tax = String(invoice.msttcgp || '').replace(/\D/g, '');
