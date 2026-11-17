@@ -10,39 +10,30 @@ import { detectProvider } from '../providerDetector';
 import { extractLookupDetailsFromXml } from '../../../utils/xmlParser';
 import { OriginalInvoiceError } from '../OriginalInvoiceError';
 
-/** Public meInvoice linkview returns { Success, Data: "https://.../downloadhandler.ashx?..." }.
- * Only return HTTPS links on the documented issuer domain; never fetch
- * arbitrary URLs from a nested JSON response.
- */
-export function findMisaPdfUrl(payload: unknown, seen = new Set<unknown>()): string | undefined {
-  const urlCandidate = (value: unknown): string | undefined => {
-    if (typeof value !== 'string') return;
-    try {
-      const url = new URL(value);
-      if (url.protocol !== 'https:' || url.username || url.password || url.port) return;
-      if (url.hostname !== 'meinvoice.vn' && !url.hostname.endsWith('.meinvoice.vn')) return;
-      if (!/downloadhandler|download[/-]|\.pdf(?:$|[?#])/i.test(url.pathname)) return;
-      return url.href;
-    } catch { return; }
-  };
-  const direct = urlCandidate(payload);
-  if (direct) return direct;
-  if (!payload || typeof payload !== 'object' || seen.has(payload)) return;
+function findMisaPdfUrl(payload: unknown, seen = new Set<unknown>()): string | undefined {
+  if (!payload || typeof payload !== 'object' || seen.has(payload)) return undefined;
   seen.add(payload);
+
   if (Array.isArray(payload)) {
-    for (const val of payload) {
-      const found = findMisaPdfUrl(val, seen);
+    for (const value of payload) {
+      if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+      const found = findMisaPdfUrl(value, seen);
       if (found) return found;
     }
-    return;
+    return undefined;
   }
-  const body = payload as Record<string, unknown>;
-  if (body.Success === false || body.success === false) return;
-  for (const key of ['Data', 'data', 'pdfUrl', 'pdfURL', 'downloadUrl', 'fileUrl', 'url', 'Url', 'link']) {
-    const found = findMisaPdfUrl(body[key], seen);
+
+  const record = payload as Record<string, unknown>;
+  for (const key of ['pdfUrl', 'pdfURL', 'fileUrl', 'fileURL', 'downloadUrl', 'downloadURL', 'url', 'Url', 'link', 'Link']) {
+    const value = record[key];
+    if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+  }
+  for (const value of Object.values(record)) {
+    if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+    const found = findMisaPdfUrl(value, seen);
     if (found) return found;
   }
-  return;
+  return undefined;
 }
 
 export class MisaDriver extends BaseInvoiceProviderDriver {
@@ -145,108 +136,6 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
     const cleanMst = (info.sellerTaxCode || '').trim();
     let lastError = '';
 
-    // MISA publishes a buyer-facing (no API credentials) flow in its
-    // ViewInvoice documentation: GetRequestTimeEnCode supplies an 8-character
-    // "ext" for download.meinvoice.vn/downloadhandler.ashx.
-    // If this public flow is unavailable, preserve the existing API probes
-    // and the browser viewer rather than treating HTTP 403 as a bad code.
-    if (cleanLookupCode && /^[A-Za-z0-9_-]{6,128}$/.test(cleanLookupCode)) {
-      try {
-        const clock = await axios.get('https://meinvoice.vn/tra-cuu/GetRequestTimeEnCode', {
-          timeout: Math.min(timeoutMs, 10000),
-          responseType: 'text',
-          headers: {
-            Accept: 'text/plain,application/json,*/*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36'
-          }
-        });
-        const encodedTime = typeof clock.data === 'string' ? clock.data : JSON.stringify(clock.data);
-        const ext = encodedTime.length >= 63 ? encodedTime.substring(55, 63) : '';
-        if (/^[A-Za-z0-9]{8}$/.test(ext)) {
-          const officialUrl = 'https://download.meinvoice.vn/downloadhandler.ashx?type=pdf&code=' +
-            encodeURIComponent(cleanLookupCode) + '&viewer=1&ext=' + encodeURIComponent(ext);
-          const pdfResponse = await axios.get(officialUrl, {
-            timeout: timeoutMs,
-            responseType: 'arraybuffer',
-            headers: {
-              Accept: 'application/pdf,application/octet-stream,*/*',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
-              Referer: 'https://meinvoice.vn/tra-cuu/'
-            }
-          });
-          const pdfBuffer = Buffer.from(pdfResponse.data);
-          if (pdfBuffer.length > 50 && pdfBuffer.subarray(0, 5).toString('latin1') === '%PDF-') {
-            this.createLog('[MISA] Nhận PDF từ cổng tải công khai của MISA.', logs);
-            return {
-              success: true, provider: this.providerCode, driverName: this.name,
-              pdfBuffer, pdfBase64: pdfBuffer.toString('base64'),
-              contentType: 'application/pdf', filename: this.buildPdfFilename(info),
-              isFallback: false, sourceUrl: officialUrl, executionLogs: logs
-            };
-          }
-        } else {
-          this.createLog('[MISA] Cổng công khai không trả về token tải đúng định dạng.', logs);
-        }
-      } catch (error: any) {
-        lastError = error.message || String(error);
-        this.createLog('[MISA] Cổng tải công khai chưa hoạt động: ' + lastError, logs);
-      }
-    }
-
-    // Public meInvoice API: resolve the transaction ID to the provider's
-    // signed PDF URL before trying legacy viewer endpoints.
-    if (cleanLookupCode) {
-      try {
-        this.createLog('[MISA] Xin link PDF chính thức qua invoicepublished/linkview...', logs);
-        const linkResponse = await axios.post(
-          'https://www.meinvoice.vn/api/v3/invoicepublished/linkview',
-          JSON.stringify([cleanLookupCode]),
-          {
-            timeout: timeoutMs,
-            responseType: 'json',
-            headers: {
-              'Content-Type': 'application/json',
-              Accept: 'application/json, text/plain, */*',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
-              Referer: 'https://www.meinvoice.vn/tra-cuu'
-            }
-          }
-        );
-        const pdfUrl = findMisaPdfUrl(linkResponse.data);
-        if (pdfUrl) {
-          const pdfResponse = await axios.get(pdfUrl, {
-            timeout: timeoutMs,
-            responseType: 'arraybuffer',
-            headers: {
-              Accept: 'application/pdf,application/octet-stream,*/*',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
-              Referer: 'https://www.meinvoice.vn/tra-cuu'
-            }
-          });
-          const pdfBuffer = Buffer.from(pdfResponse.data);
-          if (pdfBuffer.length > 50 && pdfBuffer.toString('latin1', 0, 5).startsWith('%PDF')) {
-            this.createLog(`[MISA] Tải thành công PDF qua linkview (${(pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
-            return {
-              success: true,
-              provider: this.providerCode,
-              driverName: this.name,
-              pdfBuffer,
-              pdfBase64: pdfBuffer.toString('base64'),
-              contentType: 'application/pdf',
-              filename: this.buildPdfFilename(info),
-              isFallback: false,
-              sourceUrl: pdfUrl,
-              executionLogs: logs
-            };
-          }
-        }
-        this.createLog('[MISA] linkview không trả về URL PDF hợp lệ, tiếp tục thử endpoint tương thích.', logs);
-      } catch (err: any) {
-        lastError = err.message || String(err);
-        this.createLog(`[MISA] linkview chưa dùng được: ${lastError}`, logs);
-      }
-    }
-
     // Public MISA lookup links issue the original PDF directly from
     // DownloadHandler.ashx. This is the current documented buyer-facing
     // route; the older v3 linkview API is retained below only for older
@@ -305,6 +194,60 @@ export class MisaDriver extends BaseInvoiceProviderDriver {
       } catch (error: any) {
         lastError = error.message || String(error);
         this.createLog(`[MISA] DownloadHandler chưa dùng được: ${lastError}`, logs);
+      }
+    }
+
+    // Public meInvoice API: resolve the transaction ID to the provider's
+    // signed PDF URL before trying legacy viewer endpoints.
+    if (cleanLookupCode) {
+      try {
+        this.createLog('[MISA] Xin link PDF chính thức qua invoicepublished/linkview...', logs);
+        const linkResponse = await axios.post(
+          'https://www.meinvoice.vn/api/v3/invoicepublished/linkview',
+          JSON.stringify([cleanLookupCode]),
+          {
+            timeout: timeoutMs,
+            responseType: 'json',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json, text/plain, */*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
+              Referer: 'https://www.meinvoice.vn/tra-cuu'
+            }
+          }
+        );
+        const pdfUrl = findMisaPdfUrl(linkResponse.data);
+        if (pdfUrl) {
+          const pdfResponse = await axios.get(pdfUrl, {
+            timeout: timeoutMs,
+            responseType: 'arraybuffer',
+            headers: {
+              Accept: 'application/pdf,application/octet-stream,*/*',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36',
+              Referer: 'https://www.meinvoice.vn/tra-cuu'
+            }
+          });
+          const pdfBuffer = Buffer.from(pdfResponse.data);
+          if (pdfBuffer.length > 50 && pdfBuffer.toString('latin1', 0, 5).startsWith('%PDF')) {
+            this.createLog(`[MISA] Tải thành công PDF qua linkview (${(pdfBuffer.length / 1024).toFixed(1)} KB)`, logs);
+            return {
+              success: true,
+              provider: this.providerCode,
+              driverName: this.name,
+              pdfBuffer,
+              pdfBase64: pdfBuffer.toString('base64'),
+              contentType: 'application/pdf',
+              filename: this.buildPdfFilename(info),
+              isFallback: false,
+              sourceUrl: pdfUrl,
+              executionLogs: logs
+            };
+          }
+        }
+        this.createLog('[MISA] linkview không trả về URL PDF hợp lệ, tiếp tục thử endpoint tương thích.', logs);
+      } catch (err: any) {
+        lastError = err.message || String(err);
+        this.createLog(`[MISA] linkview chưa dùng được: ${lastError}`, logs);
       }
     }
 
