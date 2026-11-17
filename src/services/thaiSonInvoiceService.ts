@@ -207,6 +207,42 @@ export function verifiedThaiSonInvoiceHtml(
       !/hóa\s*đơn|hoá\s*đơn|hoa\s*don|vat\s*invoice|tax\s*invoice/i.test(text)) {
     return;
   }
+  // Many Thai Son XSLT layouts keep the invoice in #invoice-data (hidden)
+  // and rely on the page's loadData() script to copy it into #multi-page.
+  // Build that static page ourselves, so removing untrusted JavaScript does
+  // not make the invoice blank.
+  const source = $('#invoice-data');
+  const output = $('#multi-page');
+  if (source.length && output.length &&
+      source.find('#headerTemp').length && source.find('#invoiceItems').length) {
+    const header = source.find('#headerTemp').html() || '';
+    const items = source.find('#invoiceItems').html() || '';
+    const footer = source.find('#footerTemp').html() || '';
+    const background = source.children('.background').html() || '';
+    output.html('<div class="page thai-son-static-page">' +
+      '<div class="page-content">' +
+      '<div class="background">' + background + '</div>' +
+      '<div class="header">' + header + '</div>' +
+      '<div class="content">' + items + '</div>' +
+      '<div class="footer">' + footer + '</div>' +
+      '</div><div class="page-number"></div></div>');
+    source.remove();
+    $('head').append('<style id="tha-son-static-print">' +
+      '.thai-son-static-page{page-break-after:auto!important;padding:10px 0!important}' +
+      '.thai-son-static-page .page-content{height:auto!important;min-height:950px;' +
+      'display:block!important;overflow:visible!important;position:relative!important}' +
+      '.thai-son-static-page .content,.thai-son-static-page .header,' +
+      '.thai-son-static-page .footer{display:block!important;height:auto!important;' +
+      'overflow:visible!important}' +
+      '.thai-son-static-page table{max-width:100%}' +
+      '@media print{.thai-son-static-page{page-break-after:auto!important}}' +
+      '</style>');
+  }
+  // Never return a blank search shell as a successful "HTML original".
+  // Keep normal issuer HTML only when it already exposes invoice rows.
+  const visibleText = ($('#multi-page').text() || $('body').text()).replace(/\\s+/g, ' ');
+  const hasInvoiceTable = $('table tr').length >= 3;
+  if (!hasInvoiceTable || !visibleText.trim()) return;
   $('script, iframe, object, embed, form, input, button, meta[http-equiv=refresh]').remove();
   // The provider HTML is untrusted content. Strip executable attributes
   // before putting it into a browser srcDoc frame.
