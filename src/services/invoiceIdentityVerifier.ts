@@ -15,6 +15,7 @@ function digits(value: string | undefined): string {
 
 function compact(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/Đ/g, 'D').replace(/đ/g, 'd')
     .replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 }
 
@@ -69,7 +70,7 @@ export async function verifyIssuerInvoiceBytes(
     try {
       const text = await extractPdfText(bytes);
       if (!text.trim()) return { ok: false, reason: 'Không trích xuất được thông tin định danh hóa đơn từ PDF.' };
-      if (!/(?:H[oóòỏõọ]a\s*[đd]ơn|invoice)/i.test(text)) {
+      if (!compact(text).includes('HOADON') && !compact(text).includes('INVOICE')) {
         return { ok: false, reason: 'PDF không thể hiện là hóa đơn.' };
       }
       return matchesIdentity(text, identity);
