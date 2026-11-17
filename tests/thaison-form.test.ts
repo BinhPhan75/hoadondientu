@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseThaiSonForm } from '../src/services/thaiSonInvoiceService';
+import { normalizeThaiSonPortalUrl } from '../src/utils/providerIdentity';
+import { getLookupUrlFromPayload } from '../src/utils/xmlParser';
 
 const publicPortalHtml = `<!doctype html><html><body>
   <form action="/xem-hoa-don" id="formgr" method="post">
@@ -30,4 +32,18 @@ test('Public Thai Son Co.opmart and Golden Gate lookup fields are detected', () 
 test('Pre-existing generic Thai Son lookup field remains compatible', () => {
   const html = '<form method="POST" action="/tra-cuu"><input name="MaNhanHoaDon" type="text"><input name="CaptchaInputText" type="text"><img id="CaptchaImage" src="/captcha"></form>';
   assert.equal(parseThaiSonForm(html).field, 'MaNhanHoaDon');
+});
+
+test('Historical HTTP tenant lookup links upgrade to HTTPS without seller-specific hardcoding', () => {
+  assert.equal(normalizeThaiSonPortalUrl('http://uniqlo.einvoice.com.vn/'),
+    'https://uniqlo.einvoice.com.vn/');
+  assert.equal(normalizeThaiSonPortalUrl('saigoncoop.einvoice.com.vn'),
+    'https://saigoncoop.einvoice.com.vn/');
+  assert.equal(normalizeThaiSonPortalUrl('https://vat.ggg.com.vn/'),
+    'https://vat.ggg.com.vn/');
+  assert.equal(normalizeThaiSonPortalUrl('http://127.0.0.1:8000/'), '');
+  assert.equal(normalizeThaiSonPortalUrl('http://example.com'), '');
+  const source = { nbmst: '0315304731', msttcgp: '0101300842',
+    lookupUrl: 'http://uniqlo.einvoice.com.vn/' };
+  assert.equal(getLookupUrlFromPayload(source), 'https://uniqlo.einvoice.com.vn/');
 });
