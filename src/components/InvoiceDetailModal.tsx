@@ -1354,7 +1354,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       srcDoc={prepareOriginalInvoiceHtml(originalEasyInvoiceHtml || originalVnptHtml || '')}
                       title={`Bản gốc ${currentProviderMeta.name}`}
                       className="w-full h-[1200px] border-0 bg-white"
-                      sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
+                      sandbox={isThaiSonInvoice
+                        ? "allow-same-origin"
+                        : "allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"}
                     />
                   ) : isLoadingDetail ? (
                     <div className="min-h-[600px] flex flex-col items-center justify-center p-8 text-center bg-white">
