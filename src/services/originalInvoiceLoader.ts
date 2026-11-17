@@ -1,6 +1,8 @@
 import type { GDTInvoice } from '../types';
 import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
+import { extractLookupDetailsFromXml } from '../utils/xmlParser';
+import { lookupPortalForSeller } from '../utils/providerIdentity';
 
 const pending = new Map<string, Promise<Blob>>();
 const failures = new Map<string, { expires: number; error: Error }>();
@@ -20,7 +22,13 @@ async function withDownloadSlot<T>(work: () => Promise<T>): Promise<T> {
 export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   const cacheKey = getInvoiceOriginalCacheKey(invoice);
   const provider = resolveInvoiceProvider(invoice);
-  const requestKey = JSON.stringify([cacheKey, provider, invoice.lookupCode, invoice.lookupUrl]);
+  const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
+  const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
+  const originalUrl = xmlLookup.lookupUrl || invoice.lookupUrl || '';
+  const isGenericThaiSon = !originalUrl || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(originalUrl);
+  const resolvedPortal = sellerPortal && isGenericThaiSon ? sellerPortal : originalUrl;
+  const resolvedCode = xmlLookup.lookupCode || invoice.lookupCode;
+  const requestKey = JSON.stringify([cacheKey, provider, resolvedCode, resolvedPortal]);
   const inFlight = pending.get(requestKey);
   if (inFlight) return inFlight;
   const task = (async () => {
@@ -38,8 +46,8 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
         body: JSON.stringify({
           xml: invoice.rawXml, timeoutMs: 45000, overrideProvider: provider,
           customInfo: {
-            lookupCode: invoice.lookupCode, sellerTaxCode: invoice.nbmst,
-            lookupUrl: invoice.lookupUrl, invoiceNo: invoice.shdon, invoiceSeries: invoice.khhdon,
+            lookupCode: resolvedCode, sellerTaxCode: invoice.nbmst,
+            lookupUrl: resolvedPortal, invoiceNo: invoice.shdon, invoiceSeries: invoice.khhdon,
             msttcgp: invoice.msttcgp, tentcgp: invoice.tentcgp,
           },
         }),
