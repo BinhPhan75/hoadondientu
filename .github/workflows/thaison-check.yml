@@ -7,6 +7,9 @@ on:
       - src/services/invoice-engine/drivers/MisaDriver.ts
       - src/services/invoice-engine/InvoiceDownloaderManager.ts
       - src/services/invoiceIdentityVerifier.ts
+      - src/services/invoice-engine/drivers/MinvoiceDriver.ts
+      - src/utils/providerRouting.ts
+      - server.ts
       - package.json
       - src/components/InvoiceDetailModal.tsx
       - src/utils/providerIdentity.ts
@@ -14,6 +17,7 @@ on:
       - tests/thaison-form.test.ts
       - tests/misa-original.test.ts
       - tests/original-identity.test.ts
+      - tests/minvoice-original.test.ts
       - tests/thaison-static.test.ts
       - .github/workflows/thaison-check.yml
   workflow_dispatch:
@@ -31,7 +35,7 @@ jobs:
       - name: Install project dependencies
         run: npm install --no-package-lock --no-audit --no-fund
       - name: Run Thai Son regression tests
-        run: npx tsx --test tests/thaison-form.test.ts tests/thaison-static.test.ts tests/misa-original.test.ts tests/original-identity.test.ts
+        run: npx tsx --test tests/thaison-form.test.ts tests/thaison-static.test.ts tests/misa-original.test.ts tests/original-identity.test.ts tests/minvoice-original.test.ts
       - name: Typecheck
         run: npm run lint
       - name: Build
