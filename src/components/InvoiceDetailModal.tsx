@@ -26,6 +26,7 @@ import {
   ProviderMeta 
 } from '../utils/multiTemplateRenderer';
 import { buildDirectLookupUrl, openVnptDirectPortal } from '../templates/templateUtils';
+import { easyInvoiceLookupPortals, easyInvoiceLookupUrl } from '../utils/providerIdentity';
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
@@ -859,28 +860,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const is4SiInvoice = autoDetectedProvider === '4SI' || autoDetectedProvider === 'LCS_SOFT';
 
   const easyInvoiceLookupCode = lookupDetails.lookupCode || effectiveInvoice?.lookupCode || effectiveInvoice?.mhdon || '';
+  const easyInvoicePortals = React.useMemo(() => {
+    return easyInvoiceLookupPortals(effectiveInvoice?.nbmst, lookupDetails.lookupUrl || effectiveInvoice?.lookupUrl);
+  }, [lookupDetails.lookupUrl, effectiveInvoice?.lookupUrl, effectiveInvoice?.nbmst]);
   const easyInvoicePortalUrl = React.useMemo(() => {
-    if (!effectiveInvoice) return 'https://tracuu.easyinvoice.vn';
-    const code = (easyInvoiceLookupCode || '').trim();
-    const sellerTax = (effectiveInvoice.nbmst || '').trim().replace(/[^0-9\-]/g, '');
-    let url = (lookupDetails.lookupUrl || '').trim();
-    if (url && /easyinvoice/i.test(url)) {
-      let clean = url.split('?')[0].replace(/\/+$/, '');
-      if (!/\/Search\/Index$/i.test(clean)) {
-        clean = `${clean}/Search/Index`;
-      }
-      return code ? `${clean}?fkey=${encodeURIComponent(code)}` : clean;
-    }
-    if (sellerTax) {
-      const cleanDigits = sellerTax.replace(/[^0-9]/g, '');
-      return code
-        ? `http://${cleanDigits}hd.easyinvoice.com.vn/Search/Index?fkey=${encodeURIComponent(code)}`
-        : `http://${cleanDigits}hd.easyinvoice.com.vn/Search/Index`;
-    }
-    return code
-      ? `https://tracuu.easyinvoice.vn/Search/Index?fkey=${encodeURIComponent(code)}`
-      : 'https://tracuu.easyinvoice.vn/Search/Index';
-  }, [lookupDetails.lookupUrl, easyInvoiceLookupCode, effectiveInvoice?.nbmst]);
+    return easyInvoiceLookupUrl(effectiveInvoice?.nbmst, easyInvoiceLookupCode, lookupDetails.lookupUrl || effectiveInvoice?.lookupUrl);
+  }, [lookupDetails.lookupUrl, effectiveInvoice?.lookupUrl, easyInvoiceLookupCode, effectiveInvoice?.nbmst]);
+  const easyInvoiceCommonUrl = React.useMemo(() => {
+    return easyInvoiceLookupUrl(undefined, easyInvoiceLookupCode, easyInvoicePortals.common);
+  }, [easyInvoiceLookupCode, easyInvoicePortals.common]);
+  const easyInvoiceSellerUrl = React.useMemo(() => (
+    easyInvoicePortals.seller
+      ? easyInvoiceLookupUrl(effectiveInvoice?.nbmst, easyInvoiceLookupCode, easyInvoicePortals.seller)
+      : ''
+  ), [effectiveInvoice?.nbmst, easyInvoiceLookupCode, easyInvoicePortals.seller]);
 
   if (renderError) {
     return (
@@ -1427,7 +1420,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     title={`Mở trực tiếp Cổng tra cứu EasyInvoice (${effectiveInvoice.nbmst || ''}) trên tab mới (Đã dán sẵn mã FKey: ${easyInvoiceLookupCode || ''})`}
                   >
                     <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Mở link tra cứu EasyInvoice</span>
+                    <span>Mở cổng EasyInvoice ưu tiên</span>
+                  </a>
+                )}
+                {easyInvoiceSellerUrl && easyInvoiceSellerUrl !== easyInvoicePortalUrl && (
+                  <a href={easyInvoiceSellerUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border rounded-lg border-sky-600 text-sky-200 bg-sky-950/70 hover:bg-sky-900">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Cổng riêng theo MST</span>
+                  </a>
+                )}
+                {easyInvoiceCommonUrl !== easyInvoicePortalUrl && (
+                  <a href={easyInvoiceCommonUrl} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border rounded-lg border-teal-600 text-teal-200 bg-teal-950/70 hover:bg-teal-900">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Cổng tra cứu chung</span>
                   </a>
                 )}
 
