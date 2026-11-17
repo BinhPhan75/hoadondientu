@@ -671,6 +671,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleViewOriginalProvider = async () => {
     if (!effectiveInvoice) return;
     const target = effectiveInvoice;
+    const actualProvider = resolveInvoiceProvider(target);
+    const extractedLookup = extractLookupDetails(target.rawXml);
+    const tenantUrl = extractedLookup.lookupUrl || target.lookupUrl || '';
+    const isSeparatePortal = actualProvider === 'IHOADON' ||
+      /^https?:\/\/[^/]+\.einvoice\.com\.vn(?:\/|$)/i.test(tenantUrl);
+    // Open the actual issuer portal. No verified server-side PDF API exists
+    // for every tenant; do not send these invoices to the generic Thai Son API.
+    if (isSeparatePortal && /^https?:\/\//i.test(tenantUrl)) {
+      window.open(
+        buildDirectLookupUrl(tenantUrl, extractedLookup.lookupCode || target.lookupCode, actualProvider, target.nbmst),
+        '_blank',
+        'noopener,noreferrer'
+      );
+      return;
+    }
     const sequence = ++originalLoadSequence.current;
     const isCurrent = () => openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence;
     setOriginalLoadError(null);
