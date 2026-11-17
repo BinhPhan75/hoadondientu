@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
-import { providerFromPortal } from '../src/utils/providerIdentity';
+import { providerFromPortal, easyInvoiceLookupPortals, easyInvoiceLookupUrl } from '../src/utils/providerIdentity';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
 import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml } from '../src/utils/xmlParser';
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
@@ -33,6 +33,24 @@ test('iHoaDon domain is independent of Thai Son even with a stale provider label
   assert.equal(resolveInvoiceProvider({ lookupUrl: 'https://ihoadon.vn/', provider: 'THAISON' }), 'IHOADON');
   assert.equal(detectProvider('<HDon><TTChung><LinkTraCuu>https://tracuu.ihoadon.vn/</LinkTraCuu></TTChung></HDon>'), 'IHOADON');
   assert.equal(buildDirectLookupUrl('https://tracuu.ihoadon.vn/', 'TEST1234', 'IHOADON'), 'https://tracuu.ihoadon.vn/');
+});
+
+test('EasyInvoice two lookup portals: common and tenant-by-seller-MST', () => {
+  const sellerMst = '0318391940';
+  const expectedTenant = 'https://0318391940hd.easyinvoice.com.vn/Search/Index';
+  const expectedCommon = 'https://tracuu.easyinvoice.vn/Search/Index';
+  const portals = easyInvoiceLookupPortals(sellerMst);
+  assert.equal(portals.primary, expectedTenant);
+  assert.equal(portals.seller, expectedTenant);
+  assert.equal(portals.common, expectedCommon);
+  assert.equal(easyInvoiceLookupUrl(sellerMst, 'SAMPLEFKEY'), expectedTenant + '?fkey=SAMPLEFKEY');
+  assert.equal(easyInvoiceLookupUrl(sellerMst, 'SAMPLEFKEY', 'https://tracuu.easyinvoice.vn/'), expectedCommon + '?fkey=SAMPLEFKEY');
+  assert.equal(easyInvoiceLookupUrl(sellerMst, 'SAMPLEFKEY', 'https://easyinvoice.vn'), expectedTenant + '?fkey=SAMPLEFKEY');
+  assert.equal(easyInvoiceLookupPortals('').primary, expectedCommon);
+  assert.equal(easyInvoiceLookupPortals('bad-id').seller, undefined);
+  assert.equal(easyInvoiceLookupPortals('0318391940', 'https://untrusted.example.org/').primary, expectedTenant);
+  assert.equal(providerFromPortal('https://0318391940hd.easyinvoice.com.vn/'), 'EASYINVOICE');
+  assert.equal(providerFromPortal('https://tracuu.easyinvoice.vn/'), 'EASYINVOICE');
 });
 
 test('MISA and Thai Son domain boundaries do not overlap', () => {
