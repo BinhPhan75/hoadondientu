@@ -1,0 +1,29 @@
+name: Thai Son invoice downloader regression
+on:
+  push:
+    paths:
+      - src/services/thaiSonInvoiceService.ts
+      - src/utils/providerIdentity.ts
+      - src/utils/xmlParser.ts
+      - tests/thaison-form.test.ts
+      - .github/workflows/thaison-check.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install project dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Run Thai Son regression tests
+        run: npx tsx --test tests/thaison-form.test.ts
+      - name: Typecheck
+        run: npm run lint
+      - name: Build
+        run: npm run build
