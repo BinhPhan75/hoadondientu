@@ -15,6 +15,26 @@ import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
+test('Co.opmart XML carries a seller-scoped lookup URL and Ma TC code', () => {
+  const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>Mã TC</TTruong><DLieu>4CZHQ4L0EYY</DLieu></TTin><TTin><TTruong>ĐCTC</TTruong><DLieu>https://saigoncoop.einvoice.com.vn/</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>0301175691-021</MST></NBan></NDHDon></DLHDon></HDon>';
+  assert.deepEqual(extractLookupDetailsFromXml(xml), {
+    lookupCode: '4CZHQ4L0EYY',
+    lookupUrl: 'https://saigoncoop.einvoice.com.vn/'
+  });
+  assert.equal(detectProvider(xml), 'THAISON');
+  assert.equal(buildDirectLookupUrl('https://saigoncoop.einvoice.com.vn/xem-hoa-don', '4CZHQ4L0EYY', 'THAISON', '0301175691-021'), 'https://saigoncoop.einvoice.com.vn/xem-hoa-don');
+  const otherSeller = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP></TTChung><NDHDon><NBan><MST>0123456789</MST></NBan></NDHDon></DLHDon></HDon>';
+  assert.notEqual(extractLookupDetailsFromXml(otherSeller).lookupUrl, 'https://saigoncoop.einvoice.com.vn/xem-hoa-don');
+});
+
+test('iHoaDon domain is independent of Thai Son even with a stale provider label', () => {
+  assert.equal(providerFromPortal('https://ihoadon.vn/'), 'IHOADON');
+  assert.equal(providerFromPortal('https://tracuu.ihoadon.vn/'), 'IHOADON');
+  assert.equal(resolveInvoiceProvider({ lookupUrl: 'https://ihoadon.vn/', provider: 'THAISON' }), 'IHOADON');
+  assert.equal(detectProvider('<HDon><TTChung><LinkTraCuu>https://tracuu.ihoadon.vn/</LinkTraCuu></TTChung></HDon>'), 'IHOADON');
+  assert.equal(buildDirectLookupUrl('https://tracuu.ihoadon.vn/', 'TEST1234', 'IHOADON'), 'https://tracuu.ihoadon.vn/');
+});
+
 test('MISA and Thai Son domain boundaries do not overlap', () => {
   assert.equal(providerFromPortal('https://www.meinvoice.vn/tra-cuu'), 'MISA');
   assert.equal(providerFromPortal('https://einvoice.vn/tra-cuu'), 'THAISON');
