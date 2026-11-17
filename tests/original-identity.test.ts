@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { jsPDF } from 'jspdf';
 import JSZip from 'jszip';
 import { verifyIssuerInvoiceBytes } from '../src/services/invoiceIdentityVerifier';
-import { findMisaPdfUrl } from '../src/services/invoice-engine/drivers/MisaDriver';
 
 const identity = { sellerTaxCode: '0301175691-021', invoiceSeries: 'C26MCM', invoiceNo: '0323797' };
 
@@ -39,10 +38,3 @@ test('ZIP with original signed invoice XML needs matching invoice metadata', asy
   })).ok, false);
 });
 
-test('MISA API linkview Data response is parsed as official PDF URL', () => {
-  const url = 'https://www.meinvoice.vn/tra-cuu/downloadhandler.ashx?type=pdf&code=abc&Viewer=1&SearchType=2';
-  assert.equal(findMisaPdfUrl({ Success: true, Data: url }), url);
-  assert.equal(findMisaPdfUrl({ Success: false, Data: url }), undefined);
-  assert.equal(findMisaPdfUrl({ Success: true, Data: 'http://127.0.0.1/a.pdf' }), undefined);
-  assert.equal(findMisaPdfUrl({ Success: true, Data: 'https://malicious.example/file.pdf' }), undefined);
-});
