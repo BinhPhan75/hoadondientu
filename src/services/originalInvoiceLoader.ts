@@ -24,9 +24,11 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   const provider = resolveInvoiceProvider(invoice);
   // Both providers historically cached unrelated PDFs (e.g. a seller's
   // "HƯỚNG DẪN" document) under an invoice key. Never reuse those blobs.
-  const cacheKey = provider === 'THAISON' || provider === 'MISA'
-    ? baseCacheKey + '|verified-original-v5'
-    : baseCacheKey;
+  const cacheKey = provider === 'MINVOICE'
+    ? baseCacheKey + '|minvoice-verified-original-xml-v1'
+    : provider === 'THAISON' || provider === 'MISA'
+      ? baseCacheKey + '|verified-original-v5'
+      : baseCacheKey;
   const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
   const originalUrl = provider === 'THAISON'
@@ -44,7 +46,7 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   if (inFlight) return inFlight;
   const task = (async () => {
     const legacyKey = [invoice.nbmst || '', invoice.khhdon || '', String(invoice.shdon || '')].join('|').replace(/[^a-zA-Z0-9|_-]/g, '_');
-    const hasPoisonedLegacyCache = provider === 'THAISON' || provider === 'MISA';
+    const hasPoisonedLegacyCache = provider === 'THAISON' || provider === 'MISA' || provider === 'MINVOICE';
     const cached = await readCachedOriginalPdf(cacheKey).catch(() => null)
       || (!hasPoisonedLegacyCache ? await readCachedOriginalPdf(legacyKey).catch(() => null) : null);
     if (cached) return cached;
@@ -71,10 +73,16 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
       const blob = await response.blob();
       const head = await blob.slice(0, 256).text();
       const isPdf = head.startsWith('%PDF-');
-      const isZip = blob.type.includes('application/zip');
+      const isZip = blob.type.includes('application/zip') ||
+        head.startsWith('PK\\x03\\x04');
+      const isXml = /^(application|text)\/xml/i.test(blob.type) &&
+        /^(?:<\?xml\b|<HDon(?:\s|>))/i.test(head.replace(/^\uFEFF/, '').trimStart());
       const isHtml = blob.type.includes('text/html') && /<(!doctype|html|head|div|style)/i.test(head);
-      if (!isPdf && !isHtml && !isZip) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
-      const original = new Blob([blob], { type: isPdf ? 'application/pdf' : isZip ? 'application/zip' : 'text/html' });
+      if (!isPdf && !isHtml && !isZip && !isXml) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
+      const original = new Blob([blob], {
+        type: isPdf ? 'application/pdf' : isZip ? 'application/zip'
+          : isXml ? 'application/xml' : 'text/html'
+      });
       // Storage quota errors must not trigger another paid provider lookup.
       await writeCachedOriginalPdf(cacheKey, original).catch(error => console.warn('[Original cache]', error));
       return original;
