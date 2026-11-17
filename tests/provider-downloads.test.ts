@@ -53,6 +53,16 @@ test('EasyInvoice two lookup portals: common and tenant-by-seller-MST', () => {
   assert.equal(providerFromPortal('https://tracuu.easyinvoice.vn/'), 'EASYINVOICE');
 });
 
+test('Thai Son Co.opmart driver retains tenant portal and unique lookup code', () => {
+  const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>Mã TC</TTruong><DLieu>4CZHQ4L0EYY</DLieu></TTin><TTin><TTruong>ĐCTC</TTruong><DLieu>https://saigoncoop.einvoice.com.vn/</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>0301175691-021</MST></NBan></NDHDon></DLHDon></HDon>';
+  const thai = new ThaiSonDriver();
+  const info = thai.extractInfo(xml);
+  assert.equal(info.lookupCode, '4CZHQ4L0EYY');
+  assert.equal(info.lookupUrl, 'https://saigoncoop.einvoice.com.vn/');
+  assert.equal(resolveInvoiceProvider({ rawXml: xml, nbmst: '0301175691-021' }), 'THAISON');
+  assert.equal(buildDirectLookupUrl(info.lookupUrl, info.lookupCode, 'THAISON', info.sellerTaxCode), info.lookupUrl);
+});
+
 test('MISA and Thai Son domain boundaries do not overlap', () => {
   assert.equal(providerFromPortal('https://www.meinvoice.vn/tra-cuu'), 'MISA');
   assert.equal(providerFromPortal('https://einvoice.vn/tra-cuu'), 'THAISON');
