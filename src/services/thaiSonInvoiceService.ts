@@ -183,7 +183,16 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         method: 'POST',
         body: payload.toString(),
       });
-      const html = await result.text();
+      const resultBody = Buffer.from(await result.arrayBuffer());
+      if (resultBody.subarray(0, 5).toString() === '%PDF-') {
+        return {
+          success: true, contentType: 'application/pdf', pdfBuffer: resultBody,
+          pdfBase64: resultBody.toString('base64'),
+          filename: ['HoaDon_ThaiSon', params.sellerTaxCode || '', params.invoiceSeries || '', params.invoiceNo || ''].join('_') + '.pdf',
+          sourceUrl: result.url
+        };
+      }
+      const html = resultBody.toString('utf8');
       const error = parseThaiSonForm(html).error;
       if (error) {
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
@@ -194,7 +203,14 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       for (const target of targets) {
         try {
           // The request helper checks the origin on every redirect.
-          const targetResponse = await request(target.path, {
+          // Relative actions are relative to the invoice detail page, not
+          // necessarily to the tenant's root lookup form.
+          const targetUrl = new URL(target.path, result.url);
+          if (target.method === 'GET' && target.data) {
+            const query = new URLSearchParams(target.data);
+            query.forEach((value, name) => targetUrl.searchParams.set(name, value));
+          }
+          const targetResponse = await request(targetUrl.toString(), {
             method: target.method,
             body: target.method === 'POST' ? target.data : undefined
           });
