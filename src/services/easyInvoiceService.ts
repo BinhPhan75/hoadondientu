@@ -6,6 +6,7 @@ import https from 'https';
 import { solveCaptchaWithGemini, EASYINVOICE_CAPTCHA_PROMPT } from './invoice-engine/captcha/geminiCaptchaSolver';
 import { solveCaptchaWithTesseract } from './invoice-engine/captcha/tesseractCaptchaSolver';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
+import { easyInvoiceLookupPortals } from '../utils/providerIdentity';
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
@@ -212,40 +213,23 @@ export async function downloadOriginalEasyInvoice(
     throw new Error('Mã tra cứu hóa đơn EasyInvoice (FKey) không được để trống.');
   }
 
-  // Xác định domain Cổng EasyInvoice
-  let domain = '';
-  if (lookupUrl && /easyinvoice\.com\.vn|easyinvoice\.vn/i.test(lookupUrl)) {
-    try {
-      const parsedUrl = new URL(lookupUrl);
-      domain = `${parsedUrl.protocol}//${parsedUrl.host}`;
-    } catch {
-      // Bỏ qua nếu url không chuẩn
-    }
-  }
-
-  if (!domain && sellerTaxCode) {
-    domain = `http://${sellerTaxCode.trim()}hd.easyinvoice.com.vn`;
-  }
-
-  if (!domain) {
-    domain = 'https://tracuu.easyinvoice.vn';
-  }
-
-  console.log(`[EasyInvoice] Khởi động tải HĐ gốc: FKey="${lookupCode}", MST="${sellerTaxCode || ''}", Cổng="${domain}"`);
+  // Only use verified HTTPS EasyInvoice hosts. Prefer XML portal, then
+  // seller-specific tenant, and finally the common lookup portal.
+  const portals = easyInvoiceLookupPortals(sellerTaxCode, lookupUrl);
+  const domains = [portals.primary, portals.seller, portals.common]
+    .filter((url): url is string => Boolean(url))
+    .map(url => new URL(url).origin);
+  const uniqueDomains = Array.from(new Set(domains));
+  console.log(`[EasyInvoice] Lookup routing: MST="${sellerTaxCode || ''}", portals=${uniqueDomains.join(', ')}`);
 
   const maxRetries = isServerless ? 2 : 3;
   let lastError = '';
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Nếu attempt 2 ở seller subdomain thất bại, thử cổng chung tracuu.easyinvoice.vn
-      let currentDomain = domain;
-      if (attempt > 1 && domain !== 'https://tracuu.easyinvoice.vn') {
-        currentDomain = 'https://tracuu.easyinvoice.vn';
-        console.log(`[EasyInvoice] Lần thử ${attempt}: Chuyển sang Cổng chung ${currentDomain}...`);
-      } else {
-        console.log(`[EasyInvoice] Lần thử ${attempt}/${maxRetries}: Lấy Captcha từ ${currentDomain}/Captcha/Show...`);
-      }
+      // Switching portals also starts a fresh captcha session.
+      const currentDomain = uniqueDomains[Math.min(attempt - 1, uniqueDomains.length - 1)];
+      console.log(`[EasyInvoice] Attempt ${attempt}/${maxRetries}, portal ${currentDomain}`);
 
       const cRes = await axios.get(`${currentDomain}/Captcha/Show`, {
         responseType: 'arraybuffer',
@@ -286,7 +270,15 @@ export async function downloadOriginalEasyInvoice(
 
       const postRes = await axios.post(
         `${currentDomain}/Search/Search`,
-        `typeSearch=&FKey=${encodeURIComponent(lookupCode.trim())}&Capcha=${encodeURIComponent(code)}`,
+        new URLSearchParams({
+          typeSearch: '',
+          FKey: lookupCode.trim(),
+          Capcha: code,
+          // Common portal requires the seller tax code; tenant portals already
+          // identify the taxpayer, but tolerate the extra form fields.
+          MST: sellerTaxCode || '',
+          TaxCode: sellerTaxCode || ''
+        }).toString(),
         {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
