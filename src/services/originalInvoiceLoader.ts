@@ -26,7 +26,11 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
   const originalUrl = xmlLookup.lookupUrl || invoice.lookupUrl || '';
   const isGenericThaiSon = !originalUrl || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(originalUrl);
-  const resolvedPortal = sellerPortal && isGenericThaiSon ? sellerPortal : originalUrl;
+  // A generic solution-provider page is not evidence of the seller's tenant.
+  // Never submit a seller-specific lookup code to an unverified generic portal.
+  const resolvedPortal = provider === 'THAISON'
+    ? (isGenericThaiSon ? (sellerPortal || '') : originalUrl)
+    : originalUrl;
   const resolvedCode = xmlLookup.lookupCode || invoice.lookupCode;
   const requestKey = JSON.stringify([cacheKey, provider, resolvedCode, resolvedPortal]);
   const inFlight = pending.get(requestKey);
