@@ -1,0 +1,55 @@
+name: Temporary Thai Son portal structure diagnostic
+on:
+  push:
+    paths: ['.github/workflows/thaison-diagnostic.yml']
+  workflow_dispatch:
+jobs:
+  inspect-public-pages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public lookup structure without invoice or login data
+        shell: bash
+        run: |
+          set -e
+          python3 - <<'PY'
+          import urllib.request, html.parser, re
+          sites = ['https://saigoncoop.einvoice.com.vn/','https://vat.ggg.com.vn/']
+          class TagReader(html.parser.HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.tags = []
+              def handle_starttag(self, tag, attrs):
+                  if tag in ('form','input','button','script','img','iframe'):
+                      d = dict(attrs)
+                      keys = ('name','type','id','action','method','src','onclick','formaction','placeholder','data-url')
+                      self.tags.append((tag,{k: v[:120] if isinstance(v,str) else v for k,v in d.items() if k in keys}))
+          for site in sites:
+              print('\n===',site)
+              try:
+                  req=urllib.request.Request(site,headers={'User-Agent':'Mozilla/5.0'})
+                  with urllib.request.urlopen(req,timeout=15) as res:
+                      body=res.read(800000).decode('utf8','replace')
+                      print('status',res.status,'final_url',res.url,'bytes',len(body))
+                  reader=TagReader();reader.feed(body)
+                  for tag,attrs in reader.tags[:75]:
+                      print(tag,attrs)
+                  print('form count',len(re.findall(r'<form\\b',body,re.I)))
+                  print('script count',len(re.findall(r'<script\\b',body,re.I)))
+              except Exception as e:print(type(e).__name__,str(e)[:180])
+          PY
+      - name: Inspect dynamically rendered lookup inputs
+        shell: bash
+        run: |
+          set +e
+          command -v google-chrome || true
+          for url in https://saigoncoop.einvoice.com.vn/ https://vat.ggg.com.vn/; do
+            echo "=== RENDERED $url"
+            timeout 35s google-chrome --headless --no-sandbox --disable-dev-shm-usage --disable-gpu --virtual-time-budget=2500 --dump-dom "$url" 2>/dev/null | python3 -c '
+          import sys
+          from html.parser import HTMLParser
+          class P(HTMLParser):
+            def handle_starttag(self,tag,attrs):
+              if tag in ("form","input","button","script"):
+                d=dict(attrs);print(tag,{k:d[k][:90] for k in ("name","type","id","method","action","src","onclick","placeholder") if k in d})
+          P().feed(sys.stdin.read()[:2000000])' | head -65
+          done
