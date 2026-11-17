@@ -8,7 +8,8 @@ import { isThaiSonSource, isMisaSource, extractLookupDetailsFromXml, getLookupUr
 import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
-import { parseThaiSonForm, extractThaiSonDownloadTargets, verifiedThaiSonInvoiceHtml } from '../src/services/thaiSonInvoiceService';
+import { parseThaiSonForm, extractThaiSonDownloadTargets, verifiedThaiSonInvoiceHtml, extractThaiSonOriginalContent } from '../src/services/thaiSonInvoiceService';
+import JSZip from 'jszip';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
 import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
@@ -140,6 +141,29 @@ test('Thai Son HTML display fallback requires matching seller MST and invoice nu
   assert.equal(safe?.includes('<script>'), false);
   assert.equal(verifiedThaiSonInvoiceHtml(page, '0102721191-001', '323797'), undefined);
   assert.equal(verifiedThaiSonInvoiceHtml(page, '0301175691-021', '2996339'), undefined);
+});
+
+test('Thai Son tenant form parser uses actual input names and method', () => {
+  const html = '<form action="/kiem-tra" method="get"><label>Mã tra cứu</label><input name="CodeSearch" placeholder="Mã tra cứu"/><input name="Verify" placeholder="Mã kiểm tra"/><img src="/captcha"/></form>';
+  const parsed = parseThaiSonForm(html);
+  assert.equal(parsed.field, 'CodeSearch');
+  assert.equal(parsed.captchaField, 'Verify');
+  assert.equal(parsed.method, 'GET');
+  assert.equal(parsed.formAction, '/kiem-tra');
+  assert.equal(parsed.imagePath, '/captcha');
+});
+
+test('Thai Son original downloader accepts PDF inside ZIP, and signed XML ZIP', async () => {
+  const zip = new JSZip();
+  zip.file('HoaDon.pdf', Buffer.from('%PDF-1.7 test'));
+  const bytes = await zip.generateAsync({ type: 'nodebuffer' });
+  const extracted = await extractThaiSonOriginalContent(bytes);
+  assert.equal(extracted?.extension, '.pdf');
+  assert.equal(extracted?.type, 'application/pdf');
+  const zipXml = new JSZip();
+  zipXml.file('invoice.xml', '<HDon></HDon>');
+  const archiveBytes = await zipXml.generateAsync({ type: 'nodebuffer' });
+  assert.equal((await extractThaiSonOriginalContent(archiveBytes))?.extension, '.zip');
 });
 
 test('MISA and Thai Son domain boundaries do not overlap', () => {
