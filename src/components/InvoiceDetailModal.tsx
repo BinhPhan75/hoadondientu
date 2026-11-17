@@ -1128,6 +1128,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
+            {isThaiSonInvoice && originalEasyInvoiceHtml && (
+              <div role="status" className="w-full max-w-[820px] mb-3 px-4 py-2.5 border border-teal-600 bg-teal-950/80 rounded text-xs text-teal-200">
+                Đang hiển thị bản HTML nhận từ cổng phát hành Thái Sơn. Đây không phải file PDF gốc có chữ ký số.
+              </div>
+            )}
             {originalLoadError && !originalProviderPdfUrl && (
               <div role="alert" className="w-full max-w-[820px] mb-3 px-4 py-3 bg-amber-950 border border-amber-700 rounded text-sm text-amber-100">
                 {originalLoadError}
@@ -1602,12 +1607,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="inline-flex items-center gap-2 flex-wrap">
                 {thaiSonIssuerPortal ? (
                   <>
-                    {!originalProviderPdfUrl && (
+                    {!originalProviderPdfUrl && !originalEasyInvoiceHtml && (
                       <button type="button" onClick={handleViewOriginalProvider}
                         disabled={isDownloadingEasyInvoice}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
                         {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                         <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc...' : 'Tải bản gốc Thái Sơn'}</span>
+                      </button>
+                    )}
+                    {originalEasyInvoiceHtml && (
+                      <button type="button" onClick={handlePrintHtml}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-teal-700 text-teal-200 hover:bg-teal-950/70">
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>In / lưu PDF từ bản HTML</span>
                       </button>
                     )}
                     {originalLoadError && (
