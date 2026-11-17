@@ -1835,7 +1835,9 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
 
     if (req.query.format === 'binary') {
       const isHtmlPresentation = /^text\/html/i.test(result.contentType);
-      res.setHeader('Content-Type', isHtmlPresentation ? 'text/html; charset=utf-8' : 'application/pdf');
+      const isZipArchive = /^application\/zip/i.test(result.contentType);
+      res.setHeader('Content-Type', isHtmlPresentation ? 'text/html; charset=utf-8'
+        : isZipArchive ? 'application/zip' : 'application/pdf');
       res.setHeader('Content-Disposition', `${isHtmlPresentation ? 'inline' : 'attachment'}; filename="${encodeURIComponent(result.filename)}"`);
       return res.send(result.pdfBuffer);
     }
