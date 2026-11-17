@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { jsPDF } from 'jspdf';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
 import { verifyIssuerInvoiceBytes } from '../src/services/invoiceIdentityVerifier';
 
-const publicSample = '<HDon><DLHDon><TTChung><MSTTCGP>0106026495-001</MSTTCGP>' +
+const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0106026495-001</MSTTCGP>' +
   '<KHHDon>C26TEST</KHHDon><SHDon>3777</SHDon><NLap>2026-10-28</NLap>' +
   '<TTKhac><TTin><TTruong>Mã tra cứu</TTruong>' +
   '<DLieu>TESTCODE01234567890</DLieu></TTin></TTKhac></TTChung>' +
@@ -12,62 +13,100 @@ const publicSample = '<HDon><DLHDon><TTChung><MSTTCGP>0106026495-001</MSTTCGP>' 
   '<NMua><MST>4001323868</MST></NMua></NDHDon></DLHDon></HDon>';
 
 const identity = { sellerTaxCode: '3300412634', invoiceNo: '0003777', invoiceSeries: 'C26TEST' };
+const makePdf = () => {
+  const pdf = new jsPDF();
+  pdf.text('HOA DON GIA TRI GIA TANG', 20, 20);
+  pdf.text('MST: 3300412634', 20, 32);
+  pdf.text('Ky hieu: C26TEST', 20, 44);
+  pdf.text('So: 3777', 20, 56);
+  return pdf.output('arraybuffer');
+};
 
-test('M-invoice branch-suffixed solution MSTTCGP and XML lookup code are recognized', () => {
-  assert.equal(resolveInvoiceProvider({ rawXml: publicSample }), 'MINVOICE');
-  const info = new MinvoiceDriver().extractInfo(publicSample);
+test('M-invoice MSTTCGP suffix and XML seller + lookup code are recognized', () => {
+  assert.equal(resolveInvoiceProvider({ rawXml: xml }), 'MINVOICE');
+  const info = new MinvoiceDriver().extractInfo(xml);
   assert.equal(info.sellerTaxCode, identity.sellerTaxCode);
   assert.equal(info.invoiceNo, identity.invoiceNo);
   assert.equal(info.invoiceSeries, identity.invoiceSeries);
   assert.equal(info.lookupCode, 'TESTCODE01234567890');
 });
 
-test('Original XML from M-invoice is verified by exact seller, series and invoice number', async () => {
-  const bytes = Buffer.from(publicSample, 'utf8');
-  assert.equal((await verifyIssuerInvoiceBytes(bytes, 'application/xml', identity)).ok, true);
-  assert.equal((await verifyIssuerInvoiceBytes(bytes, 'application/xml', {
-    ...identity, sellerTaxCode: '0106026495'
-  })).ok, false);
-  assert.equal((await verifyIssuerInvoiceBytes(bytes, 'application/xml', {
-    ...identity, invoiceNo: '9999'
+test('Only original issuer PDFs matching the invoice identity are acceptable', async () => {
+  const source = Buffer.from(makePdf());
+  assert.equal((await verifyIssuerInvoiceBytes(source, 'application/pdf', identity)).ok, true);
+  assert.equal((await verifyIssuerInvoiceBytes(source, 'application/pdf', {
+    ...identity, invoiceNo: '10000',
   })).ok, false);
 });
 
-test('M-invoice downloads public XML with seller MST and Số bảo mật, no fake reCAPTCHA', async () => {
+test('M-invoice PDF-only: request seller MST and lookup code; never download ZIP or XML', async () => {
   const saved = globalThis.fetch;
-  let visits = 0;
+  const endpoints: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    visits++;
-    const requested = new URL(String(input));
-    assert.equal(requested.hostname, 'tracuuhoadon.minvoice.com.vn');
-    assert.equal(requested.pathname, '/api/Search/DownloadXml');
-    assert.equal(requested.searchParams.get('masothue'), identity.sellerTaxCode);
-    assert.equal(requested.searchParams.get('sobaomat'), 'TESTCODE01234567890');
-    return new Response(publicSample, {
-      status: 200, headers: { 'Content-Type': 'application/xml' }
+    const url = new URL(String(input));
+    endpoints.push(url.pathname);
+    assert.equal(url.hostname, 'tracuuhoadon.minvoice.com.vn');
+    assert.equal(url.pathname, '/api/Search/SearchInvoice');
+    assert.equal(url.searchParams.get('masothue'), identity.sellerTaxCode);
+    assert.equal(url.searchParams.get('sobaomat'), 'TESTCODE01234567890');
+    return new Response(makePdf(), {
+      status: 200, headers: { 'Content-Type': 'application/pdf' },
     });
   }) as typeof fetch;
   try {
     const driver = new MinvoiceDriver();
-    const downloaded = await driver.fetchPdf(driver.extractInfo(publicSample));
-    assert.equal(downloaded.contentType, 'application/xml');
-    assert.equal(downloaded.isFallback, false);
-    assert.equal(downloaded.pdfBuffer.toString('utf8'), publicSample);
-    assert.ok(downloaded.filename.endsWith('.xml'));
-    assert.equal(visits, 1);
+    const actual = await driver.fetchPdf(driver.extractInfo(xml));
+    assert.equal(actual.contentType, 'application/pdf');
+    assert.equal(actual.isFallback, false);
+    assert.ok(actual.filename.endsWith('.pdf'));
+    assert.equal(actual.pdfBuffer.subarray(0, 5).toString(), '%PDF-');
+    assert.deepEqual(endpoints, ['/api/Search/SearchInvoice']);
   } finally {
     globalThis.fetch = saved;
   }
 });
 
-test('M-invoice never caches a HTML error page returned by XML endpoint', async () => {
+test('HTML, XML or ZIP response is never treated as PDF', async () => {
   const saved = globalThis.fetch;
-  globalThis.fetch = (async () => new Response('<html><body>Request denied</body></html>', {
-    status: 200, headers: { 'Content-Type': 'text/html' }
-  })) as typeof fetch;
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    seen.push(new URL(String(input)).pathname);
+    return new Response('<?xml version="1.0"?><HDon/>', {
+      status: 200, headers: { 'Content-Type': 'application/xml' },
+    });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(() => new MinvoiceDriver().fetchPdf(
+      new MinvoiceDriver().extractInfo(xml)
+    ), /Chưa tải được PDF gốc M-invoice/);
+    assert.deepEqual(seen, ['/api/Search/SearchInvoice']);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('Official CAPTCHA operation is only sent a token that was explicitly provided', async () => {
+  const saved = globalThis.fetch;
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    seen.push(url.pathname);
+    if (url.pathname.endsWith('SearchInvoice')) {
+      return new Response('Denied', { status: 403 });
+    }
+    assert.equal(url.pathname, '/api/Search/SearchInvoiceCaptcha');
+    assert.equal(new Headers(init?.headers).get('X-Recaptcha-Token'), 'test-legitimate-token');
+    return new Response(makePdf(), {
+      status: 200, headers: { 'Content-Type': 'application/pdf' },
+    });
+  }) as typeof fetch;
   try {
     const driver = new MinvoiceDriver();
-    await assert.rejects(() => driver.fetchPdf(driver.extractInfo(publicSample)), /chưa trả về XML gốc/);
+    const result = await driver.fetchPdf(driver.extractInfo(xml), {
+      recaptchaToken: 'test-legitimate-token',
+    });
+    assert.equal(result.contentType, 'application/pdf');
+    assert.deepEqual(seen, ['/api/Search/SearchInvoice', '/api/Search/SearchInvoiceCaptcha']);
   } finally {
     globalThis.fetch = saved;
   }
