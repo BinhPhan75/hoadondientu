@@ -1194,10 +1194,9 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   // 6j. Thái Sơn E-Invoice
-  const isThaiSon = detectProvider(rawXml) === 'THAISON';
-  if (isThaiSon) {
-    if (!lookupUrl) lookupUrl = 'https://einvoice.vn/tra-cuu';
-  }
+  // A solution-provider MST does NOT imply that a seller's invoice code
+  // works on einvoice.vn; many sellers have private issuer portals.
+  // Leave unresolved if XML and learned sources have no usable portal.
 
   // 6k. CyberLotus CyberBill
   const isCyberBill = /cyberbill\.vn|cyberlotus|0107871301/i.test(rawXml);
