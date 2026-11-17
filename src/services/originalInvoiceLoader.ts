@@ -63,9 +63,10 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
       const blob = await response.blob();
       const head = await blob.slice(0, 256).text();
       const isPdf = head.startsWith('%PDF-');
+      const isZip = blob.type.includes('application/zip');
       const isHtml = blob.type.includes('text/html') && /<(!doctype|html|head|div|style)/i.test(head);
-      if (!isPdf && !isHtml) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
-      const original = new Blob([blob], { type: isPdf ? 'application/pdf' : 'text/html' });
+      if (!isPdf && !isHtml && !isZip) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
+      const original = new Blob([blob], { type: isPdf ? 'application/pdf' : isZip ? 'application/zip' : 'text/html' });
       // Storage quota errors must not trigger another paid provider lookup.
       await writeCachedOriginalPdf(cacheKey, original).catch(error => console.warn('[Original cache]', error));
       return original;
