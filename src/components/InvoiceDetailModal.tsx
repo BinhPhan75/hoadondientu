@@ -30,7 +30,6 @@ import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, 
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
-import { importMinvoiceIssuerPdf } from '../services/minvoicePdfImport';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
 
@@ -164,7 +163,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [easyInvoiceViewMode, setEasyInvoiceViewMode] = useState<'pdf' | 'html'>('html');
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
-  const minvoicePdfInputRef = useRef<HTMLInputElement>(null);
   const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
@@ -676,30 +674,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         printWindow.focus();
         setTimeout(() => printWindow.print(), 400);
       }
-    }
-  };
-
-  const handleImportMinvoicePdf = async (file?: File) => {
-    if (!file || !effectiveInvoice) return;
-    const target = effectiveInvoice;
-    const invoiceId = target.id;
-    setIsDownloadingEasyInvoice(true);
-    setOriginalLoadError(null);
-    setEasyInvoiceDownloadStatus('Đang kiểm tra PDF gốc M-invoice...');
-    try {
-      const verified = await importMinvoiceIssuerPdf(file, target);
-      if (openInvoiceIdRef.current !== invoiceId) return;
-      const url = URL.createObjectURL(verified);
-      setOriginalProviderPdfUrl(url);
-      setEasyInvoiceDownloadStatus('Đã xác minh và lưu PDF gốc M-invoice. Những lần mở tiếp theo sẽ đọc từ bộ nhớ đệm.');
-    } catch (error: any) {
-      if (openInvoiceIdRef.current === invoiceId) {
-        setOriginalLoadError(error?.message || 'Không thể xác minh PDF M-invoice.');
-        setEasyInvoiceDownloadStatus(null);
-      }
-    } finally {
-      if (minvoicePdfInputRef.current) minvoicePdfInputRef.current.value = '';
-      if (openInvoiceIdRef.current === invoiceId) setIsDownloadingEasyInvoice(false);
     }
   };
 
@@ -1703,24 +1677,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                <input
-                  ref={minvoicePdfInputRef}
-                  type="file"
-                  accept="application/pdf,.pdf"
-                  className="hidden"
-                  aria-label="Chọn PDF gốc M-invoice"
-                  onChange={event => { void handleImportMinvoicePdf(event.target.files?.[0]); }}
-                />
-                {!originalProviderPdfUrl && (
-                  <button type="button"
-                    onClick={() => minvoicePdfInputRef.current?.click()}
-                    disabled={isDownloadingEasyInvoice}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-cyan-600 text-cyan-200 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60"
-                    title="Chọn file PDF gốc vừa tải trên cổng M-invoice để xác minh và lưu lại">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Nhập PDF gốc đã tải</span>
-                  </button>
-                )}
                 {!originalProviderPdfUrl && (
                   <button type="button" onClick={handleViewOriginalProvider}
                     disabled={isDownloadingEasyInvoice}
