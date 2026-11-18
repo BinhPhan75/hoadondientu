@@ -2193,16 +2193,36 @@ app.post('/api/visnam/captcha', async (_req, res) => {
       maxContentLength: 400000, maxBodyLength: 10000,
     });
     const result = upstream.data?.result;
-    if (upstream.data?.success !== true || typeof result?.key !== 'string' ||
-        !/^[0-9a-f-]{36}$/i.test(result.key) ||
+    // On the official portal a fresh CAPTCHA response has success=true and
+    // result.status=0 (status=0 is NOT an API error for RefreshCaptcha).
+    if (upstream.data?.success !== true || result?.status !== 0 ||
+        typeof result?.key !== 'string' || !/^[0-9a-f-]{36}$/i.test(result.key) ||
         typeof result.image !== 'string' || !result.image.startsWith('data:image/png;base64,') ||
         result.image.length > 350000) {
-      return res.status(502).json({ success: false, error: 'Visnam không trả về CAPTCHA hợp lệ.' });
+      console.warn('[Visnam CAPTCHA] Invalid upstream response shape', {
+        success: upstream.data?.success, status: result?.status,
+        hasKey: typeof result?.key === 'string',
+        imageLength: typeof result?.image === 'string' ? result.image.length : 0,
+      });
+      return res.status(502).json({ success: false, error: 'Visnam trả về dữ liệu CAPTCHA không hợp lệ.' });
     }
     res.setHeader('Cache-Control', 'no-store');
     return res.json({ success: true, key: result.key, image: result.image });
-  } catch {
-    return res.status(502).json({ success: false, error: 'Không thể tải CAPTCHA từ VIN-HOADON.' });
+  } catch (error: any) {
+    const upstreamStatus = Number(error?.response?.status || 0);
+    const code = String(error?.code || '').slice(0, 40);
+    // Never log CAPTCHA images, session keys or provider response payloads.
+    console.warn('[Visnam CAPTCHA] Upstream request failed', {
+      status: upstreamStatus || null,
+      code: code || null,
+      message: String(error?.message || '').slice(0, 150)
+    });
+    const explanation = upstreamStatus
+      ? 'VIN-HOADON từ chối yêu cầu CAPTCHA (HTTP ' + upstreamStatus + ').'
+      : code === 'ECONNABORTED'
+        ? 'Kết nối VIN-HOADON quá thời gian chờ.'
+        : 'Không kết nối được máy chủ CAPTCHA VIN-HOADON (' + (code || 'network') + ').';
+    return res.status(502).json({ success: false, error: explanation });
   }
 });
 
