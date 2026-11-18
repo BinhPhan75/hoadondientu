@@ -53,6 +53,39 @@ function findPdfTarget(value: unknown, depth = 0): string | undefined {
   return undefined;
 }
 
+/**
+ * Matbao's own PDF proxy accepts a validated issuer viewer URL.
+ * Do not forward arbitrary URLs to its src parameter.
+ */
+export function matbaoPdfProxyFromViewer(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const viewer = verifiedProviderUrl(value);
+  if (!viewer || viewer.hostname === 'matbao.in' ||
+      !/\\/api\\/ViewInvTemplate\\.aspx$/i.test(viewer.pathname)) return undefined;
+  const p = viewer.searchParams;
+  if (!p.get('idinv') || !p.get('fkey') || !p.get('comid') ||
+      !/^\\d{1,3}$/.test(p.get('pattern') || '') ||
+      !/^[01]$/.test(p.get('convert') || '')) return undefined;
+  const proxy = new URL('https://matbao.in/api/tra-cuu-hoa-don/pdf');
+  proxy.searchParams.set('src', viewer.href);
+  return proxy.href;
+}
+
+export function matbaoPdfUrlFromLookupResult(
+  payload: unknown, info: Pick<ExtractedInvoiceInfo, 'invoiceNo' | 'invoiceSeries' | 'templateCode'>
+): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const result = payload as Record<string, unknown>;
+  const normalizeNo = (value: unknown) => String(value ?? '').replace(/^0+(?=\\d)/, '');
+  const symbol = String(result.symbol ?? '').toUpperCase();
+  const series = String(info.invoiceSeries || '').toUpperCase();
+  if (result.found !== true ||
+      normalizeNo(result.number) !== normalizeNo(info.invoiceNo) ||
+      (symbol !== series && symbol !== String(info.templateCode) + series)) return undefined;
+  // Prefer Matbao's same-origin PDF proxy, observed returning application/pdf.
+  return matbaoPdfProxyFromViewer(result.viewerUrl) || findPdfTarget(result.pdfUrl);
+}
+
 export class MatbaoDriver extends BaseInvoiceProviderDriver {
   readonly name = 'Matbao Mifi XML Upload Driver';
   readonly providerCode = 'MATBAO';
@@ -115,7 +148,11 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
     // &serial=<series>&no=<invoice number> returns a JSON record containing
     // pdfUrl, xmlUrl, viewerUrl and found=true. The exact origin/path is
     // deployment-specific, so configure the verified full endpoint.
-    const fkeyEndpoint = verifiedProviderUrl(process.env.MATBAO_FKEY_LOOKUP_URL || '');
+    // Based on the observed browser request named "fkey?taxcode=...".
+    // Override via MATBAO_FKEY_LOOKUP_URL if Matbao changes its route.
+    const fkeyEndpoint = verifiedProviderUrl(
+      process.env.MATBAO_FKEY_LOOKUP_URL || 'https://matbao.in/api/tra-cuu-hoa-don/fkey'
+    );
     let target: string | undefined;
     if (fkeyEndpoint) {
       const lookup = new URL(fkeyEndpoint.href);
@@ -133,13 +170,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
           const text = await response.text();
           if (text.length <= 300000) {
             const result = JSON.parse(text);
-            const expected = result && result.found === true &&
-              String(result.number || '').replace(/^0+(?=\\d)/, '') === String(Number(info.invoiceNo)) &&
-              (String(result.symbol || '').toUpperCase() === info.invoiceSeries.toUpperCase() ||
-                String(result.symbol || '').toUpperCase() === info.templateCode + info.invoiceSeries.toUpperCase());
-            if (expected && typeof result.pdfUrl === 'string') {
-              target = findPdfTarget(result.pdfUrl);
-            }
+            target = matbaoPdfUrlFromLookupResult(result, info);
           }
         }
       } catch {
@@ -149,7 +180,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
     }
     const upload = verifiedProviderUrl(process.env.MATBAO_XML_UPLOAD_URL || '');
     if (!target && !upload) {
-      return fallback('Chưa cấu hình API fkey hoặc upload XML được xác minh của Mắt Bão.');
+      return fallback('Không thể lấy liên kết tải PDF qua API fkey. Có thể cổng yêu cầu xác minh trên trình duyệt.');
     }
     const mode = process.env.MATBAO_XML_UPLOAD_MODE === 'raw' ? 'raw' : 'multipart';
     const headers: Record<string, string> = { Accept: 'application/json, text/html, */*' };
@@ -191,7 +222,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
       return fallback('Không kết nối được dịch vụ upload XML của Mắt Bão.',
         'MATBAO_UPLOAD_UNAVAILABLE', 502);
     }
-    if (!target) return fallback('Chưa nhận được liên kết tải PDF từ kết quả upload XML.');
+    if (!target) return fallback('Chưa nhận được liên kết PDF hợp lệ từ Mắt Bão.');
 
     try {
       const response = await fetch(target, {
@@ -219,7 +250,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
         success: true, provider: this.providerCode, driverName: this.name,
         pdfBuffer: bytes, pdfBase64: bytes.toString('base64'), contentType: 'application/pdf',
         filename: this.buildPdfFilename(info), isFallback: false, sourceUrl: target,
-        executionLogs: ['Upload XML Mắt Bão thành công', 'Đã xác minh danh tính PDF gốc'],
+        executionLogs: ['Đã nhận liên kết PDF từ cổng Mắt Bão', 'Đã xác minh danh tính PDF gốc'],
       };
     } catch (error) {
       if (error instanceof OriginalInvoiceError) throw error;
