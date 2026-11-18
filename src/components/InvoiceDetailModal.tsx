@@ -1712,6 +1712,38 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Cổng Vietcombank</span>
                 </a>
               </div>
+            ) : resolveInvoiceProvider(effectiveInvoice) === 'MATBAO' ? (
+              <div className="inline-flex items-center gap-2 flex-wrap">
+                <button type="button"
+                  onClick={() => {
+                    const xml = String(effectiveInvoice.rawXml || '').trim();
+                    if (!xml) {
+                      toast.warning('Không có XML gốc để tải lên trang Mắt Bão.');
+                      return;
+                    }
+                    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'HD_' + String(effectiveInvoice.khhdon || '').replace(/[^A-Za-z0-9]/g, '') +
+                      '_' + String(effectiveInvoice.shdon || '').replace(/[^0-9]/g, '') + '_MATBAO.xml';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-700 text-cyan-200 hover:bg-cyan-950">
+                  <Download className="w-3.5 h-3.5" />
+                  Tải XML gốc
+                </button>
+                <a href="https://matbao.in/tra-cuu-hoa-don"
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-200 hover:bg-slate-800"
+                  title="Tại cổng Mắt Bão, chọn Tra cứu dùng file XML và tải tệp XML gốc lên">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Tra cứu Mắt Bão (Upload XML)
+                </a>
+              </div>
             ) : resolveInvoiceProvider(effectiveInvoice) === 'VISNAM' ? (
               <div className="inline-flex items-center gap-2">
                 <button type="button" onClick={() => void handleVisnamDirectLookup()}
