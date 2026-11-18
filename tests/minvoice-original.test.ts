@@ -49,6 +49,9 @@ test('M-invoice PDF-only: request seller MST and lookup code; never download ZIP
     assert.equal(url.pathname, '/api/Search/SearchInvoice');
     assert.equal(url.searchParams.get('masothue'), identity.sellerTaxCode);
     assert.equal(url.searchParams.get('sobaomat'), 'TESTCODE01234567890');
+    assert.equal(url.searchParams.get('type'), 'PDF');
+    assert.equal(url.searchParams.has('inchuyendoi'), false);
+    assert.equal(url.searchParams.toString().startsWith('type=PDF&masothue='), true);
     return new Response(makePdf(), {
       status: 200, headers: { 'Content-Type': 'application/pdf' },
     });
