@@ -814,7 +814,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice || provider === 'MISA') return;
+    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM') return;
     if (provider === 'EASYINVOICE') {
       const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
       if (code) {
@@ -1675,16 +1675,31 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <span>Cổng Vietcombank</span>
                 </a>
               </div>
+            ) : resolveInvoiceProvider(effectiveInvoice) === 'VISNAM' ? (
+              <div className="inline-flex items-center gap-2 flex-wrap">
+                <a
+                  href={buildDirectLookupUrl(
+                    'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+                    lookupDetails.lookupCode || effectiveInvoice.lookupCode,
+                    'VISNAM',
+                    effectiveInvoice.nbmst
+                  )}
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-700 text-cyan-200 hover:bg-cyan-950">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Tra cứu VIN-HOADON</span>
+                </a>
+                <button type="button"
+                  onClick={() => {
+                    const code = lookupDetails.lookupCode || effectiveInvoice.lookupCode || '';
+                    if (code) void navigator.clipboard.writeText(code);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                  Sao chép mã tra cứu: {lookupDetails.lookupCode || effectiveInvoice.lookupCode || 'chưa có'}
+                </button>
+              </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                {!originalProviderPdfUrl && (
-                  <button type="button" onClick={handleViewOriginalProvider}
-                    disabled={isDownloadingEasyInvoice}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-600 text-emerald-200 bg-emerald-950/60 hover:bg-emerald-900 disabled:opacity-60">
-                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>{isDownloadingEasyInvoice ? 'Đang tải PDF M-invoice...' : 'Tải PDF gốc M-invoice'}</span>
-                  </button>
-                )}
                 <a href={buildDirectLookupUrl(
                     'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don',
                     lookupDetails.lookupCode || effectiveInvoice.lookupCode,
