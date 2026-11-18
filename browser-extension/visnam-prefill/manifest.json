@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "HoangMySoft - Điền mã VIN-HOADON",
+  "version": "1.0.0",
+  "description": "Điền mã tra cứu do người dùng cung cấp trên trang VIN-HOADON. Không tương tác CAPTCHA.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://tracuu.vin-hoadon.com/*"
+      ],
+      "js": [
+        "visnam-prefill.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
