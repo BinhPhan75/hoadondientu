@@ -413,10 +413,8 @@ export function buildDirectLookupUrl(
   const code = (lookupCode || info.lookupCode || '').trim();
 
   if (info.shortBrand === 'VIN-HOADON' || provider === 'VISNAM') {
-    // Hash parameters are only a hint for the optional official-portal
-    // prefill extension; the website itself might not support URL prefill.
-    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
-    return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
+    // No verified issuer support for URL prefill; use the official page.
+    return 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
   }
 
   // MISA: thêm tham số fkey
