@@ -4,7 +4,7 @@ import { providerFromPortal, providerFromXmlPortal, SOLUTION_PROVIDERS, lookupPo
 
 const KNOWN_PROVIDERS = new Set([
   'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', '4SI', 'LCS', 'MINVOICE', 'THAISON',
-  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT', 'IHOADON', 'VISNAM',
+  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT', 'IHOADON', 'VISNAM', 'MATBAO',
 ]);
 
 /** Use invoice portal/solution metadata before older inferred provider labels. */
@@ -33,7 +33,7 @@ export function resolveInvoiceProvider(invoice: Partial<GDTInvoice> | null | und
   const name = ([extractTagValue(xml, 'TenTCGP'), extractTagValue(xml, 'TCGP'), extractTagValue(xml, 'ToChucGiaiPhap'), invoice.tentcgp || ''].join(' '))
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   for (const [pattern, provider] of [
-    [/THAI\s*SON/, 'THAISON'], [/M-?INVOICE/, 'MINVOICE'], [/MISA/, 'MISA'],
+    [/MAT\s*BAO|MIFI/, 'MATBAO'], [/THAI\s*SON/, 'THAISON'], [/M-?INVOICE/, 'MINVOICE'], [/MISA/, 'MISA'],
     [/VNPT/, 'VNPT'], [/VIETTEL/, 'VIETTEL'], [/SOFTDREAMS|EASYINVOICE/, 'EASYINVOICE'],
     [/BKAV/, 'BKAV'],
     [/L\.?C\.?S\b|LCSSOFT/, 'LCS'], [/VNPAY|THANH TOAN VIET NAM/, 'VNPAY'],
