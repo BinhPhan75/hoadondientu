@@ -30,6 +30,7 @@ import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, 
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
+import { importMinvoiceIssuerPdf } from '../services/minvoicePdfImport';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
 
@@ -125,6 +126,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const originalLoadSequence = useRef(0);
   // Avoid duplicate downloads if the invoice detail re-renders or is refreshed.
   const minvoiceDownloadedRef = useRef<Set<string>>(new Set());
+  const minvoicePdfInputRef = useRef<HTMLInputElement>(null);
   openInvoiceIdRef.current = invoice?.id ?? null;
 
   useEffect(() => { setCurrentInvoice(invoice); }, [invoice]);
@@ -589,6 +591,47 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setFourSiError(`Không thể tải PDF 4Si từ LCS Soft: ${err.message}`);
     } finally {
       setIsDownloadingFourSiPdf(false);
+    }
+  };
+
+  const openMinvoicePrefilledPortal = () => {
+    if (!effectiveInvoice) return;
+    const tax = String(effectiveInvoice.nbmst || '').trim();
+    const details = extractLookupDetails(effectiveInvoice.rawXml || '');
+    const code = String(details.lookupCode || effectiveInvoice.lookupCode || '').trim();
+    if (!/^\d{10}(?:-\d{3})?$/.test(tax) || !/^[A-Za-z0-9_-]{6,128}$/.test(code)) {
+      setOriginalLoadError('Hóa đơn thiếu MST hoặc mã tra cứu M-invoice hợp lệ.');
+      return;
+    }
+    const url = new URL('https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don');
+    url.hash = new URLSearchParams({ hms_mst: tax, hms_code: code }).toString();
+    // The optional Chrome helper reads fragment values and inserts them into
+    // the official site. Web pages cannot edit other domains directly.
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
+
+  const handleImportMinvoicePdf = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || !effectiveInvoice || resolveInvoiceProvider(effectiveInvoice) !== 'MINVOICE') return;
+    const target = effectiveInvoice;
+    const sequence = ++originalLoadSequence.current;
+    setIsDownloadingEasyInvoice(true);
+    setOriginalLoadError(null);
+    setEasyInvoiceDownloadStatus('Đang xác minh thông tin trong PDF gốc M-invoice...');
+    try {
+      const verified = await importMinvoiceIssuerPdf(file, target);
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+      const url = URL.createObjectURL(verified);
+      setOriginalProviderPdfUrl(url);
+      setEasyInvoiceDownloadStatus('Đã xác minh và lưu PDF gốc M-invoice vào phần mềm trên thiết bị này.');
+    } catch (error: any) {
+      if (openInvoiceIdRef.current === target.id) {
+        setOriginalLoadError(error?.message || 'Không xác minh được PDF đã tải từ M-invoice.');
+        setEasyInvoiceDownloadStatus(null);
+      }
+    } finally {
+      if (openInvoiceIdRef.current === target.id) setIsDownloadingEasyInvoice(false);
     }
   };
 
@@ -1685,14 +1728,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     disabled={isDownloadingEasyInvoice}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-600 text-emerald-200 bg-emerald-950/60 hover:bg-emerald-900 disabled:opacity-60">
                     {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>{isDownloadingEasyInvoice ? 'Đang tải PDF M-invoice...' : 'Tải PDF gốc M-invoice'}</span>
+                    <span>{isDownloadingEasyInvoice ? 'Đang thử tải PDF...' : 'Tự tải PDF M-invoice'}</span>
                   </button>
                 )}
-                <a href="https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don" target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
+                <button type="button" onClick={openMinvoicePrefilledPortal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-cyan-600 text-cyan-200 bg-cyan-950/60 hover:bg-cyan-900"
+                  title="Mở cổng M-invoice; tiện ích Chrome HoangMySoft sẽ điền sẵn MST và mã tra cứu">
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Cổng tra cứu M-invoice (dự phòng)</span>
+                  <span>Mở M-invoice (điền sẵn 2 ô)</span>
+                </button>
+                <input ref={minvoicePdfInputRef} type="file" accept="application/pdf,.pdf"
+                  onChange={handleImportMinvoicePdf} className="hidden"
+                  aria-label="Chọn PDF gốc M-invoice đã tải về" />
+                <button type="button" onClick={() => minvoicePdfInputRef.current?.click()}
+                  disabled={isDownloadingEasyInvoice}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-emerald-700 text-emerald-200 hover:bg-emerald-950/70 disabled:opacity-60">
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Nhập PDF gốc vừa tải</span>
+                </button>
+                <a href="https://github.com/BinhPhan75/hoadondientu/tree/main/browser-extension/minvoice-prefill"
+                  target="_blank" rel="noopener noreferrer"
+                  className="text-[11px] text-slate-400 hover:text-slate-200 underline"
+                  title="Cài tiện ích một lần để tự điền hai ô thật trên cổng M-invoice">
+                  Cài tiện ích Chrome điền tự động (một lần)
                 </a>
               </div>
             ) : isThaiSonInvoice ? (
