@@ -152,7 +152,8 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
         const match = text.match(/https:\/\/[^"'\s<>]+(?:downloadpdfca\.aspx|\.pdf)[^"'\s<>]*/i);
         if (match) target = findPdfTarget(match[0].replace(/&amp;/g, '&'));
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof OriginalInvoiceError) throw error;
       return fallback('Không kết nối được dịch vụ upload XML của Mắt Bão.',
         'MATBAO_UPLOAD_UNAVAILABLE', 502);
     }
