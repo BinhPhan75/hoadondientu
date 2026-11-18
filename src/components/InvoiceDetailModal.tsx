@@ -1679,7 +1679,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="inline-flex items-center gap-2 flex-wrap">
                 <a
                   href={buildDirectLookupUrl(
-                    'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+                    'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
                     lookupDetails.lookupCode || effectiveInvoice.lookupCode,
                     'VISNAM',
                     effectiveInvoice.nbmst
@@ -1689,14 +1689,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Tra cứu VIN-HOADON</span>
                 </a>
-                <button type="button"
-                  onClick={() => {
-                    const code = lookupDetails.lookupCode || effectiveInvoice.lookupCode || '';
-                    if (code) void navigator.clipboard.writeText(code);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
-                  Sao chép mã tra cứu: {lookupDetails.lookupCode || effectiveInvoice.lookupCode || 'chưa có'}
-                </button>
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
