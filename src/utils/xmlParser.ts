@@ -1136,7 +1136,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   }
 
   if (!lookupUrl && /<MSTTCGP>0401486901<\/MSTTCGP>/i.test(rawXml)) {
-    lookupUrl = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
+    lookupUrl = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
   }
 
   // 6b. VNPT Invoice
