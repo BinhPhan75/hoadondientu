@@ -1685,6 +1685,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     effectiveInvoice.nbmst
                   )}
                   target="_blank" rel="noopener noreferrer"
+                  onClick={() => {
+                    const code = String(lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
+                    if (!code) {
+                      toast.warning('Hóa đơn này chưa có mã số bí mật trong XML.');
+                      return;
+                    }
+                    if (!navigator.clipboard?.writeText) {
+                      toast.warning('Trình duyệt không hỗ trợ sao chép tự động. Hãy nhập mã số bí mật thủ công.');
+                      return;
+                    }
+                    // One user click opens the official portal and copies the
+                    // XML lookup code for pasting. Cross-origin DOM autofill
+                    // requires explicit support from the issuer website.
+                    void navigator.clipboard.writeText(code)
+                      .then(() => toast.info('Đã sao chép mã số bí mật. Tại trang VIN-HOADON, bấm Ctrl+V vào ô Mã số bí mật.'))
+                      .catch(() => toast.warning('Không thể sao chép mã. Kiểm tra quyền clipboard của trình duyệt.'));
+                  }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-700 text-cyan-200 hover:bg-cyan-950">
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Tra cứu VIN-HOADON</span>
