@@ -851,7 +851,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM') return;
+    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM' || provider === 'MATBAO') return;
     if (provider === 'EASYINVOICE') {
       const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
       if (code) {
