@@ -128,75 +128,72 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
       );
     }
 
-    const timeout = Math.min(options?.timeoutMs || 20000, 30000);
-    const makeUrl = (path: string) => {
-      // Legacy public M-invoice PDF links use *only* type, masothue, sobaomat.
-      // Extra inchuyendoi was never part of this endpoint and may cause 400.
-      const params = new URLSearchParams([
-        ['type', 'PDF'],
-        ['masothue', taxCode],
-        ['sobaomat', lookupCode],
-      ]);
-      return 'https://tracuuhoadon.minvoice.com.vn/api/Search/' + path +
-        '?' + params.toString();
-    };
-
-    // A legacy PDF operation is already implemented elsewhere in this
-    // application. Try it once, without inventing captcha tokens.
-    const attempts = [
-      { path: 'SearchInvoice', token: '' },
-      ...(options?.recaptchaToken
-        ? [{ path: 'SearchInvoiceCaptcha', token: options.recaptchaToken }]
-        : []),
-    ];
-    const statuses: string[] = [];
-    for (const attempt of attempts) {
-      const url = makeUrl(attempt.path);
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            Accept: 'application/pdf,application/octet-stream,*/*',
-            Referer: portal,
-            ...(attempt.token ? { 'X-Recaptcha-Token': attempt.token } : {}),
-          },
-          signal: AbortSignal.timeout(timeout),
-        });
-        const contentLength = Number(response.headers.get('content-length') || '0');
-        if (contentLength > 18_000_000) {
-          statuses.push(attempt.path + ': PDF vượt 18 MB');
-          continue;
-        }
-        const buffer = Buffer.from(await response.arrayBuffer());
-        if (buffer.length >= 100 && buffer.length <= 18_000_000 &&
-            response.ok && buffer.subarray(0, 5).toString('latin1') === '%PDF-') {
-          // InvoiceDownloaderManager verifies the seller, series and number
-          // from actual PDF contents before returning or caching the file.
-          return {
-            success: true, provider: this.providerCode, driverName: this.name,
-            pdfBuffer: buffer, pdfBase64: buffer.toString('base64'),
-            contentType: 'application/pdf', filename: this.buildPdfFilename(info),
-            isFallback: false, sourceUrl: portal,
-            executionLogs: ['M-invoice: đã nhận PDF từ ' + attempt.path],
-          };
-        }
-        const type = response.headers.get('content-type') || '';
-        statuses.push(attempt.path + ': HTTP ' + response.status +
-          (response.ok ? ' nhưng không trả về PDF' : '') +
-          (type && !/^application\/pdf/i.test(type) ? ' (' + type.split(';')[0].slice(0, 60) + ')' : ''));
-        if (response.status === 429) break;
-      } catch (error: any) {
-        statuses.push(attempt.path + ': ' + String(error?.message || 'lỗi kết nối').slice(0, 120));
-      }
+    // M-invoice's live portal uses SearchInvoiceCaptcha, not the legacy
+    // SearchInvoice operation. The CAPTCHA token must be acquired through a
+    // legitimate user interaction supported by the provider. Never mint,
+    // reuse, store, or synthesize one here.
+    const token = String(options?.recaptchaToken || '').trim();
+    if (!token) {
+      throw new OriginalInvoiceError(
+        'M-invoice yêu cầu xác minh reCAPTCHA trên trang tra cứu chính thức trước khi tải PDF gốc.',
+        this.providerCode, 'MINVOICE_CAPTCHA_REQUIRED', 428, portal
+      );
     }
 
+    const params = new URLSearchParams([
+      ['masothue', taxCode],
+      ['sobaomat', lookupCode],
+      ['type', 'PDF'],
+      ['inchuyendoi', 'false'],
+    ]);
+    const url = 'https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoiceCaptcha?' +
+      params.toString();
+    const timeout = Math.min(options?.timeoutMs || 20000, 30000);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json, text/plain, */*',
+          Referer: portal,
+          'X-Recaptcha-Token': token,
+        },
+        signal: AbortSignal.timeout(timeout),
+      });
+    } catch (error: any) {
+      throw new OriginalInvoiceError(
+        'Không thể kết nối cổng PDF M-invoice: ' +
+          String(error?.message || 'lỗi kết nối').slice(0, 120),
+        this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
+      );
+    }
+
+    const contentLength = Number(response.headers.get('content-length') || '0');
+    if (contentLength > 18_000_000) {
+      throw new OriginalInvoiceError(
+        'PDF gốc M-invoice vượt giới hạn 18 MB.',
+        this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
+      );
+    }
+    const contentType = response.headers.get('content-type') || '';
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (response.ok && buffer.length >= 100 && buffer.length <= 18_000_000 &&
+        buffer.subarray(0, 5).toString('latin1') === '%PDF-') {
+      // InvoiceDownloaderManager verifies invoice identity before caching.
+      return {
+        success: true, provider: this.providerCode, driverName: this.name,
+        pdfBuffer: buffer, pdfBase64: buffer.toString('base64'),
+        contentType: 'application/pdf', filename: this.buildPdfFilename(info),
+        isFallback: false, sourceUrl: portal,
+        executionLogs: ['M-invoice: đã nhận PDF gốc từ SearchInvoiceCaptcha'],
+      };
+    }
     throw new OriginalInvoiceError(
-      'Chưa tải được PDF gốc M-invoice bằng MST và mã tra cứu. ' +
-      statuses.join('; ') +
-      (options?.recaptchaToken
-        ? '. Kiểm tra mã tra cứu hoặc thử lại sau.'
-        : '. Cổng PDF có thể yêu cầu reCAPTCHA v3 trong trình duyệt.'),
-      this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal,
+      'M-invoice SearchInvoiceCaptcha: HTTP ' + response.status +
+      ' (' + contentType.split(';')[0].slice(0, 60) + ')' +
+      (response.ok ? ', phản hồi không phải PDF hợp lệ.' :
+        '. Kiểm tra mã tra cứu hoặc xác minh lại trên trang chính thức.'),
+      this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
     );
   }
 
