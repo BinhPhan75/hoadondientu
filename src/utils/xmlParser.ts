@@ -1001,6 +1001,14 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     'SecretCode', 'SecurityCode', 'AccessCode'
   ];
   let lookupCode = tagValue(codeTags);
+  // VIN-HOADON (Visnam) embeds the official lookup credential in
+  // TTChung/TTKhac/TTin with TTruong=QuanLy_SoBaoMat.
+  // Only trust this field for the Visnam solution MST, not other invoices.
+  if (!lookupCode && /<MSTTCGP>0401486901<\/MSTTCGP>/i.test(rawXml)) {
+    const visnamCode = extraFields.get('quanly_sobaomat') ||
+      extraFields.get('quanly sobaomat') || extraFields.get('quan ly so bao mat') || '';
+    if (isLookupCodeCandidate(visnamCode)) lookupCode = visnamCode;
+  }
   const extraLookupCode = extraFields.get('ma tc') || extraFields.get('ma tra cuu') || '';
   if (!lookupCode && isLookupCodeCandidate(extraLookupCode)) lookupCode = extraLookupCode;
 
@@ -1125,6 +1133,10 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
 
   if (isMisa) {
     lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
+  }
+
+  if (!lookupUrl && /<MSTTCGP>0401486901<\/MSTTCGP>/i.test(rawXml)) {
+    lookupUrl = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
   }
 
   // 6b. VNPT Invoice
