@@ -39,31 +39,49 @@ test('Only original issuer PDFs matching the invoice identity are acceptable', a
   })).ok, false);
 });
 
-test('M-invoice PDF-only: request seller MST and lookup code; never download ZIP or XML', async () => {
+test('M-invoice requires a legitimate CAPTCHA token instead of calling legacy API', async () => {
+  const saved = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    throw new Error('Unexpected network call');
+  }) as typeof fetch;
+  try {
+    const driver = new MinvoiceDriver();
+    await assert.rejects(() => driver.fetchPdf(driver.extractInfo(xml)), /reCAPTCHA/);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = saved;
+  }
+});
+
+test('M-invoice sends its observed PDF endpoint and verified token', async () => {
   const saved = globalThis.fetch;
   const endpoints: string[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     endpoints.push(url.pathname);
     assert.equal(url.hostname, 'tracuuhoadon.minvoice.com.vn');
-    assert.equal(url.pathname, '/api/Search/SearchInvoice');
+    assert.equal(url.pathname, '/api/Search/SearchInvoiceCaptcha');
     assert.equal(url.searchParams.get('masothue'), identity.sellerTaxCode);
     assert.equal(url.searchParams.get('sobaomat'), 'TESTCODE01234567890');
     assert.equal(url.searchParams.get('type'), 'PDF');
-    assert.equal(url.searchParams.has('inchuyendoi'), false);
-    assert.equal(url.searchParams.toString().startsWith('type=PDF&masothue='), true);
+    assert.equal(url.searchParams.get('inchuyendoi'), 'false');
+    assert.equal(new Headers(init?.headers).get('X-Recaptcha-Token'), 'test-legitimate-token');
     return new Response(makePdf(), {
       status: 200, headers: { 'Content-Type': 'application/pdf' },
     });
   }) as typeof fetch;
   try {
     const driver = new MinvoiceDriver();
-    const actual = await driver.fetchPdf(driver.extractInfo(xml));
+    const actual = await driver.fetchPdf(driver.extractInfo(xml), {
+      recaptchaToken: 'test-legitimate-token',
+    });
     assert.equal(actual.contentType, 'application/pdf');
     assert.equal(actual.isFallback, false);
     assert.ok(actual.filename.endsWith('.pdf'));
     assert.equal(actual.pdfBuffer.subarray(0, 5).toString(), '%PDF-');
-    assert.deepEqual(endpoints, ['/api/Search/SearchInvoice']);
+    assert.deepEqual(endpoints, ['/api/Search/SearchInvoiceCaptcha']);
   } finally {
     globalThis.fetch = saved;
   }
@@ -80,37 +98,29 @@ test('HTML, XML or ZIP response is never treated as PDF', async () => {
   }) as typeof fetch;
   try {
     await assert.rejects(() => new MinvoiceDriver().fetchPdf(
-      new MinvoiceDriver().extractInfo(xml)
-    ), /Chưa tải được PDF gốc M-invoice/);
-    assert.deepEqual(seen, ['/api/Search/SearchInvoice']);
+      new MinvoiceDriver().extractInfo(xml), { recaptchaToken: 'test-legitimate-token' }
+    ), /SearchInvoiceCaptcha/);
+    assert.deepEqual(seen, ['/api/Search/SearchInvoiceCaptcha']);
   } finally {
     globalThis.fetch = saved;
   }
 });
 
-test('Official CAPTCHA operation is only sent a token that was explicitly provided', async () => {
+test('M-invoice does not retry with legacy SearchInvoice when CAPTCHA request fails', async () => {
   const saved = globalThis.fetch;
   const seen: string[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input));
-    seen.push(url.pathname);
-    if (url.pathname.endsWith('SearchInvoice')) {
-      return new Response('Denied', { status: 403 });
-    }
-    assert.equal(url.pathname, '/api/Search/SearchInvoiceCaptcha');
-    assert.equal(new Headers(init?.headers).get('X-Recaptcha-Token'), 'test-legitimate-token');
-    return new Response(makePdf(), {
-      status: 200, headers: { 'Content-Type': 'application/pdf' },
-    });
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    seen.push(new URL(String(input)).pathname);
+    return new Response('Invalid token', { status: 403 });
   }) as typeof fetch;
   try {
     const driver = new MinvoiceDriver();
-    const result = await driver.fetchPdf(driver.extractInfo(xml), {
+    await assert.rejects(() => driver.fetchPdf(driver.extractInfo(xml), {
       recaptchaToken: 'test-legitimate-token',
-    });
-    assert.equal(result.contentType, 'application/pdf');
-    assert.deepEqual(seen, ['/api/Search/SearchInvoice', '/api/Search/SearchInvoiceCaptcha']);
+    }), /HTTP 403/);
+    assert.deepEqual(seen, ['/api/Search/SearchInvoiceCaptcha']);
   } finally {
     globalThis.fetch = saved;
   }
 });
+
