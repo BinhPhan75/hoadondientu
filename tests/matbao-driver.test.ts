@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MatbaoDriver } from '../src/services/invoice-engine/drivers/MatbaoDriver';
+import { MatbaoDriver, matbaoPdfProxyFromViewer, matbaoPdfUrlFromLookupResult } from '../src/services/invoice-engine/drivers/MatbaoDriver';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
 import { resolveInvoiceProvider } from '../src/utils/providerRouting';
@@ -101,4 +101,30 @@ test('Matbao: fkey metadata lookup validates invoice identity before requesting 
     if (oldUpload === undefined) delete process.env.MATBAO_XML_UPLOAD_URL;
     else process.env.MATBAO_XML_UPLOAD_URL = oldUpload;
   }
+});
+
+test('Matbao: construct exact official PDF proxy from a verified viewer link', () => {
+  const viewer = 'https://027098005024.matbao.in/api/ViewInvTemplate.aspx?' +
+    'idinv=mfTTI1TEd1QVJLcnB2VWozSWFLQmIrZz09&fkey=YK5BAAFD48&' +
+    'comid=NjFNU2ZzVWZwMUE9&pattern=2&convert=0';
+  const proxy = matbaoPdfProxyFromViewer(viewer);
+  assert.ok(proxy);
+  const url = new URL(proxy);
+  assert.equal(url.origin + url.pathname, 'https://matbao.in/api/tra-cuu-hoa-don/pdf');
+  assert.equal(url.searchParams.get('src'), viewer);
+  assert.equal(matbaoPdfProxyFromViewer('https://example.org/api/ViewInvTemplate.aspx?idinv=1&fkey=x&comid=y&pattern=2&convert=0'), undefined);
+  assert.equal(matbaoPdfProxyFromViewer('https://matbao.in/api/ViewInvTemplate.aspx?idinv=1&fkey=x&comid=y&pattern=2&convert=0'), undefined);
+
+  const response = {
+    found: true, symbol: '2C26MLS', number: '3622',
+    viewerUrl: viewer,
+    pdfUrl: 'https://portal-group1.mifi.vn/downloadpdfca.aspx?keyinv=example',
+  };
+  const result = matbaoPdfUrlFromLookupResult(response, {
+    invoiceNo: '0003622', invoiceSeries: 'C26MLS', templateCode: '2'
+  });
+  assert.equal(result, proxy);
+  assert.equal(matbaoPdfUrlFromLookupResult({...response, number: '3623'}, {
+    invoiceNo: '3622', invoiceSeries: 'C26MLS', templateCode: '2'
+  }), undefined);
 });
