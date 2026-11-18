@@ -135,7 +135,7 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     const token = String(options?.recaptchaToken || '').trim();
     if (!token) {
       throw new OriginalInvoiceError(
-        'M-invoice yêu cầu xác minh reCAPTCHA trên trang tra cứu chính thức trước khi tải PDF gốc.',
+        'Vui lòng mở link để tra cứu trực tiếp',
         this.providerCode, 'MINVOICE_CAPTCHA_REQUIRED', 428, portal
       );
     }
