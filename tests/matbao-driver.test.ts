@@ -66,3 +66,39 @@ test('Matbao: upload target must be HTTPS and belong to official Matbao/Mifi hos
     else process.env.MATBAO_XML_UPLOAD_URL = previous;
   }
 });
+
+test('Matbao: fkey metadata lookup validates invoice identity before requesting PDF', async () => {
+  const oldUrl = process.env.MATBAO_FKEY_LOOKUP_URL;
+  const oldUpload = process.env.MATBAO_XML_UPLOAD_URL;
+  const oldFetch = globalThis.fetch;
+  let pdfRequests = 0;
+  process.env.MATBAO_FKEY_LOOKUP_URL = 'https://matbao.in/api/test/fkey';
+  delete process.env.MATBAO_XML_UPLOAD_URL;
+  globalThis.fetch = (async (request: RequestInfo | URL) => {
+    const url = new URL(String(request));
+    if (url.pathname.endsWith('/fkey')) {
+      assert.equal(url.searchParams.get('taxcode'), '027098005024');
+      assert.equal(url.searchParams.get('pattern'), '2');
+      assert.equal(url.searchParams.get('serial'), 'C26MLS');
+      assert.equal(url.searchParams.get('no'), '3622');
+      return new Response(JSON.stringify({
+        found: true, symbol: '2C26MLS', number: '9999',
+        pdfUrl: 'https://portal-group1.mifi.vn/downloadpdfca.aspx?keyinv=test'
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    pdfRequests++;
+    throw Error('PDF must not be downloaded when invoice metadata mismatches');
+  }) as typeof fetch;
+  try {
+    await assert.rejects(new MatbaoDriver().fetchPdf(new MatbaoDriver().extractInfo(rawXml)),
+      (error: unknown) => error instanceof OriginalInvoiceError &&
+        error.code === 'MATBAO_XML_UPLOAD_REQUIRED');
+    assert.equal(pdfRequests, 0);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldUrl === undefined) delete process.env.MATBAO_FKEY_LOOKUP_URL;
+    else process.env.MATBAO_FKEY_LOOKUP_URL = oldUrl;
+    if (oldUpload === undefined) delete process.env.MATBAO_XML_UPLOAD_URL;
+    else process.env.MATBAO_XML_UPLOAD_URL = oldUpload;
+  }
+});
