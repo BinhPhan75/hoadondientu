@@ -128,7 +128,7 @@ export function buildDirectLookupUrl(
   }
   if (portalProvider === 'THAISON' || provider === 'THAISON') return url || 'https://einvoice.vn/tra-cuu';
   if (portalProvider === 'VISNAM' || provider === 'VISNAM') {
-    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
+    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
     // Used by the optional browser prefill extension. The provider site may
     // not interpret this hash on its own.
     return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
