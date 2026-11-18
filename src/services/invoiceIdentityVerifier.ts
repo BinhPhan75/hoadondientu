@@ -63,6 +63,16 @@ function matchXmlInvoice(xml: string, identity: InvoiceIdentity): OriginalVerifi
 /** Read at most the first two PDF pages; never assume PDF magic bytes imply an invoice. */
 async function extractPdfText(bytes: Buffer): Promise<string> {
   if (bytes.length > 18_000_000) throw new Error('PDF vượt giới hạn xác minh 18 MB.');
+  const canvas = await import('@napi-rs/canvas');
+  if (typeof globalThis.DOMMatrix === 'undefined') {
+    Object.assign(globalThis, { DOMMatrix: canvas.DOMMatrix });
+  }
+  if (typeof globalThis.ImageData === 'undefined') {
+    Object.assign(globalThis, { ImageData: canvas.ImageData });
+  }
+  if (typeof globalThis.Path2D === 'undefined') {
+    Object.assign(globalThis, { Path2D: canvas.Path2D });
+  }
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const loading = pdfjs.getDocument({
     data: new Uint8Array(bytes),
