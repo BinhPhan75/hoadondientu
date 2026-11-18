@@ -28,7 +28,12 @@ async function readSuccessPayload(response: Response, fallback: string): Promise
 
   const record = payload as Record<string, unknown>;
   if (!response.ok || record.success !== true) {
-    throw new Error(typeof record.error === 'string' ? record.error : fallback);
+    const errorMsg = typeof record.error === 'string' ? record.error : fallback;
+    const err = new Error(errorMsg) as Error & { fallbackCaptcha?: VisnamCaptcha };
+    if (record.fallbackCaptcha && typeof record.fallbackCaptcha === 'object') {
+      err.fallbackCaptcha = record.fallbackCaptcha as VisnamCaptcha;
+    }
+    throw err;
   }
   return record;
 }

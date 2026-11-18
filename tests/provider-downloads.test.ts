@@ -9,7 +9,6 @@ import { buildDirectLookupUrl } from '../src/templates/templateUtils';
 import { MinvoiceDriver } from '../src/services/invoice-engine/drivers/MinvoiceDriver';
 import { ThaiSonDriver } from '../src/services/invoice-engine/drivers/ThaiSonDriver';
 import { parseThaiSonForm, extractThaiSonDownloadTargets, verifiedThaiSonInvoiceHtml, extractThaiSonOriginalContent } from '../src/services/thaiSonInvoiceService';
-import JSZip from 'jszip';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { EASY_INVOICE_PRINT_STYLE_ID, prepareEasyInvoiceHtml } from '../src/utils/easyInvoicePrint';
 import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';

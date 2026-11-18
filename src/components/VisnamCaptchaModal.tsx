@@ -64,9 +64,14 @@ export const VisnamCaptchaModal: React.FC<VisnamCaptchaModalProps> = ({
           Lấy CAPTCHA mới
         </button>
 
-        <label htmlFor="visnam-captcha-code" className="mt-4 block text-sm font-medium text-slate-200">
-          Mã CAPTCHA
-        </label>
+        <div className="mt-4 flex items-center justify-between">
+          <label htmlFor="visnam-captcha-code" className="block text-sm font-medium text-slate-200">
+            Mã CAPTCHA
+          </label>
+          {code.trim() ? (
+            <span className="text-xs text-emerald-400 font-medium">Đã tự động nhận diện qua OCR</span>
+          ) : null}
+        </div>
         <input
           id="visnam-captcha-code"
           value={code}

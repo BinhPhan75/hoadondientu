@@ -35,3 +35,30 @@ test('Visnam: reject server failure or missing PDF bytes', async () => {
   await assert.rejects(extractVerifiedVisnamFiles({ success: false }, identity));
   await assert.rejects(extractVerifiedVisnamFiles(response(xml, Buffer.from('not a PDF')), identity), /PDF/);
 });
+
+test('Visnam: createVisnamBinarizedBmp removes red and green noise lines and keeps dark/blue digits', async () => {
+  const { createVisnamBinarizedBmp } = await import('../src/services/invoice-engine/captcha/tesseractCaptchaSolver');
+  // Synthetic 10x4 image:
+  // Pixel (0,0): Pure Red noise (255, 0, 0, 255)
+  // Pixel (1,0): Pure Green noise (0, 255, 0, 255)
+  // Pixel (2,0): Black digit (0, 0, 0, 255)
+  // Pixel (3,0): Blue digit (0, 0, 240, 255)
+  // Pixel (4,0): White background (255, 255, 255, 255)
+  const width = 10;
+  const height = 4;
+  const data = Buffer.alloc(width * height * 4, 255); // all white
+
+  // (0,0) Red line
+  data[0] = 255; data[1] = 0; data[2] = 0; data[3] = 255;
+  // (1,0) Green line
+  data[4] = 0; data[5] = 255; data[6] = 0; data[7] = 255;
+  // (2,0) Black digit
+  data[8] = 0; data[9] = 0; data[10] = 0; data[11] = 255;
+  // (3,0) Blue digit
+  data[12] = 0; data[13] = 0; data[14] = 240; data[15] = 255;
+
+  const bmp = createVisnamBinarizedBmp({ width, height, data }, 200, 5);
+  assert.ok(bmp.length > 54);
+  assert.equal(bmp.slice(0, 2).toString(), 'BM');
+});
+

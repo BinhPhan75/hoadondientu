@@ -85,6 +85,7 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
     const idatChunks: Buffer[] = [];
     let width = 0;
     let height = 0;
+    let colorType = 6;
 
     while (offset < buf.length) {
       const len = buf.readUInt32BE(offset);
@@ -92,6 +93,7 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
       if (type === 'IHDR') {
         width = buf.readUInt32BE(offset + 8);
         height = buf.readUInt32BE(offset + 12);
+        colorType = buf.readUInt8(offset + 17);
       } else if (type === 'IDAT') {
         idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
       }
@@ -100,20 +102,20 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
 
     if (!width || !height || idatChunks.length === 0) return null;
 
+    const bpp = colorType === 2 ? 3 : 4;
+    const stride = width * bpp + 1;
     const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
     const rawRgba = Buffer.alloc(width * height * 4);
-    const stride = width * 4 + 1;
-    const prevRow = Buffer.alloc(width * 4);
+    const prevRow = Buffer.alloc(width * bpp);
+    const curRow = Buffer.alloc(width * bpp);
 
     for (let y = 0; y < height; y++) {
       const filter = decompressed[y * stride];
       const rowOffset = y * stride + 1;
-      const destOffset = y * width * 4;
 
-      for (let x = 0; x < width * 4; x++) {
-        const bpp = 4;
+      for (let x = 0; x < width * bpp; x++) {
         const raw = decompressed[rowOffset + x];
-        const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
+        const a = x >= bpp ? curRow[x - bpp] : 0;
         const b = prevRow[x];
         const c = x >= bpp ? prevRow[x - bpp] : 0;
 
@@ -128,9 +130,24 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
           const pc = Math.abs(p - c);
           val = (raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
         }
-        rawRgba[destOffset + x] = val;
+        curRow[x] = val;
       }
-      rawRgba.copy(prevRow, 0, destOffset, destOffset + width * 4);
+      curRow.copy(prevRow);
+
+      const destOffset = y * width * 4;
+      for (let x = 0; x < width; x++) {
+        if (bpp === 3) {
+          rawRgba[destOffset + x * 4] = curRow[x * 3];
+          rawRgba[destOffset + x * 4 + 1] = curRow[x * 3 + 1];
+          rawRgba[destOffset + x * 4 + 2] = curRow[x * 3 + 2];
+          rawRgba[destOffset + x * 4 + 3] = 255;
+        } else {
+          rawRgba[destOffset + x * 4] = curRow[x * 4];
+          rawRgba[destOffset + x * 4 + 1] = curRow[x * 4 + 1];
+          rawRgba[destOffset + x * 4 + 2] = curRow[x * 4 + 2];
+          rawRgba[destOffset + x * 4 + 3] = curRow[x * 4 + 3];
+        }
+      }
     }
 
     return { width, height, data: rawRgba };
@@ -415,6 +432,84 @@ export interface TesseractSolveOptions {
 }
 
 /**
+ * Giải chuyên sâu CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com):
+ * - Binarize và khử sạch vạch nhiễu đỏ/xanh (createVisnamBinarizedBmp)
+ * - Thử các chế độ phân đoạn PSM 8 (Single word), PSM 7 (Single text line), PSM 6 (Uniform block), PSM 13 (Raw line)
+ * - Tự động chuẩn hóa thành chuỗi 4 chữ số
+ */
+export async function solveVisnamCaptcha(
+  imageInput: Buffer | string | Uint8Array,
+  timeoutMs = 12000
+): Promise<{ code: string; confidence: number } | null> {
+  const recognitionPromise = (async () => {
+    let buf: Buffer;
+    if (typeof imageInput === 'string') {
+      const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, '');
+      buf = Buffer.from(cleanB64, 'base64');
+    } else {
+      buf = Buffer.from(imageInput);
+    }
+
+    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    if (!isPng) return null;
+
+    const decoded = decodePngRgba(buf);
+    if (!decoded) return null;
+
+    const bmp = createVisnamBinarizedBmp(decoded, 380, 15);
+    const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
+
+    // 1. Thử các chế độ PSM phân đoạn từ ngữ/dòng số tốt nhất trên ảnh binarized
+    for (const psm of ['8', '7', '6', '13']) {
+      try {
+        await worker.setParameters({
+          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+          tessedit_pageseg_mode: psm as any,
+        });
+        const res = await worker.recognize(bmp);
+        const raw = res.data.text || '';
+        const cleaned = postProcessOcrText(raw, { digitsOnly: true, expectedLength: 4 });
+        if (/^\d{4}$/.test(cleaned)) {
+          return {
+            code: cleaned,
+            confidence: res.data.confidence || 85,
+          };
+        }
+      } catch {
+        // Tiếp tục chế độ kế tiếp
+      }
+    }
+
+    // 2. Dự phòng: lấy chuỗi 4 số nếu nhận diện được từ 4 số trở lên
+    for (const psm of ['8', '7', '6']) {
+      try {
+        await worker.setParameters({
+          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+          tessedit_pageseg_mode: psm as any,
+        });
+        const res = await worker.recognize(bmp);
+        const raw = res.data.text || '';
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length >= 4) {
+          return {
+            code: digits.slice(0, 4),
+            confidence: res.data.confidence || 60,
+          };
+        }
+      } catch {}
+    }
+
+    return null;
+  })();
+
+  const timeoutPromise = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), timeoutMs)
+  );
+
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+
+/**
  * Giải Captcha cục bộ bằng Tesseract.js (không cần gọi API ngoài, không bị giới hạn quota hay HTTP 429)
  * Có cơ chế giới hạn thời gian (timeoutMs) để ngăn chặn rủi ro treo tiến trình trên môi trường Serverless/Vercel.
  */
@@ -441,13 +536,20 @@ export async function solveCaptchaWithTesseract(
       throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
     }
 
+    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    if (options?.preprocessVisnam === true && isPng) {
+      const visnamRes = await solveVisnamCaptcha(buf, timeoutMs);
+      if (visnamRes) {
+        return visnamRes;
+      }
+    }
+
     // Đặt mặc định digitsOnly = false để nhận diện cả chữ và số (VD: K8H6WK)
     const digitsOnly = options?.digitsOnly === true;
     const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
 
     let processBuf = buf;
 
-    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
     if (options?.preprocessVisnam === true && isPng) {
       const decoded = decodePngRgba(buf);
       if (decoded) {

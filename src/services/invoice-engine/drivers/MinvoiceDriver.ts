@@ -132,10 +132,9 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     // SearchInvoice operation. The CAPTCHA token must be acquired through a
     // legitimate user interaction supported by the provider. Never mint,
     // reuse, store, or synthesize one here.
-    const token = String(options?.recaptchaToken || '').trim();
     if (!token) {
       throw new OriginalInvoiceError(
-        'Vui lòng mở link để tra cứu trực tiếp',
+        'M-invoice yêu cầu mã reCAPTCHA xác thực. Vui lòng mở link để tra cứu trực tiếp',
         this.providerCode, 'MINVOICE_CAPTCHA_REQUIRED', 428, portal
       );
     }

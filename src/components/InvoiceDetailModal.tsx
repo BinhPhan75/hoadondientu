@@ -30,7 +30,7 @@ import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, 
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
-import { fetchVisnamCaptcha, fetchVisnamInvoicePdf } from '../services/visnamClient';
+import { fetchVisnamCaptcha, fetchVisnamInvoicePdf, autoLookupVisnamInvoicePdf } from '../services/visnamClient';
 import { VisnamCaptchaModal } from './VisnamCaptchaModal';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
@@ -698,7 +698,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const captcha = await fetchVisnamCaptcha();
       if (openInvoiceIdRef.current !== targetId || originalLoadSequence.current !== sequence) return;
       setVisnamCaptcha(captcha);
-      setVisnamCaptchaCode('');
+      setVisnamCaptchaCode(captcha.autoSolvedCode || '');
     } catch (error) {
       if (openInvoiceIdRef.current === targetId && originalLoadSequence.current === sequence) {
         setVisnamCaptcha(null);
@@ -724,11 +724,61 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     const sequence = ++originalLoadSequence.current;
-    setVisnamCaptcha(null);
-    setVisnamCaptchaCode('');
-    setVisnamCaptchaError(null);
-    setIsVisnamCaptchaOpen(true);
-    await refreshVisnamCaptcha(target.id, sequence);
+
+    // 1. Tự động giải CAPTCHA qua OCR cục bộ và tải trực tiếp PDF về phần mềm
+    setIsDownloadingEasyInvoice(true);
+    setOriginalLoadError(null);
+    setEasyInvoiceDownloadStatus('Đang tự động nhận diện CAPTCHA qua OCR và tải PDF gốc VIN-HOADON...');
+    try {
+      const identity = {
+        sellerTaxCode: String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim(),
+        invoiceSeries: String(target.khhdon || extractTagValue(target.rawXml || '', 'KHHDon') || '').trim(),
+        invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
+      };
+      const result = await autoLookupVisnamInvoicePdf({
+        lookupCode: code,
+        identity,
+      });
+
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+
+      const url = URL.createObjectURL(result.blob);
+      setOriginalProviderPdfUrl(url);
+      setIsVisnamCaptchaOpen(false);
+      setVisnamCaptcha(null);
+      setVisnamCaptchaCode('');
+      setVisnamCaptchaError(null);
+      setEasyInvoiceDownloadStatus('Đã tự động nhận diện CAPTCHA và tải PDF gốc VIN-HOADON thành công.');
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = result.filename;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      try {
+        downloadLink.click();
+      } finally {
+        downloadLink.remove();
+      }
+      return;
+    } catch (error: any) {
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+      console.warn('[Visnam] Tự động tải qua OCR thất bại, mở hộp thoại CAPTCHA:', error?.message);
+
+      // 2. Dự phòng: Mở modal nhập CAPTCHA nếu OCR tự động thất bại
+      const fallback = error?.fallbackCaptcha;
+      setVisnamCaptcha(fallback || null);
+      setVisnamCaptchaCode(fallback?.autoSolvedCode || '');
+      setVisnamCaptchaError(null);
+      setIsVisnamCaptchaOpen(true);
+      if (!fallback) {
+        await refreshVisnamCaptcha(target.id, sequence);
+      }
+    } finally {
+      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+        setIsDownloadingEasyInvoice(false);
+      }
+    }
   };
 
   const handleVisnamCaptchaSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
