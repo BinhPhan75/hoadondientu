@@ -80,7 +80,7 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
   },
   '0401486901': {
     name: 'Công ty Cổ phần Phát triển Công nghệ Thẻ Visnam',
-    defaultPortalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+    defaultPortalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
     shortBrand: 'VIN-HOADON'
   },
   // 12. M-Invoice
@@ -110,7 +110,7 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
       mst: '0401486901',
       name: 'Công ty Cổ phần Phát triển Công nghệ Thẻ Visnam',
       fullDisplay: '0401486901 - VIN-HOADON (Visnam)',
-      portalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+      portalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
       lookupCode: (inv.lookupCode || '').trim(),
       shortBrand: 'VIN-HOADON'
     };
@@ -415,7 +415,7 @@ export function buildDirectLookupUrl(
   if (info.shortBrand === 'VIN-HOADON' || provider === 'VISNAM') {
     // Hash parameters are only a hint for the optional official-portal
     // prefill extension; the website itself might not support URL prefill.
-    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
+    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
     return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
   }
 
