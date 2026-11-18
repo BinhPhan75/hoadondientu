@@ -3,6 +3,7 @@ const PORTALS: Record<string, string[]> = {
   THAISON: ['einvoice.vn', 'einvoice.com.vn', 'thaison.vn'],
   IHOADON: ['ihoadon.vn'],
   MINVOICE: ['minvoice.vn', 'minvoice.com.vn'],
+  VISNAM: ['vin-hoadon.com'],
   VIETTEL: ['sinvoice.viettel.vn', 'vinvoice.viettel.vn', 'sinvoice.vn'],
   VNPT: ['vnpt-invoice.com.vn', 'vnpt-invoice.vn', 'invoice.vnpt.vn'],
   EASYINVOICE: ['easyinvoice.vn', 'easyinvoice.com.vn', 'softdreams.vn'],
@@ -137,7 +138,7 @@ export const SOLUTION_PROVIDERS: Record<string, string> = {
   '0101243150': 'MISA', '0101300842': 'THAISON', '0106026495': 'MINVOICE', '0106026495001': 'MINVOICE',
   '0100684378': 'VNPT', '0100686209': 'VNPT', '0100109106': 'VIETTEL',
   '0105987432': 'EASYINVOICE', '0315744883': '4SI', '0302999571': 'LCS',
-  '0101360697': 'BKAV', '0102182292': 'VNPAY', '0104128565': 'FPT', '0107871301': 'CYBERBILL',
+  '0401486901': 'VISNAM', '0101360697': 'BKAV', '0102182292': 'VNPAY', '0104128565': 'FPT', '0107871301': 'CYBERBILL',
 };
 
 export function providerFromPortal(value: string): string | undefined {
