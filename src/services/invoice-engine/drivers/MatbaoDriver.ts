@@ -1,15 +1,7 @@
 /**
  * Matbao / Mifi (MSTTCGP 0302712571) issuer original-PDF lookup.
- *
- * These invoices use their raw XML as the lookup input, not an fkey.
- * The XML-upload endpoint/field varies with portal deployment and is not
- * publicly documented. Only enable automated upload after inspecting a
- * working provider request; never guess an endpoint in production.
- *
- * Optional server configuration:
- * MATBAO_XML_UPLOAD_URL=https://<verified-matbao-or-mifi-host>/<verified-path>
- * MATBAO_XML_UPLOAD_FIELD=<verified-multipart-file-field> (default: file)
- * MATBAO_XML_UPLOAD_MODE=multipart | raw (default: multipart)
+ * Mirror the public portal's XML flow: resolve the FKey from invoice identity,
+ * then query the PDF endpoint. Pass through only a user-provided CAPTCHA token.
  */
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import type { ExtractedInvoiceInfo, DownloadOptions, DownloadResult, DriverMetadata } from '../types';
@@ -18,6 +10,8 @@ import { OriginalInvoiceError } from '../OriginalInvoiceError';
 import { verifyIssuerInvoiceBytes } from '../../invoiceIdentityVerifier';
 
 const PORTAL = 'https://matbao.in/tra-cuu-hoa-don';
+const FKEY_ENDPOINT = 'https://matbao.in/api/tra-cuu-hoa-don/fkey';
+const LOOKUP_ENDPOINT = 'https://matbao.in/api/tra-cuu-hoa-don';
 const MAX_XML = 5_000_000;
 const MAX_PDF = 18_000_000;
 
@@ -87,12 +81,12 @@ export function matbaoPdfUrlFromLookupResult(
 }
 
 export class MatbaoDriver extends BaseInvoiceProviderDriver {
-  readonly name = 'Matbao Mifi XML Upload Driver';
+  readonly name = 'Matbao Mifi XML Lookup Driver';
   readonly providerCode = 'MATBAO';
   readonly metadata: DriverMetadata = {
-    name: 'Matbao Mifi XML Upload Driver',
+    name: 'Matbao Mifi XML Lookup Driver',
     providerCode: 'MATBAO',
-    description: 'Tra cứu theo XML gốc, không cần mã tra cứu dạng văn bản',
+    description: 'Tra cứu theo XML gốc qua FKey của cổng Mắt Bão',
     sampleUrl: PORTAL,
     supportsCaptcha: true,
     requiredFields: ['rawXml'],
@@ -125,7 +119,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
       lookupCode: '',
       lookupUrl: PORTAL,
       rawXml: xml,
-      additionalData: { msttcgp: '0302712571', lookupMethod: 'xml-upload' },
+      additionalData: { msttcgp: '0302712571', lookupMethod: 'xml-fkey' },
     };
   }
 
@@ -144,85 +138,104 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
     }
 
     const timeout = Math.min(options?.timeoutMs || 20000, 30000);
-    // Observed in the official portal: fkey?taxcode=<seller>&pattern=<template>
-    // &serial=<series>&no=<invoice number> returns a JSON record containing
-    // pdfUrl, xmlUrl, viewerUrl and found=true. The exact origin/path is
-    // deployment-specific, so configure the verified full endpoint.
-    // Based on the observed browser request named "fkey?taxcode=...".
-    // Override via MATBAO_FKEY_LOOKUP_URL if Matbao changes its route.
-    const fkeyEndpoint = verifiedProviderUrl(
-      process.env.MATBAO_FKEY_LOOKUP_URL || 'https://matbao.in/api/tra-cuu-hoa-don/fkey'
-    );
-    let target: string | undefined;
-    if (fkeyEndpoint) {
-      const lookup = new URL(fkeyEndpoint.href);
-      lookup.searchParams.set('taxcode', info.sellerTaxCode);
-      lookup.searchParams.set('pattern', info.templateCode);
-      lookup.searchParams.set('serial', info.invoiceSeries);
-      lookup.searchParams.set('no', String(Number(info.invoiceNo)));
+    const sellerTaxCode = info.sellerTaxCode || this.extractXmlTag(xml, 'MST');
+    const templateCode = info.templateCode || this.extractXmlTag(xml, 'KHMSHDon');
+    const invoiceSeries = info.invoiceSeries || this.extractXmlTag(xml, 'KHHDon');
+    const invoiceNo = String(info.invoiceNo || this.extractXmlTag(xml, 'SHDon') || '')
+      .trim().replace(/^0+(?=\d)/, '');
+    if (!sellerTaxCode || !templateCode || !invoiceSeries || !/^\d+$/.test(invoiceNo)) {
+      return fallback('XML thiếu MST người bán, mẫu số, ký hiệu hoặc số hóa đơn.',
+        'MATBAO_XML_REQUIRED', 400);
+    }
+
+    let fkey = this.extractXmlTag(xml, 'Fkey') || '';
+    if (!fkey) {
+      const fkeyUrl = new URL(FKEY_ENDPOINT);
+      fkeyUrl.searchParams.set('taxcode', sellerTaxCode);
+      fkeyUrl.searchParams.set('pattern', templateCode);
+      fkeyUrl.searchParams.set('serial', invoiceSeries);
+      fkeyUrl.searchParams.set('no', invoiceNo);
+      let response: Response;
       try {
-        const response = await fetch(lookup.href, {
-          method: 'GET', redirect: 'manual',
+        response = await fetch(fkeyUrl, {
           headers: { Accept: 'application/json' },
           signal: AbortSignal.timeout(timeout),
         });
-        if (response.ok && /json/i.test(response.headers.get('content-type') || '')) {
-          const text = await response.text();
-          if (text.length <= 300000) {
-            const result = JSON.parse(text);
-            target = matbaoPdfUrlFromLookupResult(result, info);
-          }
-        }
-      } catch {
-        // Missing authentication/captcha or network error: use configured
-        // issuer XML-upload integration or an actionable manual fallback.
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return fallback('Không kết nối được API lấy FKey của Mắt Bão: ' + detail,
+          'MATBAO_FKEY_UNAVAILABLE', 502);
       }
-    }
-    const upload = verifiedProviderUrl(process.env.MATBAO_XML_UPLOAD_URL || '');
-    if (!target && !upload) {
-      return fallback('Không thể lấy liên kết tải PDF qua API fkey. Có thể cổng yêu cầu xác minh trên trình duyệt.');
-    }
-    const mode = process.env.MATBAO_XML_UPLOAD_MODE === 'raw' ? 'raw' : 'multipart';
-    const headers: Record<string, string> = { Accept: 'application/json, text/html, */*' };
-    let body: BodyInit;
-    if (mode === 'raw') {
-      headers['Content-Type'] = 'application/xml; charset=utf-8';
-      body = xml;
-    } else {
-      const field = process.env.MATBAO_XML_UPLOAD_FIELD || 'file';
-      if (!/^[A-Za-z][A-Za-z0-9_-]{0,49}$/.test(field)) {
-        return fallback('Tên trường upload XML không hợp lệ.', 'MATBAO_UPLOAD_CONFIG_ERROR', 500);
+      if (!response.ok) {
+        return fallback('API lấy FKey của Mắt Bão trả về HTTP ' + response.status + '.',
+          'MATBAO_FKEY_UNAVAILABLE', 502);
       }
-      const form = new FormData();
-      form.append(field, new Blob([xml], { type: 'application/xml' }), 'invoice.xml');
-      body = form;
+      const text = await response.text();
+      if (text.length > 300_000) return fallback('Phản hồi FKey của Mắt Bão vượt giới hạn.');
+      let payload: unknown;
+      try { payload = JSON.parse(text); } catch {
+        return fallback('API lấy FKey của Mắt Bão trả về dữ liệu không hợp lệ.',
+          'MATBAO_FKEY_UNAVAILABLE', 502);
+      }
+      const value = payload && typeof payload === 'object'
+        ? (payload as Record<string, unknown>).fkey
+        : undefined;
+      fkey = typeof value === 'string' ? value.trim() : '';
+    }
+    if (!/^[A-Za-z0-9]{5,64}$/.test(fkey)) {
+      return fallback('Mắt Bão không tìm thấy FKey phù hợp với hóa đơn XML này.',
+        'MATBAO_FKEY_NOT_FOUND', 404);
     }
 
-    if (!target && upload) try {
-      const response = await fetch(upload.href, {
-        method: 'POST', headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout),
+    const lookupUrl = new URL(LOOKUP_ENDPOINT);
+    lookupUrl.searchParams.set('code', fkey);
+    lookupUrl.searchParams.set('keyword', '');
+    const recaptchaToken = String(options?.recaptchaToken || '').trim();
+    if (recaptchaToken) lookupUrl.searchParams.set('token', recaptchaToken);
+    let lookupResponse: Response;
+    try {
+      lookupResponse = await fetch(lookupUrl, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(timeout),
       });
-      if (!response.ok) {
-        return fallback('Cổng Mắt Bão từ chối upload XML (HTTP ' + response.status + ').',
-          'MATBAO_UPLOAD_UNAVAILABLE', 502);
-      }
-      const ct = response.headers.get('content-type') || '';
-      const text = await response.text();
-      if (text.length > 2_000_000) return fallback('Phản hồi upload quá lớn.');
-      if (/json/i.test(ct)) {
-        try { target = findPdfTarget(JSON.parse(text)); } catch { /* invalid response */ }
-      }
-      // Some portals return a server-rendered HTML link to their viewer.
-      if (!target && /html/i.test(ct)) {
-        const match = text.match(/https:\/\/[^"'\s<>]+(?:downloadpdfca\.aspx|\.pdf)[^"'\s<>]*/i);
-        if (match) target = findPdfTarget(match[0].replace(/&amp;/g, '&'));
-      }
     } catch (error) {
-      if (error instanceof OriginalInvoiceError) throw error;
-      return fallback('Không kết nối được dịch vụ upload XML của Mắt Bão.',
-        'MATBAO_UPLOAD_UNAVAILABLE', 502);
+      const detail = error instanceof Error ? error.message : String(error);
+      return fallback('Không kết nối được API tra cứu hóa đơn Mắt Bão: ' + detail,
+        'MATBAO_LOOKUP_UNAVAILABLE', 502);
     }
-    if (!target) return fallback('Chưa nhận được liên kết PDF hợp lệ từ Mắt Bão.');
+    if (lookupResponse.status === 403) {
+      return fallback('Mắt Bão yêu cầu xác minh reCAPTCHA trên trang tra cứu.',
+        'MATBAO_CAPTCHA_REQUIRED', 428);
+    }
+    if (!lookupResponse.ok) {
+      return fallback('API tra cứu Mắt Bão trả về HTTP ' + lookupResponse.status + '.',
+        'MATBAO_LOOKUP_UNAVAILABLE', 502);
+    }
+    const lookupText = await lookupResponse.text();
+    if (lookupText.length > 300_000) return fallback('Phản hồi tra cứu Mắt Bão vượt giới hạn.');
+    let lookupResult: unknown;
+    try { lookupResult = JSON.parse(lookupText); } catch {
+      return fallback('API tra cứu Mắt Bão trả về dữ liệu không hợp lệ.',
+        'MATBAO_LOOKUP_UNAVAILABLE', 502);
+    }
+    if (!lookupResult || typeof lookupResult !== 'object' ||
+        (lookupResult as Record<string, unknown>).found !== true) {
+      if (!recaptchaToken) {
+        return fallback('Mắt Bão chưa trả kết quả khi chưa có CAPTCHA; hãy xác minh trên trang tra cứu.',
+          'MATBAO_CAPTCHA_REQUIRED', 428);
+      }
+      return fallback('Mắt Bão không tìm thấy hóa đơn theo FKey lấy từ XML.',
+        'MATBAO_INVOICE_NOT_FOUND', 404);
+    }
+    const target = matbaoPdfUrlFromLookupResult(lookupResult, {
+      invoiceNo,
+      invoiceSeries,
+      templateCode,
+    });
+    if (!target) {
+      return fallback('Kết quả FKey không khớp hóa đơn XML hoặc không có liên kết PDF đáng tin cậy.',
+        'MATBAO_PDF_LINK_UNVERIFIED', 422);
+    }
 
     try {
       const response = await fetch(target, {
