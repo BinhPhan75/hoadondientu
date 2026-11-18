@@ -20,22 +20,24 @@
   const description = el => normalize([
     el.name, el.id, el.placeholder, el.getAttribute('aria-label') || '',
     ...[...document.querySelectorAll('label')].filter(l => l.htmlFor && l.htmlFor === el.id).map(l => l.textContent || ''),
-    el.closest('label')?.textContent || '',
-    el.closest('.form-group,.input-group,.form-item,.row')?.textContent?.slice(0,120) || ''
+    el.closest('label')?.textContent || ''
   ].join(' '));
 
   const choose = () => {
     const inputs = [...document.querySelectorAll('input')].filter(visible);
+    // The observed VIN-HOADON page has a text input with placeholder
+    // "Mã số bí mật" and a separate "Nhập mã xác thực" CAPTCHA field.
+    // Prefer a unique exact placeholder match; never inspect a shared
+    // parent row that also contains the CAPTCHA caption.
+    const exact = inputs.filter(el => /^(ma so bi mat|ma tra cuu|ma bao mat|so bao mat)$/.test(
+      normalize(el.placeholder || el.getAttribute('aria-label') || '')
+    ));
+    if (exact.length === 1) return exact[0];
     const candidates = inputs.filter(el => {
       const label = description(el);
       return isLookup(label) && !isCaptcha(label);
     });
-    if (candidates.length === 1) return candidates[0];
-    // On a form with exactly one non-CAPTCHA text input, it must be the
-    // code entry. Do not guess if multiple unclassified inputs exist.
-    const eligible = inputs.filter(el => !isCaptcha(description(el)) &&
-      !/date|number|email|tel/.test(el.type));
-    return inputs.length > 0 && eligible.length === 1 ? eligible[0] : null;
+    return candidates.length === 1 ? candidates[0] : null;
   };
   let done = false;
   const apply = () => {
