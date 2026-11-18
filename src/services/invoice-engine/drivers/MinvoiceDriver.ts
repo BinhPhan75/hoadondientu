@@ -128,12 +128,18 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
       );
     }
 
-    const query = new URLSearchParams({
-      masothue: taxCode, sobaomat: lookupCode, type: 'PDF', inchuyendoi: 'false',
-    });
     const timeout = Math.min(options?.timeoutMs || 20000, 30000);
-    const makeUrl = (path: string) =>
-      'https://tracuuhoadon.minvoice.com.vn/api/Search/' + path + '?' + query.toString();
+    const makeUrl = (path: string) => {
+      // Legacy public M-invoice PDF links use *only* type, masothue, sobaomat.
+      // Extra inchuyendoi was never part of this endpoint and may cause 400.
+      const params = new URLSearchParams([
+        ['type', 'PDF'],
+        ['masothue', taxCode],
+        ['sobaomat', lookupCode],
+      ]);
+      return 'https://tracuuhoadon.minvoice.com.vn/api/Search/' + path +
+        '?' + params.toString();
+    };
 
     // A legacy PDF operation is already implemented elsewhere in this
     // application. Try it once, without inventing captcha tokens.
@@ -174,8 +180,10 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
             executionLogs: ['M-invoice: đã nhận PDF từ ' + attempt.path],
           };
         }
+        const type = response.headers.get('content-type') || '';
         statuses.push(attempt.path + ': HTTP ' + response.status +
-          (response.ok ? ' nhưng không trả về PDF' : ''));
+          (response.ok ? ' nhưng không trả về PDF' : '') +
+          (type && !/^application\/pdf/i.test(type) ? ' (' + type.split(';')[0].slice(0, 60) + ')' : ''));
         if (response.status === 429) break;
       } catch (error: any) {
         statuses.push(attempt.path + ': ' + String(error?.message || 'lỗi kết nối').slice(0, 120));
