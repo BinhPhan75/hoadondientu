@@ -24,6 +24,7 @@ export class CaptchaSolver {
           timeoutMs: options?.timeoutMs || 4000,
           preprocessEasyInvoice: options?.preprocessEasyInvoice === true,
           preprocessPosCaptcha: options?.alphanumeric === true,
+          preprocessVisnam: options?.preprocessVisnam === true,
         });
 
         const localCode = (tesseractRes?.code || '').trim().toUpperCase();

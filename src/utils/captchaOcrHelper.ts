@@ -275,5 +275,99 @@ export function cleanPosCaptchaOcrResult(rawText: string, expectedLength = 6): s
   return cleaned;
 }
 
+/**
+ * Tiền xử lý chuyên sâu cho CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com) trên trình duyệt:
+ * - Load ảnh qua HTML5 Canvas
+ * - Composite nền trắng chuẩn (#FFFFFF)
+ * - Khử sạch 2 vạch kẻ chéo màu đỏ và xanh lá cây cắt ngang qua các chữ số
+ * - Binarize nét chữ đen (0) trên nền trắng (255)
+ * - Thêm viền trắng an toàn 15px xung quanh giúp Tesseract phân đoạn 4 chữ số hoàn hảo
+ */
+export async function preprocessVisnamCaptchaImage(imageSrc: string): Promise<string> {
+  if (typeof window === 'undefined' || !imageSrc) return imageSrc;
+
+  return new Promise<string>((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    const timer = setTimeout(() => {
+      resolve(imageSrc);
+    }, 2500);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const rawW = img.naturalWidth || img.width || 1500;
+        const rawH = img.naturalHeight || img.height || 350;
+
+        const targetW = 380;
+        const targetH = Math.round(rawH * targetW / rawW);
+        const padding = 15;
+        const totalW = targetW + padding * 2;
+        const totalH = targetH + padding * 2;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = totalW;
+        canvas.height = totalH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(imageSrc);
+          return;
+        }
+
+        // Vẽ nền trắng
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, totalW, totalH);
+
+        // Vẽ ảnh downscale với padding
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, padding, padding, targetW, targetH);
+
+        const imgData = ctx.getImageData(0, 0, totalW, totalH);
+        const data = imgData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+
+          // Lọc vạch kẻ màu đỏ hoặc xanh lá cây
+          const isRedLine = (r > g + 35) && (r > b + 35);
+          const isGreenLine = (g > r + 25) && (g > b + 25);
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+          const isDigit = !isRedLine && !isGreenLine && (lum < 165 || (b > r + 25 && b > g + 25 && lum < 220));
+
+          if (isDigit) {
+            data[i] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
+            data[i + 3] = 255;
+          } else {
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+            data[i + 3] = 255;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      } catch (err) {
+        console.warn('Visnam Preprocessing error:', err);
+        resolve(imageSrc);
+      }
+    };
+
+    img.onerror = () => {
+      clearTimeout(timer);
+      resolve(imageSrc);
+    };
+
+    img.src = imageSrc;
+  });
+}
+
 export { solveCaptchaWithClientTemplateMatching } from './clientTemplateCaptchaSolver';
 

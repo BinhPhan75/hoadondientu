@@ -1,6 +1,7 @@
 export interface VisnamCaptcha {
   key: string;
   image: string;
+  autoSolvedCode?: string;
 }
 
 export interface VisnamInvoiceIdentity {
@@ -45,7 +46,11 @@ export async function fetchVisnamCaptcha(): Promise<VisnamCaptcha> {
       payload.image.length > 350_000) {
     throw new Error('Dữ liệu CAPTCHA VIN-HOADON không hợp lệ.');
   }
-  return { key: payload.key, image: payload.image };
+  return {
+    key: payload.key,
+    image: payload.image,
+    autoSolvedCode: typeof payload.autoSolvedCode === 'string' ? payload.autoSolvedCode : undefined
+  };
 }
 
 export async function fetchVisnamInvoicePdf(params: {
@@ -87,3 +92,40 @@ export async function fetchVisnamInvoicePdf(params: {
     : 'HoaDon_VIN-HOADON.pdf';
   return { blob: new Blob([bytes], { type: 'application/pdf' }), filename };
 }
+
+export async function autoLookupVisnamInvoicePdf(params: {
+  lookupCode: string;
+  identity: VisnamInvoiceIdentity;
+}): Promise<VisnamInvoicePdf> {
+  const response = await fetch('/api/visnam/auto-lookup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify({
+      maSoBiMat: params.lookupCode.trim(),
+      identity: params.identity,
+    }),
+  });
+  const payload = await readSuccessPayload(response, 'Không tải được PDF VIN-HOADON tự động.');
+  if (typeof payload.pdfBase64 !== 'string' ||
+      payload.pdfBase64.length > Math.ceil(18_000_000 * 4 / 3) + 16) {
+    throw new Error('VIN-HOADON không trả về PDF hợp lệ.');
+  }
+
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(payload.pdfBase64), character => character.charCodeAt(0));
+  } catch {
+    throw new Error('Dữ liệu PDF VIN-HOADON bị lỗi.');
+  }
+  if (bytes.length < 5 || new TextDecoder().decode(bytes.subarray(0, 5)) !== '%PDF-') {
+    throw new Error('VIN-HOADON không trả về tệp PDF hợp lệ.');
+  }
+
+  const filename = typeof payload.filename === 'string' &&
+    /^[A-Za-z0-9._-]{1,120}\.pdf$/i.test(payload.filename)
+    ? payload.filename
+    : 'HoaDon_VIN-HOADON.pdf';
+  return { blob: new Blob([bytes], { type: 'application/pdf' }), filename };
+}
+

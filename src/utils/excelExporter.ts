@@ -6,6 +6,7 @@ export interface ExportExcelOptions {
   taxpayerName?: string;
   periodLabel?: string;
   invoiceType?: 'purchase' | 'sold' | 'both';
+  indicator22?: number;
 }
 
 /**

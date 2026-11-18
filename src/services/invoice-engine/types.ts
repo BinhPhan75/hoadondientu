@@ -56,6 +56,7 @@ export interface CaptchaSolveOptions {
   timeoutMs?: number; // Timeout OCR
   preprocess?: boolean; // Tiền xử lý ảnh
   preprocessEasyInvoice?: boolean; // Tiền xử lý chuyên biệt cho EasyInvoice PNG
+  preprocessVisnam?: boolean; // Tiền xử lý chuyên biệt cho VIN-HOADON (Visnam)
   lang?: string; // 'eng' | 'vie'
   prompt?: string; // Tùy chỉnh prompt gửi cho Gemini AI
   alphanumeric?: boolean;

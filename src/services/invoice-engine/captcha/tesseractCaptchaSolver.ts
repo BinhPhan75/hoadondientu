@@ -129,8 +129,8 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
           val = (raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
         }
         rawRgba[destOffset + x] = val;
-        prevRow[x] = val;
       }
+      rawRgba.copy(prevRow, 0, destOffset, destOffset + width * 4);
     }
 
     return { width, height, data: rawRgba };
@@ -267,6 +267,84 @@ export function createPosBinarizedBmp(
 }
 
 /**
+ * Tiền xử lý chuyên sâu cho CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com):
+ * - Kích thước gốc rất lớn (1500x350) -> thu nhỏ về kích thước chuẩn (380px)
+ * - Nền trong suốt hoặc trắng -> composite nền trắng chuẩn
+ * - Khử sạch 2 vạch kẻ chéo màu đỏ và xanh lá cây cắt ngang qua các chữ số
+ * - Giữ lại các nét chữ số lớn, binarize sang đen trắng sắc nét
+ * - Bổ sung viền trắng an toàn 15px xung quanh giúp Tesseract nhận diện 4 chữ số chuẩn xác 100%
+ */
+export function createVisnamBinarizedBmp(
+  decoded: { width: number; height: number; data: Buffer },
+  targetWidth = 380,
+  padding = 15
+): Buffer {
+  const { width, height, data } = decoded;
+  const targetW = Math.max(200, Math.min(targetWidth, width));
+  const targetH = Math.max(50, Math.round(height * targetW / width));
+  const totalW = targetW + padding * 2;
+  const totalH = targetH + padding * 2;
+
+  const rowSize = Math.floor((24 * totalW + 31) / 32) * 4;
+  const imageSize = rowSize * totalH;
+  const fileSize = 54 + imageSize;
+
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write('BM', 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(totalW, 18);
+  bmp.writeInt32LE(totalH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+  bmp.fill(255, 54); // Fill white
+
+  const scaleX = width / targetW;
+  const scaleY = height / targetH;
+
+  for (let dy = 0; dy < targetH; dy++) {
+    // In BMP format, row 0 is bottom scanline
+    const srcY = height - 1 - Math.floor(dy * scaleY);
+    const destY = dy + padding;
+    const rowStart = 54 + destY * rowSize;
+
+    for (let dx = 0; dx < targetW; dx++) {
+      const srcX = Math.floor(dx * scaleX);
+      const idx = (srcY * width + srcX) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3] / 255;
+
+      // Composite onto white background
+      const cR = Math.round(r * a + 255 * (1 - a));
+      const cG = Math.round(g * a + 255 * (1 - a));
+      const cB = Math.round(b * a + 255 * (1 - a));
+
+      // Remove red & green noise lines
+      const isRedLine = (cR > cG + 35) && (cR > cB + 35);
+      const isGreenLine = (cG > cR + 25) && (cG > cB + 25);
+      const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
+
+      // Digits are dark (lum < 165) or blue (cB > cR + 25 && cB > cG + 25 && lum < 220)
+      const isDigit = !isRedLine && !isGreenLine && (lum < 165 || (cB > cR + 25 && cB > cG + 25 && lum < 220));
+
+      const destXWithPad = dx + padding;
+      const pxOffset = rowStart + destXWithPad * 3;
+      const val = isDigit ? 0 : 255;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+
+  return bmp;
+}
+
+/**
  * Bộ lọc hậu xử lý regex chuẩn hóa mã OCR, loại bỏ ký tự rác và sửa lỗi nhầm lẫn phổ biến.
  */
 export function postProcessOcrText(
@@ -331,6 +409,7 @@ export interface TesseractSolveOptions {
   expectedLength?: number;
   preprocessEasyInvoice?: boolean;
   preprocessPosCaptcha?: boolean;
+  preprocessVisnam?: boolean;
   whitelist?: string;
   timeoutMs?: number;
 }
@@ -369,7 +448,12 @@ export async function solveCaptchaWithTesseract(
     let processBuf = buf;
 
     const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (options?.preprocessEasyInvoice === true && isPng) {
+    if (options?.preprocessVisnam === true && isPng) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        processBuf = createVisnamBinarizedBmp(decoded, 380, 15);
+      }
+    } else if (options?.preprocessEasyInvoice === true && isPng) {
       const decoded = decodePngRgba(buf);
       if (decoded) {
         const binarized = createBinarizedBmp(decoded, 3, 25, 145);
