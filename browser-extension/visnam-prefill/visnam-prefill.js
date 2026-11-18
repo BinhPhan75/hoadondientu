@@ -1,40 +1,60 @@
 (() => {
   'use strict';
-  // Runs only on the issuer's lookup website. Never handles CAPTCHA,
-  // submits a form, sends invoice data, or calls provider APIs.
+  // Only prefill the issuer's actual lookup form, never its XML verification
+  // form or CAPTCHA. The extension does not submit the form or fetch invoices.
+  if (location.pathname.replace(/\/+$/, '').toLowerCase() !==
+      '/tracuuhoadon/tracuuxacthuc/tracuuhd') return;
+
   const params = new URLSearchParams(location.hash.replace(/^#/, ''));
-  const code = (params.get('hms_visnam_code') || '').trim();
+  const code = String(params.get('hms_visnam_code') || '').trim();
   if (!/^[A-Za-z0-9_-]{6,64}$/.test(code)) return;
-  history.replaceState(history.state, '', location.pathname + location.search);
 
   const normalize = s => String(s || '').normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    .replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
   const visible = el => el instanceof HTMLInputElement &&
-    el.type !== 'hidden' && el.type !== 'password' && el.getClientRects().length > 0;
-  const caption = el => normalize([
+    !['hidden','password','file','checkbox','radio','submit','button'].includes(el.type) &&
+    el.getClientRects().length > 0 && !el.disabled;
+  const isCaptcha = s => /captcha|xac thuc|xac nhan|kiem tra|security image|verify|verification|ma hinh/.test(s);
+  const isLookup = s => /ma so bi mat|ma tra cuu|ma bao mat|so bao mat|ma bi mat|ma so bao mat|lookup|sobaomat|mabimat|mabaomat|mahoadon|mhd/.test(s);
+  const description = el => normalize([
     el.name, el.id, el.placeholder, el.getAttribute('aria-label') || '',
+    ...[...document.querySelectorAll('label')].filter(l => l.htmlFor && l.htmlFor === el.id).map(l => l.textContent || ''),
     el.closest('label')?.textContent || '',
-    el.parentElement?.textContent?.slice(0, 100) || ''
+    el.closest('.form-group,.input-group,.form-item,.row')?.textContent?.slice(0,120) || ''
   ].join(' '));
+
   const choose = () => {
     const inputs = [...document.querySelectorAll('input')].filter(visible);
-    const targets = inputs.filter(el => /ma so bi mat|ma tra cuu|ma bao mat|lookup|so bao mat|mabimat|mabaomat|sobimat|matau/.test(caption(el))
-      && !/captcha|ma xac thuc|ma kiem tra|verification/.test(caption(el)));
-    return targets.length === 1 ? targets[0] : null;
+    const candidates = inputs.filter(el => {
+      const label = description(el);
+      return isLookup(label) && !isCaptcha(label);
+    });
+    if (candidates.length === 1) return candidates[0];
+    // On a form with exactly one non-CAPTCHA text input, it must be the
+    // code entry. Do not guess if multiple unclassified inputs exist.
+    const eligible = inputs.filter(el => !isCaptcha(description(el)) &&
+      !/date|number|email|tel/.test(el.type));
+    return inputs.length > 0 && eligible.length === 1 ? eligible[0] : null;
   };
+  let done = false;
   const apply = () => {
-    const el = choose();
-    if (!el) return false;
+    if (done) return true;
+    const input = choose();
+    if (!input) return false;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(el, code);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
-    return el.value === code;
+    if (setter) setter.call(input, code);
+    else input.value = code;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    if (input.value !== code) return false;
+    done = true;
+    history.replaceState(history.state, '', location.pathname + location.search);
+    return true;
   };
   if (apply()) return;
-  let count = 0;
+  let tries = 0;
   const timer = setInterval(() => {
-    if (apply() || ++count > 40) clearInterval(timer);
+    if (apply() || ++tries >= 80) clearInterval(timer);
   }, 250);
 })();
