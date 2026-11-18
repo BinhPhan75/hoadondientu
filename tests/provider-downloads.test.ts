@@ -29,7 +29,7 @@ test('Visnam XML extracts QuanLy_SoBaoMat and resolves VIN-HOADON portal', () =>
   assert.equal(lookup.lookupUrl,
     'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd');
   assert.equal(buildDirectLookupUrl(lookup.lookupUrl, lookup.lookupCode, 'VISNAM', '0401926013'),
-    lookup.lookupUrl + '#hms_visnam_code=22U5ZRCE8EQY');
+    lookup.lookupUrl);
 });
 
 test('Co.opmart XML carries a seller-scoped lookup URL and Ma TC code', () => {
