@@ -970,6 +970,11 @@ export function getSellerFromPayload(source: any): { name: string; taxCode: stri
  */
 export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: string; lookupUrl: string } {
   if (!rawXml) return { lookupCode: '', lookupUrl: '' };
+  // Mắt Bão/Mifi identifies invoices through XML upload; the CQT code is
+  // not a lookup token and must never be substituted for one.
+  if (/<MSTTCGP>\s*0302712571\s*<\/MSTTCGP>/i.test(rawXml)) {
+    return { lookupCode: '', lookupUrl: 'https://matbao.in/tra-cuu-hoa-don' };
+  }
 
   const tagValue = (tagNames: string[]): string => {
     for (const tag of tagNames) {
