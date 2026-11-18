@@ -44,7 +44,7 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     const details = extractLookupDetailsFromXml(xmlData);
     let lookupCode = details.lookupCode || '';
 
-    // Bổ sung quét thẻ "Số bảo mật" (có dấu tiếng Việt) và các biến thể khác
+    // Quét thẻ "Số bảo mật" (có dấu tiếng Việt) và các biến thể khác
     if (!lookupCode) {
       lookupCode = this.extractCustomField(xmlData, [
         'Số bảo mật',
@@ -78,34 +78,41 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
       }
     }
 
+    // Tự động xây dựng sẵn URL dự phòng có gắn kèm query parameters (masothue & sobaomat)
+    const cleanTaxCode = (sellerTaxCode || '').trim();
+    const cleanLookupCode = (lookupCode || '').trim();
+    const prefilledLookupUrl = cleanTaxCode && cleanLookupCode
+      ? `https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don?masothue=${encodeURIComponent(cleanTaxCode)}&sobaomat=${encodeURIComponent(cleanLookupCode)}`
+      : 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
+
     return {
       provider: this.providerCode,
       providerName: 'M-Invoice (minvoice.vn)',
-      sellerTaxCode,
+      sellerTaxCode: cleanTaxCode,
       sellerName,
       invoiceNo,
       invoiceSeries,
       templateCode,
       invoiceDate,
       cqtCode,
-      lookupCode: lookupCode.trim(),
-      lookupUrl: details.lookupUrl || 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don',
+      lookupCode: cleanLookupCode,
+      lookupUrl: prefilledLookupUrl, // Đã gán sẵn tham số để nút dự phòng tự điền dữ liệu
       rawXml: xmlData,
       additionalData: {
         msttcgp: '0106026495',
-        soBaoMat: lookupCode.trim()
+        soBaoMat: cleanLookupCode
       }
     };
   }
 
   async fetchPdf(info: ExtractedInvoiceInfo, options?: DownloadOptions): Promise<DownloadResult> {
     const logs: string[] = [];
-    const portal = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
     const taxCode = (options?.customInfo?.sellerTaxCode || info.sellerTaxCode || '').trim();
     const lookupCode = (options?.customInfo?.lookupCode || info.lookupCode || '').trim();
+    const fallbackUrl = info.lookupUrl || 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
     
     if (!taxCode || !lookupCode || lookupCode === info.cqtCode) {
-      throw new OriginalInvoiceError('MINVOICE thiếu MST bên bán hoặc Mã tra cứu (Số bảo mật).', this.providerCode, 'LOOKUP_DATA_MISSING', 422, portal);
+      throw new OriginalInvoiceError('MINVOICE thiếu MST bên bán hoặc Mã tra cứu (Số bảo mật).', this.providerCode, 'LOOKUP_DATA_MISSING', 422, fallbackUrl);
     }
 
     this.createLog(`Khởi chạy M-Invoice Driver cho HĐ Ký hiệu: ${info.invoiceSeries || ''} - Số: ${info.invoiceNo || ''}`, logs);
@@ -126,7 +133,7 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
 
       const headers: Record<string, string> = {
         'Accept': 'application/pdf, application/json, text/plain, */*',
-        'Referer': portal,
+        'Referer': fallbackUrl,
         'Origin': 'https://tracuuhoadon.minvoice.com.vn',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       };
@@ -166,8 +173,8 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     }
 
     throw new OriginalInvoiceError(
-      'Không thể tải trực tiếp tệp PDF từ cổng M-Invoice. Vui lòng kiểm tra lại MST bên bán và Mã tra cứu.',
-      this.providerCode, 'ORIGINAL_DOWNLOAD_FAILED', 422, portal
+      'Không thể tải trực tiếp tệp PDF từ cổng M-Invoice do chính sách bảo mật/Captcha. Vui lòng bấm nút mở cổng dự phòng bên dưới để tải thủ công.',
+      this.providerCode, 'ORIGINAL_DOWNLOAD_FAILED', 422, fallbackUrl
     );
   }
 }
