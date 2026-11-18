@@ -110,12 +110,47 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
       return fallback('Thiếu XML Mắt Bão hợp lệ.', 'MATBAO_XML_REQUIRED', 400);
     }
 
-    const upload = verifiedProviderUrl(process.env.MATBAO_XML_UPLOAD_URL || '');
-    if (!upload) {
-      return fallback('Chưa cấu hình endpoint nhận XML được xác minh của Mắt Bão.');
-    }
-
     const timeout = Math.min(options?.timeoutMs || 20000, 30000);
+    // Observed in the official portal: fkey?taxcode=<seller>&pattern=<template>
+    // &serial=<series>&no=<invoice number> returns a JSON record containing
+    // pdfUrl, xmlUrl, viewerUrl and found=true. The exact origin/path is
+    // deployment-specific, so configure the verified full endpoint.
+    const fkeyEndpoint = verifiedProviderUrl(process.env.MATBAO_FKEY_LOOKUP_URL || '');
+    let target: string | undefined;
+    if (fkeyEndpoint) {
+      const lookup = new URL(fkeyEndpoint.href);
+      lookup.searchParams.set('taxcode', info.sellerTaxCode);
+      lookup.searchParams.set('pattern', info.templateCode);
+      lookup.searchParams.set('serial', info.invoiceSeries);
+      lookup.searchParams.set('no', String(Number(info.invoiceNo)));
+      try {
+        const response = await fetch(lookup.href, {
+          method: 'GET', redirect: 'manual',
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (response.ok && /json/i.test(response.headers.get('content-type') || '')) {
+          const text = await response.text();
+          if (text.length <= 300000) {
+            const result = JSON.parse(text);
+            const expected = result && result.found === true &&
+              String(result.number || '').replace(/^0+(?=\\d)/, '') === String(Number(info.invoiceNo)) &&
+              (String(result.symbol || '').toUpperCase() === info.invoiceSeries.toUpperCase() ||
+                String(result.symbol || '').toUpperCase() === info.templateCode + info.invoiceSeries.toUpperCase());
+            if (expected && typeof result.pdfUrl === 'string') {
+              target = findPdfTarget(result.pdfUrl);
+            }
+          }
+        }
+      } catch {
+        // Missing authentication/captcha or network error: use configured
+        // issuer XML-upload integration or an actionable manual fallback.
+      }
+    }
+    const upload = verifiedProviderUrl(process.env.MATBAO_XML_UPLOAD_URL || '');
+    if (!target && !upload) {
+      return fallback('Chưa cấu hình API fkey hoặc upload XML được xác minh của Mắt Bão.');
+    }
     const mode = process.env.MATBAO_XML_UPLOAD_MODE === 'raw' ? 'raw' : 'multipart';
     const headers: Record<string, string> = { Accept: 'application/json, text/html, */*' };
     let body: BodyInit;
@@ -132,8 +167,7 @@ export class MatbaoDriver extends BaseInvoiceProviderDriver {
       body = form;
     }
 
-    let target: string | undefined;
-    try {
+    if (!target && upload) try {
       const response = await fetch(upload.href, {
         method: 'POST', headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout),
       });
