@@ -1856,7 +1856,7 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
       pdfBase64: result.pdfBase64
     });
   } catch (error: any) {
-    res.status(error.status || 502).json({ success: false, error: error.message, code: error.code, provider: error.provider, requiresCaptcha: error.code === 'RECAPTCHA_REQUIRED', lookupUrl: error.lookupUrl });
+    res.status(error.status || 502).json({ success: false, error: error.message, code: error.code, provider: error.provider, requiresCaptcha: error.code === 'RECAPTCHA_REQUIRED' || error.code === 'MINVOICE_CAPTCHA_REQUIRED', lookupUrl: error.lookupUrl });
   }
 });
 
