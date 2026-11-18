@@ -1714,6 +1714,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : resolveInvoiceProvider(effectiveInvoice) === 'MATBAO' ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
+                {!originalProviderPdfUrl && (
+                  <button type="button" onClick={() => void handleViewOriginalProvider()}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-700 text-emerald-200 hover:bg-emerald-950 disabled:opacity-60">
+                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    {isDownloadingEasyInvoice ? 'Đang lấy PDF gốc...' : 'Tải PDF gốc Mắt Bão'}
+                  </button>
+                )}
                 <button type="button"
                   onClick={() => {
                     const xml = String(effectiveInvoice.rawXml || '').trim();
