@@ -3,6 +3,8 @@ dotenv.config({ override: true });
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import https from 'node:https';
+import tls from 'node:tls';
 import { spawn } from 'child_process';
 import JSZip from 'jszip';
 import { ProxyAgent } from 'undici';
@@ -22,6 +24,7 @@ import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFo
 import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceService';
 import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
+import { VISNAM_RAPIDSSL_INTERMEDIATE } from './src/services/visnamCertificate';
 import { resolveInvoiceProvider } from './src/utils/providerRouting';
 import { fetchGdtInvoiceDetail, fetchGdtInvoiceXml, mergeGdtInvoiceDetail } from './src/utils/gdtDetail';
 
@@ -1795,9 +1798,11 @@ app.post('/api/invoice-downloader/download', async (req, res) => {
       });
     }
 
-    if (!forceFallback && requestedProvider === 'BKAV' && customInfo?.lookupCode) {
+    if (!forceFallback && requestedProvider === 'BKAV' && (customInfo?.lookupCode || xml)) {
       const bkav = await downloadOriginalBkavPdf({
-        lookupCode: String(customInfo.lookupCode).trim(),
+        lookupCode: customInfo?.lookupCode ? String(customInfo.lookupCode).trim() : undefined,
+        xml,
+        recaptchaToken: recaptchaToken ? String(recaptchaToken).trim() : undefined,
         timeoutMs: timeoutMs ? Number(timeoutMs) : undefined
       });
       if (req.query.format === 'binary') {
@@ -2178,6 +2183,9 @@ app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async
 // Never solve, guess, or reuse CAPTCHA; only forward the user-supplied answer
 // with a fresh provider key. The fixed upstream host prevents SSRF.
 const VISNAM_API = 'https://tracuu.vin-hoadon.com/api/services/hddt/TraCuuHoaDon';
+const VISNAM_HTTPS_AGENT = new https.Agent({
+  ca: [...tls.rootCertificates, VISNAM_RAPIDSSL_INTERMEDIATE],
+});
 const visnamHeaders = {
   Accept: 'application/json',
   'Content-Type': 'application/json',
@@ -2189,6 +2197,7 @@ const visnamHeaders = {
 app.post('/api/visnam/captcha', async (_req, res) => {
   try {
     const upstream = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
+      httpsAgent: VISNAM_HTTPS_AGENT,
       headers: visnamHeaders, timeout: 15000, maxRedirects: 0,
       maxContentLength: 400000, maxBodyLength: 10000,
     });
@@ -2239,7 +2248,7 @@ app.post('/api/visnam/lookup', async (req, res) => {
   try {
     const upstream = await axios.post(VISNAM_API + '/TraCuu',
       { key, captcha, maSoBiMat },
-      { headers: visnamHeaders, timeout: 25000, maxRedirects: 0,
+      { httpsAgent: VISNAM_HTTPS_AGENT, headers: visnamHeaders, timeout: 25000, maxRedirects: 0,
         maxContentLength: 25000000, maxBodyLength: 10000 });
     const { extractVerifiedVisnamFiles } = await import('./src/services/visnamResponse');
     const files = await extractVerifiedVisnamFiles(upstream.data, {
