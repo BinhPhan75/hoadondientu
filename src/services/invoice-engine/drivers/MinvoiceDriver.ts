@@ -44,12 +44,13 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     const details = extractLookupDetailsFromXml(xmlData);
     let lookupCode = details.lookupCode || '';
 
+    // Bổ sung quét thẻ "Số bảo mật" (có dấu tiếng Việt) và các biến thể khác
     if (!lookupCode) {
       lookupCode = this.extractCustomField(xmlData, [
+        'Số bảo mật',
         'Mã tra cứu',
         'MaTraCuu',
         'MTCuu',
-        'Số bảo mật',
         'SoBaoMat',
         'so_baomat',
         'CheckCode',
@@ -110,7 +111,6 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
     this.createLog(`Khởi chạy M-Invoice Driver cho HĐ Ký hiệu: ${info.invoiceSeries || ''} - Số: ${info.invoiceNo || ''}`, logs);
     this.createLog(`MST bên bán: ${taxCode}, Mã tra cứu: ${lookupCode}`, logs);
 
-    // Gọi API trực tiếp để lấy tệp PDF hiển thị từ M-Invoice
     try {
       this.createLog('Đang kết nối cổng M-Invoice tải trực tiếp tệp PDF bản thể hiện...', logs);
       const targetUrl = new URL('https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoiceCaptcha');
@@ -145,7 +145,6 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
 
       const buffer = Buffer.from(await response.arrayBuffer());
       if (response.ok && buffer.length > 100) {
-        // Kiểm tra xem phản hồi có phải là định dạng PDF hay không (%PDF-)
         if (buffer.subarray(0, 5).toString('latin1') === '%PDF-') {
           this.createLog(`Đã tải thành công tệp PDF gốc từ M-Invoice (${(buffer.length / 1024).toFixed(1)} KB)`, logs);
           return {
