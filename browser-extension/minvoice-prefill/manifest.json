@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "HoangMySoft - Điền M-invoice",
+  "version": "1.0.0",
+  "description": "Điền MST và mã tra cứu trên trang M-invoice khi người dùng mở từ phần mềm.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://tracuuhoadon.minvoice.com.vn/*"
+      ],
+      "js": [
+        "minvoice-prefill.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
