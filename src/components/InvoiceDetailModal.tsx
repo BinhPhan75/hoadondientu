@@ -942,7 +942,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
   const isViettelInvoice = autoDetectedProvider === 'VIETTEL';
-  const isMinvoiceInvoice = autoDetectedProvider === 'MINVOICE';
   const isEasyInvoice = autoDetectedProvider === 'EASYINVOICE';
   const isVnpayInvoice = autoDetectedProvider === 'VNPAY';
   const isVietcombankInvoice = isVnpayInvoice && /vietcombank\.com\.vn/i.test(directLookupUrl);
