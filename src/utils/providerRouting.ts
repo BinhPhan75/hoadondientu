@@ -4,7 +4,7 @@ import { providerFromPortal, providerFromXmlPortal, SOLUTION_PROVIDERS, lookupPo
 
 const KNOWN_PROVIDERS = new Set([
   'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', '4SI', 'LCS', 'MINVOICE', 'THAISON',
-  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT', 'IHOADON',
+  'BKAV', 'CYBERBILL', 'VNPAY', 'FPT', 'IHOADON', 'VISNAM',
 ]);
 
 /** Use invoice portal/solution metadata before older inferred provider labels. */
