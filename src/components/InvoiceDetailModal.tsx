@@ -30,7 +30,6 @@ import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, 
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
-import { getInvoiceOriginalCacheKey, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
 
@@ -114,7 +113,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   token,
   cookieHeader
 }) => {
-  const { toast } = useNotification();
+  const { toast, showAlert } = useNotification();
   const [currentInvoice, setCurrentInvoice] = useState<GDTInvoice | null>(invoice);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -134,10 +133,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     originalLoadSequence.current++;
     setCurrentInvoice(invoice);
     setOriginalLoadError(null);
-    setVisnamOpen(false);
-    setVisnamChallenge(null);
-    setVisnamCaptcha('');
-    setVisnamBusy(false);
     setIsDownloadingEasyInvoice(false);
     setOriginalEasyInvoiceHtml(null);
     setMisaPortalUrl(null);
@@ -168,10 +163,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [easyInvoiceViewMode, setEasyInvoiceViewMode] = useState<'pdf' | 'html'>('html');
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
-  const [visnamChallenge, setVisnamChallenge] = useState<{ key: string; image: string } | null>(null);
-  const [visnamCaptcha, setVisnamCaptcha] = useState('');
-  const [visnamBusy, setVisnamBusy] = useState(false);
-  const [visnamOpen, setVisnamOpen] = useState(false);
   const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
@@ -686,72 +677,41 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  const refreshVisnamCaptcha = async () => {
-    const invoiceId = effectiveInvoice?.id;
-    setVisnamBusy(true);
-    setOriginalLoadError(null);
-    try {
-      const response = await fetch('/api/visnam/captcha', { method: 'POST' });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Không tải được CAPTCHA Visnam.');
-      if (openInvoiceIdRef.current === invoiceId) {
-        setVisnamChallenge({ key: data.key, image: data.image });
-        setVisnamCaptcha('');
-        setVisnamOpen(true);
-      }
-    } catch (e: any) {
-      if (openInvoiceIdRef.current === invoiceId) setOriginalLoadError(e.message);
-    } finally {
-      if (openInvoiceIdRef.current === invoiceId) setVisnamBusy(false);
-    }
-  };
-
-  const downloadVisnamPdf = async () => {
-    if (!effectiveInvoice || !visnamChallenge || !visnamCaptcha.trim()) return;
+  const handleVisnamDirectLookup = async () => {
+    if (!effectiveInvoice) return;
     const target = effectiveInvoice;
-    setVisnamBusy(true);
-    setOriginalLoadError(null);
-    try {
-      const lookup = extractLookupDetails(target.rawXml);
-      const response = await fetch('/api/visnam/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: visnamChallenge.key,
-          captcha: visnamCaptcha.trim(),
-          maSoBiMat: lookup.lookupCode || target.lookupCode,
-          identity: {
-            sellerTaxCode: target.nbmst,
-            invoiceSeries: target.khhdon,
-            invoiceNo: String(target.shdon),
-          }
-        })
+    const code = String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
+    const portal = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
+    if (!code) {
+      await showAlert({
+        title: 'Thiếu mã tra cứu VIN-HOADON',
+        message: 'Không tìm thấy mã số bí mật trong XML hóa đơn. Vui lòng kiểm tra dữ liệu hóa đơn.',
+        type: 'warning', confirmText: 'OK'
       });
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || 'Tra cứu Visnam thất bại.');
-      if (openInvoiceIdRef.current !== target.id) return;
-      const binary = atob(data.pdfBase64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      if (originalProviderPdfUrl) URL.revokeObjectURL(originalProviderPdfUrl);
-      setOriginalProviderPdfUrl(URL.createObjectURL(blob));
-      setVisnamOpen(false);
-      setEasyInvoiceDownloadStatus('Đã tải PDF gốc VIN-HOADON và xác minh bằng XML của nhà cung cấp.');
-      try {
-        await writeCachedOriginalPdf(getInvoiceOriginalCacheKey(target), blob);
-      } catch {
-        toast.warning('Đã mở PDF gốc nhưng không lưu được bộ nhớ đệm trên trình duyệt.');
-      }
-    } catch (e: any) {
-      if (openInvoiceIdRef.current === target.id) {
-        setOriginalLoadError(e.message);
-        setVisnamCaptcha('');
-        setVisnamChallenge(null);
-      }
-    } finally {
-      if (openInvoiceIdRef.current === target.id) setVisnamBusy(false);
+      return;
     }
+
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(code);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+    // onConfirm is called synchronously by the alert's OK click, so browsers
+    // can permit opening the issuer's tab. Nothing opens before confirmation.
+    await showAlert({
+      title: copied ? 'Đã copy mã tra cứu' : 'Sao chép mã tra cứu VIN-HOADON',
+      message: copied
+        ? 'Đã copy mã tra cứu, Ctrl + V ở trang https://tracuu.vin-hoadon.com/ để tải hóa đơn gốc'
+        : 'Trình duyệt không cho phép tự động copy. Hãy sao chép mã hiển thị bên dưới, rồi Ctrl + V ở trang https://tracuu.vin-hoadon.com/ để tải hóa đơn gốc.',
+      type: copied ? 'success' : 'warning',
+      confirmText: 'OK - Mở trang tra cứu',
+      ...(!copied ? { copyableText: code } : {}),
+      onConfirm: () => {
+        window.open(portal, '_blank', 'noopener,noreferrer');
+      }
+    });
   };
 
   const handleViewOriginalProvider = async () => {
@@ -1753,34 +1713,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </a>
               </div>
             ) : resolveInvoiceProvider(effectiveInvoice) === 'VISNAM' ? (
-              <div className="flex flex-col gap-2">
-                {!originalProviderPdfUrl && (
-                  <button type="button" onClick={() => void refreshVisnamCaptcha()}
-                    disabled={visnamBusy}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-cyan-600 text-cyan-200 hover:bg-cyan-950 disabled:opacity-60">
-                    {visnamBusy ? 'Đang kết nối VIN-HOADON...' : 'Tải PDF gốc VIN-HOADON'}
-                  </button>
-                )}
-                {visnamOpen && !originalProviderPdfUrl && (
-                  <div className="flex flex-col gap-2 p-3 border border-cyan-700 rounded max-w-sm">
-                    <span className="text-xs text-cyan-200">Mã số bí mật đã lấy tự động từ XML. Nhập mã xác thực trong hình:</span>
-                    {visnamChallenge?.image && <img src={visnamChallenge.image} alt="Mã xác thực VIN-HOADON" className="max-w-full max-h-24 object-contain bg-white rounded" />}
-                    <input type="text" value={visnamCaptcha}
-                      onChange={event => setVisnamCaptcha(event.target.value)}
-                      maxLength={8} autoComplete="off" placeholder="Nhập mã xác thực"
-                      className="text-slate-900 bg-white rounded px-2 py-2 text-sm" />
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => void downloadVisnamPdf()}
-                        disabled={visnamBusy || !visnamChallenge || !visnamCaptcha.trim()}
-                        className="text-xs px-3 py-2 bg-cyan-700 text-white rounded disabled:opacity-50">Tra cứu và tải PDF</button>
-                      <button type="button" onClick={() => void refreshVisnamCaptcha()}
-                        disabled={visnamBusy} className="text-xs px-3 py-2 border rounded">Đổi CAPTCHA</button>
-                    </div>
-                  </div>
-                )}
-                <a href="https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd"
-                  target="_blank" rel="noopener noreferrer"
-                  className="text-xs text-slate-300 underline">Mở cổng tra cứu VIN-HOADON</a>
+              <div className="inline-flex items-center gap-2">
+                <button type="button" onClick={() => void handleVisnamDirectLookup()}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-cyan-600 text-cyan-200 hover:bg-cyan-950">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Tra cứu trực tiếp VIN-HOADON
+                </button>
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
