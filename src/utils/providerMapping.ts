@@ -524,6 +524,17 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
   const nbten = (inv.nbten || '').toUpperCase();
   const rawXml = (inv.rawXml || '').toLowerCase();
 
+  if (msttcgp === '0302712571' || provider === 'MATBAO' ||
+      rawLookupUrl.includes('matbao.in') || rawLookupUrl.includes('mifi.vn')) {
+    return {
+      label: 'Matbao / Mifi',
+      color: '#ea580c',
+      badgeClass: 'text-orange-700 bg-orange-50 border-orange-200',
+      title: 'Hóa đơn Mắt Bão - tra cứu bằng cách tải XML gốc lên',
+      isDefault: false
+    };
+  }
+
   if (msttcgp === '0401486901' || provider === 'VISNAM' || rawLookupUrl.includes('vin-hoadon.com')) {
     return {
       label: 'VIN-HOADON',
