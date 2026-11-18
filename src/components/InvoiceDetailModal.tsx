@@ -30,6 +30,7 @@ import { easyInvoiceLookupPortals, easyInvoiceLookupUrl, lookupPortalForSeller, 
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
+import { getInvoiceOriginalCacheKey, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
 
@@ -133,6 +134,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     originalLoadSequence.current++;
     setCurrentInvoice(invoice);
     setOriginalLoadError(null);
+    setVisnamOpen(false);
+    setVisnamChallenge(null);
+    setVisnamCaptcha('');
+    setVisnamBusy(false);
     setIsDownloadingEasyInvoice(false);
     setOriginalEasyInvoiceHtml(null);
     setMisaPortalUrl(null);
@@ -163,6 +168,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [easyInvoiceViewMode, setEasyInvoiceViewMode] = useState<'pdf' | 'html'>('html');
   const [misaPortalUrl, setMisaPortalUrl] = useState<string | null>(null);
   const [originalProviderPdfUrl, setOriginalProviderPdfUrl] = useState<string | null>(null);
+  const [visnamChallenge, setVisnamChallenge] = useState<{ key: string; image: string } | null>(null);
+  const [visnamCaptcha, setVisnamCaptcha] = useState('');
+  const [visnamBusy, setVisnamBusy] = useState(false);
+  const [visnamOpen, setVisnamOpen] = useState(false);
   const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [thaiSonPortalRevision, setThaiSonPortalRevision] = useState(0);
@@ -674,6 +683,74 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         printWindow.focus();
         setTimeout(() => printWindow.print(), 400);
       }
+    }
+  };
+
+  const refreshVisnamCaptcha = async () => {
+    const invoiceId = effectiveInvoice?.id;
+    setVisnamBusy(true);
+    setOriginalLoadError(null);
+    try {
+      const response = await fetch('/api/visnam/captcha', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Không tải được CAPTCHA Visnam.');
+      if (openInvoiceIdRef.current === invoiceId) {
+        setVisnamChallenge({ key: data.key, image: data.image });
+        setVisnamCaptcha('');
+        setVisnamOpen(true);
+      }
+    } catch (e: any) {
+      if (openInvoiceIdRef.current === invoiceId) setOriginalLoadError(e.message);
+    } finally {
+      if (openInvoiceIdRef.current === invoiceId) setVisnamBusy(false);
+    }
+  };
+
+  const downloadVisnamPdf = async () => {
+    if (!effectiveInvoice || !visnamChallenge || !visnamCaptcha.trim()) return;
+    const target = effectiveInvoice;
+    setVisnamBusy(true);
+    setOriginalLoadError(null);
+    try {
+      const lookup = extractLookupDetails(target.rawXml);
+      const response = await fetch('/api/visnam/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: visnamChallenge.key,
+          captcha: visnamCaptcha.trim(),
+          maSoBiMat: lookup.lookupCode || target.lookupCode,
+          identity: {
+            sellerTaxCode: target.nbmst,
+            invoiceSeries: target.khhdon,
+            invoiceNo: String(target.shdon),
+          }
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Tra cứu Visnam thất bại.');
+      if (openInvoiceIdRef.current !== target.id) return;
+      const binary = atob(data.pdfBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      if (originalProviderPdfUrl) URL.revokeObjectURL(originalProviderPdfUrl);
+      setOriginalProviderPdfUrl(URL.createObjectURL(blob));
+      setVisnamOpen(false);
+      setEasyInvoiceDownloadStatus('Đã tải PDF gốc VIN-HOADON và xác minh bằng XML của nhà cung cấp.');
+      try {
+        await writeCachedOriginalPdf(getInvoiceOriginalCacheKey(target), blob);
+      } catch {
+        toast.warning('Đã mở PDF gốc nhưng không lưu được bộ nhớ đệm trên trình duyệt.');
+      }
+    } catch (e: any) {
+      if (openInvoiceIdRef.current === target.id) {
+        setOriginalLoadError(e.message);
+        setVisnamCaptcha('');
+        setVisnamChallenge(null);
+      }
+    } finally {
+      if (openInvoiceIdRef.current === target.id) setVisnamBusy(false);
     }
   };
 
@@ -1676,36 +1753,34 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </a>
               </div>
             ) : resolveInvoiceProvider(effectiveInvoice) === 'VISNAM' ? (
-              <div className="inline-flex items-center gap-2 flex-wrap">
-                <a
-                  href={buildDirectLookupUrl(
-                    'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
-                    lookupDetails.lookupCode || effectiveInvoice.lookupCode,
-                    'VISNAM',
-                    effectiveInvoice.nbmst
-                  )}
+              <div className="flex flex-col gap-2">
+                {!originalProviderPdfUrl && (
+                  <button type="button" onClick={() => void refreshVisnamCaptcha()}
+                    disabled={visnamBusy}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded border border-cyan-600 text-cyan-200 hover:bg-cyan-950 disabled:opacity-60">
+                    {visnamBusy ? 'Đang kết nối VIN-HOADON...' : 'Tải PDF gốc VIN-HOADON'}
+                  </button>
+                )}
+                {visnamOpen && !originalProviderPdfUrl && (
+                  <div className="flex flex-col gap-2 p-3 border border-cyan-700 rounded max-w-sm">
+                    <span className="text-xs text-cyan-200">Mã số bí mật đã lấy tự động từ XML. Nhập mã xác thực trong hình:</span>
+                    {visnamChallenge?.image && <img src={visnamChallenge.image} alt="Mã xác thực VIN-HOADON" className="max-w-full max-h-24 object-contain bg-white rounded" />}
+                    <input type="text" value={visnamCaptcha}
+                      onChange={event => setVisnamCaptcha(event.target.value)}
+                      maxLength={8} autoComplete="off" placeholder="Nhập mã xác thực"
+                      className="text-slate-900 bg-white rounded px-2 py-2 text-sm" />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => void downloadVisnamPdf()}
+                        disabled={visnamBusy || !visnamChallenge || !visnamCaptcha.trim()}
+                        className="text-xs px-3 py-2 bg-cyan-700 text-white rounded disabled:opacity-50">Tra cứu và tải PDF</button>
+                      <button type="button" onClick={() => void refreshVisnamCaptcha()}
+                        disabled={visnamBusy} className="text-xs px-3 py-2 border rounded">Đổi CAPTCHA</button>
+                    </div>
+                  </div>
+                )}
+                <a href="https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd"
                   target="_blank" rel="noopener noreferrer"
-                  onClick={() => {
-                    const code = String(lookupDetails.lookupCode || effectiveInvoice.lookupCode || '').trim();
-                    if (!code) {
-                      toast.warning('Hóa đơn này chưa có mã số bí mật trong XML.');
-                      return;
-                    }
-                    if (!navigator.clipboard?.writeText) {
-                      toast.warning('Trình duyệt không hỗ trợ sao chép tự động. Hãy nhập mã số bí mật thủ công.');
-                      return;
-                    }
-                    // One user click opens the official portal and copies the
-                    // XML lookup code for pasting. Cross-origin DOM autofill
-                    // requires explicit support from the issuer website.
-                    void navigator.clipboard.writeText(code)
-                      .then(() => toast.info('Đã sao chép mã số bí mật. Tại trang VIN-HOADON, bấm Ctrl+V vào ô Mã số bí mật.'))
-                      .catch(() => toast.warning('Không thể sao chép mã. Kiểm tra quyền clipboard của trình duyệt.'));
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-700 text-cyan-200 hover:bg-cyan-950">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Tra cứu VIN-HOADON</span>
-                </a>
+                  className="text-xs text-slate-300 underline">Mở cổng tra cứu VIN-HOADON</a>
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
