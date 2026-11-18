@@ -61,10 +61,10 @@ export function matbaoPdfProxyFromViewer(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const viewer = verifiedProviderUrl(value);
   if (!viewer || viewer.hostname === 'matbao.in' ||
-      !/\\/api\\/ViewInvTemplate\\.aspx$/i.test(viewer.pathname)) return undefined;
+      !/\/api\/ViewInvTemplate\.aspx$/i.test(viewer.pathname)) return undefined;
   const p = viewer.searchParams;
   if (!p.get('idinv') || !p.get('fkey') || !p.get('comid') ||
-      !/^\\d{1,3}$/.test(p.get('pattern') || '') ||
+      !/^\d{1,3}$/.test(p.get('pattern') || '') ||
       !/^[01]$/.test(p.get('convert') || '')) return undefined;
   const proxy = new URL('https://matbao.in/api/tra-cuu-hoa-don/pdf');
   proxy.searchParams.set('src', viewer.href);
@@ -76,7 +76,7 @@ export function matbaoPdfUrlFromLookupResult(
 ): string | undefined {
   if (!payload || typeof payload !== 'object') return undefined;
   const result = payload as Record<string, unknown>;
-  const normalizeNo = (value: unknown) => String(value ?? '').replace(/^0+(?=\\d)/, '');
+  const normalizeNo = (value: unknown) => String(value ?? '').replace(/^0+(?=\d)/, '');
   const symbol = String(result.symbol ?? '').toUpperCase();
   const series = String(info.invoiceSeries || '').toUpperCase();
   if (result.found !== true ||
