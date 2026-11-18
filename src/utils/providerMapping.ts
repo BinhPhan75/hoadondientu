@@ -83,6 +83,7 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
     defaultPortalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
     shortBrand: 'VIN-HOADON'
   },
+  '0302712571': { name: 'Công ty Cổ phần Mắt Bão', defaultPortalUrl: 'https://matbao.in/tra-cuu-hoa-don', shortBrand: 'Matbao / Mifi' },
   // 12. M-Invoice
   '0106026495': {
     name: 'Công ty TNHH Hóa đơn điện tử M-Invoice',
@@ -104,6 +105,10 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   const rawLookupUrl = (inv.lookupUrl || '').trim();
   const isViettel = msttcgp.replace(/[^0-9]/g, '') === '0100109106' || provider === 'VIETTEL';
   const rawLookupCode = (isViettel ? inv.lookupCode : (inv.lookupCode || inv.mhdon))?.trim() || '';
+
+  if (msttcgp === '0302712571' || provider === 'MATBAO' || /(?:matbao\.in|mifi\.vn)/i.test(rawLookupUrl)) {
+    return { mst: '0302712571', name: 'Công ty Cổ phần Mắt Bão', fullDisplay: '0302712571 - Matbao / Mifi', portalUrl: 'https://matbao.in/tra-cuu-hoa-don', lookupCode: '', shortBrand: 'Matbao / Mifi' };
+  }
 
   if (msttcgp === '0401486901' || provider === 'VISNAM' || /vin-hoadon\.com/i.test(rawLookupUrl)) {
     return {
