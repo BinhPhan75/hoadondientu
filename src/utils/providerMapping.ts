@@ -78,6 +78,11 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
     defaultPortalUrl: 'https://cyberbill.vn',
     shortBrand: 'CyberBill'
   },
+  '0401486901': {
+    name: 'Công ty Cổ phần Phát triển Công nghệ Thẻ Visnam',
+    defaultPortalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+    shortBrand: 'VIN-HOADON'
+  },
   // 12. M-Invoice
   '0106026495': {
     name: 'Công ty TNHH Hóa đơn điện tử M-Invoice',
@@ -99,6 +104,17 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   const rawLookupUrl = (inv.lookupUrl || '').trim();
   const isViettel = msttcgp.replace(/[^0-9]/g, '') === '0100109106' || provider === 'VIETTEL';
   const rawLookupCode = (isViettel ? inv.lookupCode : (inv.lookupCode || inv.mhdon))?.trim() || '';
+
+  if (msttcgp === '0401486901' || provider === 'VISNAM' || /vin-hoadon\.com/i.test(rawLookupUrl)) {
+    return {
+      mst: '0401486901',
+      name: 'Công ty Cổ phần Phát triển Công nghệ Thẻ Visnam',
+      fullDisplay: '0401486901 - VIN-HOADON (Visnam)',
+      portalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd',
+      lookupCode: (inv.lookupCode || '').trim(),
+      shortBrand: 'VIN-HOADON'
+    };
+  }
 
   // Explicit iHoaDon domain identifies the issuer portal, not Thai Son.
   // Never guess this provider merely from the seller's tax ID.
@@ -396,6 +412,13 @@ export function buildDirectLookupUrl(
 
   const code = (lookupCode || info.lookupCode || '').trim();
 
+  if (info.shortBrand === 'VIN-HOADON' || provider === 'VISNAM') {
+    // Hash parameters are only a hint for the optional official-portal
+    // prefill extension; the website itself might not support URL prefill.
+    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
+    return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
+  }
+
   // MISA: thêm tham số fkey
   if (info.shortBrand === 'MISA' && code) {
     return `https://www.meinvoice.vn/tra-cuu?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
@@ -497,6 +520,16 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
   const nbmst = (inv.nbmst || '').replace(/[^0-9]/g, '');
   const nbten = (inv.nbten || '').toUpperCase();
   const rawXml = (inv.rawXml || '').toLowerCase();
+
+  if (msttcgp === '0401486901' || provider === 'VISNAM' || rawLookupUrl.includes('vin-hoadon.com')) {
+    return {
+      label: 'VIN-HOADON',
+      color: '#0891b2',
+      badgeClass: 'text-cyan-700 bg-cyan-50 border-cyan-200',
+      title: 'Hóa đơn phát hành qua VIN-HOADON (Visnam)',
+      isDefault: false
+    };
+  }
 
   if (provider === 'IHOADON' || /(^|\.)ihoadon\.vn(?:\/|$)/i.test(rawLookupUrl.replace(/^https?:\/\//, ''))) {
     return {
