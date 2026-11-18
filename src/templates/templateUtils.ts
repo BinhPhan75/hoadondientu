@@ -127,6 +127,12 @@ export function buildDirectLookupUrl(
     return url || 'https://tracuu.ihoadon.vn/';
   }
   if (portalProvider === 'THAISON' || provider === 'THAISON') return url || 'https://einvoice.vn/tra-cuu';
+  if (portalProvider === 'VISNAM' || provider === 'VISNAM') {
+    const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd';
+    // Used by the optional browser prefill extension. The provider site may
+    // not interpret this hash on its own.
+    return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
+  }
   if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') {
     const params = new URLSearchParams();
     if (sellerTaxCode) params.set('mst', sellerTaxCode.trim());
