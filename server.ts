@@ -2174,6 +2174,77 @@ app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async
   }
 });
 
+// Visnam lookup: the person enters the displayed CAPTCHA in HoangMySoft.
+// Never solve, guess, or reuse CAPTCHA; only forward the user-supplied answer
+// with a fresh provider key. The fixed upstream host prevents SSRF.
+const VISNAM_API = 'https://tracuu.vin-hoadon.com/api/services/hddt/TraCuuHoaDon';
+const visnamHeaders = {
+  Accept: 'application/json',
+  'Content-Type': 'application/json',
+  'X-Requested-With': 'XMLHttpRequest',
+  Origin: 'https://tracuu.vin-hoadon.com',
+  Referer: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd'
+};
+
+app.post('/api/visnam/captcha', async (_req, res) => {
+  try {
+    const upstream = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
+      headers: visnamHeaders, timeout: 15000, maxRedirects: 0,
+      maxContentLength: 400000, maxBodyLength: 10000,
+    });
+    const result = upstream.data?.result;
+    if (upstream.data?.success !== true || typeof result?.key !== 'string' ||
+        !/^[0-9a-f-]{36}$/i.test(result.key) ||
+        typeof result.image !== 'string' || !result.image.startsWith('data:image/png;base64,') ||
+        result.image.length > 350000) {
+      return res.status(502).json({ success: false, error: 'Visnam không trả về CAPTCHA hợp lệ.' });
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, key: result.key, image: result.image });
+  } catch {
+    return res.status(502).json({ success: false, error: 'Không thể tải CAPTCHA từ VIN-HOADON.' });
+  }
+});
+
+app.post('/api/visnam/lookup', async (req, res) => {
+  const { key, captcha, maSoBiMat, identity } = req.body || {};
+  if (typeof key !== 'string' || !/^[0-9a-f-]{36}$/i.test(key) ||
+      typeof captcha !== 'string' || !/^[A-Za-z0-9]{3,8}$/.test(captcha) ||
+      typeof maSoBiMat !== 'string' || !/^[A-Za-z0-9_-]{6,64}$/.test(maSoBiMat) ||
+      !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || '')) ||
+      !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || '')) ||
+      !/^\d{1,10}$/.test(String(identity.invoiceNo || ''))) {
+    return res.status(400).json({ success: false, error: 'Thiếu thông tin tra cứu hoặc hóa đơn không hợp lệ.' });
+  }
+  try {
+    const upstream = await axios.post(VISNAM_API + '/TraCuu',
+      { key, captcha, maSoBiMat },
+      { headers: visnamHeaders, timeout: 25000, maxRedirects: 0,
+        maxContentLength: 25000000, maxBodyLength: 10000 });
+    const { extractVerifiedVisnamFiles } = await import('./src/services/visnamResponse');
+    const files = await extractVerifiedVisnamFiles(upstream.data, {
+      sellerTaxCode: identity.sellerTaxCode,
+      invoiceSeries: identity.invoiceSeries,
+      invoiceNo: identity.invoiceNo
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      success: true,
+      pdfBase64: files.pdf.toString('base64'),
+      filename: files.pdfFilename,
+      xmlFilename: files.xmlFilename
+    });
+  } catch (error: any) {
+    const status = error?.response?.status;
+    return res.status(status === 429 ? 429 : 422).json({
+      success: false,
+      error: status === 429
+        ? 'VIN-HOADON đang giới hạn truy vấn. Vui lòng thử lại sau.'
+        : 'Không thể tra cứu hoặc xác minh PDF gốc. Kiểm tra CAPTCHA rồi thử lại.'
+    });
+  }
+});
+
 // Mở trực tiếp link của nhà cung cấp VNPT và tự gán mã tra cứu vào khung (bỏ qua bước giả lập trang)
 app.all('/api/vnpt/portal', (req, res) => {
   const rawMst = String(req.query.mst || req.query.sellerTaxCode || req.query.taxCode || req.body?.mst || req.body?.sellerTaxCode || '').trim();
