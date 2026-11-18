@@ -23,6 +23,7 @@ import { LcsDriver } from './drivers/LcsDriver';
 import { VnptDriver } from './drivers/VnptDriver';
 import { EasyInvoiceDriver } from './drivers/EasyInvoiceDriver';
 import { MinvoiceDriver } from './drivers/MinvoiceDriver';
+import { MatbaoDriver } from './drivers/MatbaoDriver';
 import { BkavDriver } from './drivers/BkavDriver';
 import { ThaiSonDriver } from './drivers/ThaiSonDriver';
 import { CyberBillDriver } from './drivers/CyberBillDriver';
@@ -50,6 +51,7 @@ export class InvoiceDownloaderManager {
     this.registerDriver(new VnptDriver());
     this.registerDriver(new EasyInvoiceDriver());
     this.registerDriver(new MinvoiceDriver());
+    this.registerDriver(new MatbaoDriver());
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());
@@ -258,7 +260,7 @@ export class InvoiceDownloaderManager {
       try {
         this.log(`Đang thực thi crawl từ server nhà cung cấp [${selectedDriver.providerCode}]...`, overallLogs);
         const result = await selectedDriver.fetchPdf(invoiceInfo, options);
-        if (['THAISON', 'MISA', 'MINVOICE'].includes(selectedDriver.providerCode) &&
+        if (['THAISON', 'MISA', 'MINVOICE', 'MATBAO'].includes(selectedDriver.providerCode) &&
             /^(application\/pdf|application\/zip)/i.test(result.contentType || '')) {
           const validation = await verifyIssuerInvoiceBytes(result.pdfBuffer, result.contentType, {
             sellerTaxCode: invoiceInfo.sellerTaxCode,
