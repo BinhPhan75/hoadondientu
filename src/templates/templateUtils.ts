@@ -129,9 +129,9 @@ export function buildDirectLookupUrl(
   if (portalProvider === 'THAISON' || provider === 'THAISON') return url || 'https://einvoice.vn/tra-cuu';
   if (portalProvider === 'VISNAM' || provider === 'VISNAM') {
     const base = 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
-    // Used by the optional browser prefill extension. The provider site may
-    // not interpret this hash on its own.
-    return code ? base + '#hms_visnam_code=' + encodeURIComponent(code) : base;
+    // No verified URL-prefill contract exists on the issuer's portal.
+    // Do not expose a nonfunctional hash parameter as an autofill feature.
+    return base;
   }
   if (portalProvider === 'MINVOICE' || provider === 'MINVOICE') {
     const params = new URLSearchParams();
