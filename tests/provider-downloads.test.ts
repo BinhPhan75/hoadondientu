@@ -17,6 +17,21 @@ import { verifyPmktBridgeToken } from '../src/utils/pmktBridgeAuth';
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
 
+test('Visnam XML extracts QuanLy_SoBaoMat and resolves VIN-HOADON portal', () => {
+  const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0401486901</MSTTCGP>' +
+    '<KHHDon>C26TAA</KHHDon><SHDon>5235</SHDon>' +
+    '<TTKhac><TTin><TTruong>QuanLy_SoBaoMat</TTruong>' +
+    '<DLieu>22U5ZRCE8EQY</DLieu></TTin></TTKhac></TTChung>' +
+    '<NDHDon><NBan><MST>0401926013</MST></NBan></NDHDon></DLHDon></HDon>';
+  const lookup = extractLookupDetailsFromXml(xml);
+  assert.equal(resolveInvoiceProvider({ rawXml: xml }), 'VISNAM');
+  assert.equal(lookup.lookupCode, '22U5ZRCE8EQY');
+  assert.equal(lookup.lookupUrl,
+    'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/xacthuchd');
+  assert.equal(buildDirectLookupUrl(lookup.lookupUrl, lookup.lookupCode, 'VISNAM', '0401926013'),
+    lookup.lookupUrl + '#hms_visnam_code=22U5ZRCE8EQY');
+});
+
 test('Co.opmart XML carries a seller-scoped lookup URL and Ma TC code', () => {
   const xml = '<HDon><DLHDon><TTChung><MSTTCGP>0101300842</MSTTCGP><TTKhac><TTin><TTruong>Mã TC</TTruong><DLieu>4CZHQ4L0EYY</DLieu></TTin><TTin><TTruong>ĐCTC</TTruong><DLieu>https://saigoncoop.einvoice.com.vn/</DLieu></TTin></TTKhac></TTChung><NDHDon><NBan><MST>0301175691-021</MST></NBan></NDHDon></DLHDon></HDon>';
   assert.deepEqual(extractLookupDetailsFromXml(xml), {
