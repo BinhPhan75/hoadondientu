@@ -76,6 +76,11 @@ export function parseThaiSonForm(html: string) {
     || $('img#CaptchaImage, img[src*="Captcha"], img[src*="captcha"]').first().attr('src');
   const error = form.find('.validation-summary-errors, .field-validation-error').text().trim()
     || $('.validation-summary-errors').text().trim();
+  // A native submit button with a name/value contributes to browser form
+  // submission, but the previous server-side client silently omitted it.
+  const submitButton = form.find('button[type="submit"][name], input[type="submit"][name]').first();
+  const submitName = String(submitButton.attr('name') || '');
+  const submitValue = String(submitButton.attr('value') || '');
   const hiddenFields: Record<string, string> = {};
   form.find('input[type="hidden"][name]').each((_, node) => {
     const el = $(node), name = el.attr('name') || '';
@@ -90,6 +95,8 @@ export function parseThaiSonForm(html: string) {
     captchaField,
     method: (form.attr('method') || 'POST').toUpperCase() === 'GET' ? 'GET' as const : 'POST' as const,
     formAction: form.attr('action') || '',
+    submitName,
+    submitValue,
     hiddenFields,
     formFound: Boolean(form.length)
   };

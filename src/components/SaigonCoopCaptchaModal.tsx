@@ -51,7 +51,7 @@ export const SaigonCoopCaptchaModal: React.FC<SaigonCoopCaptchaModalProps> = ({
           </button>
         </div>
         <p className="mb-4 text-sm text-slate-300">
-          Mã nhận hóa đơn đã lấy từ XML. Nhập mã kiểm tra trên ảnh để tra cứu.
+          Mã nhận hóa đơn đã lấy từ XML. Nhập CAPTCHA đúng như ảnh, giữ nguyên chữ HOA/thường nếu có.
         </p>
 
         <label className="mb-1 block text-sm font-medium text-slate-200">Mã nhận HĐ</label>

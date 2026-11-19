@@ -22,6 +22,8 @@ interface ManualCaptchaState {
   hiddenFields: Record<string, string>;
   action: string;
   method: 'GET' | 'POST';
+  submitName?: string;
+  submitValue?: string;
   lookupCodeHash: string;
   lookupField: string;
   captchaField: string;
@@ -156,7 +158,9 @@ function decodeState(value: unknown, lookupCode: string): ManualCaptchaState {
       !/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(state.captchaField || '') ||
       state.lookupField === state.captchaField ||
       !['GET','POST'].includes(state.method) ||
-      !/^\/[A-Za-z0-9/_-]{0,200}$/.test(state.action || '') ||
+      !/^\/[A-Za-z0-9/_-]{0,200}(?:\?[A-Za-z0-9_.~%=&-]{0,500})?$/.test(state.action || '') ||
+      (state.submitName && !/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(state.submitName)) ||
+      (state.submitValue && (state.submitValue.length > 256 || /[\r\n]/.test(state.submitValue))) ||
       !/^[a-f0-9]{64}$/.test(state.lookupCodeHash || '') ||
       state.lookupCodeHash !== createHash('sha256').update(lookupCode).digest('hex')) {
     throw providerError('Phiên CAPTCHA đã hết hạn hoặc không khớp mã nhận hóa đơn. Tải CAPTCHA mới.', 'CAPTCHA_EXPIRED');
@@ -209,8 +213,10 @@ export async function createThaiSonCommonManualCaptcha(lookupCodeInput: unknown)
       issuedAt: Date.now(),
       cookies: Array.from(jar, ([name, value]) => name + '=' + value),
       hiddenFields: form.hiddenFields,
-      action: action.pathname,
+      action: action.pathname + action.search,
       method: form.method,
+      submitName: form.submitName,
+      submitValue: form.submitValue,
       lookupCodeHash: createHash('sha256').update(lookupCode).digest('hex'),
       lookupField: form.field,
       captchaField: form.captchaField,
@@ -252,6 +258,9 @@ export async function submitThaiSonCommonManualLookup(params: {
   Object.entries(state.hiddenFields).forEach(([name, value]) => payload.set(name, value));
   payload.set(state.lookupField, lookupCode);
   payload.set(state.captchaField, captcha);
+  if (state.submitName && ![state.lookupField, state.captchaField].includes(state.submitName)) {
+    payload.set(state.submitName, state.submitValue || '');
+  }
 
   let response: Response;
   try {
@@ -319,7 +328,7 @@ export async function submitThaiSonCommonManualLookup(params: {
   const isCaptchaError = /captcha|mã kiểm tra|mã xác thực/i.test(providerMessage);
   if (returnedForm.formFound && returnedForm.field === state.lookupField && !providerMessage && !verifiedHtml) {
     throw providerError(
-      'Cổng chưa mở hóa đơn và đã trả lại biểu mẫu tra cứu. Kiểm tra mã nhận HĐ, nhập lại CAPTCHA hoặc tải CAPTCHA mới.',
+      'Cổng Thái Sơn trả lại biểu mẫu tra cứu, chưa mở hóa đơn. Có thể mã CAPTCHA phân biệt chữ hoa/thường hoặc website yêu cầu xử lý nút tra cứu bằng JavaScript. Vui lòng kiểm tra mã đúng như ảnh.',
       'LOOKUP_NOT_COMPLETED'
     );
   }

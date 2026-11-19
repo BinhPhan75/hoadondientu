@@ -66,3 +66,37 @@ test('Thai Son shared CAPTCHA binds challenge to lookup code', async () => {
     assert.equal(count,2);
   } finally {globalThis.fetch=previous;}
 });
+
+
+test('Thai Son manual search sends clicked submit button and retains action query', async () => {
+  const prev=globalThis.fetch;
+  const requests: Array<{url:string,body:string}>=[];
+  globalThis.fetch=(async (url:string|URL|Request,init?:RequestInit) => {
+    requests.push({url:String(url),body:String(init?.body || '')});
+    if(requests.length===1) return new Response(
+      '<form method="POST" action="/tra-cuu?mode=lookup">' +
+      '<input name="MA_NHAN_HOA_DON"><input name="CaptchaInputText">' +
+      '<button type="submit" name="searchAction" value="lookup">Tra cứu hóa đơn</button>' +
+      '<img src="/Captcha/Show"></form>',{
+        headers:{'Content-Type':'text/html','Set-Cookie':'session=example; Path=/'}
+      });
+    if(requests.length===2) return new Response(new Uint8Array(101).fill(5),{
+      headers:{'Content-Type':'image/png'}
+    });
+    if(requests.length===3) return new Response('<html><body>Chưa có hóa đơn</body></html>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    throw Error('Unexpected fetch');
+  }) as typeof fetch;
+  try {
+    const session=await createThaiSonCommonManualCaptcha('A46EKFYXHKM');
+    await assert.rejects(submitThaiSonCommonManualLookup({
+      state:session.state, lookupCode:'A46EKFYXHKM',captcha:'EIVJ',
+      sellerTaxCode:'0401515239',invoiceNo:'603',invoiceSeries:'C26MMR'
+    }));
+    assert.equal(requests.length,3);
+    assert.equal(new URL(requests[2].url).searchParams.get('mode'),'lookup');
+    assert.equal(new URLSearchParams(requests[2].body).get('searchAction'),'lookup');
+    assert.equal(new URLSearchParams(requests[2].body).get('CaptchaInputText'),'EIVJ');
+  }finally{globalThis.fetch=prev;}
+});
