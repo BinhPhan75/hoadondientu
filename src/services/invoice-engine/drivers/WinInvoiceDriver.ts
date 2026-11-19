@@ -96,6 +96,43 @@ export function findWinInvoiceDownloadLink(html: string, info: ExtractedInvoiceI
   return undefined;
 }
 
+/**
+ * WINinvoice may return a document viewer instead of raw PDF bytes.
+ * Only accept provider-hosted PDF resources or an embedded PDF data URI;
+ * an HTML invoice render is NOT treated as an original provider PDF.
+ */
+export function winInvoicePdfFromViewer(html: string, viewerUrl: string): { links: string[]; pdf?: Buffer } {
+  const $ = cheerio.load(html);
+  const links: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: string) => {
+    const raw = value.trim().replace(/&amp;/gi, '&');
+    if (!raw || raw.startsWith('#') || /^javascript:/i.test(raw)) return;
+    const url = providerUrl(raw, viewerUrl);
+    if (!url || seen.has(url.href) || url.href === viewerUrl) return;
+    // Only follow resources which look like an actual downloadable file.
+    const download = url.searchParams.has('download') || url.searchParams.has('pdf') ||
+      /(?:\.pdf(?:$|[?#])|\/(?:download|export|pdf|file)(?:\/|$))/i.test(url.pathname + url.search);
+    if (download) { seen.add(url.href); links.push(url.href); }
+  };
+  $('iframe[src], embed[src], object[data], a[href], a[data-href], source[src]').each((_, el) => {
+    const tag = (el.tagName || '').toLowerCase();
+    const value = $(el).attr(tag === 'object' ? 'data' : 'src') ||
+      $(el).attr('href') || $(el).attr('data-href') || '';
+    add(value);
+  });
+  // Some viewers embed the PDF in a data URI for their browser PDF component.
+  const match = html.match(/data:application\/pdf(?:;[^,"'\s<>]*)?;base64,([A-Za-z0-9+/=\s]{100,})/i);
+  let pdf: Buffer | undefined;
+  if (match && match[1].length <= MAX_PDF * 1.5) {
+    const decoded = Buffer.from(match[1].replace(/\s/g, ''), 'base64');
+    if (decoded.length <= MAX_PDF && decoded.subarray(0,5).toString('latin1') === '%PDF-') {
+      pdf = decoded;
+    }
+  }
+  return { links: links.slice(0, 8), pdf };
+}
+
 async function responseText(response: Response): Promise<string> {
   const size = Number(response.headers.get('content-length') || 0);
   if (size > MAX_HTML) throw new Error('HTML từ WINinvoice vượt giới hạn.');
@@ -151,14 +188,14 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
     const timeout = Math.min(options?.timeoutMs || 25000, 45000);
     const jar = new Map<string, string>();
     const logs: string[] = [];
-    const request = async (url: string, method: 'GET'|'POST', body?: string) => {
+    const request = async (url: string, method: 'GET'|'POST', body?: string, referer = PORTAL) => {
       const response = await fetch(url, {
         method, redirect: 'manual',
         headers: {
           Accept: 'text/html,application/xhtml+xml,application/pdf,*/*',
           ...(jar.size ? { Cookie: cookieHeader(jar) } : {}),
           ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded', Origin: HOST } : {}),
-          Referer: PORTAL,
+          Referer: referer,
         },
         ...(body ? { body } : {}),
         signal: AbortSignal.timeout(timeout),
@@ -204,30 +241,51 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
       // download. Follow only safe same-origin GET redirects with the same
       // session jar. Never forward cookies to a different domain.
       let nextUrl = downloadUrl;
-      let file: Response | undefined;
+      let referer = redirect.href;
+      let bytes: Buffer | undefined;
       const seen = new Set<string>();
-      for (let hop = 0; hop <= 4; hop++) {
-        if (seen.has(nextUrl)) return fail('WINinvoice trả về vòng lặp chuyển hướng tải PDF.');
+      const queue = [downloadUrl];
+      // Redirects and document viewers are common for provider download links.
+      // Keep the same cookie jar but never leave the trusted provider origin.
+      for (let hop = 0; queue.length && hop < 8; hop++) {
+        nextUrl = queue.shift()!;
+        if (seen.has(nextUrl)) continue;
         seen.add(nextUrl);
-        file = await request(nextUrl, 'GET');
-        if (![301, 302, 303, 307, 308].includes(file.status)) break;
-        const rawLocation = file.headers.get('location') || '';
-        const redirected = providerUrl(rawLocation, nextUrl);
-        if (!redirected) {
-          return fail('WINinvoice chuyển hướng tải PDF tới địa chỉ ngoài cổng tra cứu hoặc không hợp lệ (HTTP ' + file.status + ').');
+        const file = await request(nextUrl, 'GET', undefined, referer);
+        if ([301, 302, 303, 307, 308].includes(file.status)) {
+          const target = providerUrl(file.headers.get('location') || '', nextUrl);
+          if (!target) return fail('Chuyển hướng tải PDF không hợp lệ hoặc ngoài miền WINinvoice (HTTP ' + file.status + ').');
+          queue.unshift(target.href);
+          logs.push('Chuyển hướng tải WINinvoice HTTP ' + file.status);
+          referer = nextUrl;
+          continue;
         }
-        if (hop === 4) return fail('WINinvoice chuyển hướng tải PDF quá nhiều lần.');
-        logs.push('WINinvoice trả về chuyển hướng HTTP ' + file.status);
-        nextUrl = redirected.href;
+        if (!file.ok) return fail('WINinvoice không cho tải hóa đơn (HTTP ' + file.status + ').');
+        if (Number(file.headers.get('content-length') || 0) > MAX_PDF) {
+          return fail('Tệp WINinvoice vượt giới hạn dung lượng.');
+        }
+        const data = Buffer.from(await file.arrayBuffer());
+        if (data.length > MAX_PDF) return fail('Tệp WINinvoice vượt giới hạn dung lượng.');
+        if (data.subarray(0,5).toString('latin1') === '%PDF-') {
+          bytes = data;
+          break;
+        }
+        const type = (file.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        const isHtml = /^(?:text\/html|application\/xhtml\+xml)$/.test(type) ||
+          /^\s*(?:<!doctype\s+html|<html\b)/i.test(data.subarray(0,1000).toString('utf8'));
+        if (!isHtml || data.length > MAX_HTML) {
+          return fail('WINinvoice trả về ' + (type || 'dữ liệu không xác định') + ', không phải PDF gốc.');
+        }
+        const viewer = winInvoicePdfFromViewer(data.toString('utf8'), nextUrl);
+        if (viewer.pdf) { bytes = viewer.pdf; break; }
+        for (const link of viewer.links) {
+          if (!seen.has(link) && !queue.includes(link)) queue.push(link);
+        }
+        logs.push('Trang trung gian HTML từ /' + (new URL(nextUrl).pathname.split('/').filter(Boolean).join('/')) + ' được kiểm tra liên kết PDF');
+        referer = nextUrl;
       }
-      if (!file || !file.ok || Number(file.headers.get('content-length') || 0) > MAX_PDF ||
-          file.headers.get('location')) {
-        return fail('WINinvoice không cho tải hóa đơn (HTTP ' + (file?.status || 0) + ').');
-      }
-      const bytes = Buffer.from(await file.arrayBuffer());
-      if (bytes.length < 100 || bytes.length > MAX_PDF ||
-          bytes.subarray(0, 5).toString('latin1') !== '%PDF-') {
-        return fail('Đường dẫn tải WINinvoice không trả PDF; có thể yêu cầu phiên trình duyệt hoặc tải loại file khác.');
+      if (!bytes || bytes.length < 100 || bytes.length > MAX_PDF) {
+        return fail('WINinvoice chỉ trả về trang xem HTML hoặc không cung cấp tệp PDF trực tiếp trong phiên tra cứu.');
       }
       const verified = await verifyIssuerInvoiceBytes(bytes, 'application/pdf', {
         sellerTaxCode: info.sellerTaxCode, invoiceSeries: info.invoiceSeries, invoiceNo: info.invoiceNo,

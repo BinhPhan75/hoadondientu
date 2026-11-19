@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WinInvoiceDriver, winInvoiceFields, findWinInvoiceDownloadLink } from '../src/services/invoice-engine/drivers/WinInvoiceDriver';
+import { WinInvoiceDriver, winInvoiceFields, findWinInvoiceDownloadLink, winInvoicePdfFromViewer } from '../src/services/invoice-engine/drivers/WinInvoiceDriver';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
 import { extractLookupDetailsFromXml } from '../src/utils/xmlParser';
@@ -55,7 +55,7 @@ test('WINinvoice submits official x-www-form-urlencoded payload with fresh CSRF 
   }) as typeof fetch;
   try {
     await assert.rejects(driver.fetchPdf(info), (e: unknown) =>
-      e instanceof OriginalInvoiceError && e.message.includes('không trả PDF'));
+      e instanceof OriginalInvoiceError && e.message.includes('chỉ trả về trang xem HTML'));
     assert.deepEqual(requests.map(r=>[r.method,new URL(r.url).pathname]),[
       ['GET','/bill'],['POST','/bill'],['GET','/bill/inv'],['GET','/bill/view']
     ]);
@@ -103,7 +103,7 @@ test('WINinvoice follows temporary same-origin 307 downloads with session cookie
   }) as typeof fetch;
   try {
     await assert.rejects(driver.fetchPdf(info), (error:unknown) =>
-      error instanceof OriginalInvoiceError && error.message.includes('không trả PDF'));
+      error instanceof OriginalInvoiceError && error.message.includes('trả về text/plain'));
     assert.equal(requests.length,5);
     assert.equal(new URL(requests[4].url).pathname,'/bill/file');
     assert.match(requests[4].cookie,/session=test-session/);
@@ -130,4 +130,53 @@ test('WINinvoice refuses redirects outside its trusted origin', async () => {
       error instanceof OriginalInvoiceError && error.message.includes('ngoài cổng tra cứu'));
     assert.equal(calls,4);
   } finally {globalThis.fetch=previous;}
+});
+
+
+test('WINinvoice parses provider-hosted PDF links from an HTML viewer', () => {
+  const html = '<html><iframe src="/bill/download/pdf?id=123"></iframe>' +
+    '<a href="https://outside.example/file.pdf">external</a>' +
+    '<a href="/bill/file/456">Download</a></html>';
+  const result = winInvoicePdfFromViewer(html, 'https://tracuu.wininvoice.vn/bill/view?name=C26TTS_00014678');
+  assert.deepEqual(result.links, [
+    'https://tracuu.wininvoice.vn/bill/download/pdf?id=123',
+    'https://tracuu.wininvoice.vn/bill/file/456',
+  ]);
+  assert.equal(result.pdf,undefined);
+});
+
+test('WINinvoice accepts only embedded data URIs with a real PDF signature', () => {
+  const pdf = Buffer.from('%PDF-1.7\n' + 'A'.repeat(130));
+  const viewer = '<html><embed src="data:application/pdf;base64,' + pdf.toString('base64') + '"></html>';
+  const result = winInvoicePdfFromViewer(viewer, 'https://tracuu.wininvoice.vn/bill/view?name=C26TTS_00014678');
+  assert.deepEqual(result.pdf,pdf);
+});
+
+
+test('WINinvoice follows HTML viewer link to real PDF bytes and validates invoice identity', async () => {
+  const prev=globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch=(async (url:string|URL|Request) => {
+    urls.push(String(url));
+    if(urls.length===1) return new Response('<input name="phtcsrf_tkndf-tc" value="fresh_csrf_123456">',{
+      headers:{'Content-Type':'text/html','Set-Cookie':'df-tcphtcsrf_coki_tkndf-tc=fresh_csrf_123456; Path=/'}
+    });
+    if(urls.length===2) return new Response(null,{status:303,headers:{Location:'/bill/inv'}});
+    if(urls.length===3) return new Response('<a href="/bill/view?name=C26TTS_00014678&amp;f=xyz">View</a>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    if(urls.length===4) return new Response('<html><iframe src="/bill/download/pdf?id=xyz"></iframe></html>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    if(urls.length===5) return new Response('%PDF-1.7\n'+'A'.repeat(120),{
+      headers:{'Content-Type':'application/pdf'}
+    });
+    throw Error('Extra request');
+  }) as typeof fetch;
+  try {
+    await assert.rejects(driver.fetchPdf(info),(err:unknown)=>
+      err instanceof OriginalInvoiceError && err.message.includes('Không xác minh được danh tính PDF gốc'));
+    assert.equal(urls.length,5);
+    assert.equal(new URL(urls[4]).pathname,'/bill/download/pdf');
+  } finally {globalThis.fetch=prev;}
 });
