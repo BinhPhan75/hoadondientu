@@ -46,12 +46,9 @@ interface InvoiceDetailModalProps {
   cookieHeader?: string;
 }
 
-// Keep the provider's own HTML pagination when it is displayed inside the modal.
-// This is especially important for EasyInvoice invoices with many line items.
 const prepareOriginalInvoiceHtml = (html: string): string => {
   if (!html) return html;
 
-  // Gỡ bỏ inline height và overflow:hidden trên thẻ .VATTEMP hoặc container
   let processedHtml = html
     .replace(/<div([^>]*class=["'][^"']*(?:VATTEMP|invtable|invoice-content|content)[^"']*["'][^>]*)style=["']([^"']*)["']/gi, (match, p1, style) => {
       const cleanStyle = style
@@ -120,12 +117,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  // Theo dõi hóa đơn đang thực sự được mở để bỏ qua kết quả tải chi tiết trả
-  // về SAU KHI người dùng đã đóng modal hoặc chuyển sang xem hóa đơn khác -
-  // tránh việc áp dữ liệu cũ/không khớp vào state và làm crash giao diện.
   const openInvoiceIdRef = useRef<string | null>(invoice?.id ?? null);
   const originalLoadSequence = useRef(0);
-  // Avoid duplicate downloads if the invoice detail re-renders or is refreshed.
   const minvoiceDownloadedRef = useRef<Set<string>>(new Set());
   openInvoiceIdRef.current = invoice?.id ?? null;
 
@@ -211,7 +204,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const theme = 'red';
   const selectedTemplateId = 'AUTO';
 
-  // Automatic & manual on-demand invoice detail retrieval directly from GDT
   const loadInvoiceDetail = async (targetInv: GDTInvoice, force = false) => {
     if (!targetInv) return;
     if (!force && targetInv.sourceCompleteness === 'detail' && hasGenuineItems(targetInv.items)) {
@@ -234,9 +226,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         })
       });
       const data = await response.json();
-      // Bỏ qua nếu người dùng đã đóng modal hoặc đã chuyển sang xem hóa đơn
-      // khác trong lúc request này đang chạy (tránh áp dữ liệu lạc vào state
-      // sau khi đóng, nguyên nhân từng gây crash/trang trắng khi đóng modal).
       if (openInvoiceIdRef.current !== targetInv.id) {
         return;
       }
@@ -409,8 +398,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsExportingPdf(true);
     toast.info('Đang xử lý hóa đơn...', 'Thông Báo');
     try {
-      // The fallback must never auto-select a supplier template. Supplier
-      // templates are only used for genuine provider originals above.
       const success = await exportInvoiceToPdfFile(effectiveInvoice, null, undefined, 'red', 'DEFAULT');
       if (success) {
         toast.success('Đã tải PDF Tổng cục thuế thành công!');
@@ -554,7 +541,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleViewFourSiPdf = async () => {
     if (!effectiveInvoice) return;
     if (originalFourSiPdfUrl) {
-      // Đã nạp sẵn bản thể hiện đang hiển thị
       return;
     }
     setIsLoadingFourSiOriginal(true);
@@ -587,7 +573,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (!blobUrl) {
         const blob = await fetchFourSiPdfBlob();
         blobUrl = window.URL.createObjectURL(blob);
-        // Lưu lại để có thể xem trực tiếp ngay mà không cần fetch lại
         setOriginalFourSiPdfUrl(blobUrl);
       }
 
@@ -724,60 +709,74 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     const sequence = ++originalLoadSequence.current;
+    const MAX_VISNAM_AUTO_ATTEMPTS = 3;
 
-    // 1. Tự động giải CAPTCHA qua OCR cục bộ và tải trực tiếp PDF về phần mềm
     setIsDownloadingEasyInvoice(true);
     setOriginalLoadError(null);
-    setEasyInvoiceDownloadStatus('Đang tự động nhận diện CAPTCHA qua OCR và tải PDF gốc VIN-HOADON...');
-    try {
-      const identity = {
-        sellerTaxCode: String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim(),
-        invoiceSeries: String(target.khhdon || extractTagValue(target.rawXml || '', 'KHHDon') || '').trim(),
-        invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
-      };
-      const result = await autoLookupVisnamInvoicePdf({
-        lookupCode: code,
-        identity,
-      });
 
+    const identity = {
+      sellerTaxCode: String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim(),
+      invoiceSeries: String(target.khhdon || extractTagValue(target.rawXml || '', 'KHHDon') || '').trim(),
+      invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
+    };
+
+    let lastFallbackCaptcha: { key: string; image: string; autoSolvedCode?: string } | undefined;
+
+    for (let attempt = 1; attempt <= MAX_VISNAM_AUTO_ATTEMPTS; attempt++) {
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
 
-      const url = URL.createObjectURL(result.blob);
-      setOriginalProviderPdfUrl(url);
-      setIsVisnamCaptchaOpen(false);
-      setVisnamCaptcha(null);
-      setVisnamCaptchaCode('');
-      setVisnamCaptchaError(null);
-      setEasyInvoiceDownloadStatus('Đã tự động nhận diện CAPTCHA và tải PDF gốc VIN-HOADON thành công.');
+      setEasyInvoiceDownloadStatus(
+        `Đang tải PDF VIN-HOADON (lần ${attempt}/${MAX_VISNAM_AUTO_ATTEMPTS})...`
+      );
 
-      const downloadLink = document.createElement('a');
-      downloadLink.href = url;
-      downloadLink.download = result.filename;
-      downloadLink.style.display = 'none';
-      document.body.appendChild(downloadLink);
       try {
-        downloadLink.click();
-      } finally {
-        downloadLink.remove();
-      }
-      return;
-    } catch (error: any) {
-      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
-      console.warn('[Visnam] Tự động tải qua OCR thất bại, mở hộp thoại CAPTCHA:', error?.message);
+        const result = await autoLookupVisnamInvoicePdf({
+          lookupCode: code,
+          identity,
+        });
 
-      // 2. Dự phòng: Mở modal nhập CAPTCHA nếu OCR tự động thất bại
-      const fallback = error?.fallbackCaptcha;
-      setVisnamCaptcha(fallback || null);
-      setVisnamCaptchaCode(fallback?.autoSolvedCode || '');
-      setVisnamCaptchaError(null);
-      setIsVisnamCaptchaOpen(true);
-      if (!fallback) {
-        await refreshVisnamCaptcha(target.id, sequence);
-      }
-    } finally {
-      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+        if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+
+        const url = URL.createObjectURL(result.blob);
+        setOriginalProviderPdfUrl(url);
+        setIsVisnamCaptchaOpen(false);
+        setVisnamCaptcha(null);
+        setVisnamCaptchaCode('');
+        setVisnamCaptchaError(null);
+        setEasyInvoiceDownloadStatus('Đã tải PDF gốc VIN-HOADON thành công.');
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = result.filename;
+        downloadLink.style.display = 'none';
+        document.body.appendChild(downloadLink);
+        try {
+          downloadLink.click();
+        } finally {
+          downloadLink.remove();
+        }
         setIsDownloadingEasyInvoice(false);
+        return;
+      } catch (error: any) {
+        if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+        if (error?.fallbackCaptcha) {
+          lastFallbackCaptcha = error.fallbackCaptcha;
+        }
+        const msg = String(error?.message || '');
+        if (/tesseract-core|wasm|ENOENT|exit status:\s*129/i.test(msg)) {
+          break;
+        }
       }
+    }
+
+    setIsDownloadingEasyInvoice(false);
+    setEasyInvoiceDownloadStatus(null);
+    setVisnamCaptcha(lastFallbackCaptcha || null);
+    setVisnamCaptchaCode(lastFallbackCaptcha?.autoSolvedCode || '');
+    setVisnamCaptchaError(null);
+    setIsVisnamCaptchaOpen(true);
+    if (!lastFallbackCaptcha) {
+      await refreshVisnamCaptcha(target.id, sequence);
     }
   };
 
@@ -861,8 +860,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const isGenericThaiSon = !recordedPortal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(recordedPortal);
     const tenantUrl = sellerPortal && isGenericThaiSon ? sellerPortal : recordedPortal;
     const isSeparatePortal = actualProvider === 'IHOADON';
-    // Open the actual issuer portal. No verified server-side PDF API exists
-    // for every tenant; do not send these invoices to the generic Thai Son API.
     if (isSeparatePortal && /^https?:\/\//i.test(tenantUrl)) {
       window.open(
         buildDirectLookupUrl(tenantUrl, extractedLookup.lookupCode || target.lookupCode, actualProvider, target.nbmst),
@@ -911,9 +908,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } else {
         const url = window.URL.createObjectURL(blob);
         setOriginalProviderPdfUrl(url);
-        // With M-invoice, looking up the invoice should also save the
-        // verified issuer PDF to the user's Downloads folder. Browsers may
-        // require permission for automatic downloads; retain the manual link.
         if (actualProvider === 'MINVOICE') {
           const saveKey = target.id + '|' + String(target.khhdon || '') + '|' +
             String(target.shdon || '') + '|' + String(target.nbmst || '');
@@ -950,14 +944,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  // Trigger automatic load immediately when an invoice without genuine items is opened
   useEffect(() => {
     if (invoice && (!hasGenuineItems(invoice.items) || invoice.sourceCompleteness !== 'detail')) {
       loadInvoiceDetail(invoice);
     }
   }, [invoice?.id]);
 
-  // Find index in list for navigation
   const currentIndex = effectiveInvoice && allInvoices.length > 0 
     ? allInvoices.findIndex(i => i.id === effectiveInvoice.id) 
     : -1;
@@ -976,7 +968,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
-  // Generate real QR code for the invoice
   useEffect(() => {
     if (effectiveInvoice) {
       generateInvoiceQrCode(effectiveInvoice).then(url => {
@@ -985,7 +976,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   }, [effectiveInvoice]);
 
-  // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
     if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM' || provider === 'MATBAO') return;
@@ -997,25 +987,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       return;
     }
     if (!effectiveInvoice?.rawXml) return;
-    // No guessing of Thai Son seller portals; register a valid URL once if
-    // neither the XML nor learned cache identifies the seller's portal.
     const xmlPortal = extractLookupDetails(effectiveInvoice.rawXml).lookupUrl || '';
     const knownPortal = lookupPortalForSeller(effectiveInvoice.nbmst) || '';
     const candidate = xmlPortal || knownPortal || effectiveInvoice.lookupUrl || '';
     if (provider === 'THAISON' && (!candidate ||
         /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(candidate))) return;
-    // iHoaDon uses an independent provider workflow.
-    // Thai Son tenant portals now use the original-document downloader.
     if (provider === 'IHOADON') return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider, thaiSonPortalRevision]);
 
   if (!invoice || !effectiveInvoice) return null;
 
-  // Dò tìm tự động nhà cung cấp HĐĐT từ XML hoặc dữ liệu bóc tách.
-  // Bọc trong try/catch: nếu dữ liệu hóa đơn (ví dụ từ nguồn mới như hóa đơn
-  // máy tính tiền) có định dạng bất thường khiến các hàm này ném lỗi, tránh
-  // để lỗi văng ra ngoài render và làm crash toàn bộ trang (trang trắng).
   let xmlContent = '';
   let autoDetectedProvider: InvoiceProviderId = 'DEFAULT' as InvoiceProviderId;
   let lookupDetails: { lookupCode?: string; lookupUrl?: string } = {};
@@ -1025,9 +1007,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   try {
     xmlContent = effectiveInvoice.rawXml || generateGDTInvoiceXml(effectiveInvoice);
     const detectedProvider = (resolveInvoiceProvider(effectiveInvoice)?.replace(/^LCS$/, 'LCS_SOFT') || 'DEFAULT') as InvoiceProviderId;
-    // Never expose partner-specific template names. The provider badge is
-    // based only on the actual invoice solution provider, otherwise a seller
-    // can be mislabeled as a different partner template.
     const standardProviders = new Set<InvoiceProviderId>([
       'MISA', 'VIETTEL', 'VNPT', 'EASYINVOICE', 'BKAV', '4SI', 'LCS_SOFT',
       'VNPAY', 'FPT', 'MINVOICE', 'THAISON', 'CYBERBILL', 'DEFAULT'
@@ -1037,7 +1016,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       : 'DEFAULT';
     lookupDetails = extractLookupDetails(xmlContent);
 
-    // Ưu tiên mã tra cứu và URL có sẵn từ invoice nếu chưa trích xuất được từ XML
     if (!lookupDetails.lookupCode && effectiveInvoice.lookupCode) {
       lookupDetails.lookupCode = effectiveInvoice.lookupCode;
     }
@@ -1050,14 +1028,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       lookupDetails.lookupUrl = sellerThaiSonPortal;
     }
 
-    // Only solution metadata/portal evidence selects a provider, never the seller.
     if (autoDetectedProvider === 'VNPT' && !lookupDetails.lookupUrl) {
       const tax = String(effectiveInvoice.nbmst || '').replace(/[^0-9-]/g, '');
       if (tax) lookupDetails.lookupUrl = `https://${tax}-tt78.vnpt-invoice.com.vn`;
     }
     if (autoDetectedProvider === 'MISA') lookupDetails.lookupUrl = 'https://www.meinvoice.vn/tra-cuu';
-    // Do not guess the issuer portal from the Thai Son software provider.
-    // If the XML has no DCTC, use only an already learned URL for this seller.
     if (autoDetectedProvider === 'MINVOICE') lookupDetails.lookupUrl = 'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don';
 
     safeItems = ensureInvoiceItems(effectiveInvoice);
@@ -1066,20 +1041,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     renderError = err?.message || 'Không thể xử lý dữ liệu hóa đơn này.';
   }
 
-  // Template ID hiệu lực: Nếu người dùng chọn AUTO thì dùng kết quả dò tìm tự động
   const resolvedTemplateId: InvoiceProviderId = (selectedTemplateId && selectedTemplateId !== 'AUTO')
     ? (selectedTemplateId as InvoiceProviderId)
     : autoDetectedProvider;
 
-  // Chỉ gán template TKJ cho đúng MST TKJ. MSTTCGP là MST của tổ chức cung cấp
-  // giải pháp, không phải căn cứ để kết luận người bán là TKJ.
   const safeResolvedTemplateId: InvoiceProviderId =
     resolvedTemplateId === 'TKJ' && effectiveInvoice.nbmst !== '0318443500'
       ? 'DEFAULT'
       : resolvedTemplateId;
 
-  // Hóa đơn VNPAY & Vietcombank: Không có mã tra cứu trong XML GDT,
-  // theo chỉ đạo của người dùng: Luôn sử dụng mẫu chuẩn Tổng cục Thuế (DEFAULT) để thông tin người bán và người mua chính xác 100%.
   const effectiveTemplateId: InvoiceProviderId = (safeResolvedTemplateId === 'VNPAY')
     ? 'DEFAULT'
     : safeResolvedTemplateId;
@@ -1151,8 +1121,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     );
   }
 
-
-
   const handleDownloadEasyInvoice = async () => {
     if (!effectiveInvoice) return;
     const lookupCode = lookupDetails.lookupCode || effectiveInvoice.lookupCode;
@@ -1181,7 +1149,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         throw new Error(data.error || 'Tải hóa đơn từ EasyInvoice thất bại.');
       }
 
-      // Tải file về máy
       const filename = data.filename || `HOADON_${effectiveInvoice.khhdon}_${effectiveInvoice.shdon}.pdf`;
       const contentType = data.contentType || 'application/pdf';
       const byteCharacters = atob(data.pdfBase64);
@@ -1216,7 +1183,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-      {/* Thông báo đang xử lý tệp PDF dự phòng */}
       {isExportingPdf && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] bg-blue-900/95 border-2 border-blue-400 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs font-semibold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200">
           <Loader2 className="w-5 h-5 animate-spin text-blue-300 shrink-0" />
@@ -1229,7 +1195,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
       <div className="bg-slate-900 rounded-xl max-w-6xl w-full shadow-2xl border border-slate-800 overflow-hidden h-[96dvh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         
-        {/* Modal Top Bar */}
         <div className="bg-slate-950 text-white px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 shrink-0 border-b border-slate-800">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-xs bg-blue-500/15 border border-blue-500/25 text-blue-400">
@@ -1255,7 +1220,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     ĐÃ CẤP MÃ CQT
                   </span>
                 )}
-                {/* Provider Indicator Pill */}
                 <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 text-[10px] font-medium border border-amber-500/30 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
                   NCC: {currentProviderMeta.shortName}
@@ -1284,9 +1248,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Center Navigation & Tabs */}
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Prev / Next buttons */}
             {allInvoices.length > 1 && (
               <div className="flex items-center bg-slate-900 rounded-lg border border-slate-700 p-0.5 text-xs text-slate-300">
                 <button
@@ -1311,7 +1273,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* Close button */}
             <button
               onClick={onClose}
               className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
@@ -1322,10 +1283,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Main Body */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-950 flex justify-center items-start">
           <div className="w-full flex flex-col items-center">
-            {/* 4Si Error Banner */}
             {fourSiError && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-2.5 bg-red-950/90 border border-red-700/60 rounded-lg text-xs text-red-200 flex items-center justify-between gap-3 shadow-md">
                 <div className="flex items-center gap-2">
@@ -1342,7 +1301,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* 4Si Notice Banner */}
             {fourSiNotice && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-2 bg-amber-950/90 border border-amber-600/60 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md">
                 <div className="flex items-center gap-2">
@@ -1409,7 +1367,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* 4Si Active Preview Banner */}
             {originalFourSiPdfUrl && (
               <div className="w-full max-w-[820px] mb-3 px-4 py-2 bg-amber-950/80 border border-amber-700/50 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md">
                 <div className="flex items-center gap-2">
@@ -1431,7 +1388,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* Format toggle for EasyInvoice if HTML original is loaded */}
             {isEasyInvoice && originalEasyInvoiceHtml && (
               <div className="w-full max-w-[820px] mb-2 flex items-center justify-between flex-wrap gap-2 bg-slate-800/90 px-3.5 py-2 rounded-lg border border-slate-700 shadow-sm">
                 <div className="text-xs text-slate-300 font-medium flex items-center gap-2">
@@ -1447,7 +1403,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                         : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
-                    title="Xem bản thể hiện HTML đa trang chuẩn A4 (tất cả các dòng hiển thị đầy đủ, không bị co ép)"
                   >
                     Bản thể hiện HTML A4 (Đa trang chuẩn)
                   </button>
@@ -1460,7 +1415,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                           ? 'bg-emerald-600 text-white font-semibold shadow-xs'
                           : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                       }`}
-                      title="Xem file PDF từ máy chủ EasyInvoice (máy chủ EasyInvoice nén tất cả các dòng vào 1 trang)"
                     >
                       Bản PDF gốc EasyInvoice
                     </button>
@@ -1470,7 +1424,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       type="button"
                       onClick={handlePrintHtml}
                       className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-700 hover:bg-emerald-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="In hóa đơn chuẩn A4 đa trang qua hộp thoại in trình duyệt"
                     >
                       <Printer className="w-3.5 h-3.5" />
                       <span>In A4</span>
@@ -1482,7 +1435,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-2.5 py-1 text-xs font-semibold rounded-md bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-600/50 flex items-center gap-1 transition-colors cursor-pointer"
-                      title="Mở link tra cứu trực tiếp trên Cổng EasyInvoice (Đã dán sẵn mã FKey)"
                     >
                       <ExternalLink className="w-3 h-3 text-amber-400" />
                       <span>Cổng EasyInvoice ↗</span>
@@ -1492,7 +1444,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* Thông báo hướng dẫn khi đang xem PDF bị co 1 trang của EasyInvoice */}
             {isEasyInvoice && !originalEasyInvoiceHtml && originalProviderPdfUrl && (
               <div className="w-full max-w-[820px] mb-2 px-3.5 py-2.5 bg-amber-950/80 border border-amber-600/60 rounded-lg text-xs text-amber-200 flex items-center justify-between gap-3 shadow-md flex-wrap">
                 <div className="flex items-center gap-2">
@@ -1541,7 +1492,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             )}
 
-            {/* Paper A4 container */}
             <div 
               className="flex justify-center"
               style={{
@@ -1633,7 +1583,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Item count status confirmation pill below */}
               <div className="mt-4 text-center text-xs text-gray-400 font-mono">
                 {misaPortalUrl ? (
                   <>Đang xem <span className="text-emerald-400 font-bold">cổng MISA meInvoice</span> trong ứng dụng • </>
@@ -1657,7 +1606,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
         </div>
 
-        {/* Footer Actions Bar */}
         <div className="bg-slate-950 border-t border-slate-800 px-5 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
@@ -1665,7 +1613,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            {/* 1. Nếu có file PDF gốc đã nạp, hiển thị nút Tải PDF gốc đã lưu */}
             {originalProviderZipUrl && (
               <a href={originalProviderZipUrl}
                 download={`HoaDon_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}.zip`}
@@ -1686,17 +1633,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             )}
 
-            {/* 2. Provider Actions - Luôn luôn hiển thị theo nhà cung cấp */}
             {isEasyInvoice ? (
               <div className="inline-flex items-center gap-1.5 flex-wrap">
-                {/* Nút MỞ LINK TRA CỨU TRỰC TIẾP TỪ NHÀ CUNG CẤP EASYINVOICE */}
                 {easyInvoicePortalUrl && (
                   <a
                     href={easyInvoicePortalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border text-amber-200 bg-amber-950/90 hover:bg-amber-900 border-amber-500 hover:border-amber-400 ring-2 ring-amber-500/40 transition-all cursor-pointer shadow-md"
-                    title={`Mở trực tiếp Cổng tra cứu EasyInvoice (${effectiveInvoice.nbmst || ''}) trên tab mới (Đã dán sẵn mã FKey: ${easyInvoiceLookupCode || ''})`}
                   >
                     <ExternalLink className="w-3.5 h-3.5 text-amber-400" />
                     <span>Mở cổng EasyInvoice ưu tiên</span>
@@ -1717,27 +1661,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </a>
                 )}
 
-                {/* Nút In hóa đơn chuẩn A4 đa trang khi xem HTML */}
                 {originalEasyInvoiceHtml && (
                   <button
                     type="button"
                     onClick={handlePrintHtml}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/80 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs"
-                    title="In hóa đơn chuẩn A4 đa trang qua hộp thoại in của trình duyệt"
                   >
                     <Printer className="w-3.5 h-3.5 text-emerald-400" />
                     <span>In hóa đơn A4</span>
                   </button>
                 )}
 
-                {/* Nút nạp bản thể hiện HTML đa trang nếu chưa có HTML */}
                 {!originalEasyInvoiceHtml && (
                   <button
                     type="button"
                     onClick={() => handleViewOriginalEasyInvoice(false)}
                     disabled={isDownloadingEasyInvoice}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border text-emerald-300 bg-emerald-950/70 hover:bg-emerald-900 border-emerald-600 hover:border-emerald-500 ring-1 ring-emerald-500/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
-                    title={`Tra cứu mã FKey và hiển thị bản thể hiện HTML đa trang từ EasyInvoice (Mã tra cứu: ${easyInvoiceLookupCode || ''})`}
                   >
                     {isDownloadingEasyInvoice ? (
                       <Loader2 className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
@@ -1970,7 +1910,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </a>
             ) : null}
 
-            {/* Nút Tải PDF Tổng cục thuế */}
             <button
               type="button"
               onClick={handleDownloadPdfFile}
@@ -1994,7 +1933,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         </div>
       </div>
 
-      {/* Thông báo giữa màn hình khi bấm Tải PDF Tổng cục thuế: "Đang xử lý hóa đơn" */}
       {isExportingPdf && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs animate-fadeIn pointer-events-auto">
           <div className="bg-slate-900 border border-blue-500/50 rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-3.5 max-w-sm mx-4 text-center ring-1 ring-white/10 animate-scaleUp">
