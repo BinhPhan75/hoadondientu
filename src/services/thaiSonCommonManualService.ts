@@ -8,7 +8,8 @@ import {
   isThaiSonHelpDocumentLink,
   isThaiSonHelpPdf,
   parseThaiSonForm,
-  verifiedThaiSonInvoiceHtml,
+  verifiedThaiSonInvoiceHtmlWithSeries,
+  isThaiSonMarketingPage,
 } from './thaiSonInvoiceService';
 
 const PORTAL_ORIGIN = 'https://einvoice.vn';
@@ -178,6 +179,12 @@ export async function createThaiSonCommonManualCaptcha(lookupCodeInput: unknown)
     if (html.length > 2_000_000) {
       throw providerError('Biểu mẫu tra cứu Thái Sơn cổng chung vượt giới hạn.', 'CAPTCHA_UNAVAILABLE', 502);
     }
+    if (isThaiSonMarketingPage(html)) {
+      throw providerError(
+        'einvoice.vn/tra-cuu hiện là trang giới thiệu. Cần cổng tra cứu thực tế của người bán để lấy CAPTCHA và PDF gốc.',
+        'ISSUER_LOOKUP_PORTAL_REQUIRED'
+      );
+    }
     const form = parseThaiSonForm(html);
     if (!form.formFound || !form.field || !form.captchaField || !form.imagePath) {
       throw providerError('Không nhận diện được biểu mẫu CAPTCHA của cổng Thái Sơn cổng chung.', 'CAPTCHA_FORM_CHANGED', 502);
@@ -297,7 +304,13 @@ export async function submitThaiSonCommonManualLookup(params: {
   }
 
   const html = bytes.toString('utf8');
-  let verifiedHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
+  if (isThaiSonMarketingPage(html)) {
+    throw providerError(
+      'Kết quả trả về website giới thiệu Thái Sơn, không phải hóa đơn MARU. Cần đúng cổng phát hành của người bán.',
+      'ISSUER_LOOKUP_PORTAL_REQUIRED'
+    );
+  }
+  let verifiedHtml = verifiedThaiSonInvoiceHtmlWithSeries(html, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
 
   const $ = cheerio.load(html);
   const returnedForm = parseThaiSonForm(html);
@@ -357,7 +370,7 @@ export async function submitThaiSonCommonManualLookup(params: {
 
       const targetHtml = targetBytes.toString('utf8');
       verifiedHtml = verifiedHtml ||
-        verifiedThaiSonInvoiceHtml(targetHtml, params.sellerTaxCode, params.invoiceNo);
+        verifiedThaiSonInvoiceHtmlWithSeries(targetHtml, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
       extractThaiSonDownloadTargets(targetHtml).forEach(nested => {
         queue.push({ ...nested, base: targetResponse.url || targetUrl.href, depth: target.depth + 1 });
       });

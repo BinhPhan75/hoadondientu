@@ -192,6 +192,51 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
  * exposing a downloadable PDF. Verify invoice metadata before showing its
  * HTML as a provider presentation (never call it an original PDF).
  */
+/**
+ * The generic einvoice.vn/tra-cuu site is an informational webpage, not
+ * the customer invoice lookup form. Never render it as an original invoice.
+ */
+export function isThaiSonMarketingPage(html: string): boolean {
+  if (!html || html.length > 2_000_000) return false;
+  const $ = cheerio.load(html);
+  const plain = $('body').text().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const title = $('title').text().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return /phan mem hoa don dien tu e-invoice duoc nhieu dn fdi tin dung/.test(plain) ||
+    /chuyen gia hoa don dien tu/.test(plain) ||
+    (/(?:einvoice|e-invoice)/.test(title) && /gioi thieu/.test(plain) &&
+      /tin tuc/.test(plain) && /san pham/.test(plain) &&
+      !$('#invoice-data, #multi-page').length);
+}
+
+/** Restrict successful issuer HTML to the requested seller/series/number. */
+export function verifiedThaiSonInvoiceHtmlWithSeries(
+  html: string,
+  sellerTaxCode: string | undefined,
+  invoiceNo: string | undefined,
+  invoiceSeries: string | undefined,
+): string | undefined {
+  if (!invoiceSeries || isThaiSonMarketingPage(html)) return;
+  const $ = cheerio.load(html);
+  const root = $('#multi-page, #invoice-data, #invoice, .invoice-content').first();
+  const scope = root.length ? root : $('body');
+  const visibleText = scope.text().toUpperCase().replace(/\s+/g, ' ');
+  const compact = visibleText.replace(/\s+/g, '');
+  const seller = String(sellerTaxCode || '').replace(/\D/g, '');
+  const series = String(invoiceSeries).replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const number = String(invoiceNo || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+  if (!seller || !series || !number || !compact.includes(seller) || !compact.includes(series)) return;
+  // Check the number in a labelled invoice field, not as a random page number.
+  const labels = /(?:SỐ\s*(?:HÓA\s*ĐƠN|HĐ)|INVOICE\s*(?:NO|NUMBER)|INV\.?\s*NO)/gi;
+  let matched = false;
+  for (const match of visibleText.matchAll(labels)) {
+    const tail = visibleText.slice((match.index || 0) + match[0].length, (match.index || 0) + match[0].length + 35);
+    const digits = tail.match(/^\s*[:.#-]?\s*(\d{1,12})(?!\d)/);
+    if (digits && digits[1].replace(/^0+(?=\d)/, '') === number) { matched = true; break; }
+  }
+  if (!matched || scope.find('table tr').length < 3) return;
+  return verifiedThaiSonInvoiceHtml(html, sellerTaxCode, invoiceNo);
+}
+
 export function verifiedThaiSonInvoiceHtml(
   html: string,
   sellerTaxCode: string | undefined,
@@ -373,6 +418,12 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
     for (let attempt = 0; attempt < 2; attempt++) {
       const page = await request(portalBase);
       const searchPageHtml = await page.text();
+      if (isThaiSonMarketingPage(searchPageHtml)) {
+        throw new OriginalInvoiceError(
+          'einvoice.vn/tra-cuu là trang giới thiệu của Thái Sơn, không phải cổng tra cứu hóa đơn trực tiếp. Cần URL cổng phát hành do người bán cung cấp.',
+          'THAISON', 'ISSUER_LOOKUP_PORTAL_REQUIRED', 422, portalBase
+        );
+      }
       const form = parseThaiSonForm(searchPageHtml);
       if (!form.formFound || !form.field) {
         const diagnostics = diagnoseThaiSonSearchPage(searchPageHtml);
