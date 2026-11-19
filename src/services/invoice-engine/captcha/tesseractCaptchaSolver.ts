@@ -77,7 +77,7 @@ async function getWorker(whitelist?: string): Promise<Worker> {
 }
 
 /**
- * Giải mã ảnh PNG RGBA chuẩn từ ASP.NET Captcha (EasyInvoice / VNPT)
+ * Giải mã ảnh PNG RGBA chuẩn từ ASP.NET Captcha (EasyInvoice / VNPT / Visnam)
  */
 export function decodePngRgba(buf: Buffer): { width: number; height: number; data: Buffer } | null {
   try {
@@ -287,18 +287,19 @@ export function createPosBinarizedBmp(
  * Tiền xử lý chuyên sâu cho CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com):
  * - Kích thước gốc rất lớn (1500x350) -> thu nhỏ về kích thước chuẩn (380px)
  * - Nền trong suốt hoặc trắng -> composite nền trắng chuẩn
- * - Khử sạch 2 vạch kẻ chéo màu đỏ và xanh lá cây cắt ngang qua các chữ số
- * - Giữ lại các nét chữ số lớn, binarize sang đen trắng sắc nét
- * - Bổ sung viền trắng an toàn 15px xung quanh giúp Tesseract nhận diện 4 chữ số chuẩn xác 100%
+ * - Khử sạch vạch kẻ chéo màu đỏ/xanh lá cắt ngang qua các chữ số
+ * - Giữ lại các nét chữ số lớn, binarize sang đen trắng sắc nét theo ngưỡng lumThreshold
+ * - Bổ sung viền trắng an toàn 15px xung quanh giúp Tesseract nhận diện 4 chữ số nhanh và chuẩn
  */
 export function createVisnamBinarizedBmp(
   decoded: { width: number; height: number; data: Buffer },
   targetWidth = 380,
-  padding = 15
+  padding = 15,
+  lumThreshold = 165
 ): Buffer {
   const { width, height, data } = decoded;
   const targetW = Math.max(200, Math.min(targetWidth, width));
-  const targetH = Math.max(50, Math.round(height * targetW / width));
+  const targetH = Math.max(50, Math.round((height * targetW) / width));
   const totalW = targetW + padding * 2;
   const totalH = targetH + padding * 2;
 
@@ -342,12 +343,15 @@ export function createVisnamBinarizedBmp(
       const cB = Math.round(b * a + 255 * (1 - a));
 
       // Remove red & green noise lines
-      const isRedLine = (cR > cG + 35) && (cR > cB + 35);
-      const isGreenLine = (cG > cR + 25) && (cG > cB + 25);
+      const isRedLine = cR > cG + 35 && cR > cB + 35;
+      const isGreenLine = cG > cR + 25 && cG > cB + 25;
       const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
 
-      // Digits are dark (lum < 165) or blue (cB > cR + 25 && cB > cG + 25 && lum < 220)
-      const isDigit = !isRedLine && !isGreenLine && (lum < 165 || (cB > cR + 25 && cB > cG + 25 && lum < 220));
+      // Digits are dark (lum < lumThreshold) or blue (cB > cR + 25 && cB > cG + 25 && lum < 220)
+      const isDigit =
+        !isRedLine &&
+        !isGreenLine &&
+        (lum < lumThreshold || (cB > cR + 25 && cB > cG + 25 && lum < 220));
 
       const destXWithPad = dx + padding;
       const pxOffset = rowStart + destXWithPad * 3;
@@ -387,214 +391,4 @@ export function postProcessOcrText(
     // 2. Chỉ giữ lại số
     let digits = mapped.replace(/[^0-9]/g, '');
 
-    // 3. Khớp độ dài nếu có yêu cầu (VD: EasyInvoice / VNPT thường là 4 số)
-    if (options?.expectedLength && digits.length > options.expectedLength) {
-      const match = digits.match(new RegExp(`\\d{${options.expectedLength}}`));
-      if (match) return match[0];
-      return digits.substring(0, options.expectedLength);
-    }
-    return digits;
-  }
-
-  // Luồng Alphanumeric (Mã POS Captcha Cổng Thuế: 4-6 ký tự in hoa và số, VD: 6V7BEF, 46JBRS)
-  // 1. Loại bỏ các ký tự rác, nét gạch, ký hiệu phân cách phi chữ số do vạch nhiễu
-  let cleaned = rawText
-    .replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, '')
-    .replace(/\s+/g, '')
-    .toUpperCase();
-
-  // 2. Loại bỏ các ký tự phi alphanumeric
-  cleaned = cleaned.replace(/[^A-Z0-9]/g, '');
-
-  // 3. Xử lý độ dài: Captcha máy tính tiền của Tổng cục Thuế thường là 6 ký tự
-  const targetLen = options?.expectedLength || 6;
-  if (cleaned.length > targetLen) {
-    // Nếu bị nhận diện thừa ký tự do rác ở viền mép (VD: "I6V7BEF" hoặc "6V7BEF_")
-    // Kiểm tra xem có cụm 4-6 ký tự hợp lệ không
-    const match = cleaned.match(/[A-Z0-9]{4,6}/);
-    if (match && match[0].length >= 4 && match[0].length <= targetLen) {
-      return match[0];
-    }
-    return cleaned.substring(0, targetLen);
-  }
-
-  return cleaned;
-}
-
-export interface TesseractSolveOptions {
-  digitsOnly?: boolean;
-  expectedLength?: number;
-  preprocessEasyInvoice?: boolean;
-  preprocessPosCaptcha?: boolean;
-  preprocessVisnam?: boolean;
-  whitelist?: string;
-  timeoutMs?: number;
-}
-
-/**
- * Giải chuyên sâu CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com):
- * - Binarize và khử sạch vạch nhiễu đỏ/xanh (createVisnamBinarizedBmp)
- * - Thử các chế độ phân đoạn PSM 8 (Single word), PSM 7 (Single text line), PSM 6 (Uniform block), PSM 13 (Raw line)
- * - Tự động chuẩn hóa thành chuỗi 4 chữ số
- */
-export async function solveVisnamCaptcha(
-  imageInput: Buffer | string | Uint8Array,
-  timeoutMs = 12000
-): Promise<{ code: string; confidence: number } | null> {
-  const recognitionPromise = (async () => {
-    let buf: Buffer;
-    if (typeof imageInput === 'string') {
-      const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, '');
-      buf = Buffer.from(cleanB64, 'base64');
-    } else {
-      buf = Buffer.from(imageInput);
-    }
-
-    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (!isPng) return null;
-
-    const decoded = decodePngRgba(buf);
-    if (!decoded) return null;
-
-    const bmp = createVisnamBinarizedBmp(decoded, 380, 15);
-    const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
-
-    // 1. Thử các chế độ PSM phân đoạn từ ngữ/dòng số tốt nhất trên ảnh binarized
-    for (const psm of ['8', '7', '6', '13']) {
-      try {
-        await worker.setParameters({
-          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
-          tessedit_pageseg_mode: psm as any,
-        });
-        const res = await worker.recognize(bmp);
-        const raw = res.data.text || '';
-        const cleaned = postProcessOcrText(raw, { digitsOnly: true, expectedLength: 4 });
-        if (/^\d{4}$/.test(cleaned)) {
-          return {
-            code: cleaned,
-            confidence: res.data.confidence || 85,
-          };
-        }
-      } catch {
-        // Tiếp tục chế độ kế tiếp
-      }
-    }
-
-    // 2. Dự phòng: lấy chuỗi 4 số nếu nhận diện được từ 4 số trở lên
-    for (const psm of ['8', '7', '6']) {
-      try {
-        await worker.setParameters({
-          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
-          tessedit_pageseg_mode: psm as any,
-        });
-        const res = await worker.recognize(bmp);
-        const raw = res.data.text || '';
-        const digits = raw.replace(/\D/g, '');
-        if (digits.length >= 4) {
-          return {
-            code: digits.slice(0, 4),
-            confidence: res.data.confidence || 60,
-          };
-        }
-      } catch {}
-    }
-
-    return null;
-  })();
-
-  const timeoutPromise = new Promise<null>((resolve) =>
-    setTimeout(() => resolve(null), timeoutMs)
-  );
-
-  return Promise.race([recognitionPromise, timeoutPromise]);
-}
-
-/**
- * Giải Captcha cục bộ bằng Tesseract.js (không cần gọi API ngoài, không bị giới hạn quota hay HTTP 429)
- * Có cơ chế giới hạn thời gian (timeoutMs) để ngăn chặn rủi ro treo tiến trình trên môi trường Serverless/Vercel.
- */
-export async function solveCaptchaWithTesseract(
-  imageInput: Buffer | string | Uint8Array,
-  options?: TesseractSolveOptions
-): Promise<{ code: string; confidence: number }> {
-  const timeoutMs = options?.timeoutMs || 12000;
-
-  const recognitionPromise = (async () => {
-    let buf: Buffer;
-    if (typeof imageInput === 'string') {
-      const trimmed = imageInput.trim();
-      if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-        throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
-      }
-      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, '');
-      buf = Buffer.from(cleanB64, 'base64');
-    } else {
-      buf = Buffer.from(imageInput);
-    }
-
-    if (buf.length >= 4 && buf.slice(0, 10).toString('utf-8').includes('<svg')) {
-      throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
-    }
-
-    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (options?.preprocessVisnam === true && isPng) {
-      const visnamRes = await solveVisnamCaptcha(buf, timeoutMs);
-      if (visnamRes) {
-        return visnamRes;
-      }
-    }
-
-    // Đặt mặc định digitsOnly = false để nhận diện cả chữ và số (VD: K8H6WK)
-    const digitsOnly = options?.digitsOnly === true;
-    const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
-
-    let processBuf = buf;
-
-    if (options?.preprocessVisnam === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded) {
-        processBuf = createVisnamBinarizedBmp(decoded, 380, 15);
-      }
-    } else if (options?.preprocessEasyInvoice === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded) {
-        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
-        processBuf = binarized;
-      }
-    } else if (options?.preprocessPosCaptcha === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      // Chỉ re-binarize nếu ảnh nhỏ (< 300px), ảnh đã scale lớn từ client canvas được giữ nguyên để Tesseract đọc nét căng
-      if (decoded && decoded.width < 300) {
-        const binarized = createPosBinarizedBmp(decoded, 2.5, 145, 12);
-        processBuf = binarized;
-      }
-    }
-
-    const worker = await getWorker(whitelist);
-    const result = await worker.recognize(processBuf);
-    const rawText = result.data.text || '';
-
-    const cleaned = postProcessOcrText(rawText, {
-      digitsOnly,
-      expectedLength: options?.expectedLength,
-    });
-
-    return {
-      code: cleaned,
-      confidence: result.data.confidence || 0,
-    };
-  })();
-
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`Tesseract timeout vượt quá ${timeoutMs}ms`)), timeoutMs)
-  );
-
-  return Promise.race([recognitionPromise, timeoutPromise]);
-}
-
-export async function terminateTesseract(): Promise<void> {
-  if (tesseractWorker) {
-    await tesseractWorker.terminate();
-    tesseractWorker = null;
-  }
-}
+    // 3. Khớp độ dài nếu có yêu cầu (VD: EasyInvoice / VNPT / Visnam
