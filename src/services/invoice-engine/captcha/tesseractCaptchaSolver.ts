@@ -6,6 +6,14 @@ export const DIGITS_CAPTCHA_WHITELIST = '0123456789';
 
 let tesseractWorker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
+let tesseractBrokenOnHost = false;
+
+function isMissingWasmOrCoreError(err: unknown): boolean {
+  const msg = String((err as any)?.message || err || '');
+  return (
+    /tesseract-core|tesseract\.js-core|failed to asynchronously prepare wasm|ENOENT|RuntimeError:\s*Aborted/i.test(msg)
+  );
+}
 
 async function applyWorkerParams(worker: Worker, whitelist: string): Promise<void> {
   await worker.setParameters({
@@ -21,33 +29,50 @@ async function applyWorkerParams(worker: Worker, whitelist: string): Promise<voi
   });
 }
 
-async function getWorker(whitelist?: string): Promise<Worker> {
+async function getWorker(whitelist?: string): Promise<Worker | null> {
+  if (tesseractBrokenOnHost) return null;
   const targetWhitelist = whitelist || POS_CAPTCHA_WHITELIST;
 
-  if (tesseractWorker) {
-    await applyWorkerParams(tesseractWorker, targetWhitelist);
-    return tesseractWorker;
-  }
-
-  if (workerInitializing) {
-    const w = await workerInitializing;
-    await applyWorkerParams(w, targetWhitelist);
-    return w;
-  }
-
-  workerInitializing = (async () => {
-    try {
-      const cachePath = process.env.TEMP || '/tmp';
-      const w = await createWorker('eng', 1, { cachePath });
-      await applyWorkerParams(w, targetWhitelist);
-      tesseractWorker = w;
-      return w;
-    } finally {
-      workerInitializing = null;
+  try {
+    if (tesseractWorker) {
+      await applyWorkerParams(tesseractWorker, targetWhitelist);
+      return tesseractWorker;
     }
-  })();
 
-  return workerInitializing;
+    if (workerInitializing) {
+      const w = await workerInitializing;
+      await applyWorkerParams(w, targetWhitelist);
+      return w;
+    }
+
+    workerInitializing = (async () => {
+      try {
+        const cachePath = process.env.TEMP || '/tmp';
+        const w = await createWorker('eng', 1, { cachePath });
+        await applyWorkerParams(w, targetWhitelist);
+        tesseractWorker = w;
+        return w;
+      } catch (initErr) {
+        if (isMissingWasmOrCoreError(initErr)) {
+          tesseractBrokenOnHost = true;
+          console.warn('[Tesseract] Bỏ qua OCR do môi trường thiếu file WASM/core:', (initErr as any)?.message || initErr);
+          return null as unknown as Worker;
+        }
+        throw initErr;
+      } finally {
+        workerInitializing = null;
+      }
+    })();
+
+    const w = await workerInitializing;
+    return w || null;
+  } catch (err) {
+    if (isMissingWasmOrCoreError(err)) {
+      tesseractBrokenOnHost = true;
+      return null;
+    }
+    throw err;
+  }
 }
 
 export function decodePngRgba(buf: Buffer): { width: number; height: number; data: Buffer } | null {
@@ -373,53 +398,52 @@ export interface TesseractSolveOptions {
 
 export async function solveVisnamCaptcha(
   imageInput: Buffer | string | Uint8Array,
-  timeoutMs = 3500
+  timeoutMs = 2500
 ): Promise<{ code: string; confidence: number } | null> {
+  if (tesseractBrokenOnHost) return null;
+
   const recognitionPromise = (async () => {
-    let buf: Buffer;
-    if (typeof imageInput === 'string') {
-      const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, '');
-      buf = Buffer.from(cleanB64, 'base64');
-    } else {
-      buf = Buffer.from(imageInput);
-    }
-
-    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (!isPng) return null;
-
-    const decoded = decodePngRgba(buf);
-    if (!decoded) return null;
-
-    const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
-    const thresholds = [165, 190];
-    const psms = ['8', '7'];
-
-    for (const thresh of thresholds) {
-      const bmp = createVisnamBinarizedBmp(decoded, 380, 15, thresh);
-      for (const psm of psms) {
-        try {
-          await worker.setParameters({
-            tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
-            tessedit_pageseg_mode: psm as any,
-          });
-          const res = await worker.recognize(bmp);
-          const cleaned = postProcessOcrText(res.data.text || '', {
-            digitsOnly: true,
-            expectedLength: 4,
-          });
-          if (/^\d{4}$/.test(cleaned)) {
-            return {
-              code: cleaned,
-              confidence: res.data.confidence || 85,
-            };
-          }
-        } catch {
-          // Tiếp tục PSM kế tiếp
-        }
+    try {
+      let buf: Buffer;
+      if (typeof imageInput === 'string') {
+        const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, '');
+        buf = Buffer.from(cleanB64, 'base64');
+      } else {
+        buf = Buffer.from(imageInput);
       }
-    }
 
-    return null;
+      const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+      if (!isPng) return null;
+
+      const decoded = decodePngRgba(buf);
+      if (!decoded) return null;
+
+      const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
+      if (!worker) return null;
+
+      const bmp = createVisnamBinarizedBmp(decoded, 380, 15, 165);
+      await worker.setParameters({
+        tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+        tessedit_pageseg_mode: '8' as any,
+      });
+      const res = await worker.recognize(bmp);
+      const cleaned = postProcessOcrText(res.data.text || '', {
+        digitsOnly: true,
+        expectedLength: 4,
+      });
+      if (/^\d{4}$/.test(cleaned)) {
+        return {
+          code: cleaned,
+          confidence: res.data.confidence || 85,
+        };
+      }
+      return null;
+    } catch (err) {
+      if (isMissingWasmOrCoreError(err)) {
+        tesseractBrokenOnHost = true;
+      }
+      return null;
+    }
   })();
 
   const timeoutPromise = new Promise<null>((resolve) =>
@@ -433,72 +457,84 @@ export async function solveCaptchaWithTesseract(
   imageInput: Buffer | string | Uint8Array,
   options?: TesseractSolveOptions
 ): Promise<{ code: string; confidence: number }> {
-  const timeoutMs = options?.timeoutMs || 12000;
+  if (tesseractBrokenOnHost) {
+    return { code: '', confidence: 0 };
+  }
+
+  const timeoutMs = options?.timeoutMs || 6000;
 
   const recognitionPromise = (async () => {
-    let buf: Buffer;
-    if (typeof imageInput === 'string') {
-      const trimmed = imageInput.trim();
-      if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-        throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
+    try {
+      let buf: Buffer;
+      if (typeof imageInput === 'string') {
+        const trimmed = imageInput.trim();
+        if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
+          return { code: '', confidence: 0 };
+        }
+        const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, '');
+        buf = Buffer.from(cleanB64, 'base64');
+      } else {
+        buf = Buffer.from(imageInput);
       }
-      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, '');
-      buf = Buffer.from(cleanB64, 'base64');
-    } else {
-      buf = Buffer.from(imageInput);
+
+      if (buf.length >= 4 && buf.slice(0, 10).toString('utf-8').includes('<svg')) {
+        return { code: '', confidence: 0 };
+      }
+
+      const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+      if (options?.preprocessVisnam === true && isPng) {
+        const visnamRes = await solveVisnamCaptcha(buf, Math.min(timeoutMs, 2500));
+        if (visnamRes) {
+          return visnamRes;
+        }
+        return { code: '', confidence: 0 };
+      }
+
+      const digitsOnly = options?.digitsOnly === true;
+      const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
+
+      let processBuf = buf;
+
+      if (options?.preprocessEasyInvoice === true && isPng) {
+        const decoded = decodePngRgba(buf);
+        if (decoded) {
+          processBuf = createBinarizedBmp(decoded, 3, 25, 145);
+        }
+      } else if (options?.preprocessPosCaptcha === true && isPng) {
+        const decoded = decodePngRgba(buf);
+        if (decoded && decoded.width < 300) {
+          processBuf = createPosBinarizedBmp(decoded, 2.5, 145, 12);
+        }
+      }
+
+      const worker = await getWorker(whitelist);
+      if (!worker) {
+        return { code: '', confidence: 0 };
+      }
+
+      const result = await worker.recognize(processBuf);
+      const rawText = result.data.text || '';
+
+      const cleaned = postProcessOcrText(rawText, {
+        digitsOnly,
+        expectedLength: options?.expectedLength,
+      });
+
+      return {
+        code: cleaned,
+        confidence: result.data.confidence || 0,
+      };
+    } catch (err) {
+      if (isMissingWasmOrCoreError(err)) {
+        tesseractBrokenOnHost = true;
+        return { code: '', confidence: 0 };
+      }
+      throw err;
     }
-
-    if (buf.length >= 4 && buf.slice(0, 10).toString('utf-8').includes('<svg')) {
-      throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
-    }
-
-    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    if (options?.preprocessVisnam === true && isPng) {
-      const visnamRes = await solveVisnamCaptcha(buf, Math.min(timeoutMs, 3500));
-      if (visnamRes) {
-        return visnamRes;
-      }
-    }
-
-    const digitsOnly = options?.digitsOnly === true;
-    const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
-
-    let processBuf = buf;
-
-    if (options?.preprocessVisnam === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded) {
-        processBuf = createVisnamBinarizedBmp(decoded, 380, 15, 165);
-      }
-    } else if (options?.preprocessEasyInvoice === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded) {
-        processBuf = createBinarizedBmp(decoded, 3, 25, 145);
-      }
-    } else if (options?.preprocessPosCaptcha === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded && decoded.width < 300) {
-        processBuf = createPosBinarizedBmp(decoded, 2.5, 145, 12);
-      }
-    }
-
-    const worker = await getWorker(whitelist);
-    const result = await worker.recognize(processBuf);
-    const rawText = result.data.text || '';
-
-    const cleaned = postProcessOcrText(rawText, {
-      digitsOnly,
-      expectedLength: options?.expectedLength,
-    });
-
-    return {
-      code: cleaned,
-      confidence: result.data.confidence || 0,
-    };
   })();
 
-  const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`Tesseract timeout vượt quá ${timeoutMs}ms`)), timeoutMs)
+  const timeoutPromise = new Promise<{ code: string; confidence: number }>((resolve) =>
+    setTimeout(() => resolve({ code: '', confidence: 0 }), timeoutMs)
   );
 
   return Promise.race([recognitionPromise, timeoutPromise]);
@@ -506,7 +542,9 @@ export async function solveCaptchaWithTesseract(
 
 export async function terminateTesseract(): Promise<void> {
   if (tesseractWorker) {
-    await tesseractWorker.terminate();
+    try {
+      await tesseractWorker.terminate();
+    } catch {}
     tesseractWorker = null;
   }
 }
