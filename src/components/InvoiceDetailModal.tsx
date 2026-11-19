@@ -193,6 +193,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isSubmittingVisnamCaptcha, setIsSubmittingVisnamCaptcha] = useState(false);
   const [visnamCaptchaError, setVisnamCaptchaError] = useState<string | null>(null);
   const [isSaigonCoopCaptchaOpen, setIsSaigonCoopCaptchaOpen] = useState(false);
+  const [isThaiSonSharedCaptcha, setIsThaiSonSharedCaptcha] = useState(false);
   const [saigonCoopCaptcha, setSaigonCoopCaptcha] = useState<{ state: string; image: string } | null>(null);
   const [saigonCoopCaptchaError, setSaigonCoopCaptchaError] = useState<string | null>(null);
   const [isLoadingSaigonCoopCaptcha, setIsLoadingSaigonCoopCaptcha] = useState(false);
@@ -826,7 +827,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const saigonCoopLookupCode = (target: GDTInvoice) =>
     String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
 
-  const handleSaigonCoopCaptchaOpen = async () => {
+  const handleSaigonCoopCaptchaOpen = async (sharedThaiSon = false) => {
     if (!effectiveInvoice) return;
     const target = effectiveInvoice;
     const lookupCode = saigonCoopLookupCode(target);
@@ -842,7 +843,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsSaigonCoopCaptchaOpen(true);
     setIsLoadingSaigonCoopCaptcha(true);
     try {
-      const challenge = await fetchSaigonCoopCaptcha(lookupCode);
+      const challenge = await fetchSaigonCoopCaptcha(lookupCode, sharedThaiSon);
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
       setSaigonCoopCaptcha(challenge);
     } catch (error) {
@@ -873,6 +874,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         sellerTaxCode: String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim(),
         invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
         invoiceSeries: String(target.khhdon || extractTagValue(target.rawXml || '', 'KHHDon') || '').trim(),
+        sharedThaiSon: isThaiSonSharedCaptcha,
       });
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
 
@@ -885,7 +887,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setIsSaigonCoopCaptchaOpen(false);
       setSaigonCoopCaptcha(null);
       setOriginalLoadError(null);
-      setEasyInvoiceDownloadStatus('Đã xác minh hóa đơn Saigon Co.op với dữ liệu XML.');
+      setEasyInvoiceDownloadStatus(isThaiSonSharedCaptcha ? 'Đã xác minh hóa đơn Thái Sơn.' : 'Đã xác minh hóa đơn Saigon Co.op với dữ liệu XML.');
     } catch (error) {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
         setSaigonCoopCaptchaError(error instanceof Error ? error.message : 'Không tra cứu được hóa đơn Saigon Co.op.');
@@ -960,7 +962,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     // learned seller-specific portals are only a fallback.
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
+    if (actualProvider === 'THAISON' && /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(tenantUrl)) {
+      setIsThaiSonSharedCaptcha(true);
+      void handleSaigonCoopCaptchaOpen(true);
+      return;
+    }
     if (actualProvider === 'THAISON' && isSaigonCoopPortalUrl(tenantUrl)) {
+      setIsThaiSonSharedCaptcha(false);
       void handleSaigonCoopCaptchaOpen();
       return;
     }
@@ -2188,13 +2196,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         onSubmit={handleVisnamCaptchaSubmit}
       />
       <SaigonCoopCaptchaModal
+        title={isThaiSonSharedCaptcha ? 'Tra cứu Thái Sơn (CAPTCHA thủ công)' : 'Tra cứu hóa đơn Saigon Co.op'}
         isOpen={isSaigonCoopCaptchaOpen}
         lookupCode={effectiveInvoice ? saigonCoopLookupCode(effectiveInvoice) : ''}
         image={saigonCoopCaptcha?.image || ''}
         loading={isLoadingSaigonCoopCaptcha}
         submitting={isSubmittingSaigonCoopCaptcha}
         error={saigonCoopCaptchaError}
-        onRefresh={() => void handleSaigonCoopCaptchaOpen()}
+        onRefresh={() => void handleSaigonCoopCaptchaOpen(isThaiSonSharedCaptcha)}
         onSubmit={captcha => void handleSaigonCoopCaptchaSubmit(captcha)}
         onClose={closeSaigonCoopCaptcha}
       />

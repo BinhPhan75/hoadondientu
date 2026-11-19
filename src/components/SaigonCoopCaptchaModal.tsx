@@ -11,6 +11,7 @@ interface SaigonCoopCaptchaModalProps {
   onRefresh: () => void;
   onSubmit: (captcha: string) => void;
   onClose: () => void;
+  title?: string;
 }
 
 export const SaigonCoopCaptchaModal: React.FC<SaigonCoopCaptchaModalProps> = ({
@@ -23,6 +24,7 @@ export const SaigonCoopCaptchaModal: React.FC<SaigonCoopCaptchaModalProps> = ({
   onRefresh,
   onSubmit,
   onClose,
+  title = 'Tra cứu hóa đơn Saigon Co.op',
 }) => {
   const [captcha, setCaptcha] = useState('');
 
@@ -42,7 +44,7 @@ export const SaigonCoopCaptchaModal: React.FC<SaigonCoopCaptchaModalProps> = ({
         className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl"
       >
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-base font-bold text-white">Tra cứu hóa đơn Saigon Co.op</h2>
+          <h2 className="text-base font-bold text-white">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Đóng"
             className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-white">
             <X className="h-5 w-5" />
@@ -60,7 +62,7 @@ export const SaigonCoopCaptchaModal: React.FC<SaigonCoopCaptchaModalProps> = ({
           {loading && !image ? (
             <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
           ) : image ? (
-            <img src={image} alt="CAPTCHA Saigon Co.op" className="max-h-24 max-w-full object-contain" />
+            <img src={image} alt="CAPTCHA hóa đơn" className="max-h-24 max-w-full object-contain" />
           ) : (
             <span className="text-sm text-slate-500">Chưa tải được ảnh CAPTCHA</span>
           )}
