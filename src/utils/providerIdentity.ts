@@ -43,6 +43,12 @@ export function normalizeThaiSonPortalUrl(input: string | undefined): string {
   } catch { return ''; }
 }
 
+export function isSaigonCoopPortalUrl(input: string | undefined): boolean {
+  const normalized = normalizeThaiSonPortalUrl(input);
+  if (!normalized) return false;
+  return new URL(normalized).hostname.toLowerCase() === 'saigoncoop.einvoice.com.vn';
+}
+
 export function isTrustedThaiSonPortalUrl(value: string): boolean {
   try {
     const url = new URL(value);
