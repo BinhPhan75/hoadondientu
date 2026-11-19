@@ -940,14 +940,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const actualProvider = resolveInvoiceProvider(target);
     // Some tax-authority list records have invoice items but no original XML.
     // WINinvoice needs signed XML for privateCode/cmpnKey; request it first.
-    if (actualProvider === 'WININVOICE' && !target.rawXml) {
+    if ((actualProvider === 'WININVOICE' || actualProvider === 'THAISON') && !target.rawXml) {
       const refreshed = await loadInvoiceDetail(target, true);
       if (openInvoiceIdRef.current !== target.id) return;
       if (!refreshed?.rawXml) {
-        setOriginalLoadError(
-          'Hóa đơn WINinvoice chưa có XML gốc chứa privateCode và cmpnKey. ' +
-          'Cổng Thuế chưa cung cấp XML chi tiết cho hóa đơn này; vui lòng nhập XML gốc vào phần mềm hoặc tra cứu trực tiếp tại https://tracuu.wininvoice.vn/.'
-        );
+        setOriginalLoadError(actualProvider === 'WININVOICE'
+          ? 'Hóa đơn WINinvoice chưa có XML gốc chứa privateCode và cmpnKey. ' +
+            'Cổng Thuế chưa cung cấp XML chi tiết; vui lòng nhập XML gốc hoặc tra cứu tại https://tracuu.wininvoice.vn/.'
+          : 'Chưa nhận được XML chi tiết Thái Sơn từ Cơ quan Thuế để lấy Mã TC và DC TC. ' +
+            'Vui lòng nhập XML gốc vào phần mềm để tải hóa đơn từ cổng nhà cung cấp.');
         return;
       }
       target = refreshed;
@@ -955,8 +956,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const extractedLookup = extractLookupDetails(target.rawXml);
     const sellerPortal = lookupPortalForSeller(target.nbmst);
     const recordedPortal = extractedLookup.lookupUrl || target.lookupUrl || '';
-    const isGenericThaiSon = !recordedPortal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(recordedPortal);
-    const tenantUrl = sellerPortal && isGenericThaiSon ? sellerPortal : recordedPortal;
+    // Prefer the explicit XML portal (including the shared lookup page);
+    // learned seller-specific portals are only a fallback.
+    const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
     if (actualProvider === 'THAISON' && isSaigonCoopPortalUrl(tenantUrl)) {
       void handleSaigonCoopCaptchaOpen();
@@ -1124,6 +1126,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const xmlPortal = extractLookupDetails(effectiveInvoice.rawXml).lookupUrl || '';
     const knownPortal = lookupPortalForSeller(effectiveInvoice.nbmst) || '';
     const candidate = xmlPortal || knownPortal || effectiveInvoice.lookupUrl || '';
+    // Shared Thai Son lookup may require CAPTCHA; run it on explicit user
+    // action rather than consuming Gemini calls whenever the modal opens.
     if (provider === 'THAISON' && (!candidate ||
         /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(candidate))) return;
     if (provider === 'THAISON' && isSaigonCoopPortalUrl(candidate)) return;
@@ -1217,9 +1221,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   ) : '';
 
   const isThaiSonInvoice = autoDetectedProvider === 'THAISON';
-  const thaiSonIssuerPortal = isThaiSonInvoice && lookupDetails.lookupUrl &&
-    !/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(lookupDetails.lookupUrl)
-    ? lookupDetails.lookupUrl : '';
+  // The official shared einvoice.vn/tra-cuu URL from invoice XML is valid.
+  // A GDT list row may not have rawXml yet; offer detail retrieval on click.
+  const thaiSonIssuerPortal = isThaiSonInvoice
+    ? (lookupDetails.lookupUrl || effectiveInvoice.lookupUrl || '') : '';
+  const canTryThaiSonOriginal = isThaiSonInvoice &&
+    (Boolean(thaiSonIssuerPortal) || !effectiveInvoice.rawXml);
   const isSaigonCoopPortal = isSaigonCoopPortalUrl(thaiSonIssuerPortal);
   const configureThaiSonPortal = () => {
     if (!effectiveInvoice?.nbmst) return;
@@ -2063,7 +2070,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isThaiSonInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                {thaiSonIssuerPortal ? (
+                {canTryThaiSonOriginal ? (
                   <>
                     {isSaigonCoopPortal ? (
                       !originalEasyInvoiceHtml && !originalProviderPdfUrl ? (
