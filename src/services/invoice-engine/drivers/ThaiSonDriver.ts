@@ -76,10 +76,12 @@ export class ThaiSonDriver extends BaseInvoiceProviderDriver {
     if (info.lookupCode && info.lookupCode !== info.cqtCode && !options?.forceFallback) {
       try {
         this.createLog('Đã có Mã nhận hóa đơn Thái Sơn.', logs);
+        // The shared einvoice.vn/tra-cuu portal is valid when supplied by
+        // invoice XML; never guess it from the provider tax code alone.
         const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || '';
-        if (!portal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(portal)) {
+        if (!portal) {
           throw new OriginalInvoiceError(
-            'Chưa xác định được cổng phát hành của người bán từ XML. Cần một URL cổng hợp lệ; không thể suy ra từ MSTTCGP hay thử mã ngẫu nhiên tại einvoice.vn.',
+            'XML không chứa đường dẫn tra cứu Thái Sơn hợp lệ, không thể suy ra từ MSTTCGP.',
             this.providerCode, 'LOOKUP_PORTAL_UNKNOWN', 422
           );
         }

@@ -838,10 +838,10 @@ export function getLookupUrlFromPayload(source: any): string {
   if (isThaiSonSource(source)) {
     const normalizedPortal = normalizeThaiSonPortalUrl(suppliedPortal);
     const isGeneric = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(normalizedPortal);
-    const specific = normalizedPortal && !isGeneric &&
-      isTrustedThaiSonPortalUrl(normalizedPortal) ? normalizedPortal : '';
-    if (specific) rememberThaiSonPortalForSeller(sellerMst, specific);
-    return specific || tenantPortal || '';
+    const explicit = normalizedPortal && isTrustedThaiSonPortalUrl(normalizedPortal) ? normalizedPortal : '';
+    // Explicit shared portals are valid, but never learn as seller tenants.
+    if (explicit && !isGeneric) rememberThaiSonPortalForSeller(sellerMst, explicit);
+    return explicit || tenantPortal || '';
   }
   if (isLcsSource(source)) {
     return 'https://eip.lcssoft.com.vn/desktop/#/login';
@@ -1123,7 +1123,9 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   if (xmlSolutionMst === '0101300842') {
     const normalized = normalizeThaiSonPortalUrl(vendorLookupUrl);
     if (normalized && isTrustedThaiSonPortalUrl(normalized)) {
-      rememberThaiSonPortalForSeller(xmlSellerMst, normalized);
+      if (!/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(normalized)) {
+        rememberThaiSonPortalForSeller(xmlSellerMst, normalized);
+      }
       lookupUrl = normalized;
     } else {
       lookupUrl = normalizeThaiSonPortalUrl(lookupUrl) || lookupUrl;

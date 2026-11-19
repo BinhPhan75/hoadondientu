@@ -68,7 +68,10 @@ export function isTrustedThaiSonPortalUrl(value: string): boolean {
 export function rememberThaiSonPortalForSeller(taxCode: string | undefined, url: string): boolean {
   const seller = String(taxCode || '').trim();
   if (!/^\d{10}(?:-\d{3})?$/.test(seller) || !isTrustedThaiSonPortalUrl(url)) return false;
-  const clean = new URL(url).origin + '/';
+  const parsedUrl = new URL(url);
+  // A common lookup page is not a seller-specific issuer portal.
+  if (parsedUrl.hostname === 'einvoice.vn' || parsedUrl.hostname === 'www.einvoice.vn') return false;
+  const clean = parsedUrl.origin + '/';
   learnedThaiSonPortals.set(seller, clean);
   if (typeof window !== 'undefined') {
     try {
