@@ -5,7 +5,6 @@
  * Never reuse a copied user's CSRF token, cookie, or invoice-specific f key.
  */
 import * as cheerio from 'cheerio';
-import JSZip from 'jszip';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import type { ExtractedInvoiceInfo, DownloadOptions, DownloadResult, DriverMetadata } from '../types';
 import { OriginalInvoiceError } from '../OriginalInvoiceError';
@@ -279,22 +278,7 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
           });
           if (!validZip.ok) return fail('ZIP WINinvoice không khớp hóa đơn: ' + validZip.reason);
           providerZip = data;
-          // Provider package may include both XML and a rendered PDF.
-          const archive = await JSZip.loadAsync(data);
-          for (const item of Object.values(archive.files).filter(f => !f.dir && /\.pdf$/i.test(f.name)).slice(0, 8)) {
-            if ((item as any)._data?.uncompressedSize > MAX_PDF) continue;
-            const embedded = await item.async('nodebuffer');
-            if (embedded.length > MAX_PDF || embedded.subarray(0,5).toString('latin1') !== '%PDF-') continue;
-            const matched = await verifyIssuerInvoiceBytes(embedded, 'application/pdf', {
-              sellerTaxCode: info.sellerTaxCode, invoiceSeries: info.invoiceSeries, invoiceNo: info.invoiceNo,
-            });
-            if (matched.ok) {
-              bytes = embedded;
-              logs.push('Đã trích xuất PDF đúng hóa đơn từ ZIP gốc WINinvoice');
-              break;
-            }
-          }
-          if (!bytes) logs.push('ZIP gốc WINinvoice chứa XML hợp lệ, không có PDF khớp để trích xuất');
+          logs.push('Đã xác minh ZIP gốc WINinvoice và giữ nguyên các tệp nhà cung cấp');
           break;
         }
         const isHtml = /^(?:text\/html|application\/xhtml\+xml)$/.test(type) ||

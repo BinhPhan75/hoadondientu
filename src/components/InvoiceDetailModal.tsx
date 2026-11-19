@@ -994,6 +994,27 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         try {
           const JSZip = (await import('jszip')).default;
           const zip = await JSZip.loadAsync(blob);
+          if (actualProvider === 'WININVOICE') {
+            // Render the issuer PDF in the original ZIP while retaining the entire package.
+            const series = String(target.khhdon || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+            const number = String(target.shdon || '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+            const pdfFile = Object.values(zip.files).find(f => {
+              if (f.dir || !/\.pdf$/i.test(f.name)) return false;
+              const basename = f.name.split('/').pop() || '';
+              const match = basename.match(/^([A-Za-z0-9]+)_(\d+).*\.pdf$/i);
+              return !!match && match[1].toUpperCase() === series &&
+                match[2].replace(/^0+(?=\d)/, '') === number;
+            });
+            if (pdfFile) {
+              const pdfBytes = await pdfFile.async('uint8array');
+              if (pdfBytes.length >= 100 && pdfBytes.length <= 18_000_000 &&
+                  new TextDecoder('latin1').decode(pdfBytes.slice(0, 5)) === '%PDF-' && isCurrent()) {
+                setOriginalProviderPdfUrl(URL.createObjectURL(
+                  new Blob([pdfBytes], { type: 'application/pdf' })
+                ));
+              }
+            }
+          }
           const xmlFile = Object.values(zip.files).find(f => !f.dir && /\.xml$/i.test(f.name));
           if (xmlFile) {
             const xmlText = await xmlFile.async('string');
@@ -1958,7 +1979,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <button type="button" onClick={() => void handleViewOriginalProvider()}
                     disabled={isDownloadingEasyInvoice}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-700 text-emerald-200 hover:bg-emerald-950 disabled:opacity-60">
-                    {isDownloadingEasyInvoice ? 'Đang tra cứu...' : 'Tải PDF gốc WINinvoice'}
+                    {isDownloadingEasyInvoice ? 'Đang tra cứu...' : 'Xem PDF / tải ZIP gốc WINinvoice'}
                   </button>
                 )}
                 <button type="button" onClick={() => void handleWinInvoiceLookup()}

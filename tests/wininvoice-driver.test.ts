@@ -212,3 +212,33 @@ test('WINinvoice returns provider ZIP with matching original invoice XML', async
     assert.equal(call,4);
   } finally {globalThis.fetch=prev;}
 });
+
+
+test('WINinvoice preserves original ZIP even when PDF is included', async () => {
+  const previous=globalThis.fetch;
+  const zip=new JSZip();
+  zip.file('C26TTS_00014678signed.xml',
+    '<HDon><DLHDon><TTChung><KHHDon>C26TTS</KHHDon><SHDon>14678</SHDon></TTChung>' +
+    '<NDHDon><NBan><MST>0312303803</MST></NBan></NDHDon></DLHDon></HDon>');
+  zip.file('C26TTS_00014678signed.pdf','%PDF-1.7\n'+'A'.repeat(400));
+  zip.file('C26TTS_00014678signed.html','<html></html>');
+  const buffer=await zip.generateAsync({type:'nodebuffer'});
+  let count=0;
+  globalThis.fetch=(async()=>{
+    count++;
+    if(count===1)return new Response('<input name="phtcsrf_tkndf-tc" value="fresh_csrf_123456">',{
+      headers:{'Content-Type':'text/html','Set-Cookie':'df-tcphtcsrf_coki_tkndf-tc=fresh_csrf_123456; Path=/'}
+    });
+    if(count===2)return new Response(null,{status:303,headers:{Location:'/bill/inv'}});
+    if(count===3)return new Response('<a href="/bill/view?name=C26TTS_00014678&amp;f=abc">Download</a>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    if(count===4)return new Response(new Uint8Array(buffer),{headers:{'Content-Type':'application/zip'}});
+    throw Error('Unexpected call');
+  }) as typeof fetch;
+  try {
+    const result=await driver.fetchPdf(info);
+    assert.equal(result.contentType,'application/zip');
+    assert.deepEqual(result.pdfBuffer,buffer);
+  }finally {globalThis.fetch=previous;}
+});
