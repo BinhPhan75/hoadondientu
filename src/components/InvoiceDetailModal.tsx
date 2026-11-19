@@ -36,6 +36,7 @@ import {
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
+import { getInvoiceOriginalCacheKey, readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { fetchVisnamCaptcha, fetchVisnamInvoicePdf } from '../services/visnamClient';
 import { fetchSaigonCoopCaptcha, submitSaigonCoopLookup } from '../services/saigonCoopClient';
 import { VisnamCaptchaModal } from './VisnamCaptchaModal';
@@ -154,6 +155,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsLoadingVisnamCaptcha(false);
     setIsSubmittingVisnamCaptcha(false);
     setIsSaigonCoopCaptchaOpen(false);
+    setOriginalThaiSonXmlUrl(null);
+    setIsImportingThaiSonFile(false);
     setSaigonCoopCaptcha(null);
     setSaigonCoopCaptchaError(null);
     setIsLoadingSaigonCoopCaptcha(false);
@@ -194,6 +197,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [visnamCaptchaError, setVisnamCaptchaError] = useState<string | null>(null);
   const [isSaigonCoopCaptchaOpen, setIsSaigonCoopCaptchaOpen] = useState(false);
   const [isThaiSonSharedCaptcha, setIsThaiSonSharedCaptcha] = useState(false);
+  const thaiSonFileInputRef = useRef<HTMLInputElement>(null);
+  const [isImportingThaiSonFile, setIsImportingThaiSonFile] = useState(false);
+  const [originalThaiSonXmlUrl, setOriginalThaiSonXmlUrl] = useState<string | null>(null);
   const [saigonCoopCaptcha, setSaigonCoopCaptcha] = useState<{ state: string; image: string } | null>(null);
   const [saigonCoopCaptchaError, setSaigonCoopCaptchaError] = useState<string | null>(null);
   const [isLoadingSaigonCoopCaptcha, setIsLoadingSaigonCoopCaptcha] = useState(false);
@@ -915,6 +921,65 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsSubmittingSaigonCoopCaptcha(false);
   };
 
+  // When the provider uses JavaScript-only lookup, allow the exact issuer file
+  // downloaded from its official portal to be imported, verified, and cached.
+  const handleImportThaiSonFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !effectiveInvoice || resolveInvoiceProvider(effectiveInvoice) !== 'THAISON') return;
+    const target = effectiveInvoice;
+    const seq = originalLoadSequence.current;
+    setOriginalLoadError(null);
+    setIsImportingThaiSonFile(true);
+    try {
+      if (file.size < 100 || file.size > 18_000_000 ||
+          !/\.(pdf|zip|xml)$/i.test(file.name)) {
+        throw new Error('Chọn tệp PDF, ZIP hoặc XML gốc từ Thái Sơn, tối đa 18 MB.');
+      }
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Không đọc được tệp hóa đơn.'));
+        reader.onload = () => {
+          const value = String(reader.result || '');
+          resolve(value.includes(',') ? value.split(',')[1] : '');
+        };
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch('/api/thaison-common/verify-upload', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          fileBase64: base64,
+          sellerTaxCode: String(target.nbmst || ''),
+          invoiceSeries: String(target.khhdon || ''),
+          invoiceNo: String(target.shdon || ''),
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.success || !data.verified) {
+        throw new Error(data.error || 'Không xác minh được hóa đơn gốc Thái Sơn.');
+      }
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== seq) return;
+      const blob = new Blob([file], {type:data.contentType});
+      const url = URL.createObjectURL(blob);
+      setOriginalEasyInvoiceHtml(null);
+      setOriginalProviderPdfUrl(data.contentType === 'application/pdf' ? url : null);
+      setOriginalProviderZipUrl(data.contentType === 'application/zip' ? url : null);
+      setOriginalThaiSonXmlUrl(data.contentType === 'application/xml' ? url : null);
+      setOriginalLoadError(null);
+      setEasyInvoiceDownloadStatus('Đã nhập tệp Thái Sơn từ máy và đối chiếu thông tin hóa đơn.');
+      const key = getInvoiceOriginalCacheKey(target) + '|thaison-manual-verified-v1';
+      await writeCachedOriginalPdf(key,blob).catch(() => {});
+    } catch (error: any) {
+      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === seq) {
+        setOriginalLoadError(error?.message || 'Không nhập được tệp hóa đơn Thái Sơn.');
+      }
+    } finally {
+      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === seq) {
+        setIsImportingThaiSonFile(false);
+      }
+    }
+  };
+
   const handleWinInvoiceLookup = async () => {
     if (!effectiveInvoice) return;
     const xml = String(effectiveInvoice.rawXml || '');
@@ -969,8 +1034,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
     if (actualProvider === 'THAISON' && /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(tenantUrl)) {
-      setIsThaiSonSharedCaptcha(true);
-      void handleSaigonCoopCaptchaOpen(true);
+      // The public site's search button uses a browser flow not reproduced by
+      // server-side HTML form POST. Open the verified official page and allow
+      // importing the original PDF/XML/ZIP afterward. No false success or AI use.
+      const code = String(extractedLookup.lookupCode || target.lookupCode || '').trim();
+      window.open('https://einvoice.vn/tra-cuu', '_blank', 'noopener,noreferrer');
+      if (code) void navigator.clipboard.writeText(code).catch(() => {});
+      setOriginalLoadError(null);
+      setEasyInvoiceDownloadStatus('Đã mở cổng Thái Sơn. Mã nhận hóa đơn: ' + code +
+        '. Nhập CAPTCHA trên cổng, tải PDF/XML/ZIP và chọn Nhập PDF/XML/ZIP gốc để lưu vào phần mềm.');
       return;
     }
     if (actualProvider === 'THAISON' && isSaigonCoopPortalUrl(tenantUrl)) {
@@ -1153,6 +1225,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     if (provider === 'IHOADON') return;
     void handleViewOriginalProvider();
   }, [effectiveInvoice?.id, effectiveInvoice?.rawXml, effectiveInvoice?.lookupCode, effectiveInvoice?.lookupUrl, effectiveInvoice?.provider, thaiSonPortalRevision]);
+
+  useEffect(() => {
+    if (!invoice || resolveInvoiceProvider(invoice) !== 'THAISON') return;
+    const id = invoice.id;
+    let cancelled = false;
+    const key = getInvoiceOriginalCacheKey(invoice) + '|thaison-manual-verified-v1';
+    void readCachedOriginalPdf(key).then(blob => {
+      if (cancelled || !blob || openInvoiceIdRef.current !== id) return;
+      const url = URL.createObjectURL(blob);
+      if (blob.type === 'application/pdf') setOriginalProviderPdfUrl(url);
+      else if (blob.type === 'application/zip') setOriginalProviderZipUrl(url);
+      else if (blob.type === 'application/xml') setOriginalThaiSonXmlUrl(url);
+      else URL.revokeObjectURL(url);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [invoice?.id]);
+
 
   if (!invoice || !effectiveInvoice) return null;
 
@@ -2087,6 +2176,26 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isThaiSonInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
+                {/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(thaiSonIssuerPortal) && (
+                  <span className="text-[11px] text-slate-400">
+                    Cổng Thái Sơn có CAPTCHA riêng. Tải tệp trên cổng, sau đó nhập vào phần mềm để xác minh và lưu.
+                  </span>
+                )}
+                <input ref={thaiSonFileInputRef} type="file" accept=".pdf,.xml,.zip,application/pdf,application/zip,text/xml"
+                  className="hidden" onChange={event => void handleImportThaiSonFile(event)} />
+                <button type="button" onClick={() => thaiSonFileInputRef.current?.click()}
+                  disabled={isImportingThaiSonFile}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-600 text-emerald-200 hover:bg-emerald-950 disabled:opacity-50"
+                  title="Nhập PDF, ZIP hoặc XML tải từ cổng Thái Sơn. Phần mềm xác minh và lưu tệp gốc.">
+                  {isImportingThaiSonFile ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  {isImportingThaiSonFile ? 'Đang xác minh...' : 'Nhập PDF/XML/ZIP gốc'}
+                </button>
+                {originalThaiSonXmlUrl && (
+                  <a href={originalThaiSonXmlUrl} download={'HoaDon_ThaiSon_' + effectiveInvoice.khhdon + '_' + effectiveInvoice.shdon + '.xml'}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-700 text-emerald-200 hover:bg-emerald-950">
+                    <Download className="w-3.5 h-3.5" /> Tải XML gốc đã lưu
+                  </a>
+                )}
                 {canTryThaiSonOriginal ? (
                   <>
                     {isSaigonCoopPortal ? (
@@ -2107,7 +2216,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         disabled={isDownloadingEasyInvoice}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
                         {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                        <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc...' : 'Tải bản gốc Thái Sơn'}</span>
+                        <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc...' : /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(thaiSonIssuerPortal)
+                          ? 'Mở cổng Thái Sơn để tải gốc' : 'Tải bản gốc Thái Sơn'}</span>
                       </button>
                     ) : null}
                     {originalEasyInvoiceHtml && (
