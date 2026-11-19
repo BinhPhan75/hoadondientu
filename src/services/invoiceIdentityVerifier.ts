@@ -26,15 +26,13 @@ function invoiceNumber(value: string | undefined): string {
 function matchesIdentity(text: string, identity: InvoiceIdentity): OriginalVerification {
   const seller = digits(identity.sellerTaxCode);
   const number = invoiceNumber(identity.invoiceNo);
-  const series = compact(String(identity.invoiceSeries || ''));
-  if (seller.length < 10 || !number || !series) {
-    return { ok: false, reason: 'Thiếu MST người bán, ký hiệu hoặc số HĐ để xác thực bản gốc.' };
+  if (seller.length < 10 || !number) {
+    return { ok: false, reason: 'Thiếu MST người bán hoặc số HĐ để xác thực bản gốc.' };
   }
   const flattened = compact(text);
   if (!flattened.includes(seller)) return { ok: false, reason: 'MST người bán trong file không khớp hóa đơn đang mở.' };
-  if (!flattened.includes(series)) return { ok: false, reason: 'Ký hiệu trong file không khớp hóa đơn đang mở.' };
   if (!flattened.includes(number)) return { ok: false, reason: 'Số hóa đơn trong file không khớp hóa đơn đang mở.' };
-  return { ok: true, reason: 'MST, ký hiệu và số hóa đơn khớp.' };
+  return { ok: true, reason: 'MST người bán và số hóa đơn khớp.' };
 }
 
 function matchXmlInvoice(xml: string, identity: InvoiceIdentity): OriginalVerification {
