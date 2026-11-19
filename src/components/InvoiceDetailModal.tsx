@@ -232,8 +232,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Automatic & manual on-demand invoice detail retrieval directly from GDT
   const loadInvoiceDetail = async (targetInv: GDTInvoice, force = false) => {
     if (!targetInv) return;
-    if (!force && targetInv.sourceCompleteness === 'detail' && hasGenuineItems(targetInv.items)) {
-      return;
+    if (!force && targetInv.sourceCompleteness === 'detail' && hasGenuineItems(targetInv.items) && targetInv.rawXml) {
+      return targetInv;
     }
     setIsLoadingDetail(true);
     setDetailError(null);
@@ -256,18 +256,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       // khác trong lúc request này đang chạy (tránh áp dữ liệu lạc vào state
       // sau khi đóng, nguyên nhân từng gây crash/trang trắng khi đóng modal).
       if (openInvoiceIdRef.current !== targetInv.id) {
-        return;
+        return null;
       }
       if (data.success && data.invoice) {
         const enriched = data.invoice as GDTInvoice;
-        setCurrentInvoice(enriched);
-        onUpdateInvoice?.(enriched);
+        const merged = { ...targetInv, ...enriched, rawXml: enriched.rawXml || targetInv.rawXml };
+        setCurrentInvoice(merged);
+        onUpdateInvoice?.(merged);
+        return merged;
       } else {
         setDetailError(data.message || 'Cổng Thuế chưa phản hồi chi tiết mặt hàng.');
+        return null;
       }
     } catch (err: any) {
-      if (openInvoiceIdRef.current !== targetInv.id) return;
+      if (openInvoiceIdRef.current !== targetInv.id) return null;
       setDetailError(err.message || 'Lỗi mạng khi kết nối tải chi tiết.');
+      return null;
     } finally {
       if (openInvoiceIdRef.current === targetInv.id) {
         setIsLoadingDetail(false);
@@ -932,8 +936,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const handleViewOriginalProvider = async () => {
     if (!effectiveInvoice) return;
-    const target = effectiveInvoice;
+    let target = effectiveInvoice;
     const actualProvider = resolveInvoiceProvider(target);
+    // Some tax-authority list records have invoice items but no original XML.
+    // WINinvoice needs signed XML for privateCode/cmpnKey; request it first.
+    if (actualProvider === 'WININVOICE' && !target.rawXml) {
+      const refreshed = await loadInvoiceDetail(target, true);
+      if (openInvoiceIdRef.current !== target.id) return;
+      if (!refreshed?.rawXml) {
+        setOriginalLoadError(
+          'Hóa đơn WINinvoice chưa có XML gốc chứa privateCode và cmpnKey. ' +
+          'Cổng Thuế chưa cung cấp XML chi tiết cho hóa đơn này; vui lòng nhập XML gốc vào phần mềm hoặc tra cứu trực tiếp tại https://tracuu.wininvoice.vn/.'
+        );
+        return;
+      }
+      target = refreshed;
+    }
     const extractedLookup = extractLookupDetails(target.rawXml);
     const sellerPortal = lookupPortalForSeller(target.nbmst);
     const recordedPortal = extractedLookup.lookupUrl || target.lookupUrl || '';

@@ -49,7 +49,11 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
     if (cached) return cached;
     const failed = failures.get(requestKey);
     if (failed && failed.expires > Date.now()) throw failed.error;
-    if (!invoice.rawXml) throw new Error('Chưa có XML chi tiết để tải bản gốc.');
+    if (!invoice.rawXml) {
+      throw new Error(provider === 'WININVOICE'
+        ? 'WINinvoice: chưa có XML gốc chứa privateCode và cmpnKey. Hãy tải XML gốc trước hoặc mở https://tracuu.wininvoice.vn/ để tra cứu.'
+        : 'Chưa có XML chi tiết để tải bản gốc.');
+    }
     return withDownloadSlot(async () => {
       const response = await fetch('/api/invoice-downloader/download?format=binary', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
