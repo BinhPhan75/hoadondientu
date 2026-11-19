@@ -23,6 +23,7 @@ import { lookupVnpayInvoice, downloadOriginalVnpayPdf, downloadOriginalVnpayXml,
 import { renderFourSiPdfViaLcs, FOUR_SI_LCS_READER_URL, FOUR_SI_PORTAL_URL, isFourSiInvoice } from './src/services/fourSiInvoiceService';
 import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceService';
 import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
+import { createSaigonCoopManualCaptcha, submitSaigonCoopManualLookup } from './src/services/saigonCoopInvoiceService';
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
 import { VISNAM_RAPIDSSL_INTERMEDIATE } from './src/services/visnamCertificate';
 import { resolveInvoiceProvider } from './src/utils/providerRouting';
@@ -2179,8 +2180,9 @@ app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async
   }
 });
 
-// Visnam lookup: Tự động nhận diện CAPTCHA qua công nghệ OCR cục bộ (Tesseract),
-// đồng thời hỗ trợ bảng nhập thủ công nếu tự động vượt CAPTCHA thất bại.
+// Visnam lookup: the person enters the displayed CAPTCHA in HoangMySoft.
+// Never solve, guess, or reuse CAPTCHA; only forward the user-supplied answer
+// with a fresh provider key. The fixed upstream host prevents SSRF.
 const VISNAM_API = 'https://tracuu.vin-hoadon.com/api/services/hddt/TraCuuHoaDon';
 const VISNAM_HTTPS_AGENT = new https.Agent({
   ca: [...tls.rootCertificates, VISNAM_RAPIDSSL_INTERMEDIATE],
@@ -2214,23 +2216,12 @@ app.post('/api/visnam/captcha', async (_req, res) => {
       });
       return res.status(502).json({ success: false, error: 'Visnam trả về dữ liệu CAPTCHA không hợp lệ.' });
     }
-
-    let autoSolvedCode: string | undefined;
-    try {
-      const { solveVisnamCaptcha } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver');
-      const solved = await solveVisnamCaptcha(result.image, 6000);
-      if (solved && /^\d{4}$/.test(solved.code)) {
-        autoSolvedCode = solved.code;
-      }
-    } catch (e: any) {
-      console.warn('[Visnam CAPTCHA] Auto-solve in captcha endpoint warning:', e?.message);
-    }
-
     res.setHeader('Cache-Control', 'no-store');
-    return res.json({ success: true, key: result.key, image: result.image, autoSolvedCode });
+    return res.json({ success: true, key: result.key, image: result.image });
   } catch (error: any) {
     const upstreamStatus = Number(error?.response?.status || 0);
     const code = String(error?.code || '').slice(0, 40);
+    // Never log CAPTCHA images, session keys or provider response payloads.
     console.warn('[Visnam CAPTCHA] Upstream request failed', {
       status: upstreamStatus || null,
       code: code || null,
@@ -2243,100 +2234,6 @@ app.post('/api/visnam/captcha', async (_req, res) => {
         : 'Không kết nối được máy chủ CAPTCHA VIN-HOADON (' + (code || 'network') + ').';
     return res.status(502).json({ success: false, error: explanation });
   }
-});
-
-app.post('/api/visnam/auto-lookup', async (req, res) => {
-  const { maSoBiMat, identity } = req.body || {};
-  if (typeof maSoBiMat !== 'string' || !/^[A-Za-z0-9_/-]{4,64}$/.test(maSoBiMat.trim()) ||
-      !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || '')) ||
-      !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || '')) ||
-      !/^\d{1,10}$/.test(String(identity.invoiceNo || ''))) {
-    return res.status(400).json({ success: false, error: 'Thiếu thông tin tra cứu hoặc hóa đơn không hợp lệ.' });
-  }
-
-  const cleanSecret = maSoBiMat.trim();
-  const { extractVerifiedVisnamFiles } = await import('./src/services/visnamResponse');
-  const { solveVisnamCaptcha } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver');
-
-  let lastKey: string | undefined;
-  let lastImage: string | undefined;
-  let lastSolvedCode: string | undefined;
-
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      const capRes = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
-        httpsAgent: VISNAM_HTTPS_AGENT,
-        headers: visnamHeaders,
-        timeout: 10000,
-        maxRedirects: 0,
-        maxContentLength: 400000,
-        maxBodyLength: 10000
-      });
-      const result = capRes.data?.result;
-      if (capRes.data?.success !== true || result?.status !== 0 ||
-          typeof result?.key !== 'string' || !/^[0-9a-f-]{36}$/i.test(result.key) ||
-          typeof result.image !== 'string' || !result.image.startsWith('data:image/png;base64,')) {
-        continue;
-      }
-
-      lastKey = result.key;
-      lastImage = result.image;
-
-      const solved = await solveVisnamCaptcha(result.image, 8000);
-      const captchaCode = solved?.code?.trim();
-      if (!captchaCode || !/^\d{4}$/.test(captchaCode)) {
-        console.info(`[Visnam Auto-Lookup] Lần ${attempt}: OCR không phát hiện đủ 4 số, thử mã CAPTCHA mới.`);
-        continue;
-      }
-
-      lastSolvedCode = captchaCode;
-      console.info(`[Visnam Auto-Lookup] Lần ${attempt}: OCR nhận diện mã "${captchaCode}". Đang tra cứu upstream...`);
-
-      const lookupRes = await axios.post(VISNAM_API + '/TraCuu',
-        { key: lastKey, captcha: captchaCode, maSoBiMat: cleanSecret },
-        { httpsAgent: VISNAM_HTTPS_AGENT, headers: visnamHeaders, timeout: 25000, maxRedirects: 0,
-          maxContentLength: 25000000, maxBodyLength: 10000 });
-
-      const upstreamResult = lookupRes.data?.result;
-      if (upstreamResult?.status === 1) {
-        const files = await extractVerifiedVisnamFiles(lookupRes.data, {
-          sellerTaxCode: identity.sellerTaxCode,
-          invoiceSeries: identity.invoiceSeries,
-          invoiceNo: identity.invoiceNo
-        });
-        res.setHeader('Cache-Control', 'no-store');
-        return res.json({
-          success: true,
-          pdfBase64: files.pdf.toString('base64'),
-          filename: files.pdfFilename,
-          xmlFilename: files.xmlFilename,
-          captchaSolved: captchaCode,
-          attempts: attempt
-        });
-      }
-
-      if (upstreamResult?.status === 2) {
-        // Mã xác thực không hợp lệ, tiếp tục thử với CAPTCHA mới
-        console.info(`[Visnam Auto-Lookup] Lần ${attempt}: Upstream từ chối mã "${captchaCode}". Đang thử CAPTCHA mới...`);
-        continue;
-      }
-
-      const errorMsg = String(upstreamResult?.message || 'Không tìm thấy hóa đơn trên hệ thống VIN-HOADON.');
-      return res.status(422).json({ success: false, error: errorMsg });
-    } catch (err: any) {
-      console.warn(`[Visnam Auto-Lookup] Lần ${attempt} gặp lỗi:`, err?.message);
-    }
-  }
-
-  return res.status(422).json({
-    success: false,
-    error: 'Không thể tự động vượt CAPTCHA VIN-HOADON sau 5 lần thử.',
-    fallbackCaptcha: lastKey && lastImage ? {
-      key: lastKey,
-      image: lastImage,
-      autoSolvedCode: lastSolvedCode
-    } : undefined
-  });
 });
 
 app.post('/api/visnam/lookup', async (req, res) => {
@@ -3278,6 +3175,51 @@ app.all('/api/cyberbill/download-pdf', async (req, res) => {
   } catch (error: any) {
     console.error('[CyberBill] Lỗi tải PDF gốc:', error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/saigoncoop/captcha', async (req, res) => {
+  try {
+    const challenge = await createSaigonCoopManualCaptcha(req.body?.lookupCode);
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, ...challenge });
+  } catch (error: any) {
+    const status = Number(error?.status);
+    console.warn('[Saigon Co.op CAPTCHA] Request failed', {
+      code: String(error?.code || '').slice(0, 60),
+      status: status >= 400 && status <= 599 ? status : 502,
+    });
+    return res.status(status >= 400 && status <= 599 ? status : 502)
+      .json({ success: false, error: String(error?.message || 'Không thể tải CAPTCHA Saigon Co.op.') });
+  }
+});
+
+app.post('/api/saigoncoop/lookup', async (req, res) => {
+  try {
+    const result = await submitSaigonCoopManualLookup({
+      state: req.body?.state,
+      lookupCode: req.body?.lookupCode,
+      captcha: req.body?.captcha,
+      sellerTaxCode: String(req.body?.sellerTaxCode || ''),
+      invoiceNo: String(req.body?.invoiceNo || ''),
+      invoiceSeries: String(req.body?.invoiceSeries || ''),
+    });
+    res.setHeader('Cache-Control', 'no-store');
+    if (result.kind === 'pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(result.filename)}"`);
+      res.setHeader('X-Invoice-Filename', encodeURIComponent(result.filename));
+      return res.send(result.pdfBuffer);
+    }
+    return res.json({ success: true, kind: 'html', html: result.html });
+  } catch (error: any) {
+    const status = Number(error?.status);
+    console.warn('[Saigon Co.op lookup] Request failed', {
+      code: String(error?.code || '').slice(0, 60),
+      status: status >= 400 && status <= 599 ? status : 502,
+    });
+    return res.status(status >= 400 && status <= 599 ? status : 502)
+      .json({ success: false, error: String(error?.message || 'Không thể tra cứu hóa đơn Saigon Co.op.') });
   }
 });
 
