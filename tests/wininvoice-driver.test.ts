@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import JSZip from 'jszip';
 import { WinInvoiceDriver, winInvoiceFields, findWinInvoiceDownloadLink, winInvoicePdfFromViewer } from '../src/services/invoice-engine/drivers/WinInvoiceDriver';
 import { OriginalInvoiceError } from '../src/services/invoice-engine/OriginalInvoiceError';
 import { detectProvider } from '../src/services/invoice-engine/providerDetector';
@@ -178,5 +179,36 @@ test('WINinvoice follows HTML viewer link to real PDF bytes and validates invoic
       err instanceof OriginalInvoiceError && err.message.includes('Không xác minh được danh tính PDF gốc'));
     assert.equal(urls.length,5);
     assert.equal(new URL(urls[4]).pathname,'/bill/download/pdf');
+  } finally {globalThis.fetch=prev;}
+});
+
+
+test('WINinvoice returns provider ZIP with matching original invoice XML', async () => {
+  const prev = globalThis.fetch;
+  const zip = new JSZip();
+  const originalXml = '<HDon><DLHDon><TTChung><KHHDon>C26TTS</KHHDon><SHDon>14678</SHDon></TTChung>' +
+    '<NDHDon><NBan><MST>0312303803</MST></NBan></NDHDon></DLHDon></HDon>';
+  zip.file('original.xml', originalXml);
+  const archive = await zip.generateAsync({type:'nodebuffer'});
+  let call = 0;
+  globalThis.fetch = (async () => {
+    call++;
+    if(call===1) return new Response('<input name="phtcsrf_tkndf-tc" value="fresh_csrf_123456">',{
+      headers:{'Content-Type':'text/html','Set-Cookie':'df-tcphtcsrf_coki_tkndf-tc=fresh_csrf_123456; Path=/'}
+    });
+    if(call===2) return new Response(null,{status:303,headers:{Location:'/bill/inv'}});
+    if(call===3) return new Response('<a href="/bill/view?name=C26TTS_00014678&amp;f=valid">Download</a>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    if(call===4) return new Response(new Uint8Array(archive),{status:200,headers:{'Content-Type':'application/zip'}});
+    throw new Error('Unexpected request');
+  }) as typeof fetch;
+  try {
+    const result=await driver.fetchPdf(info);
+    assert.equal(result.success,true);
+    assert.equal(result.contentType,'application/zip');
+    assert.match(result.filename,/\.zip$/);
+    assert.deepEqual(result.pdfBuffer,archive);
+    assert.equal(call,4);
   } finally {globalThis.fetch=prev;}
 });

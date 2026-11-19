@@ -5,6 +5,7 @@
  * Never reuse a copied user's CSRF token, cookie, or invoice-specific f key.
  */
 import * as cheerio from 'cheerio';
+import JSZip from 'jszip';
 import { BaseInvoiceProviderDriver } from './InvoiceProviderDriver';
 import type { ExtractedInvoiceInfo, DownloadOptions, DownloadResult, DriverMetadata } from '../types';
 import { OriginalInvoiceError } from '../OriginalInvoiceError';
@@ -243,6 +244,7 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
       let nextUrl = downloadUrl;
       let referer = redirect.href;
       let bytes: Buffer | undefined;
+      let providerZip: Buffer | undefined;
       const seen = new Set<string>();
       const queue = [downloadUrl];
       // Redirects and document viewers are common for provider download links.
@@ -271,6 +273,30 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
           break;
         }
         const type = (file.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        if (data.subarray(0,4).toString('latin1') === 'PK\x03\x04') {
+          const validZip = await verifyIssuerInvoiceBytes(data, 'application/zip', {
+            sellerTaxCode: info.sellerTaxCode, invoiceSeries: info.invoiceSeries, invoiceNo: info.invoiceNo,
+          });
+          if (!validZip.ok) return fail('ZIP WINinvoice không khớp hóa đơn: ' + validZip.reason);
+          providerZip = data;
+          // Provider package may include both XML and a rendered PDF.
+          const archive = await JSZip.loadAsync(data);
+          for (const item of Object.values(archive.files).filter(f => !f.dir && /\.pdf$/i.test(f.name)).slice(0, 8)) {
+            if ((item as any)._data?.uncompressedSize > MAX_PDF) continue;
+            const embedded = await item.async('nodebuffer');
+            if (embedded.length > MAX_PDF || embedded.subarray(0,5).toString('latin1') !== '%PDF-') continue;
+            const matched = await verifyIssuerInvoiceBytes(embedded, 'application/pdf', {
+              sellerTaxCode: info.sellerTaxCode, invoiceSeries: info.invoiceSeries, invoiceNo: info.invoiceNo,
+            });
+            if (matched.ok) {
+              bytes = embedded;
+              logs.push('Đã trích xuất PDF đúng hóa đơn từ ZIP gốc WINinvoice');
+              break;
+            }
+          }
+          if (!bytes) logs.push('ZIP gốc WINinvoice chứa XML hợp lệ, không có PDF khớp để trích xuất');
+          break;
+        }
         const isHtml = /^(?:text\/html|application\/xhtml\+xml)$/.test(type) ||
           /^\s*(?:<!doctype\s+html|<html\b)/i.test(data.subarray(0,1000).toString('utf8'));
         if (!isHtml || data.length > MAX_HTML) {
@@ -283,6 +309,15 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
         }
         logs.push('Trang trung gian HTML từ /' + (new URL(nextUrl).pathname.split('/').filter(Boolean).join('/')) + ' được kiểm tra liên kết PDF');
         referer = nextUrl;
+      }
+      if (!bytes && providerZip) {
+        return {
+          success: true, provider: this.providerCode, driverName: this.name,
+          pdfBuffer: providerZip, pdfBase64: providerZip.toString('base64'),
+          filename: 'HoaDon_' + info.invoiceSeries + '_' + info.invoiceNo + '.zip',
+          contentType: 'application/zip', sourceUrl: nextUrl, isFallback: false,
+          executionLogs: [...logs, 'Đã tải ZIP gốc WINinvoice và đối chiếu XML đúng hóa đơn'],
+        };
       }
       if (!bytes || bytes.length < 100 || bytes.length > MAX_PDF) {
         return fail('WINinvoice chỉ trả về trang xem HTML hoặc không cung cấp tệp PDF trực tiếp trong phiên tra cứu.');
