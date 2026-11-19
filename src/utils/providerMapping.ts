@@ -83,6 +83,7 @@ export const KNOWN_SOLUTION_PROVIDERS: Record<string, { name: string; defaultPor
     defaultPortalUrl: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd',
     shortBrand: 'VIN-HOADON'
   },
+  '0312303803': { name: 'Công ty TNHH Win Tech Solution', defaultPortalUrl: 'https://tracuu.wininvoice.vn/', shortBrand: 'WINinvoice' },
   '0302712571': { name: 'Công ty Cổ phần Mắt Bão', defaultPortalUrl: 'https://matbao.in/tra-cuu-hoa-don', shortBrand: 'Matbao / Mifi' },
   // 12. M-Invoice
   '0106026495': {
@@ -105,6 +106,15 @@ export function getInvoiceProviderInfo(inv: Partial<GDTInvoice>): InvoiceProvide
   const rawLookupUrl = (inv.lookupUrl || '').trim();
   const isViettel = msttcgp.replace(/[^0-9]/g, '') === '0100109106' || provider === 'VIETTEL';
   const rawLookupCode = (isViettel ? inv.lookupCode : (inv.lookupCode || inv.mhdon))?.trim() || '';
+
+  if (msttcgp === '0312303803' || provider === 'WININVOICE' || /tracuu\.wininvoice\.vn/i.test(rawLookupUrl)) {
+    return {
+      mst: '0312303803', name: 'Công ty TNHH Win Tech Solution',
+      fullDisplay: '0312303803 - WINinvoice',
+      portalUrl: 'https://tracuu.wininvoice.vn/',
+      lookupCode: (inv.lookupCode || '').trim(), shortBrand: 'WINinvoice'
+    };
+  }
 
   if (msttcgp === '0302712571' || provider === 'MATBAO' || /(?:matbao\.in|mifi\.vn)/i.test(rawLookupUrl)) {
     return { mst: '0302712571', name: 'Công ty Cổ phần Mắt Bão', fullDisplay: '0302712571 - Matbao / Mifi', portalUrl: 'https://matbao.in/tra-cuu-hoa-don', lookupCode: '', shortBrand: 'Matbao / Mifi' };
@@ -422,6 +432,12 @@ export function buildDirectLookupUrl(
     return 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd';
   }
 
+  if (info.shortBrand === 'WINinvoice' || provider === 'WININVOICE') {
+    // Portal has no confirmed URL-prefill contract. Never claim hash/query
+    // strings fill external input fields on a different origin.
+    return 'https://tracuu.wininvoice.vn/';
+  }
+
   // MISA: thêm tham số fkey
   if (info.shortBrand === 'MISA' && code) {
     return `https://www.meinvoice.vn/tra-cuu?sc=${encodeURIComponent(code)}&code=${encodeURIComponent(code)}`;
@@ -523,6 +539,16 @@ export function getInvoiceProviderBadge(inv: Partial<GDTInvoice>): InvoiceProvid
   const nbmst = (inv.nbmst || '').replace(/[^0-9]/g, '');
   const nbten = (inv.nbten || '').toUpperCase();
   const rawXml = (inv.rawXml || '').toLowerCase();
+
+  if (msttcgp === '0312303803' || provider === 'WININVOICE' ||
+      rawLookupUrl.includes('tracuu.wininvoice.vn')) {
+    return {
+      label: 'WINinvoice', color: '#dc2626',
+      badgeClass: 'text-red-700 bg-red-50 border-red-200',
+      title: 'Win Tech Solution - tra cứu bằng privateCode và cmpnKey',
+      isDefault: false
+    };
+  }
 
   if (msttcgp === '0302712571' || provider === 'MATBAO' ||
       rawLookupUrl.includes('matbao.in') || rawLookupUrl.includes('mifi.vn')) {

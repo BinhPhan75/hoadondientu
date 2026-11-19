@@ -903,6 +903,33 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsSubmittingSaigonCoopCaptcha(false);
   };
 
+  const handleWinInvoiceLookup = async () => {
+    if (!effectiveInvoice) return;
+    const xml = String(effectiveInvoice.rawXml || '');
+    const code = extractLookupDetails(xml).lookupCode;
+    const companyBlock = xml.match(/<TTin\b[^>]*\bId=["']cmpnKey["'][^>]*>([\s\S]*?)<\/TTin>/i);
+    const company = companyBlock ? extractTagValue(companyBlock[1], 'DLieu').trim() : '';
+    if (!code || !/^\d{10}(?:-\d{3})?$/.test(company)) {
+      await showAlert({
+        title: 'Thiếu thông tin WINinvoice',
+        message: 'Không tìm thấy privateCode hoặc cmpnKey hợp lệ trong XML hóa đơn.',
+        type: 'warning', confirmText: 'OK',
+      });
+      return;
+    }
+    let copied = false;
+    try { await navigator.clipboard.writeText(code); copied = true; } catch {}
+    await showAlert({
+      title: copied ? 'Đã copy mã tra cứu WINinvoice' : 'Tra cứu trực tiếp WINinvoice',
+      message: copied
+        ? 'Đã sao chép mã tra cứu. Dán Ctrl + V vào ô Mã tra cứu, nhập Mã công ty: ' + company + '. Bấm OK để mở https://tracuu.wininvoice.vn/ và tải hóa đơn gốc.'
+        : 'Nhập Mã tra cứu: ' + code + ' và Mã công ty: ' + company + ' tại https://tracuu.wininvoice.vn/ để tải hóa đơn gốc.',
+      type: copied ? 'success' : 'warning',
+      confirmText: 'OK - Mở trang tra cứu',
+      onConfirm: () => { window.open('https://tracuu.wininvoice.vn/', '_blank', 'noopener,noreferrer'); },
+    });
+  };
+
   const handleViewOriginalProvider = async () => {
     if (!effectiveInvoice) return;
     const target = effectiveInvoice;
@@ -1044,7 +1071,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM' || provider === 'MATBAO') return;
+    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM' || provider === 'MATBAO' || provider === 'WININVOICE') return;
     if (provider === 'EASYINVOICE') {
       const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
       if (code) {
@@ -1906,6 +1933,21 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Cổng Vietcombank</span>
                 </a>
+              </div>
+            ) : resolveInvoiceProvider(effectiveInvoice) === 'WININVOICE' ? (
+              <div className="inline-flex items-center gap-2 flex-wrap">
+                {!originalProviderPdfUrl && (
+                  <button type="button" onClick={() => void handleViewOriginalProvider()}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-emerald-700 text-emerald-200 hover:bg-emerald-950 disabled:opacity-60">
+                    {isDownloadingEasyInvoice ? 'Đang tra cứu...' : 'Tải PDF gốc WINinvoice'}
+                  </button>
+                )}
+                <button type="button" onClick={() => void handleWinInvoiceLookup()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-cyan-700 text-cyan-200 hover:bg-cyan-950">
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Tra cứu WINinvoice trực tiếp
+                </button>
               </div>
             ) : resolveInvoiceProvider(effectiveInvoice) === 'MATBAO' ? (
               <div className="inline-flex items-center gap-2 flex-wrap">

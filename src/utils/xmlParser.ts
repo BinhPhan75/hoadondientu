@@ -970,6 +970,13 @@ export function getSellerFromPayload(source: any): { name: string; taxCode: stri
  */
 export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: string; lookupUrl: string } {
   if (!rawXml) return { lookupCode: '', lookupUrl: '' };
+  // WinInvoice carries privateCode and cmpnKey in dedicated TTin Id fields.
+  // Avoid falling back to CQT code or unrelated custom fields.
+  if (/<MSTTCGP>\s*0312303803\s*<\/MSTTCGP>/i.test(rawXml)) {
+    const codeBlock = rawXml.match(/<TTin\b[^>]*\bId=["']privateCode["'][^>]*>([\s\S]*?)<\/TTin>/i);
+    const code = codeBlock ? extractTagValue(codeBlock[1], 'DLieu') : '';
+    return { lookupCode: /^[A-Za-z0-9_-]{6,64}$/.test(code.trim()) ? code.trim() : '', lookupUrl: 'https://tracuu.wininvoice.vn/' };
+  }
   // Mắt Bão/Mifi identifies invoices through XML upload; the CQT code is
   // not a lookup token and must never be substituted for one.
   if (/<MSTTCGP>\s*0302712571\s*<\/MSTTCGP>/i.test(rawXml)) {
