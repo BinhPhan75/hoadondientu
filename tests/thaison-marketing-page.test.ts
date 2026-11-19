@@ -39,3 +39,19 @@ test('Thai Son verified HTML requires matching series and invoice number', () =>
   assert.equal(verifiedThaiSonInvoiceHtmlWithSeries(html,'0401515239','604','C26MMR'),undefined);
   assert.equal(verifiedThaiSonInvoiceHtmlWithSeries(html,'0401515239','603','C26XYZ'),undefined);
 });
+
+
+test('Real Thai Son shared lookup form is valid despite marketing navigation', () => {
+  const realLanding = '<html><head><title>E-Invoice - Chuyên gia hóa đơn điện tử</title></head>' +
+    '<body><h1>Phần mềm hóa đơn điện tử E-Invoice được nhiều DN FDI tin dùng</h1>' +
+    '<nav>Giới thiệu Tin tức Sản phẩm Tra cứu hóa đơn</nav>' +
+    '<form action="/tra-cuu" method="POST">' +
+    '<label>Mã nhận hóa đơn</label><input name="MA_NHAN_HOA_DON">' +
+    '<label>Mã kiểm tra</label><input name="CaptchaInputText">' +
+    '<img src="/Captcha/Show"></form></body></html>';
+  assert.equal(isThaiSonMarketingPage(realLanding), false);
+});
+
+test('Marketing-only page remains invalid even when it mentions invoice-related text', () => {
+  assert.equal(isThaiSonMarketingPage(marketing), true);
+});

@@ -198,14 +198,26 @@ export function extractThaiSonDownloadTargets(html: string): ThaiSonDownloadTarg
  */
 export function isThaiSonMarketingPage(html: string): boolean {
   if (!html || html.length > 2_000_000) return false;
+  // The real invoice lookup form lives on the SAME page as E-Invoice's
+  // marketing header/navigation. Its presence must take precedence over
+  // the marketing text, or valid /tra-cuu sessions are rejected.
+  const lookup = parseThaiSonForm(html);
+  if (lookup.formFound && lookup.field && lookup.captchaField && lookup.imagePath) {
+    return false;
+  }
   const $ = cheerio.load(html);
+  // A genuine invoice result can also appear as a modal within the common
+  // landing page. The result still needs independent identity validation.
+  if ($('#invoice-data, #multi-page, .invoice-detail, #invoice-detail').filter((_, node) =>
+    $(node).find('table tr').length >= 3).length) {
+    return false;
+  }
   const plain = $('body').text().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const title = $('title').text().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   return /phan mem hoa don dien tu e-invoice duoc nhieu dn fdi tin dung/.test(plain) ||
     /chuyen gia hoa don dien tu/.test(plain) ||
     (/(?:einvoice|e-invoice)/.test(title) && /gioi thieu/.test(plain) &&
-      /tin tuc/.test(plain) && /san pham/.test(plain) &&
-      !$('#invoice-data, #multi-page').length);
+      /tin tuc/.test(plain) && /san pham/.test(plain));
 }
 
 /** Restrict successful issuer HTML to the requested seller/series/number. */
