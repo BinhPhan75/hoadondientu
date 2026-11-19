@@ -2,7 +2,13 @@ import * as cheerio from 'cheerio';
 import { createHash } from 'node:crypto';
 import { OriginalInvoiceError } from './invoice-engine/OriginalInvoiceError';
 import { verifyIssuerInvoiceBytes } from './invoiceIdentityVerifier';
-import { parseThaiSonForm, verifiedThaiSonInvoiceHtml } from './thaiSonInvoiceService';
+import {
+  extractThaiSonDownloadTargets,
+  isThaiSonHelpDocumentLink,
+  isThaiSonHelpPdf,
+  parseThaiSonForm,
+  verifiedThaiSonInvoiceHtml,
+} from './thaiSonInvoiceService';
 
 const PORTAL_ORIGIN = 'https://saigoncoop.einvoice.com.vn';
 const PORTAL_URL = PORTAL_ORIGIN + '/';
@@ -22,8 +28,15 @@ export type SaigonCoopLookupResult =
   | { kind: 'html'; html: string }
   | { kind: 'pdf'; filename: string; pdfBuffer: Buffer };
 
+const MAX_RESULT_BYTES = 18_000_000;
+
 function providerError(message: string, code: string, status = 422): OriginalInvoiceError {
   return new OriginalInvoiceError(message, 'THAISON', code, status, PORTAL_URL);
+}
+
+function pdfFilename(sellerTaxCode: string, invoiceNo: string): string {
+  const number = String(invoiceNo).replace(/\D/g, '').padStart(7, '0');
+  return 'HoaDon_SaigonCoop_' + sellerTaxCode.replace(/\D/g, '') + '_' + number + '.pdf';
 }
 
 function normalizeLookupCode(value: unknown): string {
@@ -247,49 +260,110 @@ export async function submitSaigonCoopManualLookup(params: {
     );
   }
   const contentLength = Number(response.headers.get('content-length') || '0');
-  if (contentLength > 18_000_000) {
+  if (contentLength > MAX_RESULT_BYTES) {
     throw providerError('Kết quả tra cứu Saigon Co.op vượt giới hạn 18 MB.', 'RESULT_TOO_LARGE', 502);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > 18_000_000) {
+  if (bytes.length > MAX_RESULT_BYTES) {
     throw providerError('Kết quả tra cứu Saigon Co.op vượt giới hạn 18 MB.', 'RESULT_TOO_LARGE', 502);
   }
   const contentType = response.headers.get('content-type') || '';
-  if (bytes.subarray(0, 5).toString('latin1') === '%PDF-') {
-    const verification = await verifyIssuerInvoiceBytes(bytes, contentType, {
+  const verifyPdf = async (
+    pdf: Buffer, pdfContentType: string
+  ): Promise<SaigonCoopLookupResult | undefined> => {
+    if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') return;
+    const verification = await verifyIssuerInvoiceBytes(pdf, pdfContentType, {
       sellerTaxCode: params.sellerTaxCode,
       invoiceNo: params.invoiceNo,
       invoiceSeries: params.invoiceSeries,
     });
-    if (!verification.ok) {
-      throw providerError('PDF Saigon Co.op chưa khớp hóa đơn đang mở: ' + verification.reason, 'INVOICE_IDENTITY_MISMATCH');
-    }
-    const number = String(params.invoiceNo).replace(/\D/g, '').padStart(7, '0');
+    if (!verification.ok) return;
     return {
       kind: 'pdf',
-      filename: 'HoaDon_SaigonCoop_' + params.sellerTaxCode.replace(/\D/g, '') + '_' + number + '.pdf',
-      pdfBuffer: bytes,
+      filename: pdfFilename(params.sellerTaxCode, params.invoiceNo),
+      pdfBuffer: pdf,
     };
+  };
+  if (bytes.subarray(0, 5).toString('latin1') === '%PDF-') {
+    const result = await verifyPdf(bytes, contentType);
+    if (result) return result;
+    throw providerError('PDF Saigon Co.op chưa khớp MST và số hóa đơn đang mở; không hiển thị kết quả.', 'INVOICE_IDENTITY_MISMATCH');
   }
   if (!response.ok || !/html/i.test(contentType)) {
     throw providerError('Saigon Co.op trả kết quả tra cứu không hợp lệ (HTTP ' + response.status + ').', 'LOOKUP_FAILED', 502);
   }
 
   const html = bytes.toString('utf8');
-  const verifiedHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
-  if (verifiedHtml) return { kind: 'html', html: verifiedHtml };
+  let verifiedHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
 
   const $ = cheerio.load(html);
   const returnedForm = parseThaiSonForm(html);
   const providerMessage = (returnedForm.error || $('#listresult').text())
     .replace(/\s+/g, ' ').trim().slice(0, 240);
   const isCaptchaError = /captcha|mã kiểm tra|mã xác thực/i.test(providerMessage);
-  if (returnedForm.formFound && returnedForm.field === 'MA_NHAN_HOA_DON' && !providerMessage) {
+  if (returnedForm.formFound && returnedForm.field === 'MA_NHAN_HOA_DON' && !providerMessage && !verifiedHtml) {
     throw providerError(
       'Cổng chưa mở hóa đơn và đã trả lại biểu mẫu tra cứu. Kiểm tra mã nhận HĐ, nhập lại CAPTCHA hoặc tải CAPTCHA mới.',
       'LOOKUP_NOT_COMPLETED'
     );
   }
+
+  const queue = extractThaiSonDownloadTargets(html).map(target => ({
+    ...target,
+    base: response.url || PORTAL_URL,
+    depth: 0,
+  }));
+  const seenTargets = new Set<string>();
+  while (queue.length && seenTargets.size < 18) {
+    const target = queue.shift()!;
+    let targetUrl: URL;
+    try {
+      targetUrl = new URL(target.path, target.base);
+    } catch {
+      continue;
+    }
+    if (targetUrl.origin !== PORTAL_ORIGIN || isThaiSonHelpDocumentLink(targetUrl.href)) continue;
+    if (target.method === 'GET' && target.data) {
+      new URLSearchParams(target.data).forEach((value, name) => targetUrl.searchParams.set(name, value));
+    }
+    const unique = target.method + '|' + targetUrl.href + '|' + (target.data || '');
+    if (seenTargets.has(unique)) continue;
+    seenTargets.add(unique);
+
+    try {
+      const targetResponse = await requestPortal(
+        targetUrl, target.method, target.method === 'POST' ? target.data : undefined, jar, 15000
+      );
+      const targetLength = Number(targetResponse.headers.get('content-length') || '0');
+      if (targetLength > MAX_RESULT_BYTES) {
+        await targetResponse.body?.cancel();
+        continue;
+      }
+      const targetBytes = Buffer.from(await targetResponse.arrayBuffer());
+      if (targetBytes.length > MAX_RESULT_BYTES) continue;
+
+      const targetType = targetResponse.headers.get('content-type') || '';
+      const targetPdf = await verifyPdf(targetBytes, targetType);
+      if (targetPdf && !isThaiSonHelpPdf(targetBytes)) return targetPdf;
+
+      if (target.depth >= 2 || targetBytes.length > 1_500_000 ||
+          (!/html/i.test(targetType) &&
+           !/<!doctype html|<html/i.test(targetBytes.subarray(0, 250).toString('utf8')))) {
+        continue;
+      }
+
+      const targetHtml = targetBytes.toString('utf8');
+      verifiedHtml = verifiedHtml ||
+        verifiedThaiSonInvoiceHtml(targetHtml, params.sellerTaxCode, params.invoiceNo);
+      extractThaiSonDownloadTargets(targetHtml).forEach(nested => {
+        queue.push({ ...nested, base: targetResponse.url || targetUrl.href, depth: target.depth + 1 });
+      });
+    } catch {
+      // Other advertised links may still lead to the verified invoice.
+    }
+  }
+  if (verifiedHtml) return { kind: 'html', html: verifiedHtml };
+
   throw providerError(
     isCaptchaError
       ? 'CAPTCHA không đúng hoặc đã hết hạn. Tải CAPTCHA mới rồi thử lại.'
