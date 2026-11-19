@@ -209,7 +209,7 @@ export function isThaiSonMarketingPage(html: string): boolean {
   const $ = cheerio.load(html);
   // A genuine invoice result can also appear as a modal within the common
   // landing page. The result still needs independent identity validation.
-  if ($('#invoice-data, #multi-page, .invoice-detail, #invoice-detail').filter((_, node) =>
+  if ($('#invoice-data, #multi-page, #invoice, .invoice-content, .invoice-detail, #invoice-detail').filter((_, node) =>
     $(node).find('table tr').length >= 3).length) {
     return false;
   }
@@ -247,6 +247,26 @@ export function verifiedThaiSonInvoiceHtmlWithSeries(
     if (digits && digits[1].replace(/^0+(?=\d)/, '') === number) { matched = true; break; }
   }
   if (!matched || scope.find('table tr').length < 3) return;
+  // The shared E-Invoice site has the invoice viewer embedded in a marketing
+  // page. Returning the entire HTML would render the site's navigation and
+  // articles inside the invoice modal. Isolate the invoice itself.
+  if (root.length) {
+    const source = $('#invoice-data');
+    const output = $('#multi-page');
+    const fragments = source.length && output.length
+      ? $.html(source) + $.html(output)
+      : $.html(root);
+    const scopedHtml = '<!doctype html><html><head><meta charset="utf-8">' +
+      $('head style').map((_, node) => $.html(node)).get().join('') +
+      '</head><body>' + fragments + '</body></html>';
+    return verifiedThaiSonInvoiceHtml(scopedHtml, sellerTaxCode, invoiceNo);
+  }
+  // Standalone publisher HTML without a clear invoice container is acceptable
+  // only if it contains no website navigation or search form.
+  if ($('form, nav, header nav, .navbar, .main-menu, #menu').length ||
+      /phan mem hoa don dien tu e-invoice duoc nhieu dn fdi tin dung/i.test(
+        $('body').text().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      )) return;
   return verifiedThaiSonInvoiceHtml(html, sellerTaxCode, invoiceNo);
 }
 

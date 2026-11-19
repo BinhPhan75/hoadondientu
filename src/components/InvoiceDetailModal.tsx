@@ -838,6 +838,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
     const sequence = ++originalLoadSequence.current;
     setOriginalLoadError(null);
+    setOriginalEasyInvoiceHtml(null);
     setSaigonCoopCaptchaError(null);
     setSaigonCoopCaptcha(null);
     setIsSaigonCoopCaptchaOpen(true);
@@ -879,6 +880,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
 
       if (result.kind === 'html') {
+        if (isThaiSonSharedCaptcha && /phan mem hoa don dien tu e-invoice|chuyen gia hoa don dien tu|dich vu truyen nhan va luu tru/i.test(
+          result.html.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+        )) {
+          throw new Error('Cổng Thái Sơn trả trang giới thiệu thay vì bản hóa đơn MARU. Không thể xem hay lưu HTML này như hóa đơn gốc.');
+        }
         setOriginalEasyInvoiceHtml(result.html);
         setEasyInvoiceViewMode('html');
       } else {
@@ -995,6 +1001,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         throw new Error('M-invoice chỉ chấp nhận PDF gốc, không tải XML hoặc ZIP.');
       }
       if (blob.type.includes('text/html')) {
+        if (actualProvider === 'THAISON') {
+          throw new Error('Thái Sơn chưa trả PDF/ZIP gốc đã xác minh. Không hiển thị HTML website của nhà cung cấp.');
+        }
         const html = prepareEasyInvoiceHtml(await blob.text());
         if (!isCurrent()) return;
         setOriginalEasyInvoiceHtml(html);

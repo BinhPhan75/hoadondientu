@@ -62,3 +62,27 @@ test('Thai Son marketing with incidental invoice identifiers is not accepted as 
     '<p>MST 0401515239, ký hiệu C26MMR, Số hóa đơn: 0000603</p></body>');
   assert.equal(verifiedThaiSonInvoiceHtmlWithSeries(homepage,'0401515239','603','C26MMR'),undefined);
 });
+
+
+test('Thai Son shared marketing shell with embedded invoice only returns invoice fragment', () => {
+  const webpage = '<html><head><title>E-Invoice</title></head><body>' +
+    '<nav>Giới thiệu Tin tức Sản phẩm Tra cứu hóa đơn</nav>' +
+    '<h1>Phần mềm hóa đơn điện tử E-Invoice được nhiều DN FDI tin dùng</h1>' +
+    '<div id="invoice"><h2>HÓA ĐƠN GIÁ TRỊ GIA TĂNG</h2>' +
+    '<p>MST bên bán: 0401515239</p><p>Ký hiệu: C26MMR</p>' +
+    '<p>Số hóa đơn: 0000603</p>' +
+    '<table><tr><td>Hàng</td></tr><tr><td>Gạch</td></tr><tr><td>Tổng</td></tr></table>' +
+    '</div></body></html>';
+  const clean = verifiedThaiSonInvoiceHtmlWithSeries(webpage, '0401515239', '603', 'C26MMR');
+  assert.ok(clean);
+  assert.match(clean!,/Gạch/);
+  assert.doesNotMatch(clean!,/nhiều DN FDI|Giới thiệu Tin tức/i);
+});
+
+test('Thai Son site shell without isolated invoice markup is never a valid original', () => {
+  const webpage = '<html><body><nav>Giới thiệu Tin tức Sản phẩm</nav>' +
+    '<p>MST:0401515239; Ký hiệu:C26MMR; Số hóa đơn:0000603</p>' +
+    '<table><tr><td>a</td></tr><tr><td>b</td></tr><tr><td>c</td></tr></table>' +
+    '<form><input name="MA_NHAN_HOA_DON"/></form></body></html>';
+  assert.equal(verifiedThaiSonInvoiceHtmlWithSeries(webpage,'0401515239','603','C26MMR'),undefined);
+});
