@@ -80,3 +80,54 @@ test('WINinvoice fails safely if server does not supply CSRF/session', async () 
     assert.equal(count,1);
   } finally {globalThis.fetch=prev;}
 });
+
+
+test('WINinvoice follows temporary same-origin 307 downloads with session cookies', async () => {
+  const previous = globalThis.fetch;
+  const requests: Array<{url:string;cookie:string}> = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const uri = String(url);
+    requests.push({url:uri,cookie:String(new Headers(init?.headers).get('cookie') || '')});
+    switch (requests.length) {
+      case 1: return new Response('<input name="phtcsrf_tkndf-tc" value="fresh_csrf_123456">', {
+        headers: {'Content-Type':'text/html','Set-Cookie':'df-tcphtcsrf_coki_tkndf-tc=fresh_csrf_123456; Path=/'}
+      });
+      case 2: return new Response(null, {status:303,headers:{Location:'/bill/inv','Set-Cookie':'session=test-session; Path=/'}});
+      case 3: return new Response('<a href="/bill/view?name=C26TTS_00014678&amp;f=temporary">Download</a>', {
+        headers:{'Content-Type':'text/html'}
+      });
+      case 4: return new Response(null, {status:307,headers:{Location:'/bill/file?id=invoice'}});
+      case 5: return new Response('NOT_A_PDF', {status:200,headers:{'Content-Type':'text/plain'}});
+      default: throw Error('Unexpected network request');
+    }
+  }) as typeof fetch;
+  try {
+    await assert.rejects(driver.fetchPdf(info), (error:unknown) =>
+      error instanceof OriginalInvoiceError && error.message.includes('không trả PDF'));
+    assert.equal(requests.length,5);
+    assert.equal(new URL(requests[4].url).pathname,'/bill/file');
+    assert.match(requests[4].cookie,/session=test-session/);
+  } finally {globalThis.fetch=previous;}
+});
+
+test('WINinvoice refuses redirects outside its trusted origin', async () => {
+  const previous=globalThis.fetch;
+  let calls=0;
+  globalThis.fetch=(async () => {
+    calls++;
+    if(calls===1) return new Response('<input name="phtcsrf_tkndf-tc" value="fresh_csrf_123456">',{
+      headers:{'Content-Type':'text/html','Set-Cookie':'df-tcphtcsrf_coki_tkndf-tc=fresh_csrf_123456; Path=/'}
+    });
+    if(calls===2) return new Response(null,{status:303,headers:{Location:'/bill/inv'}});
+    if(calls===3) return new Response('<a href="/bill/view?name=C26TTS_00014678&amp;f=abc">Download</a>',{
+      headers:{'Content-Type':'text/html'}
+    });
+    if(calls===4) return new Response(null,{status:307,headers:{Location:'https://example.org/download'}});
+    throw Error('Unexpected external fetch');
+  }) as typeof fetch;
+  try {
+    await assert.rejects(driver.fetchPdf(info),(error:unknown) =>
+      error instanceof OriginalInvoiceError && error.message.includes('ngoài cổng tra cứu'));
+    assert.equal(calls,4);
+  } finally {globalThis.fetch=previous;}
+});

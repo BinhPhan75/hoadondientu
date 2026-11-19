@@ -200,10 +200,29 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
       const listHtml = await responseText(listing);
       const downloadUrl = findWinInvoiceDownloadLink(listHtml, info);
       if (!downloadUrl) return fail('Không tìm thấy liên kết tải đúng ký hiệu và số hóa đơn trong phiên tra cứu.');
-      const file = await request(downloadUrl, 'GET');
-      if (!file.ok || Number(file.headers.get('content-length') || 0) > MAX_PDF ||
+      // /bill/view can respond 307 (temporary redirect) to the actual
+      // download. Follow only safe same-origin GET redirects with the same
+      // session jar. Never forward cookies to a different domain.
+      let nextUrl = downloadUrl;
+      let file: Response | undefined;
+      const seen = new Set<string>();
+      for (let hop = 0; hop <= 4; hop++) {
+        if (seen.has(nextUrl)) return fail('WINinvoice trả về vòng lặp chuyển hướng tải PDF.');
+        seen.add(nextUrl);
+        file = await request(nextUrl, 'GET');
+        if (![301, 302, 303, 307, 308].includes(file.status)) break;
+        const rawLocation = file.headers.get('location') || '';
+        const redirected = providerUrl(rawLocation, nextUrl);
+        if (!redirected) {
+          return fail('WINinvoice chuyển hướng tải PDF tới địa chỉ ngoài cổng tra cứu hoặc không hợp lệ (HTTP ' + file.status + ').');
+        }
+        if (hop === 4) return fail('WINinvoice chuyển hướng tải PDF quá nhiều lần.');
+        logs.push('WINinvoice trả về chuyển hướng HTTP ' + file.status);
+        nextUrl = redirected.href;
+      }
+      if (!file || !file.ok || Number(file.headers.get('content-length') || 0) > MAX_PDF ||
           file.headers.get('location')) {
-        return fail('WINinvoice không cho tải hóa đơn (HTTP ' + file.status + ').');
+        return fail('WINinvoice không cho tải hóa đơn (HTTP ' + (file?.status || 0) + ').');
       }
       const bytes = Buffer.from(await file.arrayBuffer());
       if (bytes.length < 100 || bytes.length > MAX_PDF ||
@@ -219,7 +238,7 @@ export class WinInvoiceDriver extends BaseInvoiceProviderDriver {
         success: true, provider: this.providerCode, driverName: this.name,
         pdfBuffer: bytes, pdfBase64: bytes.toString('base64'),
         filename: this.buildPdfFilename(info), contentType: 'application/pdf',
-        sourceUrl: downloadUrl, isFallback: false, executionLogs: logs,
+        sourceUrl: nextUrl, isFallback: false, executionLogs: logs,
       };
     } catch (error: any) {
       if (error instanceof OriginalInvoiceError) throw error;
