@@ -1,70 +1,45 @@
 import { createWorker, type Worker } from 'tesseract.js';
 import zlib from 'zlib';
 
-const isServerless = Boolean(
-  process.env.VERCEL ||
-  process.env.AWS_LAMBDA_FUNCTION_NAME ||
-  process.env.LAMBDA_TASK_ROOT ||
-  process.env.NETLIFY
-);
-
 export const POS_CAPTCHA_WHITELIST = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const DIGITS_CAPTCHA_WHITELIST = '0123456789';
 
 let tesseractWorker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
 
+async function applyWorkerParams(worker: Worker, whitelist: string): Promise<void> {
+  await worker.setParameters({
+    tessedit_char_whitelist: whitelist,
+    tessedit_pageseg_mode: '7' as any,
+    user_defined_dpi: '300',
+    tessjs_create_pdf: '0',
+    tessjs_create_hocr: '0',
+    tessjs_create_tsv: '0',
+    tessjs_create_box: '0',
+    tessjs_create_unlv: '0',
+    tessjs_create_osd: '0',
+  });
+}
+
 async function getWorker(whitelist?: string): Promise<Worker> {
   const targetWhitelist = whitelist || POS_CAPTCHA_WHITELIST;
 
   if (tesseractWorker) {
-    await tesseractWorker.setParameters({
-      tessedit_char_whitelist: targetWhitelist,
-      tessedit_pageseg_mode: '7' as any, // PSM 7: Treat the image as a single text line
-      user_defined_dpi: '300',
-      tessjs_create_pdf: '0',
-      tessjs_create_hocr: '0',
-      tessjs_create_tsv: '0',
-      tessjs_create_box: '0',
-      tessjs_create_unlv: '0',
-      tessjs_create_osd: '0',
-    });
+    await applyWorkerParams(tesseractWorker, targetWhitelist);
     return tesseractWorker;
   }
 
   if (workerInitializing) {
     const w = await workerInitializing;
-    await w.setParameters({
-      tessedit_char_whitelist: targetWhitelist,
-      tessedit_pageseg_mode: '7' as any,
-      user_defined_dpi: '300',
-      tessjs_create_pdf: '0',
-      tessjs_create_hocr: '0',
-      tessjs_create_tsv: '0',
-      tessjs_create_box: '0',
-      tessjs_create_unlv: '0',
-      tessjs_create_osd: '0',
-    });
+    await applyWorkerParams(w, targetWhitelist);
     return w;
   }
 
   workerInitializing = (async () => {
     try {
       const cachePath = process.env.TEMP || '/tmp';
-      const w = await createWorker('eng', 1, {
-        cachePath,
-      });
-      await w.setParameters({
-        tessedit_char_whitelist: targetWhitelist,
-        tessedit_pageseg_mode: '7' as any, // PSM 7: Single text line
-        user_defined_dpi: '300',
-        tessjs_create_pdf: '0',
-        tessjs_create_hocr: '0',
-        tessjs_create_tsv: '0',
-        tessjs_create_box: '0',
-        tessjs_create_unlv: '0',
-        tessjs_create_osd: '0',
-      });
+      const w = await createWorker('eng', 1, { cachePath });
+      await applyWorkerParams(w, targetWhitelist);
       tesseractWorker = w;
       return w;
     } finally {
@@ -72,13 +47,9 @@ async function getWorker(whitelist?: string): Promise<Worker> {
     }
   })();
 
-  const w = await workerInitializing;
-  return w;
+  return workerInitializing;
 }
 
-/**
- * Giải mã ảnh PNG RGBA chuẩn từ ASP.NET Captcha (EasyInvoice / VNPT / Visnam)
- */
 export function decodePngRgba(buf: Buffer): { width: number; height: number; data: Buffer } | null {
   try {
     let offset = 8;
@@ -156,9 +127,6 @@ export function decodePngRgba(buf: Buffer): { width: number; height: number; dat
   }
 }
 
-/**
- * Tạo ảnh BMP binarized (trắng/đen) phóng to để Tesseract OCR dễ nhận diện các số Captcha
- */
 export function createBinarizedBmp(
   decoded: { width: number; height: number; data: Buffer },
   scale = 3,
@@ -202,7 +170,7 @@ export function createBinarizedBmp(
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
 
       const isText = lum > 140;
-      const val = isText ? 0 : 255; // 0 = Đen (Chữ số), 255 = Trắng (Nền)
+      const val = isText ? 0 : 255;
 
       const pxOffset = rowStart + destX * 3;
       bmp[pxOffset] = val;
@@ -214,10 +182,6 @@ export function createBinarizedBmp(
   return bmp;
 }
 
-/**
- * Tạo ảnh BMP binarized chuyên sâu cho CAPTCHA máy tính tiền (POS Captcha) trên Node.js
- * Tăng tương phản tối đa, loại bỏ nền xám mờ và bổ sung viền trắng an toàn cho Tesseract
- */
 export function createPosBinarizedBmp(
   decoded: { width: number; height: number; data: Buffer },
   scale = 2.5,
@@ -226,7 +190,6 @@ export function createPosBinarizedBmp(
 ): Buffer {
   const { width, height, data } = decoded;
 
-  // Nếu ảnh đã được phóng to sẵn từ phía client (width >= 300), giữ nguyên scale 1.0
   const effectiveScale = width >= 300 ? 1.0 : Math.max(1.0, Math.min(scale, Math.round(500 / width)));
   const effectivePadding = width >= 300 ? Math.round(padding / 2) : padding;
 
@@ -251,7 +214,6 @@ export function createPosBinarizedBmp(
   bmp.writeUInt32LE(0, 30);
   bmp.writeUInt32LE(imageSize, 34);
 
-  // Khởi tạo nền trắng
   bmp.fill(255, 54);
 
   for (let destY = 0; destY < newH; destY++) {
@@ -270,7 +232,6 @@ export function createPosBinarizedBmp(
       const b = data[srcIdx + 2] || 0;
       const lum = r * 0.299 + g * 0.587 + b * 0.114;
 
-      // Chữ đậm -> Đen (0), Nền và vạch mờ -> Trắng (255)
       const val = lum < threshold ? 0 : 255;
 
       const pxOffset = rowStart + destX * 3;
@@ -283,14 +244,6 @@ export function createPosBinarizedBmp(
   return bmp;
 }
 
-/**
- * Tiền xử lý chuyên sâu cho CAPTCHA VIN-HOADON (Visnam - tracuu.vin-hoadon.com):
- * - Kích thước gốc rất lớn (1500x350) -> thu nhỏ về kích thước chuẩn (380px)
- * - Nền trong suốt hoặc trắng -> composite nền trắng chuẩn
- * - Khử sạch vạch kẻ chéo màu đỏ/xanh lá cắt ngang qua các chữ số
- * - Giữ lại các nét chữ số lớn, binarize sang đen trắng sắc nét theo ngưỡng lumThreshold
- * - Bổ sung viền trắng an toàn 15px xung quanh giúp Tesseract nhận diện 4 chữ số nhanh và chuẩn
- */
 export function createVisnamBinarizedBmp(
   decoded: { width: number; height: number; data: Buffer },
   targetWidth = 380,
@@ -318,13 +271,12 @@ export function createVisnamBinarizedBmp(
   bmp.writeUInt16LE(24, 28);
   bmp.writeUInt32LE(0, 30);
   bmp.writeUInt32LE(imageSize, 34);
-  bmp.fill(255, 54); // Fill white
+  bmp.fill(255, 54);
 
   const scaleX = width / targetW;
   const scaleY = height / targetH;
 
   for (let dy = 0; dy < targetH; dy++) {
-    // In BMP format, row 0 is bottom scanline
     const srcY = height - 1 - Math.floor(dy * scaleY);
     const destY = dy + padding;
     const rowStart = 54 + destY * rowSize;
@@ -337,17 +289,14 @@ export function createVisnamBinarizedBmp(
       const b = data[idx + 2];
       const a = data[idx + 3] / 255;
 
-      // Composite onto white background
       const cR = Math.round(r * a + 255 * (1 - a));
       const cG = Math.round(g * a + 255 * (1 - a));
       const cB = Math.round(b * a + 255 * (1 - a));
 
-      // Remove red & green noise lines
       const isRedLine = cR > cG + 35 && cR > cB + 35;
       const isGreenLine = cG > cR + 25 && cG > cB + 25;
       const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
 
-      // Digits are dark (lum < lumThreshold) or blue (cB > cR + 25 && cB > cG + 25 && lum < 220)
       const isDigit =
         !isRedLine &&
         !isGreenLine &&
@@ -365,9 +314,6 @@ export function createVisnamBinarizedBmp(
   return bmp;
 }
 
-/**
- * Bộ lọc hậu xử lý regex chuẩn hóa mã OCR, loại bỏ ký tự rác và sửa lỗi nhầm lẫn phổ biến.
- */
 export function postProcessOcrText(
   rawText: string,
   options?: { digitsOnly?: boolean; expectedLength?: number }
@@ -377,8 +323,7 @@ export function postProcessOcrText(
   const digitsOnly = options?.digitsOnly === true;
 
   if (digitsOnly) {
-    // 1. Chuyển đổi các ký tự chữ dễ bị Tesseract nhận diện nhầm thành số
-    let mapped = rawText
+    const mapped = rawText
       .replace(/[OoD]/g, '0')
       .replace(/[Il|!]/g, '1')
       .replace(/[Zz]/g, '2')
@@ -388,7 +333,180 @@ export function postProcessOcrText(
       .replace(/[B]/g, '8')
       .replace(/[gq]/g, '9');
 
-    // 2. Chỉ giữ lại số
-    let digits = mapped.replace(/[^0-9]/g, '');
+    const digits = mapped.replace(/[^0-9]/g, '');
 
-    // 3. Khớp độ dài nếu có yêu cầu (VD: EasyInvoice / VNPT / Visnam
+    if (options?.expectedLength && digits.length > options.expectedLength) {
+      const match = digits.match(new RegExp(`\\d{${options.expectedLength}}`));
+      if (match) return match[0];
+      return digits.substring(0, options.expectedLength);
+    }
+    return digits;
+  }
+
+  let cleaned = rawText
+    .replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  const targetLen = options?.expectedLength || 6;
+  if (cleaned.length > targetLen) {
+    const match = cleaned.match(/[A-Z0-9]{4,6}/);
+    if (match && match[0].length >= 4 && match[0].length <= targetLen) {
+      return match[0];
+    }
+    return cleaned.substring(0, targetLen);
+  }
+
+  return cleaned;
+}
+
+export interface TesseractSolveOptions {
+  digitsOnly?: boolean;
+  expectedLength?: number;
+  preprocessEasyInvoice?: boolean;
+  preprocessPosCaptcha?: boolean;
+  preprocessVisnam?: boolean;
+  whitelist?: string;
+  timeoutMs?: number;
+}
+
+export async function solveVisnamCaptcha(
+  imageInput: Buffer | string | Uint8Array,
+  timeoutMs = 3500
+): Promise<{ code: string; confidence: number } | null> {
+  const recognitionPromise = (async () => {
+    let buf: Buffer;
+    if (typeof imageInput === 'string') {
+      const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, '');
+      buf = Buffer.from(cleanB64, 'base64');
+    } else {
+      buf = Buffer.from(imageInput);
+    }
+
+    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    if (!isPng) return null;
+
+    const decoded = decodePngRgba(buf);
+    if (!decoded) return null;
+
+    const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
+    const thresholds = [165, 190];
+    const psms = ['8', '7'];
+
+    for (const thresh of thresholds) {
+      const bmp = createVisnamBinarizedBmp(decoded, 380, 15, thresh);
+      for (const psm of psms) {
+        try {
+          await worker.setParameters({
+            tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+            tessedit_pageseg_mode: psm as any,
+          });
+          const res = await worker.recognize(bmp);
+          const cleaned = postProcessOcrText(res.data.text || '', {
+            digitsOnly: true,
+            expectedLength: 4,
+          });
+          if (/^\d{4}$/.test(cleaned)) {
+            return {
+              code: cleaned,
+              confidence: res.data.confidence || 85,
+            };
+          }
+        } catch {
+          // Tiếp tục PSM kế tiếp
+        }
+      }
+    }
+
+    return null;
+  })();
+
+  const timeoutPromise = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), timeoutMs)
+  );
+
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+
+export async function solveCaptchaWithTesseract(
+  imageInput: Buffer | string | Uint8Array,
+  options?: TesseractSolveOptions
+): Promise<{ code: string; confidence: number }> {
+  const timeoutMs = options?.timeoutMs || 12000;
+
+  const recognitionPromise = (async () => {
+    let buf: Buffer;
+    if (typeof imageInput === 'string') {
+      const trimmed = imageInput.trim();
+      if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
+        throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
+      }
+      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, '');
+      buf = Buffer.from(cleanB64, 'base64');
+    } else {
+      buf = Buffer.from(imageInput);
+    }
+
+    if (buf.length >= 4 && buf.slice(0, 10).toString('utf-8').includes('<svg')) {
+      throw new Error('Tesseract không hỗ trợ định dạng SVG trực tiếp.');
+    }
+
+    const isPng = buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    if (options?.preprocessVisnam === true && isPng) {
+      const visnamRes = await solveVisnamCaptcha(buf, Math.min(timeoutMs, 3500));
+      if (visnamRes) {
+        return visnamRes;
+      }
+    }
+
+    const digitsOnly = options?.digitsOnly === true;
+    const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
+
+    let processBuf = buf;
+
+    if (options?.preprocessVisnam === true && isPng) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        processBuf = createVisnamBinarizedBmp(decoded, 380, 15, 165);
+      }
+    } else if (options?.preprocessEasyInvoice === true && isPng) {
+      const decoded = decodePngRgba(buf);
+      if (decoded) {
+        processBuf = createBinarizedBmp(decoded, 3, 25, 145);
+      }
+    } else if (options?.preprocessPosCaptcha === true && isPng) {
+      const decoded = decodePngRgba(buf);
+      if (decoded && decoded.width < 300) {
+        processBuf = createPosBinarizedBmp(decoded, 2.5, 145, 12);
+      }
+    }
+
+    const worker = await getWorker(whitelist);
+    const result = await worker.recognize(processBuf);
+    const rawText = result.data.text || '';
+
+    const cleaned = postProcessOcrText(rawText, {
+      digitsOnly,
+      expectedLength: options?.expectedLength,
+    });
+
+    return {
+      code: cleaned,
+      confidence: result.data.confidence || 0,
+    };
+  })();
+
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Tesseract timeout vượt quá ${timeoutMs}ms`)), timeoutMs)
+  );
+
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+
+export async function terminateTesseract(): Promise<void> {
+  if (tesseractWorker) {
+    await tesseractWorker.terminate();
+    tesseractWorker = null;
+  }
+}
