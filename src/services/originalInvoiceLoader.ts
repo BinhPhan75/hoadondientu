@@ -23,19 +23,18 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
   const baseCacheKey = getInvoiceOriginalCacheKey(invoice);
   const provider = resolveInvoiceProvider(invoice);
   // Providers that had legacy mock/error caches use versioned keys
-  const cacheKey = provider === 'THAISON' || provider === 'MISA' || provider === 'MINVOICE'
-    ? baseCacheKey + '|verified-original-v5'
-    : baseCacheKey;
+  const cacheKey = provider === 'THAISON'
+    ? baseCacheKey + '|thai-son-identity-v6'
+    : provider === 'MISA' || provider === 'MINVOICE'
+      ? baseCacheKey + '|verified-original-v5' : baseCacheKey;
   const xmlLookup = invoice.rawXml ? extractLookupDetailsFromXml(invoice.rawXml) : { lookupCode: '', lookupUrl: '' };
   const sellerPortal = provider === 'THAISON' ? lookupPortalForSeller(invoice.nbmst) : undefined;
   const originalUrl = provider === 'THAISON'
     ? (normalizeThaiSonPortalUrl(xmlLookup.lookupUrl || invoice.lookupUrl) || xmlLookup.lookupUrl || invoice.lookupUrl || '')
     : (xmlLookup.lookupUrl || invoice.lookupUrl || '');
-  const isGenericThaiSon = !originalUrl || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(originalUrl);
-  // A generic solution-provider page is not evidence of the seller's tenant.
-  // Never submit a seller-specific lookup code to an unverified generic portal.
+  // Use the explicitly supplied invoice portal; seller-specific cache is only a fallback.
   const resolvedPortal = provider === 'THAISON'
-    ? (isGenericThaiSon ? (sellerPortal || '') : originalUrl)
+    ? (originalUrl || sellerPortal || '')
     : originalUrl;
   const resolvedCode = xmlLookup.lookupCode || invoice.lookupCode;
   const requestKey = JSON.stringify([cacheKey, provider, resolvedCode, resolvedPortal]);
@@ -46,7 +45,7 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
     const hasPoisonedLegacyCache = provider === 'THAISON' || provider === 'MISA' || provider === 'MINVOICE';
     const cached = await readCachedOriginalPdf(cacheKey).catch(() => null)
       || (!hasPoisonedLegacyCache ? await readCachedOriginalPdf(legacyKey).catch(() => null) : null);
-    if (cached) return cached;
+    if (cached && !(provider === 'THAISON' && cached.type.includes('text/html'))) return cached;
     const failed = failures.get(requestKey);
     if (failed && failed.expires > Date.now()) throw failed.error;
     if (!invoice.rawXml) {
@@ -77,6 +76,10 @@ export async function loadOriginalInvoice(invoice: GDTInvoice): Promise<Blob> {
       const isZip = blob.type.includes('application/zip');
       const isHtml = blob.type.includes('text/html') && /<(!doctype|html|head|div|style)/i.test(head);
       if (!isPdf && !isHtml && !isZip) throw new Error('Nhà cung cấp không trả về bản gốc hợp lệ.');
+      // Thai Son HTML must be checked server-side and never accepted from old caches.
+      if (provider === 'THAISON' && isHtml) {
+        throw new Error('Bản HTML Thái Sơn không được chứng thực như PDF gốc; hãy tra cứu qua CAPTCHA thủ công để nhận bản đã xác minh.');
+      }
       const original = new Blob([blob], { type: isPdf ? 'application/pdf' : isZip ? 'application/zip' : 'text/html' });
       // Storage quota errors must not trigger another paid provider lookup.
       await writeCachedOriginalPdf(cacheKey, original).catch(error => console.warn('[Original cache]', error));

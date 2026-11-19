@@ -55,3 +55,10 @@ test('Real Thai Son shared lookup form is valid despite marketing navigation', (
 test('Marketing-only page remains invalid even when it mentions invoice-related text', () => {
   assert.equal(isThaiSonMarketingPage(marketing), true);
 });
+
+
+test('Thai Son marketing with incidental invoice identifiers is not accepted as original', () => {
+  const homepage = marketing.replace('</body>',
+    '<p>MST 0401515239, ký hiệu C26MMR, Số hóa đơn: 0000603</p></body>');
+  assert.equal(verifiedThaiSonInvoiceHtmlWithSeries(homepage,'0401515239','603','C26MMR'),undefined);
+});

@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import JSZip from 'jszip';
+import { verifyIssuerInvoiceBytes } from './invoiceIdentityVerifier';
 import { solveCaptchaWithGemini, ALPHANUMERIC_CAPTCHA_PROMPT } from './invoice-engine/captcha/geminiCaptchaSolver';
 import { OriginalInvoiceError } from './invoice-engine/OriginalInvoiceError';
 
@@ -469,6 +470,15 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
       const resultBody = Buffer.from(await result.arrayBuffer());
       const directOriginal = await extractThaiSonOriginalContent(resultBody);
       if (directOriginal && !(directOriginal.extension === '.pdf' && isThaiSonHelpPdf(directOriginal.bytes))) {
+        const verified = await verifyIssuerInvoiceBytes(directOriginal.bytes, directOriginal.type, {
+          sellerTaxCode: params.sellerTaxCode, invoiceSeries: params.invoiceSeries, invoiceNo: params.invoiceNo,
+        });
+        if (!verified.ok) {
+          throw new OriginalInvoiceError(
+            'Tệp tải Thái Sơn không khớp hóa đơn đang mở: ' + verified.reason,
+            'THAISON', 'INVOICE_IDENTITY_MISMATCH', 422, portalBase
+          );
+        }
         return {
           success: true, contentType: directOriginal.type, pdfBuffer: directOriginal.bytes,
           pdfBase64: directOriginal.bytes.toString('base64'),
@@ -483,7 +493,7 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
-      let displayHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
+      let displayHtml = verifiedThaiSonInvoiceHtmlWithSeries(html, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
       const advertisedTargets = extractThaiSonDownloadTargets(html);
       // The issuer may render site navigation with download-like links on
       // the search page. These are not proof that invoice lookup succeeded.
@@ -531,15 +541,20 @@ export async function downloadOriginalThaiSonPdf(params: ThaiSonDownloadParams):
             const evidence = targetUrl.href.includes(params.lookupCode.trim()) ||
               (digits.length >= 4 && targetUrl.href.includes(digits));
             if (displayHtml || evidence) {
-              originalContent = candidate;
-              break;
+              const verified = await verifyIssuerInvoiceBytes(candidate.bytes, candidate.type, {
+                sellerTaxCode: params.sellerTaxCode, invoiceSeries: params.invoiceSeries, invoiceNo: params.invoiceNo,
+              });
+              if (verified.ok) {
+                originalContent = candidate;
+                break;
+              }
             }
           }
           const mime = targetResponse.headers.get('content-type') || '';
           if (target.depth < 2 && bytes.length < 1500000 &&
               (/html/i.test(mime) || /<!doctype html|<html/i.test(bytes.subarray(0, 250).toString('utf8')))) {
             const innerHtml = bytes.toString('utf8');
-            displayHtml = displayHtml || verifiedThaiSonInvoiceHtml(innerHtml, params.sellerTaxCode, params.invoiceNo);
+            displayHtml = displayHtml || verifiedThaiSonInvoiceHtmlWithSeries(innerHtml, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
             const nested = extractThaiSonDownloadTargets(innerHtml);
             nested.forEach(item => queue.push({ ...item, base: targetResponse.url, depth: target.depth + 1 }));
           }
