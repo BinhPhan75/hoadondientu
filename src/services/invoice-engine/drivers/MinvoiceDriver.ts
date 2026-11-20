@@ -128,6 +128,8 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
       );
     }
 
+    const token = (options?.recaptchaToken || (options?.customInfo as any)?.recaptchaToken || '').trim();
+
     // M-invoice's live portal uses SearchInvoiceCaptcha, not the legacy
     // SearchInvoice operation. The CAPTCHA token must be acquired through a
     // legitimate user interaction supported by the provider. Never mint,

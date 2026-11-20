@@ -271,13 +271,14 @@ export function createPosBinarizedBmp(
 
 export function createVisnamBinarizedBmp(
   decoded: { width: number; height: number; data: Buffer },
-  targetWidth = 380,
-  padding = 15,
-  lumThreshold = 165
+  targetWidth = 240,
+  padding = 12,
+  lumThreshold = 175,
+  targetHeight?: number
 ): Buffer {
   const { width, height, data } = decoded;
-  const targetW = Math.max(200, Math.min(targetWidth, width));
-  const targetH = Math.max(50, Math.round((height * targetW) / width));
+  const targetW = Math.max(160, Math.min(targetWidth, width));
+  const targetH = targetHeight ? Math.max(40, targetHeight) : Math.max(50, Math.round((height * targetW) / width));
   const totalW = targetW + padding * 2;
   const totalH = targetH + padding * 2;
 
@@ -318,7 +319,7 @@ export function createVisnamBinarizedBmp(
       const cG = Math.round(g * a + 255 * (1 - a));
       const cB = Math.round(b * a + 255 * (1 - a));
 
-      const isRedLine = cR > cG + 35 && cR > cB + 35;
+      const isRedLine = cR > cG + 30 && cR > cB + 30;
       const isGreenLine = cG > cR + 25 && cG > cB + 25;
       const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
 
@@ -398,7 +399,7 @@ export interface TesseractSolveOptions {
 
 export async function solveVisnamCaptcha(
   imageInput: Buffer | string | Uint8Array,
-  timeoutMs = 2500
+  timeoutMs = 3000
 ): Promise<{ code: string; confidence: number } | null> {
   if (tesseractBrokenOnHost) return null;
 
@@ -421,22 +422,27 @@ export async function solveVisnamCaptcha(
       const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
       if (!worker) return null;
 
-      const bmp = createVisnamBinarizedBmp(decoded, 380, 15, 165);
-      await worker.setParameters({
-        tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
-        tessedit_pageseg_mode: '8' as any,
-      });
-      const res = await worker.recognize(bmp);
-      const cleaned = postProcessOcrText(res.data.text || '', {
-        digitsOnly: true,
-        expectedLength: 4,
-      });
-      if (/^\d{4}$/.test(cleaned)) {
-        return {
-          code: cleaned,
-          confidence: res.data.confidence || 85,
-        };
+      const passes = [
+        { w: 240, h: 90, psm: '8', lum: 175 },
+        { w: 220, h: 80, psm: '8', lum: 175 },
+        { w: 260, h: 90, psm: '8', lum: 185 },
+        { w: 240, h: 90, psm: '7', lum: 175 },
+        { w: 320, h: 80, psm: '8', lum: 175 },
+      ];
+
+      for (const pass of passes) {
+        const bmp = createVisnamBinarizedBmp(decoded, pass.w, 12, pass.lum, pass.h);
+        await worker.setParameters({
+          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+          tessedit_pageseg_mode: pass.psm as any,
+        });
+        const res = await worker.recognize(bmp);
+        const cleaned = postProcessOcrText(res.data.text || '', { digitsOnly: true, expectedLength: 4 });
+        if (/^\d{4}$/.test(cleaned)) {
+          return { code: cleaned, confidence: res.data.confidence || 85 };
+        }
       }
+
       return null;
     } catch (err) {
       if (isMissingWasmOrCoreError(err)) {

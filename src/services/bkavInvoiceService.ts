@@ -1,9 +1,16 @@
 /** Download the provider PDF exposed by the public Bkav eHoadon lookup page. */
 export async function downloadOriginalBkavPdf(params: {
-  lookupCode: string;
+  lookupCode?: string;
+  xml?: string;
+  recaptchaToken?: string;
   timeoutMs?: number;
 }): Promise<{ data: Buffer; filename: string; contentType: string }> {
-  const lookupCode = String(params.lookupCode || '').trim();
+  let lookupCode = String(params.lookupCode || '').trim();
+  if (!lookupCode && params.xml) {
+    const match = params.xml.match(/<(?:MTDiep|MaTraCuu|MTC|MaSoBiMat|MaTraCuuHD)>([^<]+)<\//i) ||
+      params.xml.match(/MTC[:\s=]+([A-Za-z0-9_-]+)/i);
+    if (match) lookupCode = match[1].trim();
+  }
   if (!lookupCode) throw new Error('Mã tra cứu Bkav eHoadon không được để trống.');
 
   const controller = new AbortController();

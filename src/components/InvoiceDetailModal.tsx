@@ -36,7 +36,7 @@ import {
 import { ensureInvoiceItems, hasGenuineItems, extractTagValue, parseGDTInvoiceXml } from '../utils/xmlParser';
 import { resolveInvoiceProvider } from '../utils/providerRouting';
 import { loadOriginalInvoice } from '../services/originalInvoiceLoader';
-import { fetchVisnamCaptcha, fetchVisnamInvoicePdf } from '../services/visnamClient';
+import { fetchVisnamCaptcha, fetchVisnamInvoicePdf, autoLookupVisnamInvoicePdf } from '../services/visnamClient';
 import { fetchSaigonCoopCaptcha, submitSaigonCoopLookup } from '../services/saigonCoopClient';
 import { VisnamCaptchaModal } from './VisnamCaptchaModal';
 import { SaigonCoopCaptchaModal } from './SaigonCoopCaptchaModal';
@@ -187,11 +187,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [originalProviderZipUrl, setOriginalProviderZipUrl] = useState<string | null>(null);
   const [isDownloadingEasyInvoice, setIsDownloadingEasyInvoice] = useState(false);
   const [isVisnamCaptchaOpen, setIsVisnamCaptchaOpen] = useState(false);
-  const [visnamCaptcha, setVisnamCaptcha] = useState<{ key: string; image: string } | null>(null);
+  const [visnamCaptcha, setVisnamCaptcha] = useState<{ key: string; image: string; autoSolvedCode?: string } | null>(null);
   const [visnamCaptchaCode, setVisnamCaptchaCode] = useState('');
   const [isLoadingVisnamCaptcha, setIsLoadingVisnamCaptcha] = useState(false);
   const [isSubmittingVisnamCaptcha, setIsSubmittingVisnamCaptcha] = useState(false);
+  const [isVisnamOcrRunning, setIsVisnamOcrRunning] = useState(false);
   const [visnamCaptchaError, setVisnamCaptchaError] = useState<string | null>(null);
+  const visnamRetryCountRef = useRef(0);
   const [isSaigonCoopCaptchaOpen, setIsSaigonCoopCaptchaOpen] = useState(false);
   const [isThaiSonSharedCaptcha, setIsThaiSonSharedCaptcha] = useState(false);
   const [saigonCoopCaptcha, setSaigonCoopCaptcha] = useState<{ state: string; image: string } | null>(null);
@@ -714,6 +716,34 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
   };
 
+  const runVisnamOcr = async (image: string, targetId: string, sequence: number) => {
+    if (!image) return;
+    setIsVisnamOcrRunning(true);
+    try {
+      const res = await fetch('/api/invoice-downloader/solve-captcha', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image,
+          preprocessVisnam: true,
+          provider: 'visnam',
+          timeoutMs: 3500
+        })
+      });
+      const data = await res.json();
+      if (openInvoiceIdRef.current !== targetId || originalLoadSequence.current !== sequence) return;
+      if (data.success && data.code && /^\d{4}$/.test(String(data.code).trim())) {
+        setVisnamCaptchaCode(String(data.code).trim());
+      }
+    } catch {
+      // Ignored
+    } finally {
+      if (openInvoiceIdRef.current === targetId && originalLoadSequence.current === sequence) {
+        setIsVisnamOcrRunning(false);
+      }
+    }
+  };
+
   const refreshVisnamCaptcha = async (targetId: string, sequence: number) => {
     setIsLoadingVisnamCaptcha(true);
     setVisnamCaptchaError(null);
@@ -721,7 +751,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const captcha = await fetchVisnamCaptcha();
       if (openInvoiceIdRef.current !== targetId || originalLoadSequence.current !== sequence) return;
       setVisnamCaptcha(captcha);
-      setVisnamCaptchaCode('');
+      if (captcha.autoSolvedCode && /^\d{4}$/.test(captcha.autoSolvedCode)) {
+        setVisnamCaptchaCode(captcha.autoSolvedCode);
+      } else {
+        setVisnamCaptchaCode('');
+        void runVisnamOcr(captcha.image, targetId, sequence);
+      }
     } catch (error) {
       if (openInvoiceIdRef.current === targetId && originalLoadSequence.current === sequence) {
         setVisnamCaptcha(null);
@@ -737,8 +772,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const handleVisnamDirectLookup = async () => {
     if (!effectiveInvoice) return;
     const target = effectiveInvoice;
-    const code = String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
-    if (!code) {
+    const lookupCode = String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
+    if (!lookupCode) {
       await showAlert({
         title: 'Thiếu mã tra cứu VIN-HOADON',
         message: 'Không tìm thấy mã số bí mật trong XML hóa đơn. Vui lòng kiểm tra dữ liệu hóa đơn.',
@@ -746,7 +781,47 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       });
       return;
     }
+
     const sequence = ++originalLoadSequence.current;
+    visnamRetryCountRef.current = 0;
+    setIsDownloadingEasyInvoice(true);
+    setOriginalLoadError(null);
+    setEasyInvoiceDownloadStatus('Đang tự động nhận diện CAPTCHA qua OCR nội bộ và tải PDF VIN-HOADON...');
+
+    const identity = {
+      sellerTaxCode: String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim(),
+      invoiceSeries: String(target.khhdon || extractTagValue(target.rawXml || '', 'KHHDon') || '').trim(),
+      invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
+    };
+
+    // Bước 1: Thử tự động giải mã CAPTCHA qua OCR nội bộ và tải trực tiếp ngầm (không cần mở modal)
+    try {
+      const autoResult = await autoLookupVisnamInvoicePdf({ lookupCode, identity });
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+
+      const url = URL.createObjectURL(autoResult.blob);
+      setOriginalProviderPdfUrl(url);
+      setEasyInvoiceDownloadStatus('Đã tự động tải và xác minh PDF gốc VIN-HOADON qua OCR nội bộ.');
+
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = autoResult.filename;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      try {
+        downloadLink.click();
+      } finally {
+        downloadLink.remove();
+      }
+      return;
+    } catch (autoErr: any) {
+      console.info('[Visnam Auto-Lookup] Chưa tải tự động ngầm được, mở hộp thoại tự điền & xác nhận:', autoErr?.message);
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+    } finally {
+      setIsDownloadingEasyInvoice(false);
+    }
+
+    // Bước 2: Nếu chưa tải được ngầm, mở modal xác minh nhưng tự điền OCR và tự động xác nhận
     setVisnamCaptcha(null);
     setVisnamCaptchaCode('');
     setVisnamCaptchaError(null);
@@ -802,9 +877,20 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
     } catch (error) {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
-        setVisnamCaptcha(null);
-        setVisnamCaptchaCode('');
-        setVisnamCaptchaError(error instanceof Error ? error.message : 'Không tải được PDF VIN-HOADON.');
+        // Tự động thử lại CAPTCHA mới nếu nhận diện sai hoặc hết hạn (tối đa 2 lần)
+        if (visnamRetryCountRef.current < 2) {
+          visnamRetryCountRef.current++;
+          setVisnamCaptchaError('Mã CAPTCHA chưa chính xác. Đang tự động đổi ảnh khác và nhận diện lại...');
+          setTimeout(() => {
+            if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+              void refreshVisnamCaptcha(target.id, sequence);
+            }
+          }, 600);
+        } else {
+          setVisnamCaptcha(null);
+          setVisnamCaptchaCode('');
+          setVisnamCaptchaError(error instanceof Error ? error.message : 'Không tải được PDF VIN-HOADON.');
+        }
       }
     } finally {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
@@ -2427,9 +2513,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         error={visnamCaptchaError}
         isLoading={isLoadingVisnamCaptcha}
         isSubmitting={isSubmittingVisnamCaptcha}
+        isOcrRunning={isVisnamOcrRunning}
         onCodeChange={value => setVisnamCaptchaCode(value.replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase())}
         onRefresh={() => {
           if (effectiveInvoice) void refreshVisnamCaptcha(effectiveInvoice.id, originalLoadSequence.current);
+        }}
+        onAutoSolve={() => {
+          if (effectiveInvoice && visnamCaptcha?.image) {
+            void runVisnamOcr(visnamCaptcha.image, effectiveInvoice.id, originalLoadSequence.current);
+          }
         }}
         onCancel={closeVisnamCaptcha}
         onSubmit={handleVisnamCaptchaSubmit}
