@@ -326,12 +326,10 @@ export async function submitThaiSonCommonManualLookup(params: {
   const providerMessage = (returnedForm.error || $('#listresult').text())
     .replace(/\s+/g, ' ').trim().slice(0, 240);
   const isCaptchaError = /captcha|mã kiểm tra|mã xác thực/i.test(providerMessage);
-  if (returnedForm.formFound && returnedForm.field === state.lookupField && !providerMessage && !verifiedHtml) {
-    throw providerError(
-      'Cổng Thái Sơn trả lại biểu mẫu tra cứu, chưa mở hóa đơn. Có thể mã CAPTCHA phân biệt chữ hoa/thường hoặc website yêu cầu xử lý nút tra cứu bằng JavaScript. Vui lòng kiểm tra mã đúng như ảnh.',
-      'LOOKUP_NOT_COMPLETED'
-    );
-  }
+  // The shared portal may keep the lookup form on the page while rendering
+  // a result modal or advertising a PDF endpoint. Inspect verified downloads
+  // before declaring lookup failure; never treat the form alone as success.
+  const returnedToForm = returnedForm.formFound && returnedForm.field === state.lookupField;
 
   const queue = extractThaiSonDownloadTargets(html).map(target => ({
     ...target,
@@ -389,10 +387,24 @@ export async function submitThaiSonCommonManualLookup(params: {
   }
   if (verifiedHtml) return { kind: 'html', html: verifiedHtml };
 
+  // Distinguish an explicit captcha rejection from a returned form with no
+  // verified invoice. This avoids blaming the user's captcha when the
+  // provider's JavaScript/XHR search has not run in the server-side flow.
+  const providerDetail = providerMessage.replace(/[\r\n]/g, ' ').slice(0, 160);
+  if (isCaptchaError) {
+    throw providerError('Cổng Thái Sơn báo lỗi CAPTCHA: ' + providerDetail +
+      '. Lấy CAPTCHA mới và nhập lại.', 'CAPTCHA_REJECTED');
+  }
+  if (returnedToForm) {
+    throw providerError(
+      providerDetail
+        ? 'Cổng Thái Sơn chưa trả hóa đơn: ' + providerDetail
+        : 'Cổng Thái Sơn nhận yêu cầu nhưng chỉ trả lại biểu mẫu; chưa nhận được kết quả PDF/XML. Có thể website xử lý tra cứu bằng yêu cầu JavaScript riêng.',
+      'LOOKUP_NOT_COMPLETED'
+    );
+  }
   throw providerError(
-    isCaptchaError
-      ? 'CAPTCHA không đúng hoặc đã hết hạn. Tải CAPTCHA mới rồi thử lại.'
-      : providerMessage || 'Kết quả từ cổng Thái Sơn cổng chung không khớp MST và số hóa đơn đang mở; không hiển thị kết quả.',
-    isCaptchaError ? 'CAPTCHA_REJECTED' : 'INVOICE_NOT_VERIFIED'
+    providerDetail || 'Cổng Thái Sơn chưa trả PDF/XML khớp MST, ký hiệu và số hóa đơn.',
+    'INVOICE_NOT_VERIFIED'
   );
 }

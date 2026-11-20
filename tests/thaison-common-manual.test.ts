@@ -100,3 +100,41 @@ test('Thai Son manual search sends clicked submit button and retains action quer
     assert.equal(new URLSearchParams(requests[2].body).get('CaptchaInputText'),'EIVJ');
   }finally{globalThis.fetch=prev;}
 });
+
+
+test('Shared Thai Son form can remain in response while an issuer PDF link is checked', async () => {
+  const prev=globalThis.fetch;
+  const urls: string[]=[];
+  globalThis.fetch=(async (url:string|URL|Request,init?:RequestInit)=>{
+    urls.push(String(url));
+    if(urls.length===1)return new Response(
+      '<form method="POST" action="/tra-cuu">' +
+      '<input name="MA_NHAN_HOA_DON"><input name="CaptchaInputText">' +
+      '<img src="/Captcha/Show"></form>',
+      {headers:{'Content-Type':'text/html','Set-Cookie':'session=demo; Path=/'}}
+    );
+    if(urls.length===2)return new Response(new Uint8Array(100).fill(3),{
+      headers:{'Content-Type':'image/png'}
+    });
+    if(urls.length===3)return new Response(
+      '<form method="POST" action="/tra-cuu">' +
+      '<input name="MA_NHAN_HOA_DON"><input name="CaptchaInputText">' +
+      '<img src="/Captcha/Show"></form>' +
+      '<a href="/invoice/download.pdf">Tải PDF hóa đơn</a>',
+      {headers:{'Content-Type':'text/html'}}
+    );
+    if(urls.length===4)return new Response('not an invoice pdf',{
+      headers:{'Content-Type':'text/plain'}
+    });
+    throw new Error('Unexpected request');
+  }) as typeof fetch;
+  try {
+    const challenge=await createThaiSonCommonManualCaptcha('A46EKFYXHKM');
+    await assert.rejects(submitThaiSonCommonManualLookup({
+      state:challenge.state,lookupCode:'A46EKFYXHKM',captcha:'ABCD',
+      sellerTaxCode:'0401515239',invoiceNo:'603',invoiceSeries:'C26MMR',
+    }),/chỉ trả lại biểu mẫu/);
+    assert.equal(urls.length,4);
+    assert.equal(new URL(urls[3]).pathname,'/invoice/download.pdf');
+  }finally{globalThis.fetch=prev;}
+});
