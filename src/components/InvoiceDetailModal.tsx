@@ -1035,15 +1035,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
     if (actualProvider === 'THAISON' && /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(tenantUrl)) {
-      // The public site's search button uses a browser flow not reproduced by
-      // server-side HTML form POST. Open the verified official page and allow
-      // importing the original PDF/XML/ZIP afterward. No false success or AI use.
-      const code = String(extractedLookup.lookupCode || target.lookupCode || '').trim();
-      window.open('https://einvoice.vn/tra-cuu', '_blank', 'noopener,noreferrer');
-      if (code) void navigator.clipboard.writeText(code).catch(() => {});
-      setOriginalLoadError(null);
-      setEasyInvoiceDownloadStatus('Đã mở cổng Thái Sơn. Mã nhận hóa đơn: ' + code +
-        '. Nhập CAPTCHA trên cổng, tải PDF/XML/ZIP và chọn Nhập PDF/XML/ZIP gốc để lưu vào phần mềm.');
+      // XML contains the provider URL and receipt code. Start an in-app,
+      // same-session lookup and ask for CAPTCHA only when required.
+      // Uploading a file is an optional fallback, not the primary workflow.
+      setIsThaiSonSharedCaptcha(true);
+      void handleSaigonCoopCaptchaOpen(true);
       return;
     }
     if (actualProvider === 'THAISON' && isSaigonCoopPortalUrl(tenantUrl)) {
@@ -2179,7 +2175,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <div className="inline-flex items-center gap-2 flex-wrap">
                 {/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(thaiSonIssuerPortal) && (
                   <span className="text-[11px] text-slate-400">
-                    Cổng Thái Sơn có CAPTCHA riêng. Tải tệp trên cổng, sau đó nhập vào phần mềm để xác minh và lưu.
+                    Tự lấy mã từ XML, hiển thị CAPTCHA khi cần. Nhập tệp đã tải chỉ là phương án dự phòng.
                   </span>
                 )}
                 <input ref={thaiSonFileInputRef} type="file" accept=".pdf,.xml,.zip,application/pdf,application/zip,text/xml"
@@ -2218,7 +2214,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
                         {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                         <span>{isDownloadingEasyInvoice ? 'Đang tải bản gốc...' : /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(thaiSonIssuerPortal)
-                          ? 'Mở cổng Thái Sơn để tải gốc' : 'Tải bản gốc Thái Sơn'}</span>
+                          ? 'Tra cứu và tải gốc Thái Sơn' : 'Tải bản gốc Thái Sơn'}</span>
                       </button>
                     ) : null}
                     {originalEasyInvoiceHtml && (
