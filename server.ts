@@ -25,7 +25,6 @@ import { downloadOriginalCyberbillPdf } from './src/services/cyberbillInvoiceSer
 import { downloadOriginalThaiSonPdf, downloadOriginalThaiSonXml } from './src/services/thaiSonInvoiceService';
 import { createSaigonCoopManualCaptcha, submitSaigonCoopManualLookup } from './src/services/saigonCoopInvoiceService';
 import { createThaiSonCommonManualCaptcha, submitThaiSonCommonManualLookup } from './src/services/thaiSonCommonManualService';
-import { verifyIssuerInvoiceBytes } from './src/services/invoiceIdentityVerifier';
 import { downloadOriginalBkavPdf } from './src/services/bkavInvoiceService';
 import { VISNAM_RAPIDSSL_INTERMEDIATE } from './src/services/visnamCertificate';
 import { resolveInvoiceProvider } from './src/utils/providerRouting';
@@ -3181,46 +3180,6 @@ app.all('/api/cyberbill/download-pdf', async (req, res) => {
 });
 
 
-
-// Verify a locally supplied original downloaded by the user from E-Invoice.
-// This endpoint does NOT fetch a provider URL and does not solve CAPTCHA.
-app.post('/api/thaison-common/verify-upload', async (req, res) => {
-  try {
-    const base64 = req.body?.fileBase64;
-    const sellerTaxCode = String(req.body?.sellerTaxCode || '');
-    const invoiceSeries = String(req.body?.invoiceSeries || '');
-    const invoiceNo = String(req.body?.invoiceNo || '');
-    if (typeof base64 !== 'string' || base64.length < 100 || base64.length > 25_000_000 ||
-        !/^[A-Za-z0-9+/]+={0,2}$/.test(base64) ||
-        !/^\d{10}(?:-\d{3})?$/.test(sellerTaxCode) ||
-        !/^[A-Za-z0-9]{4,20}$/.test(invoiceSeries) ||
-        !/^\d{1,10}$/.test(invoiceNo)) {
-      return res.status(400).json({success:false,error:'Thông tin hoặc dung lượng tệp hóa đơn không hợp lệ.'});
-    }
-    const bytes = Buffer.from(base64, 'base64');
-    if (bytes.length < 100 || bytes.length > 18_000_000) {
-      return res.status(400).json({success:false,error:'Chỉ nhận tệp hóa đơn gốc dung lượng tối đa 18 MB.'});
-    }
-    const head = bytes.subarray(0, 100).toString('latin1');
-    const isPdf = head.startsWith('%PDF-');
-    const isZip = head.startsWith('PK\x03\x04');
-    const isXml = /^\s*(?:<\?xml[^>]*>\s*)?<HDon(?:\s|>)/i.test(bytes.subarray(0,300).toString('utf8').replace(/^\uFEFF/,''));
-    if (!isPdf && !isZip && !isXml) {
-      return res.status(422).json({success:false,error:'Đây không phải PDF, ZIP hoặc XML hóa đơn gốc.'});
-    }
-    const contentType = isPdf ? 'application/pdf' : isZip ? 'application/zip' : 'application/xml';
-    const verification = await verifyIssuerInvoiceBytes(bytes, contentType, {
-      sellerTaxCode, invoiceSeries, invoiceNo
-    });
-    if (!verification.ok) {
-      return res.status(422).json({success:false,error:'Tệp không khớp hóa đơn đang mở: ' + verification.reason});
-    }
-    res.setHeader('Cache-Control','no-store');
-    return res.json({success:true,contentType,verified:true});
-  } catch {
-    return res.status(422).json({success:false,error:'Không thể đọc hoặc xác minh tệp hóa đơn gốc.'});
-  }
-});
 
 app.post('/api/thaison-common/captcha', async (req, res) => {
   try {
