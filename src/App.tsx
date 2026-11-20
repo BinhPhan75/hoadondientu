@@ -1964,6 +1964,11 @@ export default function App() {
     return <LoginScreen onLoginSuccess={(user) => setCurrentUser(user)} />;
   }
 
+  // Compact layout for the embedded PMKT purchase lookup only.
+  // The standalone invoice downloader retains its full navigation and tax summary.
+  const embeddedPurchaseMode = window.parent !== window
+    && new URLSearchParams(window.location.search).get('pmkt') === 'purchase';
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#f3f4f6] text-[#1f2937]">
       {/* 1. Left Sidebar (High Density Dark Theme) */}
@@ -2016,8 +2021,8 @@ export default function App() {
 
       {/* 2. Main Content Area */}
       <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
-        {/* Top Header */}
-        <Header
+        {/* Top Header (standalone downloader only) */}
+        {!embeddedPurchaseMode && <Header
           account={account}
           selectedInvoices={selectedInvoices}
           totalInvoicesCount={filteredInvoices.length}
@@ -2033,10 +2038,10 @@ export default function App() {
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={handleToggleSidebar}
           activeReportTab={activeReportTab}
-        />
+        />}
 
         {/* Thanh chuyển đổi Báo cáo: Bảng kê mua vào | Bảng kê bán ra | Tờ khai thuế GTGT */}
-        <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-3 shrink-0 shadow-2xs">
+        {!embeddedPurchaseMode && <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-3 shrink-0 shadow-2xs">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
             {/* Tab 1: Bảng kê mua vào (Mẫu 01-2/GTGT) */}
             <button
@@ -2106,7 +2111,7 @@ export default function App() {
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
             <span>Hệ thống Kế toán Thuế CQT</span>
           </div>
-        </div>
+        </div>}
 
         {/* Nội dung tương ứng theo Tab */}
         {activeReportTab === 'declaration' ? (
@@ -2124,8 +2129,8 @@ export default function App() {
         ) : (
           <>
             <PmktPurchaseTransfer selected={selectedInvoices} invoices={invoices}/>
-            {/* Stats Bar */}
-            <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />
+            {/* Stats Bar (standalone downloader only) */}
+            {!embeddedPurchaseMode && <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />}
 
             {/* Search & Filter Bar */}
             <SearchFilterBar
