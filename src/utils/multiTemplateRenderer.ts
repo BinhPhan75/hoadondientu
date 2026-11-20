@@ -193,7 +193,7 @@ export function getProviderMeta(providerId?: string): ProviderMeta {
         domain: 'ehoadon.vn',
         badge: 'eHoadon',
         color: '#ea580c',
-        portalUrl: 'https://tracuu.ehoadon.vn',
+        portalUrl: 'https://tchd.ehoadon.vn/TCHD',
         description: 'Hóa đơn điện tử Bkav eHoadon'
       };
     case 'VNPAY':

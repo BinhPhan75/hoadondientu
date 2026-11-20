@@ -979,6 +979,42 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     });
   };
 
+  const handleBkavIssuerLookup = async () => {
+    if (!effectiveInvoice) return;
+    const target = effectiveInvoice;
+    // BKAV's MTC is an independent issuer credential, not MCCQT, StoreID,
+    // OrderNumber, invoice serial, or the related adjustment invoice number.
+    const extracted = extractLookupDetails(target.rawXml);
+    const cqt = String(extractTagValue(target.rawXml || '', 'MCCQT') || target.mhdon || '').trim();
+    const provided = String(extracted.lookupCode || target.lookupCode || '').trim();
+    const code = /^[A-Za-z0-9_-]{6,120}$/.test(provided) && provided !== cqt
+      ? provided : '';
+    let copied = false;
+    if (code) {
+      try { await navigator.clipboard.writeText(code); copied = true; } catch {
+        // Show the lookup code if the browser denies clipboard permission.
+      }
+    }
+    if (openInvoiceIdRef.current !== target.id) return;
+    await showAlert({
+      title: code
+        ? (copied ? 'Đã copy mã tra cứu BKAV' : 'Tra cứu BKAV eHoadon')
+        : 'XML chưa có mã tra cứu BKAV',
+      message: code
+        ? (copied
+          ? 'Đã sao chép mã tra cứu. Bấm Xác nhận để mở cổng BKAV, dùng Ctrl + V dán mã rồi tra cứu và tải PDF/XML gốc.'
+          : 'Mã tra cứu BKAV: ' + code +
+            '. Bấm Xác nhận để mở cổng BKAV, dán mã bằng Ctrl + V hoặc nhập trực tiếp.')
+        : 'XML của hóa đơn này không chứa Mã tra cứu BKAV (MTC). Mã Cơ quan Thuế, StoreID và OrderNumber không thay thế được MTC. Hãy lấy mã từ email/SMS gửi hóa đơn của người bán, hoặc đề nghị người bán gửi lại mã. Bấm Xác nhận để mở cổng BKAV và nhập mã tra cứu.',
+      type: code ? (copied ? 'success' : 'warning') : 'warning',
+      confirmText: 'Xác nhận - Mở cổng BKAV',
+      onConfirm: () => {
+        if (code) void navigator.clipboard.writeText(code).catch(() => {});
+        window.open('https://tchd.ehoadon.vn/TCHD', '_blank', 'noopener,noreferrer');
+      },
+    });
+  };
+
   const handleViewOriginalProvider = async () => {
     if (!effectiveInvoice) return;
     let target = effectiveInvoice;
@@ -1443,6 +1479,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setThaiSonPortalRevision(revision => revision + 1);
   };
 
+  const isBkavInvoice = autoDetectedProvider === 'BKAV';
   const isMinvoiceInvoice = autoDetectedProvider === 'MINVOICE';
   const isMisaInvoice = autoDetectedProvider === 'MISA';
   const isVnptInvoice = autoDetectedProvider === 'VNPT';
@@ -2321,6 +2358,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   </button>
                 )}
               </div>
+            ) : isBkavInvoice ? (
+              <button type="button" onClick={() => void handleBkavIssuerLookup()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
+                <ExternalLink className="w-3.5 h-3.5" />
+                Tra cứu hóa đơn BKAV
+              </button>
             ) : (!isSaigonCoopPortal && directLookupUrl &&
                 (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
               <a

@@ -1261,7 +1261,7 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
   // 6i. Bkav eHoadon
   const isBkav = /bkav|ehoadon\.vn|ehoadon\.bkav|0101360697/i.test(rawXml);
   if (isBkav) {
-    if (!lookupUrl) lookupUrl = 'https://ehoadon.bkav.com/tra-cuu';
+    if (!lookupUrl) lookupUrl = 'https://tchd.ehoadon.vn/TCHD';
   }
 
   // 6j. Thái Sơn E-Invoice

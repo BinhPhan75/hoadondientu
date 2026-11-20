@@ -15,7 +15,7 @@ export class BkavDriver extends BaseInvoiceProviderDriver {
     name: 'Bkav eHoadon Driver',
     providerCode: 'BKAV',
     description: 'Tra cứu & xử lý hóa đơn điện tử Bkav eHoadon qua Mã tra cứu / Chữ ký số BKAV-CA',
-    sampleUrl: 'https://ehoadon.bkav.com/tra-cuu',
+    sampleUrl: 'https://tchd.ehoadon.vn/TCHD',
     supportsCaptcha: false,
     requiredFields: ['lookupCode', 'sellerTaxCode']
   };
