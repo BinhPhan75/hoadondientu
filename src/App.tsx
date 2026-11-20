@@ -1,3 +1,4 @@
+import {PmktPurchaseTransfer} from './components/PmktPurchaseTransfer';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -2122,6 +2123,7 @@ export default function App() {
           />
         ) : (
           <>
+            <PmktPurchaseTransfer selected={selectedInvoices} invoices={invoices}/>
             {/* Stats Bar */}
             <TaxSummaryDashboard invoices={filteredInvoices} invoiceType={filters.invoiceType} />
 
