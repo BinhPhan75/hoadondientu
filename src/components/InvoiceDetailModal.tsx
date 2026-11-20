@@ -1006,11 +1006,38 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
     if (actualProvider === 'THAISON' && /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(tenantUrl)) {
-      // XML contains the provider URL and receipt code. Start an in-app,
-      // same-session lookup and ask for CAPTCHA only when required.
-      // Uploading a file is an optional fallback, not the primary workflow.
-      setIsThaiSonSharedCaptcha(true);
-      void handleSaigonCoopCaptchaOpen(true);
+      // Shared Thai Son portal: lookup is performed in the issuer's own
+      // browser page. Do not open the in-app CAPTCHA workflow.
+      const code = String(extractedLookup.lookupCode || target.lookupCode || '').trim();
+      if (!code) {
+        await showAlert({
+          title: 'Thiếu mã tra cứu Thái Sơn',
+          message: 'Không tìm thấy mã nhận hóa đơn trong XML. Vui lòng kiểm tra XML gốc.',
+          type: 'warning',
+          confirmText: 'Đóng',
+        });
+        return;
+      }
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(code);
+        copied = true;
+      } catch {
+        // Clipboard writes may require a direct user gesture on confirmation.
+      }
+      if (openInvoiceIdRef.current !== target.id) return;
+      await showAlert({
+        title: copied ? 'Đã copy mã tra cứu Thái Sơn' : 'Mở cổng tra cứu Thái Sơn',
+        message: copied
+          ? 'Đã sao chép mã nhận hóa đơn. Bấm Xác nhận để mở trang Thái Sơn, nhấn Ctrl + V vào ô Mã nhận hóa đơn rồi nhập CAPTCHA trực tiếp để tải PDF/XML.'
+          : 'Trình duyệt chưa cấp quyền sao chép mã. Bấm Xác nhận để thử sao chép lại và mở trang Thái Sơn. Mã nhận hóa đơn: ' + code + '. Dán bằng Ctrl + V hoặc nhập mã này, sau đó nhập CAPTCHA để tải PDF/XML.',
+        type: copied ? 'success' : 'warning',
+        confirmText: 'Xác nhận - Mở cổng Thái Sơn',
+        onConfirm: () => {
+          void navigator.clipboard.writeText(code).catch(() => {});
+          window.open('https://einvoice.vn/tra-cuu', '_blank', 'noopener,noreferrer');
+        },
+      });
       return;
     }
     if (actualProvider === 'THAISON' && isSaigonCoopPortalUrl(tenantUrl)) {
@@ -2127,11 +2154,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isThaiSonInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                {/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(thaiSonIssuerPortal) && (
-                  <span className="text-[11px] text-slate-400">
-                    Tự lấy link và mã từ XML; chỉ yêu cầu nhập CAPTCHA khi nhà cung cấp cần.
-                  </span>
-                )}
                 {canTryThaiSonOriginal ? (
                   <>
                     {isSaigonCoopPortal ? (
