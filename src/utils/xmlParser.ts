@@ -1003,6 +1003,22 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     .map(block => extractTagValue(block, 'MST'))
     .find(Boolean) || '';
 
+  // Central Retail is a Thai Son customer running its own lookup portal.
+  // Invoice metadata stores [DCTC] and [MaTC] inside *different* TTin/DLieu
+  // nodes rather than standard lookup tags. Read only these explicit markers.
+  const isCentralRetailThaiSon = /<MSTTCGP>\s*0101300842\s*<\/MSTTCGP>/i.test(rawXml);
+  const rawExtraData = extractTagBlocks(rawXml, 'TTin').map(block => extractTagValue(block, 'DLieu'));
+  const centralPortal = rawExtraData.map(value => value.match(/\[DCTC\]([^\[\]<]{1,500})\[\/DCTC\]/i)?.[1]?.trim() || '')
+    .find(value => /^https:\/\/hddt\.centralretail\.com\.vn\/?$/i.test(value)) || '';
+  const centralLookupCode = rawExtraData.map(value => value.match(/\[MaTC\]([A-Za-z0-9_-]{6,64})\[\/MaTC\]/i)?.[1] || '')
+    .find(Boolean) || '';
+  if (isCentralRetailThaiSon && centralPortal && centralLookupCode && isLookupCodeCandidate(centralLookupCode)) {
+    return {
+      lookupCode: centralLookupCode,
+      lookupUrl: 'https://hddt.centralretail.com.vn/vi-vn/tra-cuu-hoa-don-dien-tu',
+    };
+  }
+
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
   const codeTags = [
     'SoBaoMat', 'sobaomat', 'SOBAOMAT',

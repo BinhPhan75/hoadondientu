@@ -1005,6 +1005,39 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     // learned seller-specific portals are only a fallback.
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
+    // Central Retail uses its own Thai Son customer lookup website.
+    // The receipt code [MaTC] is embedded in the signed invoice XML.
+    if (actualProvider === 'THAISON' &&
+        /^https:\/\/hddt\.centralretail\.com\.vn\/vi-vn\/tra-cuu-hoa-don-dien-tu\/?$/i.test(tenantUrl)) {
+      const code = String(extractedLookup.lookupCode || '').trim();
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(code)) {
+        await showAlert({
+          title: 'Thiếu mã tra cứu Central Retail',
+          message: 'Không tìm thấy mã MaTC hợp lệ trong XML hóa đơn Thái Sơn của Central Retail.',
+          type: 'warning', confirmText: 'Đóng',
+        });
+        return;
+      }
+      let copied = false;
+      try { await navigator.clipboard.writeText(code); copied = true; } catch {
+        // Show the code explicitly if clipboard access is unavailable.
+      }
+      if (openInvoiceIdRef.current !== target.id) return;
+      await showAlert({
+        title: copied ? 'Đã copy mã tra cứu Central Retail' : 'Tra cứu hóa đơn Central Retail',
+        message: copied
+          ? 'Đã sao chép mã tra cứu. Bấm Xác nhận để mở cổng Central Retail, nhấn Ctrl + V vào ô mã tra cứu rồi thực hiện các bước trên website để xem hoặc tải hóa đơn gốc.'
+          : 'Trình duyệt chưa cho phép sao chép. Mã tra cứu: ' + code +
+            '. Bấm Xác nhận để mở cổng Central Retail và dán bằng Ctrl + V hoặc nhập mã trực tiếp.',
+        type: copied ? 'success' : 'warning',
+        confirmText: 'Xác nhận - Mở Central Retail',
+        onConfirm: () => {
+          void navigator.clipboard.writeText(code).catch(() => {});
+          window.open('https://hddt.centralretail.com.vn/vi-vn/tra-cuu-hoa-don-dien-tu', '_blank', 'noopener,noreferrer');
+        },
+      });
+      return;
+    }
     if (actualProvider === 'THAISON' && /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(tenantUrl)) {
       // Shared Thai Son portal: lookup is performed in the issuer's own
       // browser page. Do not open the in-app CAPTCHA workflow.
