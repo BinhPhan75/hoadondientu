@@ -981,35 +981,50 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   const handleBkavIssuerLookup = async () => {
     if (!effectiveInvoice) return;
-    const target = effectiveInvoice;
-    // BKAV's MTC is an independent issuer credential, not MCCQT, StoreID,
-    // OrderNumber, invoice serial, or the related adjustment invoice number.
-    const extracted = extractLookupDetails(target.rawXml);
-    const cqt = String(extractTagValue(target.rawXml || '', 'MCCQT') || target.mhdon || '').trim();
-    const provided = String(extracted.lookupCode || target.lookupCode || '').trim();
-    const code = /^[A-Za-z0-9_-]{6,120}$/.test(provided) && provided !== cqt
-      ? provided : '';
-    let copied = false;
-    if (code) {
-      try { await navigator.clipboard.writeText(code); copied = true; } catch {
-        // Show the lookup code if the browser denies clipboard permission.
-      }
+    const initial = effectiveInvoice;
+    let target = initial;
+    // The BKAV official lookup site supports verification from an original
+    // signed invoice XML file WITHOUT an issuer MTC lookup credential.
+    if (!target.rawXml || !/<(?:\w+:)?DSCKS\b/i.test(target.rawXml)) {
+      const detail = await loadInvoiceDetail(target, true);
+      if (openInvoiceIdRef.current !== initial.id) return;
+      if (detail) target = detail;
     }
-    if (openInvoiceIdRef.current !== target.id) return;
+    const raw = String(target.rawXml || '');
+    const signedXml = /<(?:\w+:)?HDon\b/i.test(raw) &&
+      /<(?:\w+:)?DSCKS\b/i.test(raw) &&
+      /<(?:\w+:)?Signature\b/i.test(raw);
+    if (!signedXml) {
+      await showAlert({
+        title: 'Chưa có XML gốc ký số BKAV',
+        message: 'Chưa có XML hóa đơn gốc có chữ ký số để đưa lên BKAV. Không thể thay bằng XML tự tạo hoặc mã Cơ quan Thuế. Hãy tải XML gốc từ dữ liệu hóa đơn, sau đó sử dụng chức năng Tra cứu bằng file XML trên cổng BKAV.',
+        type: 'warning',
+        confirmText: 'Đóng',
+      });
+      return;
+    }
+    const series = String(target.khhdon || extractTagValue(raw, 'KHHDon') || '')
+      .replace(/[^A-Za-z0-9]/g, '');
+    const number = String(target.shdon || extractTagValue(raw, 'SHDon') || '')
+      .replace(/\D/g, '').padStart(7, '0');
+    const filename = 'HoaDon_BKAV_' + (series || 'HD') + '_' + (number || '0') + '.xml';
+    if (openInvoiceIdRef.current !== initial.id) return;
     await showAlert({
-      title: code
-        ? (copied ? 'Đã copy mã tra cứu BKAV' : 'Tra cứu BKAV eHoadon')
-        : 'XML chưa có mã tra cứu BKAV',
-      message: code
-        ? (copied
-          ? 'Đã sao chép mã tra cứu. Bấm Xác nhận để mở cổng BKAV, dùng Ctrl + V dán mã rồi tra cứu và tải PDF/XML gốc.'
-          : 'Mã tra cứu BKAV: ' + code +
-            '. Bấm Xác nhận để mở cổng BKAV, dán mã bằng Ctrl + V hoặc nhập trực tiếp.')
-        : 'XML của hóa đơn này không chứa Mã tra cứu BKAV (MTC). Mã Cơ quan Thuế, StoreID và OrderNumber không thay thế được MTC. Hãy lấy mã từ email/SMS gửi hóa đơn của người bán, hoặc đề nghị người bán gửi lại mã. Bấm Xác nhận để mở cổng BKAV và nhập mã tra cứu.',
-      type: code ? (copied ? 'success' : 'warning') : 'warning',
-      confirmText: 'Xác nhận - Mở cổng BKAV',
+      title: 'Tra cứu BKAV bằng XML - Không cần mã tra cứu',
+      message: 'Hóa đơn này không có mã MTC trong XML, nhưng BKAV hỗ trợ tra cứu bằng file XML ký số. Bấm Xác nhận: phần mềm tải file XML gốc xuống máy và mở cổng BKAV. Trên website chọn "Tra cứu bằng file XML" → "Chọn file" → chọn ' + filename + ' → "Đọc file XML".',
+      type: 'success',
+      confirmText: 'Tải XML và mở cổng BKAV',
       onConfirm: () => {
-        if (code) void navigator.clipboard.writeText(code).catch(() => {});
+        // Preserve the signed XML source; do not re-generate/reformat it.
+        const url = URL.createObjectURL(new Blob([raw], { type: 'application/xml;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        try { link.click(); } finally {
+          link.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+        }
         window.open('https://tchd.ehoadon.vn/TCHD', '_blank', 'noopener,noreferrer');
       },
     });
@@ -2362,7 +2377,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <button type="button" onClick={() => void handleBkavIssuerLookup()}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md border border-cyan-700 text-cyan-300 bg-cyan-950/60 hover:bg-cyan-900 disabled:opacity-60">
                 <ExternalLink className="w-3.5 h-3.5" />
-                Tra cứu hóa đơn BKAV
+                Tra cứu BKAV bằng XML
               </button>
             ) : (!isSaigonCoopPortal && directLookupUrl &&
                 (!isVnpayInvoice || Boolean(lookupDetails.lookupCode))) ? (
