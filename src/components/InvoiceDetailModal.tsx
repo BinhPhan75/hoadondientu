@@ -896,7 +896,44 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setEasyInvoiceDownloadStatus(isThaiSonSharedCaptcha ? 'Đã xác minh hóa đơn Thái Sơn.' : 'Đã xác minh hóa đơn Saigon Co.op với dữ liệu XML.');
     } catch (error) {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
-        setSaigonCoopCaptchaError(error instanceof Error ? error.message : 'Không tra cứu được hóa đơn Saigon Co.op.');
+        if (isThaiSonSharedCaptcha) {
+          // The common E-Invoice portal may require a browser-only JavaScript
+          // search. Offer the verified official portal instead of asking for
+          // repeated CAPTCHA attempts or uploading files manually.
+          const code = String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || lookupCode).trim();
+          setIsSaigonCoopCaptchaOpen(false);
+          setSaigonCoopCaptcha(null);
+          setSaigonCoopCaptchaError(null);
+          setOriginalLoadError(null);
+          setIsSubmittingSaigonCoopCaptcha(false);
+          setIsDownloadingEasyInvoice(false);
+          let copied = false;
+          try {
+            await navigator.clipboard.writeText(code);
+            copied = true;
+          } catch {
+            // Clipboard access may require a direct button click.
+          }
+          if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+            await showAlert({
+              title: copied ? 'Đã copy mã tra cứu Thái Sơn' : 'Tra cứu trực tiếp Thái Sơn',
+              message: (copied
+                ? 'Đã sao chép mã nhận hóa đơn. Bấm Xác nhận để mở cổng Thái Sơn, nhấn Ctrl + V vào ô Mã nhận hóa đơn, nhập CAPTCHA trên website rồi tải PDF/XML gốc.'
+                : 'Chưa thể tự sao chép mã. Bấm Xác nhận để thử sao chép và mở cổng Thái Sơn, sau đó nhấn Ctrl + V vào ô Mã nhận hóa đơn, nhập CAPTCHA trên website rồi tải PDF/XML gốc.') +
+                ' Mã nhận hóa đơn: ' + code,
+              type: copied ? 'success' : 'warning',
+              confirmText: 'Xác nhận - Mở cổng Thái Sơn',
+              onConfirm: () => {
+                // Retry copy within a user gesture when browser permissions
+                // do not allow background clipboard writes.
+                void navigator.clipboard.writeText(code).catch(() => {});
+                window.open('https://einvoice.vn/tra-cuu', '_blank', 'noopener,noreferrer');
+              },
+            });
+          }
+        } else {
+          setSaigonCoopCaptchaError(error instanceof Error ? error.message : 'Không tra cứu được hóa đơn Saigon Co.op.');
+        }
       }
     } finally {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
