@@ -1,6 +1,6 @@
 # PMKT e-invoice module integration
 
-The downloader is embedded by PMKT at `https://pmkt.nghiatingold.com`. The client and server reject other parent/origin values. The client sends `HOADON_BRIDGE_READY` to that exact origin and accepts `PMKT_EINVOICE_SESSION` only from that origin and `window.parent`. It requests a replacement session with `HOADON_BRIDGE_REFRESH_REQUEST` after an API 401 or shortly before the bridge JWT expires.
+The downloader is embedded by PMKT at `(configure in deployment environment)`. The client and server reject other parent/origin values. The client sends `HOADON_BRIDGE_READY` to that exact origin and accepts `PMKT_EINVOICE_SESSION` only from that origin and `window.parent`. It requests a replacement session with `HOADON_BRIDGE_REFRESH_REQUEST` after an API 401 or shortly before the bridge JWT expires.
 
 ## Production configuration
 
@@ -8,8 +8,8 @@ Configure these values in the downloader's Production deployment and redeploy:
 
 | Setting | Value |
 | --- | --- |
-| `PMKT_APP_ORIGIN` | `https://pmkt.nghiatingold.com` |
-| `VITE_PMKT_ORIGIN` | `https://pmkt.nghiatingold.com` |
+| `PMKT_APP_ORIGIN` | `(configure in deployment environment)` |
+| `VITE_PMKT_ORIGIN` | `(configure in deployment environment)` |
 | `PMKT_BRIDGE_SECRET` | A randomly generated secret with at least 32 bytes; set the identical value in PMKT Production |
 
 `VITE_PMKT_ORIGIN` is embedded during the client build. `PMKT_APP_ORIGIN` controls server-side frame/CORS policy; Vercel's static-response CSP is fixed to the verified Production origin. The two environment variables default to that origin, but should be explicitly set so a deployment's configuration is auditable. Do not include a path or trailing slash, use a wildcard, or expose the bridge secret to the browser. If the bridge secret is missing or shorter than 32 bytes, protected API routes fail closed. The API also fails closed on invalid/missing bridge JWTs.
