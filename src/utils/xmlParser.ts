@@ -1019,6 +1019,24 @@ export function extractLookupDetailsFromXml(rawXml?: string): { lookupCode: stri
     };
   }
 
+  // AEON Viet Nam issues Thai Son invoices through its dedicated
+  // hddt.aeon.com.vn portal. This XML has an explicit "Mã TC" but no
+  // lookup URL, so select the official portal using the seller identity.
+  const aeonSellerTaxCode = extractTagBlocks(rawXml, 'NBan')
+    .map(block => extractTagValue(block, 'MST')).find(Boolean) || '';
+  const aeonSellerName = extractTagBlocks(rawXml, 'NBan')
+    .map(block => extractTagValue(block, 'Ten')).find(Boolean) || '';
+  const aeonReceiptCode = extraFields.get('ma tc') || '';
+  if (/<MSTTCGP>\s*0101300842\s*<\/MSTTCGP>/i.test(rawXml) &&
+      /^0311241512(?:-\d{3})?$/.test(aeonSellerTaxCode) &&
+      /AEON\s+VIỆT\s+NAM/i.test(aeonSellerName) &&
+      /^[A-Za-z0-9_-]{6,64}$/.test(aeonReceiptCode)) {
+    return {
+      lookupCode: aeonReceiptCode,
+      lookupUrl: 'https://hddt.aeon.com.vn/',
+    };
+  }
+
   // 1. Kiểm tra các thẻ XML mã tra cứu chính thức trước
   const codeTags = [
     'SoBaoMat', 'sobaomat', 'SOBAOMAT',

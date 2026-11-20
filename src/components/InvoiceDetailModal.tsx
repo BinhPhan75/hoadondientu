@@ -1005,6 +1005,43 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     // learned seller-specific portals are only a fallback.
     const tenantUrl = recordedPortal || sellerPortal || '';
     const isSeparatePortal = actualProvider === 'IHOADON';
+    // AEON Viet Nam uses a Thai Son customer portal, not einvoice.vn.
+    // The signed XML carries its "Mã TC" field without a lookup URL.
+    if (actualProvider === 'THAISON' &&
+        /^https:\/\/hddt\.aeon\.com\.vn\/?$/i.test(tenantUrl)) {
+      const code = String(extractedLookup.lookupCode || '').trim();
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(code)) {
+        await showAlert({
+          title: 'Thiếu mã tra cứu AEON',
+          message: 'XML không có mã tra cứu AEON hợp lệ. Vui lòng kiểm tra XML hóa đơn.',
+          type: 'warning',
+          confirmText: 'Đóng',
+        });
+        return;
+      }
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(code);
+        copied = true;
+      } catch {
+        // Show the code for manual entry when clipboard access is denied.
+      }
+      if (openInvoiceIdRef.current !== target.id) return;
+      await showAlert({
+        title: copied ? 'Đã copy mã tra cứu AEON' : 'Tra cứu hóa đơn AEON',
+        message: copied
+          ? 'Đã sao chép mã tra cứu. Bấm Xác nhận để mở cổng AEON, chọn chi nhánh phù hợp, nhấn Ctrl + V vào ô Mã tra cứu hóa đơn và thực hiện các bước kiểm tra trên website để tải hóa đơn gốc.'
+          : 'Chưa thể sao chép tự động. Mã tra cứu: ' + code +
+            '. Bấm Xác nhận để mở cổng AEON, chọn chi nhánh rồi dán bằng Ctrl + V hoặc nhập mã trực tiếp.',
+        type: copied ? 'success' : 'warning',
+        confirmText: 'Xác nhận - Mở cổng AEON',
+        onConfirm: () => {
+          void navigator.clipboard.writeText(code).catch(() => {});
+          window.open('https://hddt.aeon.com.vn/', '_blank', 'noopener,noreferrer');
+        },
+      });
+      return;
+    }
     // Central Retail uses its own Thai Son customer lookup website.
     // The receipt code [MaTC] is embedded in the signed invoice XML.
     if (actualProvider === 'THAISON' &&
