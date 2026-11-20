@@ -37,7 +37,8 @@ export function normalizeThaiSonPortalUrl(input: string | undefined): string {
     const url = new URL(candidate);
     const host = url.hostname.toLowerCase();
     if (!(host === 'einvoice.vn' || host === 'www.einvoice.vn' ||
-      host.endsWith('.einvoice.com.vn') || host === 'vat.ggg.com.vn')) return '';
+      host.endsWith('.einvoice.com.vn') || host === 'vat.ggg.com.vn' ||
+      host === 'einvoice.vifb.vn')) return '';
     if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port) return '';
     url.protocol = 'https:';
     return url.toString();

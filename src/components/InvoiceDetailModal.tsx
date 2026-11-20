@@ -1042,6 +1042,52 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       });
       return;
     }
+    // Thai Son tenant portals explicitly recorded in the issuer XML.
+    // Copy the receipt code and let the user search on the actual provider site.
+    // Keep all other Saigon Co.op branches on their existing in-app workflow.
+    const thaiSonTenant = actualProvider === 'THAISON' ? (
+      /^https:\/\/einvoice\.vifb\.vn\/?$/i.test(tenantUrl) &&
+      /^0312065210-011$/.test(String(target.nbmst || ''))
+        ? { name: 'Ý Tưởng Việt (VIFB)', url: 'https://einvoice.vifb.vn/' }
+        : /^https:\/\/saigoncoop\.einvoice\.com\.vn\/?$/i.test(tenantUrl) &&
+          /^0301175691-021$/.test(String(target.nbmst || ''))
+          ? { name: 'Co.opmart Quảng Bình', url: 'https://saigoncoop.einvoice.com.vn/' }
+          : null
+    ) : null;
+    if (thaiSonTenant) {
+      const code = String(extractedLookup.lookupCode || target.lookupCode || '').trim();
+      if (!/^[A-Za-z0-9_-]{6,64}$/.test(code)) {
+        await showAlert({
+          title: 'Thiếu mã tra cứu ' + thaiSonTenant.name,
+          message: 'Không tìm thấy mã tra cứu hợp lệ trong XML hóa đơn.',
+          type: 'warning',
+          confirmText: 'Đóng',
+        });
+        return;
+      }
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(code);
+        copied = true;
+      } catch {
+        // If denied, show the code and retry from the confirmation click.
+      }
+      if (openInvoiceIdRef.current !== target.id) return;
+      await showAlert({
+        title: copied ? 'Đã copy mã tra cứu ' + thaiSonTenant.name : 'Tra cứu hóa đơn ' + thaiSonTenant.name,
+        message: copied
+          ? 'Đã sao chép mã tra cứu. Bấm Xác nhận để mở đúng cổng nhà cung cấp, nhấn Ctrl + V vào ô mã tra cứu và nhập CAPTCHA trên website (nếu được yêu cầu) để tải hóa đơn gốc.'
+          : 'Trình duyệt chưa cho phép sao chép tự động. Mã tra cứu: ' + code +
+            '. Bấm Xác nhận để mở cổng nhà cung cấp, dán bằng Ctrl + V hoặc nhập mã trực tiếp.',
+        type: copied ? 'success' : 'warning',
+        confirmText: 'Xác nhận - Mở cổng ' + thaiSonTenant.name,
+        onConfirm: () => {
+          void navigator.clipboard.writeText(code).catch(() => {});
+          window.open(thaiSonTenant.url, '_blank', 'noopener,noreferrer');
+        },
+      });
+      return;
+    }
     // Central Retail uses its own Thai Son customer lookup website.
     // The receipt code [MaTC] is embedded in the signed invoice XML.
     if (actualProvider === 'THAISON' &&
@@ -1381,7 +1427,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     ? (lookupDetails.lookupUrl || effectiveInvoice.lookupUrl || '') : '';
   const canTryThaiSonOriginal = isThaiSonInvoice &&
     (Boolean(thaiSonIssuerPortal) || !effectiveInvoice.rawXml);
-  const isSaigonCoopPortal = isSaigonCoopPortalUrl(thaiSonIssuerPortal);
+  // Co.opmart Quảng Bình uses the copy-code portal handoff, not in-app CAPTCHA.
+  // Keep the established Saigon Co.op CAPTCHA flow for other issuers.
+  const isSaigonCoopPortal = isSaigonCoopPortalUrl(thaiSonIssuerPortal) &&
+    String(effectiveInvoice.nbmst || '') !== '0301175691-021';
   const configureThaiSonPortal = () => {
     if (!effectiveInvoice?.nbmst) return;
     const proposed = window.prompt('Nhập URL cổng tra cứu hóa đơn chính thức của người bán (lưu dùng lại theo MST):', '');
