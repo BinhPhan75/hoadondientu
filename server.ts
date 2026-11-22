@@ -3193,6 +3193,10 @@ app.all('/api/minvoice/download-pdf', async (req, res) => {
 
     const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || '1');
     const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || '');
+    const recaptchaToken = String(
+      req.query.recaptchaToken || req.body?.recaptchaToken ||
+      req.headers['x-recaptcha-token'] || ''
+    ).trim();
 
     if (!sellerTaxCode) {
       return res.status(400).json({ success: false, error: 'Mã số thuế bên bán (sellerTaxCode / masothue) không được để trống' });
@@ -3201,41 +3205,58 @@ app.all('/api/minvoice/download-pdf', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Số bảo mật (lookupCode / sobaomat) không được để trống' });
     }
 
-    const minvoiceUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+    // Ưu tiên endpoint SearchInvoiceCaptcha khi có token hoặc thử lần lượt
+    const targetEndpoint = recaptchaToken
+      ? 'https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoiceCaptcha'
+      : 'https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice';
+
+    const minvoiceUrl = `${targetEndpoint}?masothue=${encodeURIComponent(
       sellerTaxCode
     )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25000);
 
+    const headers: Record<string, string> = {
+      'Accept': 'application/pdf, application/octet-stream, */*',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Referer': 'https://tracuuhoadon.minvoice.com.vn/',
+      'Origin': 'https://tracuuhoadon.minvoice.com.vn'
+    };
+
+    if (recaptchaToken) {
+      headers['X-Recaptcha-Token'] = recaptchaToken;
+    }
+
     const resp = await fetch(minvoiceUrl, {
       method: 'GET',
-      headers: {
-        'Accept': 'application/pdf, application/octet-stream, */*',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Referer': 'https://tracuuhoadon.minvoice.com.vn/',
-        'Origin': 'https://tracuuhoadon.minvoice.com.vn'
-      },
+      headers,
       signal: controller.signal
     });
 
     clearTimeout(timeout);
 
     if (!resp.ok) {
-      throw new Error(`Cổng M-Invoice phản hồi lỗi HTTP ${resp.status}: ${resp.statusText}`);
+      const errText = await resp.text().catch(() => '');
+      let errMsg = `Cổng M-Invoice phản hồi lỗi HTTP ${resp.status}`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.message) errMsg = parsed.message;
+      } catch {}
+      return res.status(resp.status === 400 ? 400 : 502).json({ success: false, error: errMsg });
     }
 
     const arrayBuf = await resp.arrayBuffer();
     const buffer = Buffer.from(arrayBuf);
 
     if (buffer.length < 500 || !buffer.subarray(0, 10).toString('latin1').includes('%PDF')) {
-      throw new Error('Dữ liệu trả về từ cổng M-Invoice không phải file PDF hợp lệ');
+      return res.status(502).json({ success: false, error: 'Dữ liệu trả về từ cổng M-Invoice không phải file PDF hợp lệ' });
     }
 
     const cleanShd = invoiceNo.padStart(7, '0');
     const filename = `HoaDon_MInvoice_${sellerTaxCode}_${cleanShd}_${lookupCode}.pdf`;
 
-    if (req.query.format === 'json' || req.body?.format === 'json') {
+    if (req.query.format === 'json' || req.body?.format === 'json' || req.headers.accept?.includes('application/json')) {
       return res.json({
         success: true,
         filename,
@@ -3248,9 +3269,8 @@ app.all('/api/minvoice/download-pdf', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     res.setHeader('Content-Length', buffer.length);
     res.send(buffer);
-  } catch (error: any) {
-    console.error('[M-Invoice] Lỗi tải PDF gốc:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err?.message || 'Lỗi khi tải hóa đơn M-Invoice.' });
   }
 });
 

@@ -42,6 +42,10 @@ import { VisnamCaptchaModal } from './VisnamCaptchaModal';
 import { SaigonCoopCaptchaModal } from './SaigonCoopCaptchaModal';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
+import { fetchMinvoiceInvoicePdf } from '../services/minvoiceClient';
+import { MinvoicePortalModal } from './MinvoicePortalModal';
+import { minvoicePdfCacheKey } from '../services/minvoicePdfImport';
+import { writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -194,6 +198,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isVisnamOcrRunning, setIsVisnamOcrRunning] = useState(false);
   const [visnamCaptchaError, setVisnamCaptchaError] = useState<string | null>(null);
   const visnamRetryCountRef = useRef(0);
+  const [isMinvoiceModalOpen, setIsMinvoiceModalOpen] = useState(false);
   const [isSaigonCoopCaptchaOpen, setIsSaigonCoopCaptchaOpen] = useState(false);
   const [isThaiSonSharedCaptcha, setIsThaiSonSharedCaptcha] = useState(false);
   const [saigonCoopCaptcha, setSaigonCoopCaptcha] = useState<{ state: string; image: string } | null>(null);
@@ -910,6 +915,72 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setIsSubmittingVisnamCaptcha(false);
   };
 
+  const handleMinvoiceDownload = async (silent = false) => {
+    if (!effectiveInvoice) return;
+    const target = effectiveInvoice;
+    const lookupCode = String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
+    const sellerTaxCode = String(target.nbmst || extractTagValue(target.rawXml || '', 'MST') || '').trim();
+
+    if (!lookupCode || !sellerTaxCode) {
+      if (!silent) {
+        await showAlert({
+          title: 'Thiếu thông tin tra cứu M-Invoice',
+          message: 'Không tìm thấy Mã số thuế bên bán hoặc Số bảo mật trong XML hóa đơn.',
+          type: 'warning',
+          confirmText: 'OK'
+        });
+      }
+      return;
+    }
+
+    const sequence = ++originalLoadSequence.current;
+    setIsDownloadingEasyInvoice(true);
+    setOriginalLoadError(null);
+    setEasyInvoiceDownloadStatus('Đang tự động xác thực và tải hóa đơn gốc M-Invoice...');
+
+    try {
+      const result = await fetchMinvoiceInvoicePdf({
+        sellerTaxCode,
+        lookupCode,
+        invoiceNo: target.shdon,
+        invoiceSeries: target.khhdon
+      });
+
+      if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+
+      const url = URL.createObjectURL(result.blob);
+      setOriginalProviderPdfUrl(url);
+      setEasyInvoiceDownloadStatus('Đã tải và mở thành công PDF gốc M-Invoice.');
+
+      // Lưu bản gốc vào IndexedDB cache
+      await writeCachedOriginalPdf(minvoicePdfCacheKey(target), result.blob).catch(() => {});
+
+      // Tự động tải file PDF về máy người dùng
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = result.filename;
+      downloadLink.style.display = 'none';
+      document.body.appendChild(downloadLink);
+      try {
+        downloadLink.click();
+      } finally {
+        downloadLink.remove();
+      }
+    } catch (error: any) {
+      console.warn('[Minvoice Download]', error?.message);
+      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+        if (!silent) {
+          // Nếu không tải trực tiếp qua API được (do Google reCAPTCHA chặn domain), mở cổng tra cứu tích hợp sẵn
+          setIsMinvoiceModalOpen(true);
+        }
+      }
+    } finally {
+      if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
+        setIsDownloadingEasyInvoice(false);
+      }
+    }
+  };
+
   const saigonCoopLookupCode = (target: GDTInvoice) =>
     String(extractLookupDetails(target.rawXml).lookupCode || target.lookupCode || '').trim();
 
@@ -1434,11 +1505,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Background prefetch and the viewer share one cached/in-flight download.
   useEffect(() => {
     const provider = effectiveInvoice ? resolveInvoiceProvider(effectiveInvoice) : undefined;
-    if (!effectiveInvoice || provider === 'MISA' || provider === 'MINVOICE' || provider === 'VISNAM' || provider === 'MATBAO' || provider === 'WININVOICE') return;
+    if (!effectiveInvoice || provider === 'MISA' || provider === 'VISNAM' || provider === 'MATBAO' || provider === 'WININVOICE') return;
     if (provider === 'EASYINVOICE') {
       const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
       if (code) {
         void handleViewOriginalEasyInvoice(true);
+      }
+      return;
+    }
+    if (provider === 'MINVOICE') {
+      const code = effectiveInvoice.lookupCode || effectiveInvoice.mhdon;
+      if (code) {
+        void handleMinvoiceDownload(true);
       }
       return;
     }
@@ -2382,16 +2460,39 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                <a href={buildDirectLookupUrl(
+                {!originalProviderPdfUrl && (
+                  <button
+                    type="button"
+                    onClick={() => void handleMinvoiceDownload(false)}
+                    disabled={isDownloadingEasyInvoice}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-teal-600 text-teal-200 bg-teal-950/70 hover:bg-teal-900 disabled:opacity-60 transition-colors shadow-xs"
+                  >
+                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>{isDownloadingEasyInvoice ? 'Đang tải PDF M-Invoice...' : 'Tải và mở PDF M-Invoice'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsMinvoiceModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Cổng tra cứu M-Invoice (tự điền)</span>
+                </button>
+                <a
+                  href={buildDirectLookupUrl(
                     'https://tracuuhoadon.minvoice.com.vn/tra-cuu-hoa-don',
                     lookupDetails.lookupCode || effectiveInvoice.lookupCode,
                     'MINVOICE',
                     effectiveInvoice.nbmst
                   )}
-                  target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800">
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Tra cứu M-invoice (MST + mã tra cứu)</span>
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                  title="Mở tab mới trên trình duyệt"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>Mở tab mới</span>
                 </a>
               </div>
             ) : isThaiSonInvoice ? (
@@ -2537,6 +2638,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         onRefresh={() => void handleSaigonCoopCaptchaOpen(isThaiSonSharedCaptcha)}
         onSubmit={captcha => void handleSaigonCoopCaptchaSubmit(captcha)}
         onClose={closeSaigonCoopCaptcha}
+      />
+      <MinvoicePortalModal
+        isOpen={isMinvoiceModalOpen}
+        invoice={effectiveInvoice}
+        sellerTaxCode={effectiveInvoice?.nbmst || ''}
+        lookupCode={lookupDetails.lookupCode || effectiveInvoice?.lookupCode || ''}
+        onClose={() => setIsMinvoiceModalOpen(false)}
+        onPdfImported={(url) => {
+          setOriginalProviderPdfUrl(url);
+          setEasyInvoiceDownloadStatus('Đã nạp và hiển thị PDF gốc M-Invoice.');
+        }}
       />
     </div>
   );
