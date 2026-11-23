@@ -659,29 +659,21 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
           </table>
         </div>
 
-        {/* Commitment & Signature Area */}
-        <div className="mt-8 pt-4 border-t border-slate-200 grid grid-cols-2 text-center text-xs">
-          <div>
-            <div className="font-bold text-slate-900 uppercase">NGƯỜI LẬP BIỂU</div>
-            <div className="text-[11px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</div>
-            <div className="h-16"></div>
-            <div className="font-medium text-slate-700">Kế toán thuế</div>
+        {/* Commitment & Signature Area - aligned two-column signature row */}
+        <div className="mt-8 pt-4 border-t border-slate-200 text-xs print:break-inside-avoid">
+          <div className="text-right text-slate-500 italic text-[11px] mb-2">
+            Ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
           </div>
-          <div>
-            <div className="text-slate-500 italic text-[11px]">
-              Ngày {new Date().getDate()} tháng {new Date().getMonth() + 1} năm {new Date().getFullYear()}
+          <div className="grid grid-cols-2 gap-6 text-center items-start">
+            <div>
+              <div className="font-bold text-slate-900 uppercase">NGƯỜI LẬP BIỂU</div>
+              <div className="text-[11px] text-slate-500 italic mt-0.5">(Ký, ghi rõ họ tên)</div>
+              <div className="h-16"></div>
             </div>
-            <div className="font-bold text-slate-900 uppercase mt-0.5">NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT</div>
-            <div className="text-[11px] text-slate-500 italic mt-0.5">(Ký, đóng dấu hoặc ký số điện tử)</div>
-            <div className="h-16 flex items-center justify-center">
-              {account.isRealGDT && (
-                <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded">
-                  ✓ Chứng thư số hợp lệ CQT
-                </span>
-              )}
-            </div>
-            <div className="font-bold text-slate-900 uppercase">
-              {account.taxpayerName || 'GIÁM ĐỐC / NGƯỜI ĐẠI DIỆN'}
+            <div>
+              <div className="font-bold text-slate-900 uppercase">NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT</div>
+              <div className="text-[11px] text-slate-500 italic mt-0.5">(Ký, đóng dấu hoặc ký số điện tử)</div>
+              <div className="h-16"></div>
             </div>
           </div>
         </div>
