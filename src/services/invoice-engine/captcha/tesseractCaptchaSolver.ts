@@ -1,5 +1,7 @@
 import { createWorker, type Worker } from 'tesseract.js';
 import zlib from 'zlib';
+import fs from 'fs';
+import path from 'path';
 
 export const POS_CAPTCHA_WHITELIST = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const DIGITS_CAPTCHA_WHITELIST = '0123456789';
@@ -7,6 +9,48 @@ export const DIGITS_CAPTCHA_WHITELIST = '0123456789';
 let tesseractWorker: Worker | null = null;
 let workerInitializing: Promise<Worker> | null = null;
 let tesseractBrokenOnHost = false;
+
+function ensureTrainedDataInTmp(): string {
+  const tmpDir = process.env.TEMP || '/tmp';
+  const targetPath = path.join(tmpDir, 'eng.traineddata');
+
+  try {
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 2_000_000) {
+      return tmpDir;
+    }
+  } catch {}
+
+  const cwd = process.cwd();
+  const searchLocations = [
+    path.join(cwd, 'public', 'tessdata', 'eng.traineddata'),
+    path.join(cwd, 'dist', 'tessdata', 'eng.traineddata'),
+    path.resolve('public/tessdata/eng.traineddata'),
+    path.resolve('dist/tessdata/eng.traineddata'),
+    '/var/task/public/tessdata/eng.traineddata',
+    '/var/task/dist/tessdata/eng.traineddata',
+    path.join(__dirname, '..', '..', '..', '..', 'public', 'tessdata', 'eng.traineddata'),
+    path.join(__dirname, '..', '..', '..', '..', 'dist', 'tessdata', 'eng.traineddata'),
+  ];
+
+  for (const src of searchLocations) {
+    try {
+      if (fs.existsSync(src) && fs.statSync(src).size > 2_000_000) {
+        try {
+          fs.copyFileSync(src, targetPath);
+          console.info(`[Tesseract] Đã nạp eng.traineddata từ ${src} vào ${targetPath}`);
+          return tmpDir;
+        } catch {
+          // If /tmp is unwritable or copy fails, use source directory directly
+          return path.dirname(src);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Tesseract] Không thể sao chép từ ${src}:`, err?.message);
+    }
+  }
+
+  return tmpDir;
+}
 
 function isMissingWasmOrCoreError(err: unknown): boolean {
   const msg = String((err as any)?.message || err || '');
@@ -47,8 +91,12 @@ async function getWorker(whitelist?: string): Promise<Worker | null> {
 
     workerInitializing = (async () => {
       try {
-        const cachePath = process.env.TEMP || '/tmp';
-        const w = await createWorker('eng', 1, { cachePath });
+        const cachePath = ensureTrainedDataInTmp();
+        const w = await createWorker('eng', 1, {
+          cachePath,
+          langPath: cachePath,
+          gzip: false,
+        });
         await applyWorkerParams(w, targetWhitelist);
         tesseractWorker = w;
         return w;
@@ -399,7 +447,7 @@ export interface TesseractSolveOptions {
 
 export async function solveVisnamCaptcha(
   imageInput: Buffer | string | Uint8Array,
-  timeoutMs = 3000
+  timeoutMs = 4500
 ): Promise<{ code: string; confidence: number } | null> {
   if (tesseractBrokenOnHost) return null;
 
@@ -423,11 +471,12 @@ export async function solveVisnamCaptcha(
       if (!worker) return null;
 
       const passes = [
-        { w: 240, h: 90, psm: '8', lum: 175 },
-        { w: 220, h: 80, psm: '8', lum: 175 },
-        { w: 260, h: 90, psm: '8', lum: 185 },
-        { w: 240, h: 90, psm: '7', lum: 175 },
-        { w: 320, h: 80, psm: '8', lum: 175 },
+        { w: 260, h: 90, psm: '7', lum: 175 },
+        { w: 260, h: 90, psm: '8', lum: 175 },
+        { w: 280, h: 100, lum: 180, psm: '7' },
+        { w: 240, h: 80, lum: 170, psm: '7' },
+        { w: 320, h: 100, lum: 180, psm: '8' },
+        { w: 300, h: 90, lum: 165, psm: '6' },
       ];
 
       for (const pass of passes) {
@@ -554,3 +603,12 @@ export async function terminateTesseract(): Promise<void> {
     tesseractWorker = null;
   }
 }
+
+export async function warmupTesseractWorker(): Promise<void> {
+  try {
+    await getWorker(DIGITS_CAPTCHA_WHITELIST);
+  } catch (err: any) {
+    console.warn('[Tesseract Warmup] Không thể khởi tạo worker ngầm:', err?.message);
+  }
+}
+

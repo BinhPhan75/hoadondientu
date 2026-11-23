@@ -15,71 +15,116 @@ __export(tesseractCaptchaSolver_exports, {
   POS_CAPTCHA_WHITELIST: () => POS_CAPTCHA_WHITELIST,
   createBinarizedBmp: () => createBinarizedBmp,
   createPosBinarizedBmp: () => createPosBinarizedBmp,
+  createVisnamBinarizedBmp: () => createVisnamBinarizedBmp,
   decodePngRgba: () => decodePngRgba,
   postProcessOcrText: () => postProcessOcrText,
   solveCaptchaWithTesseract: () => solveCaptchaWithTesseract,
-  terminateTesseract: () => terminateTesseract
+  solveVisnamCaptcha: () => solveVisnamCaptcha,
+  terminateTesseract: () => terminateTesseract,
+  warmupTesseractWorker: () => warmupTesseractWorker
 });
 import { createWorker } from "tesseract.js";
 import zlib from "zlib";
-async function getWorker(whitelist) {
-  const targetWhitelist = whitelist || POS_CAPTCHA_WHITELIST;
-  if (tesseractWorker) {
-    await tesseractWorker.setParameters({
-      tessedit_char_whitelist: targetWhitelist,
-      tessedit_pageseg_mode: "7",
-      // PSM 7: Treat the image as a single text line
-      user_defined_dpi: "300",
-      tessjs_create_pdf: "0",
-      tessjs_create_hocr: "0",
-      tessjs_create_tsv: "0",
-      tessjs_create_box: "0",
-      tessjs_create_unlv: "0",
-      tessjs_create_osd: "0"
-    });
-    return tesseractWorker;
-  }
-  if (workerInitializing) {
-    const w2 = await workerInitializing;
-    await w2.setParameters({
-      tessedit_char_whitelist: targetWhitelist,
-      tessedit_pageseg_mode: "7",
-      user_defined_dpi: "300",
-      tessjs_create_pdf: "0",
-      tessjs_create_hocr: "0",
-      tessjs_create_tsv: "0",
-      tessjs_create_box: "0",
-      tessjs_create_unlv: "0",
-      tessjs_create_osd: "0"
-    });
-    return w2;
-  }
-  workerInitializing = (async () => {
-    try {
-      const cachePath = process.env.TEMP || "/tmp";
-      const w2 = await createWorker("eng", 1, {
-        cachePath
-      });
-      await w2.setParameters({
-        tessedit_char_whitelist: targetWhitelist,
-        tessedit_pageseg_mode: "7",
-        // PSM 7: Single text line
-        user_defined_dpi: "300",
-        tessjs_create_pdf: "0",
-        tessjs_create_hocr: "0",
-        tessjs_create_tsv: "0",
-        tessjs_create_box: "0",
-        tessjs_create_unlv: "0",
-        tessjs_create_osd: "0"
-      });
-      tesseractWorker = w2;
-      return w2;
-    } finally {
-      workerInitializing = null;
+import fs from "fs";
+import path from "path";
+function ensureTrainedDataInTmp() {
+  const tmpDir = process.env.TEMP || "/tmp";
+  const targetPath = path.join(tmpDir, "eng.traineddata");
+  try {
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 2e6) {
+      return tmpDir;
     }
-  })();
-  const w = await workerInitializing;
-  return w;
+  } catch {
+  }
+  const cwd = process.cwd();
+  const searchLocations = [
+    path.join(cwd, "public", "tessdata", "eng.traineddata"),
+    path.join(cwd, "dist", "tessdata", "eng.traineddata"),
+    path.resolve("public/tessdata/eng.traineddata"),
+    path.resolve("dist/tessdata/eng.traineddata"),
+    "/var/task/public/tessdata/eng.traineddata",
+    "/var/task/dist/tessdata/eng.traineddata",
+    path.join(__dirname, "..", "..", "..", "..", "public", "tessdata", "eng.traineddata"),
+    path.join(__dirname, "..", "..", "..", "..", "dist", "tessdata", "eng.traineddata")
+  ];
+  for (const src of searchLocations) {
+    try {
+      if (fs.existsSync(src) && fs.statSync(src).size > 2e6) {
+        try {
+          fs.copyFileSync(src, targetPath);
+          console.info(`[Tesseract] \u0110\xE3 n\u1EA1p eng.traineddata t\u1EEB ${src} v\xE0o ${targetPath}`);
+          return tmpDir;
+        } catch {
+          return path.dirname(src);
+        }
+      }
+    } catch (err) {
+      console.warn(`[Tesseract] Kh\xF4ng th\u1EC3 sao ch\xE9p t\u1EEB ${src}:`, err?.message);
+    }
+  }
+  return tmpDir;
+}
+function isMissingWasmOrCoreError(err) {
+  const msg = String(err?.message || err || "");
+  return /tesseract-core|tesseract\.js-core|failed to asynchronously prepare wasm|ENOENT|RuntimeError:\s*Aborted/i.test(msg);
+}
+async function applyWorkerParams(worker, whitelist) {
+  await worker.setParameters({
+    tessedit_char_whitelist: whitelist,
+    tessedit_pageseg_mode: "7",
+    user_defined_dpi: "300",
+    tessjs_create_pdf: "0",
+    tessjs_create_hocr: "0",
+    tessjs_create_tsv: "0",
+    tessjs_create_box: "0",
+    tessjs_create_unlv: "0",
+    tessjs_create_osd: "0"
+  });
+}
+async function getWorker(whitelist) {
+  if (tesseractBrokenOnHost) return null;
+  const targetWhitelist = whitelist || POS_CAPTCHA_WHITELIST;
+  try {
+    if (tesseractWorker) {
+      await applyWorkerParams(tesseractWorker, targetWhitelist);
+      return tesseractWorker;
+    }
+    if (workerInitializing) {
+      const w2 = await workerInitializing;
+      await applyWorkerParams(w2, targetWhitelist);
+      return w2;
+    }
+    workerInitializing = (async () => {
+      try {
+        const cachePath = ensureTrainedDataInTmp();
+        const w2 = await createWorker("eng", 1, {
+          cachePath,
+          langPath: cachePath,
+          gzip: false
+        });
+        await applyWorkerParams(w2, targetWhitelist);
+        tesseractWorker = w2;
+        return w2;
+      } catch (initErr) {
+        if (isMissingWasmOrCoreError(initErr)) {
+          tesseractBrokenOnHost = true;
+          console.warn("[Tesseract] B\u1ECF qua OCR do m\xF4i tr\u01B0\u1EDDng thi\u1EBFu file WASM/core:", initErr?.message || initErr);
+          return null;
+        }
+        throw initErr;
+      } finally {
+        workerInitializing = null;
+      }
+    })();
+    const w = await workerInitializing;
+    return w || null;
+  } catch (err) {
+    if (isMissingWasmOrCoreError(err)) {
+      tesseractBrokenOnHost = true;
+      return null;
+    }
+    throw err;
+  }
 }
 function decodePngRgba(buf) {
   try {
@@ -87,30 +132,32 @@ function decodePngRgba(buf) {
     const idatChunks = [];
     let width = 0;
     let height = 0;
+    let colorType = 6;
     while (offset < buf.length) {
       const len = buf.readUInt32BE(offset);
       const type = buf.slice(offset + 4, offset + 8).toString("ascii");
       if (type === "IHDR") {
         width = buf.readUInt32BE(offset + 8);
         height = buf.readUInt32BE(offset + 12);
+        colorType = buf.readUInt8(offset + 17);
       } else if (type === "IDAT") {
         idatChunks.push(buf.slice(offset + 8, offset + 8 + len));
       }
       offset += 12 + len;
     }
     if (!width || !height || idatChunks.length === 0) return null;
+    const bpp = colorType === 2 ? 3 : 4;
+    const stride = width * bpp + 1;
     const decompressed = zlib.inflateSync(Buffer.concat(idatChunks));
     const rawRgba = Buffer.alloc(width * height * 4);
-    const stride = width * 4 + 1;
-    const prevRow = Buffer.alloc(width * 4);
+    const prevRow = Buffer.alloc(width * bpp);
+    const curRow = Buffer.alloc(width * bpp);
     for (let y = 0; y < height; y++) {
       const filter = decompressed[y * stride];
       const rowOffset = y * stride + 1;
-      const destOffset = y * width * 4;
-      for (let x = 0; x < width * 4; x++) {
-        const bpp = 4;
+      for (let x = 0; x < width * bpp; x++) {
         const raw = decompressed[rowOffset + x];
-        const a = x >= bpp ? rawRgba[destOffset + x - bpp] : 0;
+        const a = x >= bpp ? curRow[x - bpp] : 0;
         const b = prevRow[x];
         const c = x >= bpp ? prevRow[x - bpp] : 0;
         let val = raw;
@@ -124,8 +171,22 @@ function decodePngRgba(buf) {
           const pc = Math.abs(p - c);
           val = raw + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c) & 255;
         }
-        rawRgba[destOffset + x] = val;
-        prevRow[x] = val;
+        curRow[x] = val;
+      }
+      curRow.copy(prevRow);
+      const destOffset = y * width * 4;
+      for (let x = 0; x < width; x++) {
+        if (bpp === 3) {
+          rawRgba[destOffset + x * 4] = curRow[x * 3];
+          rawRgba[destOffset + x * 4 + 1] = curRow[x * 3 + 1];
+          rawRgba[destOffset + x * 4 + 2] = curRow[x * 3 + 2];
+          rawRgba[destOffset + x * 4 + 3] = 255;
+        } else {
+          rawRgba[destOffset + x * 4] = curRow[x * 4];
+          rawRgba[destOffset + x * 4 + 1] = curRow[x * 4 + 1];
+          rawRgba[destOffset + x * 4 + 2] = curRow[x * 4 + 2];
+          rawRgba[destOffset + x * 4 + 3] = curRow[x * 4 + 3];
+        }
       }
     }
     return { width, height, data: rawRgba };
@@ -219,12 +280,63 @@ function createPosBinarizedBmp(decoded, scale = 2.5, threshold = 145, padding = 
   }
   return bmp;
 }
+function createVisnamBinarizedBmp(decoded, targetWidth = 240, padding = 12, lumThreshold = 175, targetHeight) {
+  const { width, height, data } = decoded;
+  const targetW = Math.max(160, Math.min(targetWidth, width));
+  const targetH = targetHeight ? Math.max(40, targetHeight) : Math.max(50, Math.round(height * targetW / width));
+  const totalW = targetW + padding * 2;
+  const totalH = targetH + padding * 2;
+  const rowSize = Math.floor((24 * totalW + 31) / 32) * 4;
+  const imageSize = rowSize * totalH;
+  const fileSize = 54 + imageSize;
+  const bmp = Buffer.alloc(fileSize);
+  bmp.write("BM", 0);
+  bmp.writeUInt32LE(fileSize, 2);
+  bmp.writeUInt32LE(54, 10);
+  bmp.writeUInt32LE(40, 14);
+  bmp.writeInt32LE(totalW, 18);
+  bmp.writeInt32LE(totalH, 22);
+  bmp.writeUInt16LE(1, 26);
+  bmp.writeUInt16LE(24, 28);
+  bmp.writeUInt32LE(0, 30);
+  bmp.writeUInt32LE(imageSize, 34);
+  bmp.fill(255, 54);
+  const scaleX = width / targetW;
+  const scaleY = height / targetH;
+  for (let dy = 0; dy < targetH; dy++) {
+    const srcY = height - 1 - Math.floor(dy * scaleY);
+    const destY = dy + padding;
+    const rowStart = 54 + destY * rowSize;
+    for (let dx = 0; dx < targetW; dx++) {
+      const srcX = Math.floor(dx * scaleX);
+      const idx = (srcY * width + srcX) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const a = data[idx + 3] / 255;
+      const cR = Math.round(r * a + 255 * (1 - a));
+      const cG = Math.round(g * a + 255 * (1 - a));
+      const cB = Math.round(b * a + 255 * (1 - a));
+      const isRedLine = cR > cG + 30 && cR > cB + 30;
+      const isGreenLine = cG > cR + 25 && cG > cB + 25;
+      const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
+      const isDigit = !isRedLine && !isGreenLine && (lum < lumThreshold || cB > cR + 25 && cB > cG + 25 && lum < 220);
+      const destXWithPad = dx + padding;
+      const pxOffset = rowStart + destXWithPad * 3;
+      const val = isDigit ? 0 : 255;
+      bmp[pxOffset] = val;
+      bmp[pxOffset + 1] = val;
+      bmp[pxOffset + 2] = val;
+    }
+  }
+  return bmp;
+}
 function postProcessOcrText(rawText, options) {
   if (!rawText) return "";
   const digitsOnly = options?.digitsOnly === true;
   if (digitsOnly) {
-    let mapped = rawText.replace(/[OoD]/g, "0").replace(/[Il|!]/g, "1").replace(/[Zz]/g, "2").replace(/[Ss]/g, "5").replace(/[b]/g, "6").replace(/[T]/g, "7").replace(/[B]/g, "8").replace(/[gq]/g, "9");
-    let digits2 = mapped.replace(/[^0-9]/g, "");
+    const mapped = rawText.replace(/[OoD]/g, "0").replace(/[Il|!]/g, "1").replace(/[Zz]/g, "2").replace(/[Ss]/g, "5").replace(/[b]/g, "6").replace(/[T]/g, "7").replace(/[B]/g, "8").replace(/[gq]/g, "9");
+    const digits2 = mapped.replace(/[^0-9]/g, "");
     if (options?.expectedLength && digits2.length > options.expectedLength) {
       const match = digits2.match(new RegExp(`\\d{${options.expectedLength}}`));
       if (match) return match[0];
@@ -232,8 +344,7 @@ function postProcessOcrText(rawText, options) {
     }
     return digits2;
   }
-  let cleaned = rawText.replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, "").replace(/\s+/g, "").toUpperCase();
-  cleaned = cleaned.replace(/[^A-Z0-9]/g, "");
+  let cleaned = rawText.replace(/[|\\/_~—–\-.,:;'"“”`*#^!?()[\]{}<>+=$@%&]/g, "").replace(/\s+/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const targetLen = options?.expectedLength || 6;
   if (cleaned.length > targetLen) {
     const match = cleaned.match(/[A-Z0-9]{4,6}/);
@@ -244,73 +355,150 @@ function postProcessOcrText(rawText, options) {
   }
   return cleaned;
 }
-async function solveCaptchaWithTesseract(imageInput, options) {
-  const timeoutMs = options?.timeoutMs || 12e3;
+async function solveVisnamCaptcha(imageInput, timeoutMs = 4500) {
+  if (tesseractBrokenOnHost) return null;
   const recognitionPromise = (async () => {
-    let buf;
-    if (typeof imageInput === "string") {
-      const trimmed = imageInput.trim();
-      if (trimmed.startsWith("<svg") || trimmed.includes("<svg")) {
-        throw new Error("Tesseract kh\xF4ng h\u1ED7 tr\u1EE3 \u0111\u1ECBnh d\u1EA1ng SVG tr\u1EF1c ti\u1EBFp.");
+    try {
+      let buf;
+      if (typeof imageInput === "string") {
+        const cleanB64 = imageInput.trim().replace(/^data:image\/[a-z+]+;base64,/, "");
+        buf = Buffer.from(cleanB64, "base64");
+      } else {
+        buf = Buffer.from(imageInput);
       }
-      const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, "");
-      buf = Buffer.from(cleanB64, "base64");
-    } else {
-      buf = Buffer.from(imageInput);
-    }
-    if (buf.length >= 4 && buf.slice(0, 10).toString("utf-8").includes("<svg")) {
-      throw new Error("Tesseract kh\xF4ng h\u1ED7 tr\u1EE3 \u0111\u1ECBnh d\u1EA1ng SVG tr\u1EF1c ti\u1EBFp.");
-    }
-    const digitsOnly = options?.digitsOnly === true;
-    const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
-    let processBuf = buf;
-    const isPng = buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71;
-    if (options?.preprocessEasyInvoice === true && isPng) {
+      const isPng = buf.length >= 8 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71;
+      if (!isPng) return null;
       const decoded = decodePngRgba(buf);
-      if (decoded) {
-        const binarized = createBinarizedBmp(decoded, 3, 25, 145);
-        processBuf = binarized;
+      if (!decoded) return null;
+      const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
+      if (!worker) return null;
+      const passes = [
+        { w: 260, h: 90, psm: "7", lum: 175 },
+        { w: 260, h: 90, psm: "8", lum: 175 },
+        { w: 280, h: 100, lum: 180, psm: "7" },
+        { w: 240, h: 80, lum: 170, psm: "7" },
+        { w: 320, h: 100, lum: 180, psm: "8" },
+        { w: 300, h: 90, lum: 165, psm: "6" }
+      ];
+      for (const pass of passes) {
+        const bmp = createVisnamBinarizedBmp(decoded, pass.w, 12, pass.lum, pass.h);
+        await worker.setParameters({
+          tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
+          tessedit_pageseg_mode: pass.psm
+        });
+        const res = await worker.recognize(bmp);
+        const cleaned = postProcessOcrText(res.data.text || "", { digitsOnly: true, expectedLength: 4 });
+        if (/^\d{4}$/.test(cleaned)) {
+          return { code: cleaned, confidence: res.data.confidence || 85 };
+        }
       }
-    } else if (options?.preprocessPosCaptcha === true && isPng) {
-      const decoded = decodePngRgba(buf);
-      if (decoded && decoded.width < 300) {
-        const binarized = createPosBinarizedBmp(decoded, 2.5, 145, 12);
-        processBuf = binarized;
+      return null;
+    } catch (err) {
+      if (isMissingWasmOrCoreError(err)) {
+        tesseractBrokenOnHost = true;
       }
+      return null;
     }
-    const worker = await getWorker(whitelist);
-    const result = await worker.recognize(processBuf);
-    const rawText = result.data.text || "";
-    const cleaned = postProcessOcrText(rawText, {
-      digitsOnly,
-      expectedLength: options?.expectedLength
-    });
-    return {
-      code: cleaned,
-      confidence: result.data.confidence || 0
-    };
   })();
   const timeoutPromise = new Promise(
-    (_, reject) => setTimeout(() => reject(new Error(`Tesseract timeout v\u01B0\u1EE3t qu\xE1 ${timeoutMs}ms`)), timeoutMs)
+    (resolve) => setTimeout(() => resolve(null), timeoutMs)
+  );
+  return Promise.race([recognitionPromise, timeoutPromise]);
+}
+async function solveCaptchaWithTesseract(imageInput, options) {
+  if (tesseractBrokenOnHost) {
+    return { code: "", confidence: 0 };
+  }
+  const timeoutMs = options?.timeoutMs || 6e3;
+  const recognitionPromise = (async () => {
+    try {
+      let buf;
+      if (typeof imageInput === "string") {
+        const trimmed = imageInput.trim();
+        if (trimmed.startsWith("<svg") || trimmed.includes("<svg")) {
+          return { code: "", confidence: 0 };
+        }
+        const cleanB64 = trimmed.replace(/^data:image\/[a-z+]+;base64,/, "");
+        buf = Buffer.from(cleanB64, "base64");
+      } else {
+        buf = Buffer.from(imageInput);
+      }
+      if (buf.length >= 4 && buf.slice(0, 10).toString("utf-8").includes("<svg")) {
+        return { code: "", confidence: 0 };
+      }
+      const isPng = buf.length >= 8 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71;
+      if (options?.preprocessVisnam === true && isPng) {
+        const visnamRes = await solveVisnamCaptcha(buf, Math.min(timeoutMs, 2500));
+        if (visnamRes) {
+          return visnamRes;
+        }
+        return { code: "", confidence: 0 };
+      }
+      const digitsOnly = options?.digitsOnly === true;
+      const whitelist = options?.whitelist || (digitsOnly ? DIGITS_CAPTCHA_WHITELIST : POS_CAPTCHA_WHITELIST);
+      let processBuf = buf;
+      if (options?.preprocessEasyInvoice === true && isPng) {
+        const decoded = decodePngRgba(buf);
+        if (decoded) {
+          processBuf = createBinarizedBmp(decoded, 3, 25, 145);
+        }
+      } else if (options?.preprocessPosCaptcha === true && isPng) {
+        const decoded = decodePngRgba(buf);
+        if (decoded && decoded.width < 300) {
+          processBuf = createPosBinarizedBmp(decoded, 2.5, 145, 12);
+        }
+      }
+      const worker = await getWorker(whitelist);
+      if (!worker) {
+        return { code: "", confidence: 0 };
+      }
+      const result = await worker.recognize(processBuf);
+      const rawText = result.data.text || "";
+      const cleaned = postProcessOcrText(rawText, {
+        digitsOnly,
+        expectedLength: options?.expectedLength
+      });
+      return {
+        code: cleaned,
+        confidence: result.data.confidence || 0
+      };
+    } catch (err) {
+      if (isMissingWasmOrCoreError(err)) {
+        tesseractBrokenOnHost = true;
+        return { code: "", confidence: 0 };
+      }
+      throw err;
+    }
+  })();
+  const timeoutPromise = new Promise(
+    (resolve) => setTimeout(() => resolve({ code: "", confidence: 0 }), timeoutMs)
   );
   return Promise.race([recognitionPromise, timeoutPromise]);
 }
 async function terminateTesseract() {
   if (tesseractWorker) {
-    await tesseractWorker.terminate();
+    try {
+      await tesseractWorker.terminate();
+    } catch {
+    }
     tesseractWorker = null;
   }
 }
-var isServerless, POS_CAPTCHA_WHITELIST, DIGITS_CAPTCHA_WHITELIST, tesseractWorker, workerInitializing;
+async function warmupTesseractWorker() {
+  try {
+    await getWorker(DIGITS_CAPTCHA_WHITELIST);
+  } catch (err) {
+    console.warn("[Tesseract Warmup] Kh\xF4ng th\u1EC3 kh\u1EDFi t\u1EA1o worker ng\u1EA7m:", err?.message);
+  }
+}
+var POS_CAPTCHA_WHITELIST, DIGITS_CAPTCHA_WHITELIST, tesseractWorker, workerInitializing, tesseractBrokenOnHost;
 var init_tesseractCaptchaSolver = __esm({
   "src/services/invoice-engine/captcha/tesseractCaptchaSolver.ts"() {
-    isServerless = Boolean(
-      process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
-    );
     POS_CAPTCHA_WHITELIST = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     DIGITS_CAPTCHA_WHITELIST = "0123456789";
     tesseractWorker = null;
     workerInitializing = null;
+    tesseractBrokenOnHost = false;
   }
 });
 
@@ -536,11 +724,11 @@ async function loadComismshFont() {
     try {
       if (typeof process !== "undefined" && process.versions && process.versions.node) {
         try {
-          const fs2 = await import("fs");
-          const path3 = await import("path");
-          const fontPath = path3.resolve(process.cwd(), "public/fonts/Comismsh.ttf");
-          if (fs2.existsSync(fontPath)) {
-            const buf = fs2.readFileSync(fontPath);
+          const fs3 = await import("fs");
+          const path4 = await import("path");
+          const fontPath = path4.resolve(process.cwd(), "public/fonts/Comismsh.ttf");
+          if (fs3.existsSync(fontPath)) {
+            const buf = fs3.readFileSync(fontPath);
             fontInstance = parseOpenTypeBuffer(buf);
             return fontInstance;
           }
@@ -779,7 +967,7 @@ var init_visnamResponse = __esm({
 // server.ts
 import dotenv from "dotenv";
 import express from "express";
-import path2 from "path";
+import path3 from "path";
 import crypto2 from "crypto";
 import https4 from "node:https";
 import tls from "node:tls";
@@ -787,7 +975,7 @@ import { spawn } from "child_process";
 import JSZip6 from "jszip";
 import { ProxyAgent } from "undici";
 import axios9 from "axios";
-import * as cheerio7 from "cheerio";
+import * as cheerio9 from "cheerio";
 
 // src/utils/xmlParser.ts
 import JSZip from "jszip";
@@ -800,6 +988,7 @@ var PORTALS = {
   MINVOICE: ["minvoice.vn", "minvoice.com.vn"],
   VISNAM: ["vin-hoadon.com"],
   MATBAO: ["matbao.in", "mifi.vn"],
+  WININVOICE: ["tracuu.wininvoice.vn", "wininvoice.vn"],
   VIETTEL: ["sinvoice.viettel.vn", "vinvoice.viettel.vn", "sinvoice.vn"],
   VNPT: ["vnpt-invoice.com.vn", "vnpt-invoice.vn", "invoice.vnpt.vn"],
   EASYINVOICE: ["easyinvoice.vn", "easyinvoice.com.vn", "softdreams.vn"],
@@ -820,7 +1009,7 @@ function normalizeThaiSonPortalUrl(input) {
   try {
     const url = new URL(candidate);
     const host = url.hostname.toLowerCase();
-    if (!(host === "einvoice.vn" || host === "www.einvoice.vn" || host.endsWith(".einvoice.com.vn") || host === "vat.ggg.com.vn")) return "";
+    if (!(host === "einvoice.vn" || host === "www.einvoice.vn" || host.endsWith(".einvoice.com.vn") || host === "vat.ggg.com.vn" || host === "einvoice.vifb.vn")) return "";
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return "";
     url.protocol = "https:";
     return url.toString();
@@ -842,7 +1031,9 @@ function isTrustedThaiSonPortalUrl(value2) {
 function rememberThaiSonPortalForSeller(taxCode, url) {
   const seller = String(taxCode || "").trim();
   if (!/^\d{10}(?:-\d{3})?$/.test(seller) || !isTrustedThaiSonPortalUrl(url)) return false;
-  const clean = new URL(url).origin + "/";
+  const parsedUrl = new URL(url);
+  if (parsedUrl.hostname === "einvoice.vn" || parsedUrl.hostname === "www.einvoice.vn") return false;
+  const clean = parsedUrl.origin + "/";
   learnedThaiSonPortals.set(seller, clean);
   if (typeof window !== "undefined") {
     try {
@@ -904,6 +1095,7 @@ var SOLUTION_PROVIDERS = {
   "0105987432": "EASYINVOICE",
   "0315744883": "4SI",
   "0302999571": "LCS",
+  "0312303803": "WININVOICE",
   "0302712571": "MATBAO",
   "0401486901": "VISNAM",
   "0101360697": "BKAV",
@@ -946,7 +1138,8 @@ var KNOWN_PROVIDERS = /* @__PURE__ */ new Set([
   "FPT",
   "IHOADON",
   "VISNAM",
-  "MATBAO"
+  "MATBAO",
+  "WININVOICE"
 ]);
 function resolveInvoiceProvider(invoice) {
   if (!invoice) return void 0;
@@ -971,6 +1164,7 @@ function resolveInvoiceProvider(invoice) {
   if (portal) return portal;
   const name = [extractTagValue(xml, "TenTCGP"), extractTagValue(xml, "TCGP"), extractTagValue(xml, "ToChucGiaiPhap"), invoice.tentcgp || ""].join(" ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
   for (const [pattern, provider2] of [
+    [/WIN\s*INVOICE|WIN\s*TECH\s*SOLUTION/, "WININVOICE"],
     [/MAT\s*BAO|MIFI/, "MATBAO"],
     [/THAI\s*SON/, "THAISON"],
     [/M-?INVOICE/, "MINVOICE"],
@@ -1714,9 +1908,9 @@ function getLookupUrlFromPayload(source) {
   if (isThaiSonSource(source)) {
     const normalizedPortal = normalizeThaiSonPortalUrl(suppliedPortal);
     const isGeneric = /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(normalizedPortal);
-    const specific = normalizedPortal && !isGeneric && isTrustedThaiSonPortalUrl(normalizedPortal) ? normalizedPortal : "";
-    if (specific) rememberThaiSonPortalForSeller(sellerMst, specific);
-    return specific || tenantPortal || "";
+    const explicit = normalizedPortal && isTrustedThaiSonPortalUrl(normalizedPortal) ? normalizedPortal : "";
+    if (explicit && !isGeneric) rememberThaiSonPortalForSeller(sellerMst, explicit);
+    return explicit || tenantPortal || "";
   }
   if (isLcsSource(source)) {
     return "https://eip.lcssoft.com.vn/desktop/#/login";
@@ -1846,6 +2040,11 @@ function getSellerFromPayload(source) {
 }
 function extractLookupDetailsFromXml(rawXml) {
   if (!rawXml) return { lookupCode: "", lookupUrl: "" };
+  if (/<MSTTCGP>\s*0312303803\s*<\/MSTTCGP>/i.test(rawXml)) {
+    const codeBlock = rawXml.match(/<TTin\b[^>]*\bId=["']privateCode["'][^>]*>([\s\S]*?)<\/TTin>/i);
+    const code = codeBlock ? extractTagValue(codeBlock[1], "DLieu") : "";
+    return { lookupCode: /^[A-Za-z0-9_-]{6,64}$/.test(code.trim()) ? code.trim() : "", lookupUrl: "https://tracuu.wininvoice.vn/" };
+  }
   if (/<MSTTCGP>\s*0302712571\s*<\/MSTTCGP>/i.test(rawXml)) {
     return { lookupCode: "", lookupUrl: "https://matbao.in/tra-cuu-hoa-don" };
   }
@@ -1863,6 +2062,25 @@ function extractLookupDetailsFromXml(rawXml) {
     if (label && value2) extraFields.set(label, value2);
   }
   const xmlSellerMst = extractTagBlocks(rawXml, "NBan").map((block) => extractTagValue(block, "MST")).find(Boolean) || "";
+  const isCentralRetailThaiSon = /<MSTTCGP>\s*0101300842\s*<\/MSTTCGP>/i.test(rawXml);
+  const rawExtraData = extractTagBlocks(rawXml, "TTin").map((block) => extractTagValue(block, "DLieu"));
+  const centralPortal = rawExtraData.map((value2) => value2.match(/\[DCTC\]([^\[\]<]{1,500})\[\/DCTC\]/i)?.[1]?.trim() || "").find((value2) => /^https:\/\/hddt\.centralretail\.com\.vn\/?$/i.test(value2)) || "";
+  const centralLookupCode = rawExtraData.map((value2) => value2.match(/\[MaTC\]([A-Za-z0-9_-]{6,64})\[\/MaTC\]/i)?.[1] || "").find(Boolean) || "";
+  if (isCentralRetailThaiSon && centralPortal && centralLookupCode && isLookupCodeCandidate(centralLookupCode)) {
+    return {
+      lookupCode: centralLookupCode,
+      lookupUrl: "https://hddt.centralretail.com.vn/vi-vn/tra-cuu-hoa-don-dien-tu"
+    };
+  }
+  const aeonSellerTaxCode = extractTagBlocks(rawXml, "NBan").map((block) => extractTagValue(block, "MST")).find(Boolean) || "";
+  const aeonSellerName = extractTagBlocks(rawXml, "NBan").map((block) => extractTagValue(block, "Ten")).find(Boolean) || "";
+  const aeonReceiptCode = extraFields.get("ma tc") || "";
+  if (/<MSTTCGP>\s*0101300842\s*<\/MSTTCGP>/i.test(rawXml) && /^0311241512(?:-\d{3})?$/.test(aeonSellerTaxCode) && /AEON\s+VIỆT\s+NAM/i.test(aeonSellerName) && /^[A-Za-z0-9_-]{6,64}$/.test(aeonReceiptCode)) {
+    return {
+      lookupCode: aeonReceiptCode,
+      lookupUrl: "https://hddt.aeon.com.vn/"
+    };
+  }
   const codeTags = [
     "SoBaoMat",
     "sobaomat",
@@ -1966,7 +2184,9 @@ function extractLookupDetailsFromXml(rawXml) {
   if (xmlSolutionMst === "0101300842") {
     const normalized = normalizeThaiSonPortalUrl(vendorLookupUrl);
     if (normalized && isTrustedThaiSonPortalUrl(normalized)) {
-      rememberThaiSonPortalForSeller(xmlSellerMst, normalized);
+      if (!/^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(normalized)) {
+        rememberThaiSonPortalForSeller(xmlSellerMst, normalized);
+      }
       lookupUrl = normalized;
     } else {
       lookupUrl = normalizeThaiSonPortalUrl(lookupUrl) || lookupUrl;
@@ -2034,7 +2254,7 @@ function extractLookupDetailsFromXml(rawXml) {
   }
   const isBkav = /bkav|ehoadon\.vn|ehoadon\.bkav|0101360697/i.test(rawXml);
   if (isBkav) {
-    if (!lookupUrl) lookupUrl = "https://ehoadon.bkav.com/tra-cuu";
+    if (!lookupUrl) lookupUrl = "https://tchd.ehoadon.vn/TCHD";
   }
   const isCyberBill = /cyberbill\.vn|cyberlotus|0107871301/i.test(rawXml);
   if (isCyberBill) {
@@ -4030,7 +4250,8 @@ var CaptchaSolver = class {
           whitelist: options?.whitelist || (options?.alphanumeric ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" : "0123456789"),
           timeoutMs: options?.timeoutMs || 4e3,
           preprocessEasyInvoice: options?.preprocessEasyInvoice === true,
-          preprocessPosCaptcha: options?.alphanumeric === true
+          preprocessPosCaptcha: options?.alphanumeric === true,
+          preprocessVisnam: options?.preprocessVisnam === true
         });
         const localCode = (tesseractRes?.code || "").trim().toUpperCase();
         const validLocalCode = options?.alphanumeric ? /^[A-Z0-9]{4,6}$/.test(localCode) : /^[0-9]{3,6}$/.test(localCode);
@@ -5246,7 +5467,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
     this.createLog(`M\xE3 tra c\u1EE9u / M\xE3 h\xF3a \u0111\u01A1n 4Si: "${invoiceCode}"`, logs);
     const timeoutMs = options?.timeoutMs || 15e3;
     const baseUrl = "https://inv.4si.vn";
-    let cookieHeader = "";
+    let cookieHeader2 = "";
     const client = axios4.create({
       baseURL: baseUrl,
       timeout: timeoutMs,
@@ -5266,7 +5487,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
       });
       if (pageRes.headers["set-cookie"]) {
         const setCookie = pageRes.headers["set-cookie"];
-        cookieHeader = Array.isArray(setCookie) ? setCookie.map((c) => c.split(";")[0]).join("; ") : String(setCookie).split(";")[0];
+        cookieHeader2 = Array.isArray(setCookie) ? setCookie.map((c) => c.split(";")[0]).join("; ") : String(setCookie).split(";")[0];
       }
       const $ = cheerio.load(typeof pageRes.data === "string" ? pageRes.data : "");
       let captchaImgSrc = $('img#captcha, img#imgCaptcha, img.captcha, img[src*="captcha"]').attr("src") || "/captcha";
@@ -5280,7 +5501,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
         const captchaRes = await client.get(captchaImgSrc, {
           responseType: "arraybuffer",
           headers: {
-            ...cookieHeader ? { "Cookie": cookieHeader } : {}
+            ...cookieHeader2 ? { "Cookie": cookieHeader2 } : {}
           }
         });
         if (captchaRes.data && captchaRes.data.byteLength > 50) {
@@ -5329,7 +5550,7 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
           const postRes = await client.post(ep, postPayload, {
             responseType: "arraybuffer",
             headers: {
-              ...cookieHeader ? { "Cookie": cookieHeader } : {},
+              ...cookieHeader2 ? { "Cookie": cookieHeader2 } : {},
               "Content-Type": "application/x-www-form-urlencoded"
             },
             validateStatus: (s) => s < 500
@@ -5394,8 +5615,8 @@ var FourSiDriver = class extends BaseInvoiceProviderDriver {
 
 // src/services/invoice-engine/drivers/GenericFallbackDriver.ts
 import { jsPDF } from "jspdf";
-import fs from "fs";
-import path from "path";
+import fs2 from "fs";
+import path2 from "path";
 import QRCode from "qrcode";
 var regularFontBuffer = null;
 var boldFontBuffer = null;
@@ -5403,19 +5624,19 @@ var italicFontBuffer = null;
 function loadUnicodeFonts() {
   if (regularFontBuffer && boldFontBuffer) return true;
   const candidateDirs = [
-    path.resolve(process.cwd(), "assets/fonts"),
-    path.resolve(process.cwd(), "public/fonts"),
+    path2.resolve(process.cwd(), "assets/fonts"),
+    path2.resolve(process.cwd(), "public/fonts"),
     "/usr/share/fonts/truetype/liberation"
   ];
   for (const dir of candidateDirs) {
     try {
-      const reg = path.join(dir, "LiberationSerif-Regular.ttf");
-      const bold = path.join(dir, "LiberationSerif-Bold.ttf");
-      const ital = path.join(dir, "LiberationSerif-Italic.ttf");
-      if (fs.existsSync(reg) && fs.existsSync(bold)) {
-        regularFontBuffer = fs.readFileSync(reg);
-        boldFontBuffer = fs.readFileSync(bold);
-        italicFontBuffer = fs.existsSync(ital) ? fs.readFileSync(ital) : regularFontBuffer;
+      const reg = path2.join(dir, "LiberationSerif-Regular.ttf");
+      const bold = path2.join(dir, "LiberationSerif-Bold.ttf");
+      const ital = path2.join(dir, "LiberationSerif-Italic.ttf");
+      if (fs2.existsSync(reg) && fs2.existsSync(bold)) {
+        regularFontBuffer = fs2.readFileSync(reg);
+        boldFontBuffer = fs2.readFileSync(bold);
+        italicFontBuffer = fs2.existsSync(ital) ? fs2.readFileSync(ital) : regularFontBuffer;
         return true;
       }
     } catch {
@@ -6419,12 +6640,12 @@ function prepareEasyInvoiceHtml(html) {
 
 // src/services/easyInvoiceService.ts
 var httpsAgent2 = new https3.Agent({ rejectUnauthorized: false });
-var isServerless2 = Boolean(
+var isServerless = Boolean(
   process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.NETLIFY
 );
 async function solveEasyInvoiceCaptcha(captchaBuf) {
   const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
-  if (isServerless2 && hasGeminiKey) {
+  if (isServerless && hasGeminiKey) {
     try {
       console.log("[EasyInvoice] M\xF4i tr\u01B0\u1EDDng Vercel/Serverless: S\u1EED d\u1EE5ng Gemini Vision gi\u1EA3i Captcha tr\u1EF1c ti\u1EBFp...");
       const digits3 = await solveCaptchaWithGemini(captchaBuf, EASYINVOICE_CAPTCHA_PROMPT);
@@ -6464,7 +6685,7 @@ async function downloadOriginalEasyInvoice(params) {
   const domains = [portals.primary, portals.seller, portals.common].filter((url) => Boolean(url)).map((url) => new URL(url).origin);
   const uniqueDomains = Array.from(new Set(domains));
   console.log(`[EasyInvoice] Lookup routing: MST="${sellerTaxCode || ""}", portals=${uniqueDomains.join(", ")}`);
-  const maxRetries = isServerless2 ? 2 : 3;
+  const maxRetries = isServerless ? 2 : 3;
   let lastError = "";
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -6826,94 +7047,6 @@ var EasyInvoiceDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
-// src/services/bkavInvoiceService.ts
-async function downloadOriginalBkavPdf(params) {
-  const lookupCode = String(params.lookupCode || "").trim();
-  const xml = String(params.xml || "").trim();
-  const recaptchaToken = String(params.recaptchaToken || "").trim();
-  if (!lookupCode && !xml) throw new Error("C\u1EA7n m\xE3 tra c\u1EE9u ho\u1EB7c t\u1EC7p XML h\xF3a \u0111\u01A1n Bkav eHoadon.");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), params.timeoutMs || 2e4);
-  try {
-    const pageUrl = lookupCode ? `https://van.ehoadon.vn/TCHD?MTC=${encodeURIComponent(lookupCode)}` : "https://van.ehoadon.vn/TCHD";
-    const page = await fetch(pageUrl, {
-      headers: {
-        Accept: "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
-      },
-      signal: controller.signal
-    });
-    if (!page.ok) throw new Error(`C\u1ED5ng Bkav tr\u1EA3 v\u1EC1 HTTP ${page.status}.`);
-    let responseHtml = await page.text();
-    if (xml && !lookupCode) {
-      const hiddenFields = /* @__PURE__ */ new Map();
-      for (const match of responseHtml.matchAll(/<input[^>]+name=["']([^"']+)["'][^>]*value=["']([^"']*)["'][^>]*>/gi)) {
-        const name = match[1];
-        if (/^(__VIEWSTATE|__VIEWSTATEGENERATOR|__EVENTVALIDATION|__EVENTTARGET|__EVENTARGUMENT|__LASTFOCUS|ctl00\$hdfShowBanner|ctl00\$bodySearch\$lookupBase\$hdfFileLastModifiedDate|ctl00\$bodySearch\$lookupBase\$hdfIsXML)$/i.test(name)) {
-          hiddenFields.set(name, match[2].replace(/&amp;/g, "&").replace(/&quot;/g, '"'));
-        }
-      }
-      const form = new FormData();
-      hiddenFields.forEach((value2, name) => form.set(name, value2));
-      form.set("ctl00$bodySearch$lookupBase$hdfIsXML", "true");
-      form.set("ctl00$bodySearch$lookupBase$fuXMLUpload", new Blob([xml], { type: "text/xml" }), "invoice.xml");
-      form.set("ctl00$bodySearch$lookupBase$Button1", "Tra c\u1EE9u");
-      if (recaptchaToken) {
-        form.set("g-recaptcha-response", recaptchaToken);
-        form.set("recaptchaToken", recaptchaToken);
-      }
-      const cookie = String(page.headers.get("set-cookie") || "").split(";")[0];
-      const lookup = await fetch(pageUrl, {
-        method: "POST",
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36",
-          ...cookie ? { Cookie: cookie } : {}
-        },
-        body: form,
-        signal: controller.signal
-      });
-      if (!lookup.ok) throw new Error(`C\u1ED5ng Bkav tr\u1EA3 v\u1EC1 HTTP ${lookup.status} khi t\u1EA3i XML.`);
-      responseHtml = await lookup.text();
-    }
-    const candidates = [...responseHtml.matchAll(/(?:href|src)=["']([^"']*Invoice_View[^"']+\.pdf[^"']*)["']/gi)].map((match) => match[1].replace(/&amp;/g, "&"));
-    const relative = candidates[0];
-    if (!relative) {
-      if (/mã tra cứu.*không đúng|không tìm thấy|không tồn tại/i.test(responseHtml)) {
-        throw new Error("Bkav kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n v\u1EDBi m\xE3 tra c\u1EE9u n\xE0y.");
-      }
-      if (xml) {
-        throw Object.assign(
-          new Error("Bkav ch\u01B0a tr\u1EA3 v\u1EC1 PDF g\u1ED1c sau khi ti\u1EBFp nh\u1EADn XML. C\u1ED5ng y\xEAu c\u1EA7u x\xE1c th\u1EF1c reCAPTCHA h\u1EE3p l\u1EC7 t\u1EEB trang tra c\u1EE9u."),
-          { code: "RECAPTCHA_REQUIRED", status: 428, provider: "BKAV", lookupUrl: "https://van.ehoadon.vn/TCHD" }
-        );
-      }
-      throw new Error("Bkav ch\u01B0a tr\u1EA3 v\u1EC1 li\xEAn k\u1EBFt PDF g\u1ED1c cho m\xE3 tra c\u1EE9u n\xE0y.");
-    }
-    const pdfUrl = new URL(relative, pageUrl).toString();
-    const pdf = await fetch(pdfUrl, {
-      headers: {
-        Accept: "application/pdf,application/octet-stream,*/*",
-        Referer: pageUrl,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
-      },
-      signal: controller.signal
-    });
-    if (!pdf.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c PDF Bkav: HTTP ${pdf.status}.`);
-    const data = Buffer.from(await pdf.arrayBuffer());
-    if (!data.subarray(0, 10).toString("latin1").includes("%PDF")) {
-      throw new Error("Bkav kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7.");
-    }
-    return {
-      data,
-      filename: `HoaDon_Bkav_${lookupCode || "XML"}.pdf`,
-      contentType: "application/pdf"
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // src/services/invoice-engine/drivers/BkavDriver.ts
 var BkavDriver = class extends BaseInvoiceProviderDriver {
   constructor() {
@@ -6924,7 +7057,7 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
       name: "Bkav eHoadon Driver",
       providerCode: "BKAV",
       description: "Tra c\u1EE9u & x\u1EED l\xFD h\xF3a \u0111\u01A1n \u0111i\u1EC7n t\u1EED Bkav eHoadon qua M\xE3 tra c\u1EE9u / Ch\u1EEF k\xFD s\u1ED1 BKAV-CA",
-      sampleUrl: "https://ehoadon.bkav.com/tra-cuu",
+      sampleUrl: "https://tchd.ehoadon.vn/TCHD",
       supportsCaptcha: false,
       requiredFields: ["lookupCode", "sellerTaxCode"]
     };
@@ -6967,31 +7100,6 @@ var BkavDriver = class extends BaseInvoiceProviderDriver {
     if (info.lookupCode) {
       this.createLog(`M\xE3 tra c\u1EE9u Bkav: "${info.lookupCode}"`, logs);
       this.createLog(`C\u1ED5ng m\u1EDF h\xF3a \u0111\u01A1n tr\u1EF1c ti\u1EBFp: ${info.lookupUrl || "https://tchd.ehoadon.vn/TCHD"}`, logs);
-    }
-    if (info.lookupCode || info.rawXml) {
-      try {
-        const original = await downloadOriginalBkavPdf({
-          lookupCode: info.lookupCode,
-          xml: info.lookupCode ? void 0 : info.rawXml,
-          recaptchaToken: options?.recaptchaToken,
-          timeoutMs: options?.timeoutMs
-        });
-        this.createLog(`T\u1EA3i b\u1EA3n g\u1ED1c BKAV th\xE0nh c\xF4ng: ${original.filename}`, logs);
-        return {
-          success: true,
-          provider: this.providerCode,
-          driverName: this.name,
-          pdfBuffer: original.data,
-          pdfBase64: original.data.toString("base64"),
-          contentType: original.contentType,
-          filename: original.filename,
-          isFallback: false,
-          sourceUrl: info.lookupUrl,
-          executionLogs: logs
-        };
-      } catch (error) {
-        this.createLog(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c b\u1EA3n g\u1ED1c BKAV: ${error.message}`, logs);
-      }
     }
     this.createLog(`T\u1EA1o b\u1EA3n th\u1EC3 hi\u1EC7n PDF & HTML/CSS chu\u1EA9n Ngh\u1ECB \u0111\u1ECBnh 123 / Quy\u1EBFt \u0111\u1ECBnh 1450/TCT`, logs);
     const fallbackRes = await this.fallback.fetchPdf(info, options);
@@ -7638,10 +7746,10 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
         portal
       );
     }
-    const token = String(options?.recaptchaToken || "").trim();
+    const token = (options?.recaptchaToken || options?.customInfo?.recaptchaToken || "").trim();
     if (!token) {
       throw new OriginalInvoiceError(
-        "Vui l\xF2ng m\u1EDF link \u0111\u1EC3 tra c\u1EE9u tr\u1EF1c ti\u1EBFp",
+        "M-invoice y\xEAu c\u1EA7u m\xE3 reCAPTCHA x\xE1c th\u1EF1c. Vui l\xF2ng m\u1EDF link \u0111\u1EC3 tra c\u1EE9u tr\u1EF1c ti\u1EBFp",
         this.providerCode,
         "MINVOICE_CAPTCHA_REQUIRED",
         428,
@@ -8004,12 +8112,336 @@ var MatbaoDriver = class extends BaseInvoiceProviderDriver {
   }
 };
 
-// src/services/thaiSonInvoiceService.ts
+// src/services/invoice-engine/drivers/WinInvoiceDriver.ts
 import * as cheerio5 from "cheerio";
+init_invoiceIdentityVerifier();
+var HOST = "https://tracuu.wininvoice.vn";
+var PORTAL2 = HOST + "/bill";
+var MAX_HTML = 2e6;
+var MAX_PDF2 = 18e6;
+var TOKEN_FIELD = "phtcsrf_tkndf-tc";
+var TOKEN_COOKIE = "df-tcphtcsrf_coki_tkndf-tc";
+function winInvoiceFields(xml) {
+  const field = (id) => {
+    const match = [...xml.matchAll(/<TTin\b[^>]*\bId=["']([^"']+)["'][^>]*>([\s\S]*?)<\/TTin>/gi)].find((item) => item[1].toLowerCase() === id.toLowerCase());
+    if (!match) return "";
+    return match[2].match(/<DLieu(?:\s[^>]*)?>([\s\S]*?)<\/DLieu>/i)?.[1]?.trim() || "";
+  };
+  return { lookupCode: field("privateCode"), companyCode: field("cmpnKey") };
+}
+function sameOrigin(url) {
+  return url.origin === HOST && !url.username && !url.password;
+}
+function providerUrl(value2, base) {
+  try {
+    const url = new URL(value2, base);
+    return sameOrigin(url) ? url : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function setCookies(headers, jar) {
+  const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
+  for (const item of values) {
+    const pair = item.split(";", 1)[0];
+    const pos = pair.indexOf("=");
+    if (pos > 0) {
+      const name = pair.slice(0, pos).trim();
+      const value2 = pair.slice(pos + 1).trim();
+      if (/^[a-zA-Z0-9_-]{1,100}$/.test(name) && value2.length < 4096) jar.set(name, value2);
+    }
+  }
+}
+function cookieHeader(jar) {
+  return [...jar.entries()].map(([key, value2]) => key + "=" + value2).join("; ");
+}
+function csrfFromHtml(html) {
+  const $ = cheerio5.load(html);
+  const field = $("input").filter((_, el) => $(el).attr("name") === TOKEN_FIELD).first();
+  return String(field.attr("value") || "").trim();
+}
+function findWinInvoiceDownloadLink(html, info) {
+  const $ = cheerio5.load(html);
+  const series = String(info.invoiceSeries || "").trim().toUpperCase();
+  const number = String(info.invoiceNo || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  if (!series || !number) return void 0;
+  const candidates = [];
+  $("[href],[data-href],[onclick]").each((_, el) => {
+    for (const attr of ["href", "data-href", "onclick"]) {
+      const value2 = $(el).attr(attr) || "";
+      if (attr !== "onclick") {
+        if (value2) candidates.push(value2);
+      } else {
+        const match = value2.match(/(?:https?:\/\/tracuu\.wininvoice\.vn)?\/bill\/view\?[^"'\s<>]+/i);
+        if (match) candidates.push(match[0]);
+      }
+    }
+  });
+  for (const candidate of candidates) {
+    const url = providerUrl(candidate.replace(/&amp;/gi, "&"), HOST + "/bill/inv");
+    if (!url || url.pathname !== "/bill/view") continue;
+    const name = url.searchParams.get("name") || "";
+    const pivot = name.lastIndexOf("_");
+    if (pivot < 0) continue;
+    const linkSeries = name.slice(0, pivot).trim().toUpperCase();
+    const linkNo = name.slice(pivot + 1).replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+    if (series !== linkSeries || number !== linkNo || !url.searchParams.get("f")) continue;
+    url.searchParams.set("download", "1");
+    return url.href;
+  }
+  return void 0;
+}
+function winInvoicePdfFromViewer(html, viewerUrl) {
+  const $ = cheerio5.load(html);
+  const links = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (value2) => {
+    const raw = value2.trim().replace(/&amp;/gi, "&");
+    if (!raw || raw.startsWith("#") || /^javascript:/i.test(raw)) return;
+    const url = providerUrl(raw, viewerUrl);
+    if (!url || seen.has(url.href) || url.href === viewerUrl) return;
+    const download = url.searchParams.has("download") || url.searchParams.has("pdf") || /(?:\.pdf(?:$|[?#])|\/(?:download|export|pdf|file)(?:\/|$))/i.test(url.pathname + url.search);
+    if (download) {
+      seen.add(url.href);
+      links.push(url.href);
+    }
+  };
+  $("iframe[src], embed[src], object[data], a[href], a[data-href], source[src]").each((_, el) => {
+    const tag = (el.tagName || "").toLowerCase();
+    const value2 = $(el).attr(tag === "object" ? "data" : "src") || $(el).attr("href") || $(el).attr("data-href") || "";
+    add(value2);
+  });
+  const match = html.match(/data:application\/pdf(?:;[^,"'\s<>]*)?;base64,([A-Za-z0-9+/=\s]{100,})/i);
+  let pdf;
+  if (match && match[1].length <= MAX_PDF2 * 1.5) {
+    const decoded = Buffer.from(match[1].replace(/\s/g, ""), "base64");
+    if (decoded.length <= MAX_PDF2 && decoded.subarray(0, 5).toString("latin1") === "%PDF-") {
+      pdf = decoded;
+    }
+  }
+  return { links: links.slice(0, 8), pdf };
+}
+async function responseText(response) {
+  const size = Number(response.headers.get("content-length") || 0);
+  if (size > MAX_HTML) throw new Error("HTML t\u1EEB WINinvoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n.");
+  const text = await response.text();
+  if (text.length > MAX_HTML) throw new Error("HTML t\u1EEB WINinvoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n.");
+  return text;
+}
+var WinInvoiceDriver = class extends BaseInvoiceProviderDriver {
+  constructor() {
+    super(...arguments);
+    this.name = "WINinvoice Original PDF Driver";
+    this.providerCode = "WININVOICE";
+    this.metadata = {
+      name: "WINinvoice Original PDF Driver",
+      providerCode: "WININVOICE",
+      description: "Tra c\u1EE9u PDF WINinvoice b\u1EB1ng privateCode + cmpnKey qua bi\u1EC3u m\u1EABu ch\xEDnh th\u1EE9c",
+      sampleUrl: PORTAL2,
+      supportsCaptcha: false,
+      requiredFields: ["rawXml"]
+    };
+  }
+  canHandle(input) {
+    if (typeof input !== "string") return input.provider === this.providerCode;
+    return /<MSTTCGP>\s*0312303803\s*<\/MSTTCGP>/i.test(input) || /(?:tracuu\.)?wininvoice\.vn/i.test(input);
+  }
+  extractInfo(xml) {
+    const fields = winInvoiceFields(xml);
+    const seller = this.extractXmlTag(this.extractXmlTag(xml, "NBan"), "MST");
+    return {
+      provider: this.providerCode,
+      providerName: "WINinvoice - Win Tech Solution",
+      sellerTaxCode: seller,
+      sellerName: this.extractXmlTag(this.extractXmlTag(xml, "NBan"), "Ten"),
+      invoiceNo: this.extractXmlTag(xml, "SHDon"),
+      invoiceSeries: this.extractXmlTag(xml, "KHHDon"),
+      templateCode: this.extractXmlTag(xml, "KHMSHDon"),
+      invoiceDate: this.extractXmlTag(xml, "NLap"),
+      cqtCode: this.extractXmlTag(xml, "MCCQT"),
+      lookupCode: fields.lookupCode,
+      lookupUrl: PORTAL2,
+      rawXml: xml,
+      additionalData: { companyCode: fields.companyCode, lookupMethod: "privateCode+cmpnKey" }
+    };
+  }
+  async fetchPdf(info, options) {
+    const fail = (reason, code = "WININVOICE_PORTAL_REQUIRED") => {
+      throw new OriginalInvoiceError(
+        reason + " C\xF3 th\u1EC3 tra c\u1EE9u t\u1EA1i https://tracuu.wininvoice.vn/bill b\u1EB1ng hai m\xE3 trong XML.",
+        this.providerCode,
+        code,
+        428,
+        PORTAL2
+      );
+    };
+    if (!/<MSTTCGP>\s*0312303803\s*<\/MSTTCGP>/i.test(info.rawXml || "")) {
+      return fail("Kh\xF4ng c\xF3 XML WINinvoice h\u1EE3p l\u1EC7.", "WININVOICE_XML_REQUIRED");
+    }
+    const { lookupCode, companyCode } = winInvoiceFields(info.rawXml || "");
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(lookupCode) || !/^\d{10}(?:-\d{3})?$/.test(companyCode)) {
+      return fail("Thi\u1EBFu privateCode ho\u1EB7c cmpnKey h\u1EE3p l\u1EC7.", "WININVOICE_MISSING_CODES");
+    }
+    const timeout = Math.min(options?.timeoutMs || 25e3, 45e3);
+    const jar = /* @__PURE__ */ new Map();
+    const logs = [];
+    const request = async (url, method, body, referer = PORTAL2) => {
+      const response = await fetch(url, {
+        method,
+        redirect: "manual",
+        headers: {
+          Accept: "text/html,application/xhtml+xml,application/pdf,*/*",
+          ...jar.size ? { Cookie: cookieHeader(jar) } : {},
+          ...body ? { "Content-Type": "application/x-www-form-urlencoded", Origin: HOST } : {},
+          Referer: referer
+        },
+        ...body ? { body } : {},
+        signal: AbortSignal.timeout(timeout)
+      });
+      setCookies(response.headers, jar);
+      return response;
+    };
+    try {
+      const landing = await request(PORTAL2, "GET");
+      if (!landing.ok || !String(landing.headers.get("content-type") || "").includes("text/html")) {
+        return fail("Kh\xF4ng m\u1EDF \u0111\u01B0\u1EE3c bi\u1EC3u m\u1EABu WINinvoice.");
+      }
+      const html = await responseText(landing);
+      const formToken = csrfFromHtml(html);
+      const cookieToken = jar.get(TOKEN_COOKIE) || "";
+      const csrf = formToken || cookieToken;
+      if (!csrf || !/^[A-Za-z0-9_-]{12,150}$/.test(csrf) || !jar.size) {
+        return fail("Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c phi\xEAn ho\u1EB7c m\xE3 CSRF h\u1EE3p l\u1EC7 t\u1EEB WINinvoice.");
+      }
+      const data = new URLSearchParams({
+        private_code: lookupCode,
+        cmpn_key: companyCode,
+        action: "submit",
+        [TOKEN_FIELD]: csrf,
+        test: "1"
+      });
+      const posted = await request(PORTAL2, "POST", data.toString());
+      if (posted.status !== 303) {
+        return fail("WINinvoice kh\xF4ng ch\u1EA5p nh\u1EADn bi\u1EC3u m\u1EABu tra c\u1EE9u (HTTP " + posted.status + ").");
+      }
+      const redirect = providerUrl(posted.headers.get("location") || "", PORTAL2);
+      if (!redirect || redirect.pathname !== "/bill/inv") {
+        return fail("Ph\u1EA3n h\u1ED3i chuy\u1EC3n h\u01B0\u1EDBng tra c\u1EE9u WINinvoice kh\xF4ng h\u1EE3p l\u1EC7.");
+      }
+      logs.push("\u0110\xE3 x\xE1c th\u1EF1c bi\u1EC3u m\u1EABu WINinvoice v\xE0 \u0111\u01B0\u1EE3c chuy\u1EC3n \u0111\u1EBFn danh s\xE1ch h\xF3a \u0111\u01A1n");
+      const listing = await request(redirect.href, "GET");
+      if (!listing.ok || !String(listing.headers.get("content-type") || "").includes("text/html")) {
+        return fail("Kh\xF4ng l\u1EA5y \u0111\u01B0\u1EE3c danh s\xE1ch h\xF3a \u0111\u01A1n WINinvoice.");
+      }
+      const listHtml = await responseText(listing);
+      const downloadUrl = findWinInvoiceDownloadLink(listHtml, info);
+      if (!downloadUrl) return fail("Kh\xF4ng t\xECm th\u1EA5y li\xEAn k\u1EBFt t\u1EA3i \u0111\xFAng k\xFD hi\u1EC7u v\xE0 s\u1ED1 h\xF3a \u0111\u01A1n trong phi\xEAn tra c\u1EE9u.");
+      let nextUrl = downloadUrl;
+      let referer = redirect.href;
+      let bytes;
+      let providerZip;
+      const seen = /* @__PURE__ */ new Set();
+      const queue = [downloadUrl];
+      for (let hop = 0; queue.length && hop < 8; hop++) {
+        nextUrl = queue.shift();
+        if (seen.has(nextUrl)) continue;
+        seen.add(nextUrl);
+        const file = await request(nextUrl, "GET", void 0, referer);
+        if ([301, 302, 303, 307, 308].includes(file.status)) {
+          const target = providerUrl(file.headers.get("location") || "", nextUrl);
+          if (!target) return fail("Chuy\u1EC3n h\u01B0\u1EDBng t\u1EA3i PDF kh\xF4ng h\u1EE3p l\u1EC7 ho\u1EB7c ngo\xE0i mi\u1EC1n WINinvoice (HTTP " + file.status + ").");
+          queue.unshift(target.href);
+          logs.push("Chuy\u1EC3n h\u01B0\u1EDBng t\u1EA3i WINinvoice HTTP " + file.status);
+          referer = nextUrl;
+          continue;
+        }
+        if (!file.ok) return fail("WINinvoice kh\xF4ng cho t\u1EA3i h\xF3a \u0111\u01A1n (HTTP " + file.status + ").");
+        if (Number(file.headers.get("content-length") || 0) > MAX_PDF2) {
+          return fail("T\u1EC7p WINinvoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n dung l\u01B0\u1EE3ng.");
+        }
+        const data2 = Buffer.from(await file.arrayBuffer());
+        if (data2.length > MAX_PDF2) return fail("T\u1EC7p WINinvoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n dung l\u01B0\u1EE3ng.");
+        if (data2.subarray(0, 5).toString("latin1") === "%PDF-") {
+          bytes = data2;
+          break;
+        }
+        const type = (file.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        if (data2.subarray(0, 4).toString("latin1") === "PK") {
+          const validZip = await verifyIssuerInvoiceBytes(data2, "application/zip", {
+            sellerTaxCode: info.sellerTaxCode,
+            invoiceSeries: info.invoiceSeries,
+            invoiceNo: info.invoiceNo
+          });
+          if (!validZip.ok) return fail("ZIP WINinvoice kh\xF4ng kh\u1EDBp h\xF3a \u0111\u01A1n: " + validZip.reason);
+          providerZip = data2;
+          logs.push("\u0110\xE3 x\xE1c minh ZIP g\u1ED1c WINinvoice v\xE0 gi\u1EEF nguy\xEAn c\xE1c t\u1EC7p nh\xE0 cung c\u1EA5p");
+          break;
+        }
+        const isHtml = /^(?:text\/html|application\/xhtml\+xml)$/.test(type) || /^\s*(?:<!doctype\s+html|<html\b)/i.test(data2.subarray(0, 1e3).toString("utf8"));
+        if (!isHtml || data2.length > MAX_HTML) {
+          return fail("WINinvoice tr\u1EA3 v\u1EC1 " + (type || "d\u1EEF li\u1EC7u kh\xF4ng x\xE1c \u0111\u1ECBnh") + ", kh\xF4ng ph\u1EA3i PDF g\u1ED1c.");
+        }
+        const viewer = winInvoicePdfFromViewer(data2.toString("utf8"), nextUrl);
+        if (viewer.pdf) {
+          bytes = viewer.pdf;
+          break;
+        }
+        for (const link of viewer.links) {
+          if (!seen.has(link) && !queue.includes(link)) queue.push(link);
+        }
+        logs.push("Trang trung gian HTML t\u1EEB /" + new URL(nextUrl).pathname.split("/").filter(Boolean).join("/") + " \u0111\u01B0\u1EE3c ki\u1EC3m tra li\xEAn k\u1EBFt PDF");
+        referer = nextUrl;
+      }
+      if (!bytes && providerZip) {
+        return {
+          success: true,
+          provider: this.providerCode,
+          driverName: this.name,
+          pdfBuffer: providerZip,
+          pdfBase64: providerZip.toString("base64"),
+          filename: "HoaDon_" + info.invoiceSeries + "_" + info.invoiceNo + ".zip",
+          contentType: "application/zip",
+          sourceUrl: nextUrl,
+          isFallback: false,
+          executionLogs: [...logs, "\u0110\xE3 t\u1EA3i ZIP g\u1ED1c WINinvoice v\xE0 \u0111\u1ED1i chi\u1EBFu XML \u0111\xFAng h\xF3a \u0111\u01A1n"]
+        };
+      }
+      if (!bytes || bytes.length < 100 || bytes.length > MAX_PDF2) {
+        return fail("WINinvoice ch\u1EC9 tr\u1EA3 v\u1EC1 trang xem HTML ho\u1EB7c kh\xF4ng cung c\u1EA5p t\u1EC7p PDF tr\u1EF1c ti\u1EBFp trong phi\xEAn tra c\u1EE9u.");
+      }
+      const verified = await verifyIssuerInvoiceBytes(bytes, "application/pdf", {
+        sellerTaxCode: info.sellerTaxCode,
+        invoiceSeries: info.invoiceSeries,
+        invoiceNo: info.invoiceNo
+      });
+      if (!verified.ok) return fail("Kh\xF4ng x\xE1c minh \u0111\u01B0\u1EE3c danh t\xEDnh PDF g\u1ED1c: " + verified.reason);
+      logs.push("PDF \u0111\u01B0\u1EE3c \u0111\u1ED1i chi\u1EBFu th\xF4ng tin h\xF3a \u0111\u01A1n th\xE0nh c\xF4ng");
+      return {
+        success: true,
+        provider: this.providerCode,
+        driverName: this.name,
+        pdfBuffer: bytes,
+        pdfBase64: bytes.toString("base64"),
+        filename: this.buildPdfFilename(info),
+        contentType: "application/pdf",
+        sourceUrl: nextUrl,
+        isFallback: false,
+        executionLogs: logs
+      };
+    } catch (error) {
+      if (error instanceof OriginalInvoiceError) throw error;
+      return fail("Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c c\u1ED5ng WINinvoice ho\u1EB7c phi\xEAn tra c\u1EE9u \u0111\xE3 h\u1EBFt h\u1EA1n.");
+    }
+  }
+};
+
+// src/services/thaiSonInvoiceService.ts
+init_invoiceIdentityVerifier();
+import * as cheerio6 from "cheerio";
 import JSZip4 from "jszip";
 var THAISON_PORTAL_URL = "https://einvoice.vn/tra-cuu";
 function parseThaiSonForm(html) {
-  const $ = cheerio5.load(html);
+  const $ = cheerio6.load(html);
   const lookupNames = ["MA_NHAN_HOA_DON", "MaNhanHoaDon", "MaTraCuu", "MaNhanHDon", "MTCuu"];
   const named = $("form").filter((_, node) => lookupNames.some((name) => $(node).find('input[name="' + name + '"]').length > 0)).first();
   let form = named;
@@ -8053,6 +8485,9 @@ function parseThaiSonForm(html) {
   const tokenInput = form.find('input[name="CaptchaDeText"],input[name="CaptchaToken"]').first();
   const imagePath = form.find('img#CaptchaImage, img[src*="Captcha"], img[src*="captcha"]').first().attr("src") || $('img#CaptchaImage, img[src*="Captcha"], img[src*="captcha"]').first().attr("src");
   const error = form.find(".validation-summary-errors, .field-validation-error").text().trim() || $(".validation-summary-errors").text().trim();
+  const submitButton = form.find('button[type="submit"][name], input[type="submit"][name]').first();
+  const submitName = String(submitButton.attr("name") || "");
+  const submitValue = String(submitButton.attr("value") || "");
   const hiddenFields = {};
   form.find('input[type="hidden"][name]').each((_, node) => {
     const el = $(node), name = el.attr("name") || "";
@@ -8066,6 +8501,8 @@ function parseThaiSonForm(html) {
     captchaField,
     method: (form.attr("method") || "POST").toUpperCase() === "GET" ? "GET" : "POST",
     formAction: form.attr("action") || "",
+    submitName,
+    submitValue,
     hiddenFields,
     formFound: Boolean(form.length)
   };
@@ -8084,11 +8521,11 @@ function isThaiSonHelpPdf(bytes) {
   return false;
 }
 function extractThaiSonDownloadTargets(html) {
-  const $ = cheerio5.load(html);
+  const $ = cheerio6.load(html);
   const found = [];
   const seen = /* @__PURE__ */ new Set();
-  const add = (path3, method = "GET", data) => {
-    const value2 = path3.trim().replace(/&amp;/g, "&");
+  const add = (path4, method = "GET", data) => {
+    const value2 = path4.trim().replace(/&amp;/g, "&");
     if (!value2 || value2.startsWith("#") || /^(?:javascript|data|file):/i.test(value2) || isThaiSonHelpDocumentLink(value2)) return;
     const id = [method, value2, data || ""].join("|");
     if (seen.has(id)) return;
@@ -8099,11 +8536,11 @@ function extractThaiSonDownloadTargets(html) {
   const isDownloadPath = (s) => /\.pdf(?:[?#]|$)|(?:tai|download|export|print|pdf|file)/i.test(s);
   $("a[href], iframe[src], embed[src], object[data], source[src]").each((_, node) => {
     const $el = $(node);
-    const path3 = $el.attr("href") || $el.attr("src") || $el.attr("data") || "";
+    const path4 = $el.attr("href") || $el.attr("src") || $el.attr("data") || "";
     const label = [$el.text(), $el.attr("title") || "", $el.attr("download") || ""].join(" ");
     const tag = String(node.tagName || "").toLowerCase();
-    if (isThaiSonHelpDocumentLink(path3, label)) return;
-    if (["iframe", "embed", "object", "source"].includes(tag) || isDownloadText(label) || isDownloadPath(path3)) add(path3);
+    if (isThaiSonHelpDocumentLink(path4, label)) return;
+    if (["iframe", "embed", "object", "source"].includes(tag) || isDownloadText(label) || isDownloadPath(path4)) add(path4);
   });
   $("button, input[type=submit], input[type=button], a[onclick]").each((_, node) => {
     const $el = $(node);
@@ -8136,16 +8573,62 @@ function extractThaiSonDownloadTargets(html) {
   });
   return found.slice(0, 12);
 }
+function isThaiSonMarketingPage(html) {
+  if (!html || html.length > 2e6) return false;
+  const lookup = parseThaiSonForm(html);
+  if (lookup.formFound && lookup.field && lookup.captchaField && lookup.imagePath) {
+    return false;
+  }
+  const $ = cheerio6.load(html);
+  if ($("#invoice-data, #multi-page, #invoice, .invoice-content, .invoice-detail, #invoice-detail").filter((_, node) => $(node).find("table tr").length >= 3).length) {
+    return false;
+  }
+  const plain = $("body").text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const title = $("title").text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  return /phan mem hoa don dien tu e-invoice duoc nhieu dn fdi tin dung/.test(plain) || /chuyen gia hoa don dien tu/.test(plain) || /(?:einvoice|e-invoice)/.test(title) && /gioi thieu/.test(plain) && /tin tuc/.test(plain) && /san pham/.test(plain);
+}
+function verifiedThaiSonInvoiceHtmlWithSeries(html, sellerTaxCode, invoiceNo, invoiceSeries) {
+  if (!invoiceSeries || isThaiSonMarketingPage(html)) return;
+  const $ = cheerio6.load(html);
+  const root = $("#multi-page, #invoice-data, #invoice, .invoice-content").first();
+  const scope = root.length ? root : $("body");
+  const visibleText = scope.text().toUpperCase().replace(/\s+/g, " ");
+  const compact2 = visibleText.replace(/\s+/g, "");
+  const seller = String(sellerTaxCode || "").replace(/\D/g, "");
+  const series = String(invoiceSeries).replace(/[^A-Z0-9]/gi, "").toUpperCase();
+  const number = String(invoiceNo || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  if (!seller || !series || !number || !compact2.includes(seller) || !compact2.includes(series)) return;
+  const labels = /(?:SỐ\s*(?:HÓA\s*ĐƠN|HĐ)|INVOICE\s*(?:NO|NUMBER)|INV\.?\s*NO)/gi;
+  let matched = false;
+  for (const match of visibleText.matchAll(labels)) {
+    const tail = visibleText.slice((match.index || 0) + match[0].length, (match.index || 0) + match[0].length + 35);
+    const digits2 = tail.match(/^\s*[:.#-]?\s*(\d{1,12})(?!\d)/);
+    if (digits2 && digits2[1].replace(/^0+(?=\d)/, "") === number) {
+      matched = true;
+      break;
+    }
+  }
+  if (!matched || scope.find("table tr").length < 3) return;
+  if (root.length) {
+    const source = $("#invoice-data");
+    const output = $("#multi-page");
+    const fragments = source.length && output.length ? $.html(source) + $.html(output) : $.html(root);
+    const scopedHtml = '<!doctype html><html><head><meta charset="utf-8">' + $("head style").map((_, node) => $.html(node)).get().join("") + "</head><body>" + fragments + "</body></html>";
+    return verifiedThaiSonInvoiceHtml(scopedHtml, sellerTaxCode, invoiceNo);
+  }
+  if ($("form, nav, header nav, .navbar, .main-menu, #menu").length || /phan mem hoa don dien tu e-invoice duoc nhieu dn fdi tin dung/i.test(
+    $("body").text().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  )) return;
+  return verifiedThaiSonInvoiceHtml(html, sellerTaxCode, invoiceNo);
+}
 function verifiedThaiSonInvoiceHtml(html, sellerTaxCode, invoiceNo) {
   if (!sellerTaxCode || !invoiceNo || html.length > 2e6) return;
-  const $ = cheerio5.load(html);
+  const $ = cheerio6.load(html);
   const text = $("body").text().replace(/\s+/g, " ");
   const compact2 = text.replace(/\s+/g, "").toLowerCase();
   const seller = sellerTaxCode.replace(/\s+/g, "").toLowerCase();
-  const sellerDigits = sellerTaxCode.replace(/\D/g, "");
-  const textDigits = text.replace(/\D/g, "");
   const number = String(invoiceNo).replace(/^0+/, "") || "0";
-  if (!compact2.includes(seller) && (!sellerDigits || !textDigits.includes(sellerDigits)) || !compact2.includes(number) || !/hóa\s*đơn|hoá\s*đơn|hoa\s*don|vat\s*invoice|tax\s*invoice/i.test(text)) {
+  if (!compact2.includes(seller) || !compact2.includes(number) || !/hóa\s*đơn|hoá\s*đơn|hoa\s*don|vat\s*invoice|tax\s*invoice/i.test(text)) {
     return;
   }
   const source = $("#invoice-data");
@@ -8198,7 +8681,7 @@ async function extractThaiSonOriginalContent(bytes) {
   }
 }
 function diagnoseThaiSonSearchPage(html) {
-  const $ = cheerio5.load(html);
+  const $ = cheerio6.load(html);
   const inputs = $("input[name]").map((_, node) => {
     const el = $(node);
     return { name: (el.attr("name") || "").slice(0, 80), type: el.attr("type") || "text" };
@@ -8237,8 +8720,8 @@ async function downloadOriginalThaiSonPdf(params) {
   const portalBase = portal.origin + (host.endsWith(".einvoice.com.vn") || host === "vat.ggg.com.vn" ? "/" : "/tra-cuu");
   const signal = AbortSignal.timeout(Math.min(params.timeoutMs || 45e3, 45e3));
   const cookies = /* @__PURE__ */ new Map();
-  const request = async (path3, init = {}) => {
-    let url = new URL(path3, portalBase);
+  const request = async (path4, init = {}) => {
+    let url = new URL(path4, portalBase);
     let method = init.method || "GET";
     let body = init.body;
     for (let hop = 0; hop < 5; hop++) {
@@ -8281,6 +8764,15 @@ async function downloadOriginalThaiSonPdf(params) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const page = await request(portalBase);
       const searchPageHtml = await page.text();
+      if (isThaiSonMarketingPage(searchPageHtml)) {
+        throw new OriginalInvoiceError(
+          "einvoice.vn/tra-cuu l\xE0 trang gi\u1EDBi thi\u1EC7u c\u1EE7a Th\xE1i S\u01A1n, kh\xF4ng ph\u1EA3i c\u1ED5ng tra c\u1EE9u h\xF3a \u0111\u01A1n tr\u1EF1c ti\u1EBFp. C\u1EA7n URL c\u1ED5ng ph\xE1t h\xE0nh do ng\u01B0\u1EDDi b\xE1n cung c\u1EA5p.",
+          "THAISON",
+          "ISSUER_LOOKUP_PORTAL_REQUIRED",
+          422,
+          portalBase
+        );
+      }
       const form = parseThaiSonForm(searchPageHtml);
       if (!form.formFound || !form.field) {
         const diagnostics = diagnoseThaiSonSearchPage(searchPageHtml);
@@ -8318,6 +8810,20 @@ async function downloadOriginalThaiSonPdf(params) {
       const resultBody = Buffer.from(await result.arrayBuffer());
       const directOriginal = await extractThaiSonOriginalContent(resultBody);
       if (directOriginal && !(directOriginal.extension === ".pdf" && isThaiSonHelpPdf(directOriginal.bytes))) {
+        const verified = await verifyIssuerInvoiceBytes(directOriginal.bytes, directOriginal.type, {
+          sellerTaxCode: params.sellerTaxCode,
+          invoiceSeries: params.invoiceSeries,
+          invoiceNo: params.invoiceNo
+        });
+        if (!verified.ok) {
+          throw new OriginalInvoiceError(
+            "T\u1EC7p t\u1EA3i Th\xE1i S\u01A1n kh\xF4ng kh\u1EDBp h\xF3a \u0111\u01A1n \u0111ang m\u1EDF: " + verified.reason,
+            "THAISON",
+            "INVOICE_IDENTITY_MISMATCH",
+            422,
+            portalBase
+          );
+        }
         return {
           success: true,
           contentType: directOriginal.type,
@@ -8334,7 +8840,7 @@ async function downloadOriginalThaiSonPdf(params) {
         if (attempt === 0 && /captcha|mã kiểm tra|mã xác thực/i.test(error)) continue;
         throw new Error(error);
       }
-      let displayHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
+      let displayHtml = verifiedThaiSonInvoiceHtmlWithSeries(html, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
       const advertisedTargets = extractThaiSonDownloadTargets(html);
       if (!displayHtml && postForm.formFound && postForm.field) {
         console.warn("[ThaiSon] Lookup returned the search form instead of invoice details", {
@@ -8378,14 +8884,21 @@ async function downloadOriginalThaiSonPdf(params) {
             const digits2 = (params.invoiceNo || "").replace(/^0+(?=\d)/, "");
             const evidence = targetUrl.href.includes(params.lookupCode.trim()) || digits2.length >= 4 && targetUrl.href.includes(digits2);
             if (displayHtml || evidence) {
-              originalContent = candidate;
-              break;
+              const verified = await verifyIssuerInvoiceBytes(candidate.bytes, candidate.type, {
+                sellerTaxCode: params.sellerTaxCode,
+                invoiceSeries: params.invoiceSeries,
+                invoiceNo: params.invoiceNo
+              });
+              if (verified.ok) {
+                originalContent = candidate;
+                break;
+              }
             }
           }
           const mime2 = targetResponse.headers.get("content-type") || "";
           if (target.depth < 2 && bytes2.length < 15e5 && (/html/i.test(mime2) || /<!doctype html|<html/i.test(bytes2.subarray(0, 250).toString("utf8")))) {
             const innerHtml = bytes2.toString("utf8");
-            displayHtml = displayHtml || verifiedThaiSonInvoiceHtml(innerHtml, params.sellerTaxCode, params.invoiceNo);
+            displayHtml = displayHtml || verifiedThaiSonInvoiceHtmlWithSeries(innerHtml, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
             const nested = extractThaiSonDownloadTargets(innerHtml);
             nested.forEach((item) => queue.push({ ...item, base: targetResponse.url, depth: target.depth + 1 }));
           }
@@ -8497,9 +9010,9 @@ var ThaiSonDriver = class extends BaseInvoiceProviderDriver {
       try {
         this.createLog("\u0110\xE3 c\xF3 M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n.", logs);
         const portal = options?.customInfo?.lookupUrl || info.lookupUrl || lookupPortalForSeller(info.sellerTaxCode) || "";
-        if (!portal || /^https?:\/\/(?:www\.)?einvoice\.vn(?:\/|$)/i.test(portal)) {
+        if (!portal) {
           throw new OriginalInvoiceError(
-            "Ch\u01B0a x\xE1c \u0111\u1ECBnh \u0111\u01B0\u1EE3c c\u1ED5ng ph\xE1t h\xE0nh c\u1EE7a ng\u01B0\u1EDDi b\xE1n t\u1EEB XML. C\u1EA7n m\u1ED9t URL c\u1ED5ng h\u1EE3p l\u1EC7; kh\xF4ng th\u1EC3 suy ra t\u1EEB MSTTCGP hay th\u1EED m\xE3 ng\u1EABu nhi\xEAn t\u1EA1i einvoice.vn.",
+            "XML kh\xF4ng ch\u1EE9a \u0111\u01B0\u1EDDng d\u1EABn tra c\u1EE9u Th\xE1i S\u01A1n h\u1EE3p l\u1EC7, kh\xF4ng th\u1EC3 suy ra t\u1EEB MSTTCGP.",
             this.providerCode,
             "LOOKUP_PORTAL_UNKNOWN",
             422
@@ -8773,6 +9286,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
     this.registerDriver(new EasyInvoiceDriver());
     this.registerDriver(new MinvoiceDriver());
     this.registerDriver(new MatbaoDriver());
+    this.registerDriver(new WinInvoiceDriver());
     this.registerDriver(new BkavDriver());
     this.registerDriver(new ThaiSonDriver());
     this.registerDriver(new CyberBillDriver());
@@ -8950,7 +9464,7 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
       try {
         this.log(`\u0110ang th\u1EF1c thi crawl t\u1EEB server nh\xE0 cung c\u1EA5p [${selectedDriver.providerCode}]...`, overallLogs);
         const result = await selectedDriver.fetchPdf(invoiceInfo, options);
-        if (["THAISON", "MISA", "MINVOICE", "MATBAO"].includes(selectedDriver.providerCode) && /^(application\/pdf|application\/zip)/i.test(result.contentType || "")) {
+        if (["THAISON", "MISA", "MINVOICE", "MATBAO", "WININVOICE"].includes(selectedDriver.providerCode) && /^(application\/pdf|application\/zip)/i.test(result.contentType || "")) {
           const validation = await verifyIssuerInvoiceBytes(result.pdfBuffer, result.contentType, {
             sellerTaxCode: invoiceInfo.sellerTaxCode,
             invoiceNo: invoiceInfo.invoiceNo,
@@ -9004,14 +9518,19 @@ var InvoiceDownloaderManager = class _InvoiceDownloaderManager {
 var invoiceManager = InvoiceDownloaderManager.getInstance();
 
 // src/services/saigonCoopInvoiceService.ts
-import * as cheerio6 from "cheerio";
+import * as cheerio7 from "cheerio";
 import { createHash as createHash2 } from "node:crypto";
 init_invoiceIdentityVerifier();
 var PORTAL_ORIGIN = "https://saigoncoop.einvoice.com.vn";
 var PORTAL_URL = PORTAL_ORIGIN + "/";
 var MAX_STATE_AGE_MS = 5 * 60 * 1e3;
+var MAX_RESULT_BYTES = 18e6;
 function providerError(message, code, status = 422) {
   return new OriginalInvoiceError(message, "THAISON", code, status, PORTAL_URL);
+}
+function pdfFilename(sellerTaxCode, invoiceNo) {
+  const number = String(invoiceNo).replace(/\D/g, "").padStart(7, "0");
+  return "HoaDon_SaigonCoop_" + sellerTaxCode.replace(/\D/g, "") + "_" + number + ".pdf";
 }
 function normalizeLookupCode(value2) {
   const code = String(value2 || "").trim();
@@ -9192,50 +9711,474 @@ async function submitSaigonCoopManualLookup(params) {
     );
   }
   const contentLength = Number(response.headers.get("content-length") || "0");
-  if (contentLength > 18e6) {
+  if (contentLength > MAX_RESULT_BYTES) {
     throw providerError("K\u1EBFt qu\u1EA3 tra c\u1EE9u Saigon Co.op v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.", "RESULT_TOO_LARGE", 502);
   }
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > 18e6) {
+  if (bytes.length > MAX_RESULT_BYTES) {
     throw providerError("K\u1EBFt qu\u1EA3 tra c\u1EE9u Saigon Co.op v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.", "RESULT_TOO_LARGE", 502);
   }
   const contentType = response.headers.get("content-type") || "";
-  if (bytes.subarray(0, 5).toString("latin1") === "%PDF-") {
-    const verification = await verifyIssuerInvoiceBytes(bytes, contentType, {
+  const verifyPdf = async (pdf, pdfContentType) => {
+    if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return;
+    const verification = await verifyIssuerInvoiceBytes(pdf, pdfContentType, {
       sellerTaxCode: params.sellerTaxCode,
       invoiceNo: params.invoiceNo,
       invoiceSeries: params.invoiceSeries
     });
-    if (!verification.ok) {
-      throw providerError("PDF Saigon Co.op ch\u01B0a kh\u1EDBp h\xF3a \u0111\u01A1n \u0111ang m\u1EDF: " + verification.reason, "INVOICE_IDENTITY_MISMATCH");
-    }
-    const number = String(params.invoiceNo).replace(/\D/g, "").padStart(7, "0");
+    if (!verification.ok) return;
     return {
       kind: "pdf",
-      filename: "HoaDon_SaigonCoop_" + params.sellerTaxCode.replace(/\D/g, "") + "_" + number + ".pdf",
-      pdfBuffer: bytes
+      filename: pdfFilename(params.sellerTaxCode, params.invoiceNo),
+      pdfBuffer: pdf
     };
+  };
+  if (bytes.subarray(0, 5).toString("latin1") === "%PDF-") {
+    const result = await verifyPdf(bytes, contentType);
+    if (result) return result;
+    throw providerError("PDF Saigon Co.op ch\u01B0a kh\u1EDBp MST v\xE0 s\u1ED1 h\xF3a \u0111\u01A1n \u0111ang m\u1EDF; kh\xF4ng hi\u1EC3n th\u1ECB k\u1EBFt qu\u1EA3.", "INVOICE_IDENTITY_MISMATCH");
   }
   if (!response.ok || !/html/i.test(contentType)) {
     throw providerError("Saigon Co.op tr\u1EA3 k\u1EBFt qu\u1EA3 tra c\u1EE9u kh\xF4ng h\u1EE3p l\u1EC7 (HTTP " + response.status + ").", "LOOKUP_FAILED", 502);
   }
   const html = bytes.toString("utf8");
-  const verifiedHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
-  if (verifiedHtml) return { kind: "html", html: verifiedHtml };
-  const $ = cheerio6.load(html);
+  let verifiedHtml = verifiedThaiSonInvoiceHtml(html, params.sellerTaxCode, params.invoiceNo);
+  const $ = cheerio7.load(html);
   const returnedForm = parseThaiSonForm(html);
   const providerMessage = (returnedForm.error || $("#listresult").text()).replace(/\s+/g, " ").trim().slice(0, 240);
   const isCaptchaError = /captcha|mã kiểm tra|mã xác thực/i.test(providerMessage);
-  if (returnedForm.formFound && returnedForm.field === "MA_NHAN_HOA_DON" && !providerMessage) {
+  if (returnedForm.formFound && returnedForm.field === "MA_NHAN_HOA_DON" && !providerMessage && !verifiedHtml) {
     throw providerError(
       "C\u1ED5ng ch\u01B0a m\u1EDF h\xF3a \u0111\u01A1n v\xE0 \u0111\xE3 tr\u1EA3 l\u1EA1i bi\u1EC3u m\u1EABu tra c\u1EE9u. Ki\u1EC3m tra m\xE3 nh\u1EADn H\u0110, nh\u1EADp l\u1EA1i CAPTCHA ho\u1EB7c t\u1EA3i CAPTCHA m\u1EDBi.",
       "LOOKUP_NOT_COMPLETED"
     );
   }
+  const queue = extractThaiSonDownloadTargets(html).map((target) => ({
+    ...target,
+    base: response.url || PORTAL_URL,
+    depth: 0
+  }));
+  const seenTargets = /* @__PURE__ */ new Set();
+  while (queue.length && seenTargets.size < 18) {
+    const target = queue.shift();
+    let targetUrl;
+    try {
+      targetUrl = new URL(target.path, target.base);
+    } catch {
+      continue;
+    }
+    if (targetUrl.origin !== PORTAL_ORIGIN || isThaiSonHelpDocumentLink(targetUrl.href)) continue;
+    if (target.method === "GET" && target.data) {
+      new URLSearchParams(target.data).forEach((value2, name) => targetUrl.searchParams.set(name, value2));
+    }
+    const unique = target.method + "|" + targetUrl.href + "|" + (target.data || "");
+    if (seenTargets.has(unique)) continue;
+    seenTargets.add(unique);
+    try {
+      const targetResponse = await requestPortal(
+        targetUrl,
+        target.method,
+        target.method === "POST" ? target.data : void 0,
+        jar,
+        15e3
+      );
+      const targetLength = Number(targetResponse.headers.get("content-length") || "0");
+      if (targetLength > MAX_RESULT_BYTES) {
+        await targetResponse.body?.cancel();
+        continue;
+      }
+      const targetBytes = Buffer.from(await targetResponse.arrayBuffer());
+      if (targetBytes.length > MAX_RESULT_BYTES) continue;
+      const targetType = targetResponse.headers.get("content-type") || "";
+      const targetPdf = await verifyPdf(targetBytes, targetType);
+      if (targetPdf && !isThaiSonHelpPdf(targetBytes)) return targetPdf;
+      if (target.depth >= 2 || targetBytes.length > 15e5 || !/html/i.test(targetType) && !/<!doctype html|<html/i.test(targetBytes.subarray(0, 250).toString("utf8"))) {
+        continue;
+      }
+      const targetHtml = targetBytes.toString("utf8");
+      verifiedHtml = verifiedHtml || verifiedThaiSonInvoiceHtml(targetHtml, params.sellerTaxCode, params.invoiceNo);
+      extractThaiSonDownloadTargets(targetHtml).forEach((nested) => {
+        queue.push({ ...nested, base: targetResponse.url || targetUrl.href, depth: target.depth + 1 });
+      });
+    } catch {
+    }
+  }
+  if (verifiedHtml) return { kind: "html", html: verifiedHtml };
   throw providerError(
     isCaptchaError ? "CAPTCHA kh\xF4ng \u0111\xFAng ho\u1EB7c \u0111\xE3 h\u1EBFt h\u1EA1n. T\u1EA3i CAPTCHA m\u1EDBi r\u1ED3i th\u1EED l\u1EA1i." : providerMessage || "K\u1EBFt qu\u1EA3 t\u1EEB c\u1ED5ng Saigon Co.op kh\xF4ng kh\u1EDBp MST v\xE0 s\u1ED1 h\xF3a \u0111\u01A1n \u0111ang m\u1EDF; kh\xF4ng hi\u1EC3n th\u1ECB k\u1EBFt qu\u1EA3.",
     isCaptchaError ? "CAPTCHA_REJECTED" : "INVOICE_NOT_VERIFIED"
   );
+}
+
+// src/services/thaiSonCommonManualService.ts
+import * as cheerio8 from "cheerio";
+import { createHash as createHash3 } from "node:crypto";
+init_invoiceIdentityVerifier();
+var PORTAL_ORIGIN2 = "https://einvoice.vn";
+var PORTAL_URL2 = PORTAL_ORIGIN2 + "/tra-cuu";
+var MAX_STATE_AGE_MS2 = 5 * 60 * 1e3;
+var MAX_RESULT_BYTES2 = 18e6;
+function providerError2(message, code, status = 422) {
+  return new OriginalInvoiceError(message, "THAISON", code, status, PORTAL_URL2);
+}
+function pdfFilename2(sellerTaxCode, invoiceNo) {
+  const number = String(invoiceNo).replace(/\D/g, "").padStart(7, "0");
+  return "HoaDon_ThaiSonCommon_" + sellerTaxCode.replace(/\D/g, "") + "_" + number + ".pdf";
+}
+function normalizeLookupCode2(value2) {
+  const code = String(value2 || "").trim();
+  if (!/^[A-Za-z0-9._-]{5,128}$/.test(code)) {
+    throw providerError2("M\xE3 nh\u1EADn h\xF3a \u0111\u01A1n Th\xE1i S\u01A1n c\u1ED5ng chung kh\xF4ng h\u1EE3p l\u1EC7.", "LOOKUP_DATA_MISSING");
+  }
+  return code;
+}
+function cookiesFromHeaders2(headers, jar) {
+  for (const header of headers.getSetCookie()) {
+    const pair = header.split(";", 1)[0].trim();
+    const separator = pair.indexOf("=");
+    if (separator <= 0) continue;
+    const name = pair.slice(0, separator).trim();
+    const value2 = pair.slice(separator + 1).trim();
+    if (/^[A-Za-z0-9_.-]{1,100}$/.test(name) && !/[\r\n;]/.test(value2) && value2.length <= 1024) {
+      jar.set(name, value2);
+    }
+  }
+}
+async function requestPortal2(target, method, body, jar, timeoutMs) {
+  let url = target;
+  let requestMethod = method;
+  let requestBody = body;
+  const signal = AbortSignal.timeout(timeoutMs);
+  for (let hop = 0; hop < 5; hop++) {
+    if (url.origin !== PORTAL_ORIGIN2) {
+      throw providerError2("C\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung chuy\u1EC3n h\u01B0\u1EDBng sang mi\u1EC1n kh\xE1c.", "PORTAL_REDIRECT_REJECTED", 502);
+    }
+    const cookie = Array.from(jar, ([name, value2]) => name + "=" + value2).join("; ");
+    const response = await fetch(url, {
+      method: requestMethod,
+      body: requestBody,
+      redirect: "manual",
+      signal,
+      headers: {
+        Accept: "text/html,application/pdf,image/*,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0",
+        Referer: PORTAL_URL2,
+        ...cookie ? { Cookie: cookie } : {},
+        ...requestMethod === "POST" ? {
+          Origin: PORTAL_ORIGIN2,
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+        } : {}
+      }
+    });
+    cookiesFromHeaders2(response.headers, jar);
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get("location");
+      if (!location) {
+        await response.body?.cancel();
+        throw providerError2("C\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung tr\u1EA3 v\u1EC1 chuy\u1EC3n h\u01B0\u1EDBng thi\u1EBFu \u0111\u1ECBa ch\u1EC9.", "PORTAL_REDIRECT_REJECTED", 502);
+      }
+      const next = new URL(location, url);
+      await response.body?.cancel();
+      if (response.status === 303 || [301, 302].includes(response.status) && requestMethod === "POST") {
+        requestMethod = "GET";
+        requestBody = void 0;
+      }
+      url = next;
+      continue;
+    }
+    return response;
+  }
+  throw providerError2("C\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung chuy\u1EC3n h\u01B0\u1EDBng qu\xE1 nhi\u1EC1u l\u1EA7n.", "PORTAL_REDIRECT_REJECTED", 502);
+}
+function encodeState2(state) {
+  const encoded = Buffer.from(JSON.stringify(state), "utf8").toString("base64url");
+  if (encoded.length > 16e3) {
+    throw providerError2("D\u1EEF li\u1EC7u CAPTCHA Th\xE1i S\u01A1n c\u1ED5ng chung v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n.", "CAPTCHA_UNAVAILABLE", 502);
+  }
+  return encoded;
+}
+function decodeState2(value2, lookupCode) {
+  const encoded = String(value2 || "");
+  if (!encoded || encoded.length > 16e3) {
+    throw providerError2("Phi\xEAn CAPTCHA kh\xF4ng h\u1EE3p l\u1EC7. T\u1EA3i CAPTCHA m\u1EDBi.", "CAPTCHA_EXPIRED");
+  }
+  let state;
+  try {
+    state = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    throw providerError2("Phi\xEAn CAPTCHA kh\xF4ng h\u1EE3p l\u1EC7. T\u1EA3i CAPTCHA m\u1EDBi.", "CAPTCHA_EXPIRED");
+  }
+  const now = Date.now();
+  const hidden = state?.hiddenFields;
+  const validCookies = Array.isArray(state?.cookies) && state.cookies.length <= 20 && state.cookies.every((cookie) => typeof cookie === "string" && /^[A-Za-z0-9_.-]{1,100}=[^;\r\n]{0,1024}$/.test(cookie));
+  const validHiddenFields = hidden && typeof hidden === "object" && !Array.isArray(hidden) && Object.keys(hidden).length <= 24 && Object.entries(hidden).every(([name, field]) => /^[A-Za-z0-9_.\[\]-]{1,100}$/.test(name) && typeof field === "string" && field.length <= 4096 && !/[\r\n]/.test(field));
+  if (!Number.isSafeInteger(state?.issuedAt) || state.issuedAt > now + 1e4 || now - state.issuedAt > MAX_STATE_AGE_MS2 || !validCookies || !validHiddenFields || !/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(state.lookupField || "") || !/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(state.captchaField || "") || state.lookupField === state.captchaField || !["GET", "POST"].includes(state.method) || !/^\/[A-Za-z0-9/_-]{0,200}(?:\?[A-Za-z0-9_.~%=&-]{0,500})?$/.test(state.action || "") || state.submitName && !/^[A-Za-z0-9_.\[\]-]{1,100}$/.test(state.submitName) || state.submitValue && (state.submitValue.length > 256 || /[\r\n]/.test(state.submitValue)) || !/^[a-f0-9]{64}$/.test(state.lookupCodeHash || "") || state.lookupCodeHash !== createHash3("sha256").update(lookupCode).digest("hex")) {
+    throw providerError2("Phi\xEAn CAPTCHA \u0111\xE3 h\u1EBFt h\u1EA1n ho\u1EB7c kh\xF4ng kh\u1EDBp m\xE3 nh\u1EADn h\xF3a \u0111\u01A1n. T\u1EA3i CAPTCHA m\u1EDBi.", "CAPTCHA_EXPIRED");
+  }
+  return state;
+}
+async function createThaiSonCommonManualCaptcha(lookupCodeInput) {
+  const lookupCode = normalizeLookupCode2(lookupCodeInput);
+  const jar = /* @__PURE__ */ new Map();
+  try {
+    const page = await requestPortal2(new URL(PORTAL_URL2), "GET", void 0, jar, 15e3);
+    if (!page.ok) {
+      throw providerError2("Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c bi\u1EC3u m\u1EABu tra c\u1EE9u Th\xE1i S\u01A1n c\u1ED5ng chung (HTTP " + page.status + ").", "CAPTCHA_UNAVAILABLE", 502);
+    }
+    const html = await page.text();
+    if (html.length > 2e6) {
+      throw providerError2("Bi\u1EC3u m\u1EABu tra c\u1EE9u Th\xE1i S\u01A1n c\u1ED5ng chung v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n.", "CAPTCHA_UNAVAILABLE", 502);
+    }
+    if (isThaiSonMarketingPage(html)) {
+      throw providerError2(
+        "einvoice.vn/tra-cuu hi\u1EC7n l\xE0 trang gi\u1EDBi thi\u1EC7u. C\u1EA7n c\u1ED5ng tra c\u1EE9u th\u1EF1c t\u1EBF c\u1EE7a ng\u01B0\u1EDDi b\xE1n \u0111\u1EC3 l\u1EA5y CAPTCHA v\xE0 PDF g\u1ED1c.",
+        "ISSUER_LOOKUP_PORTAL_REQUIRED"
+      );
+    }
+    const form = parseThaiSonForm(html);
+    if (!form.formFound || !form.field || !form.captchaField || !form.imagePath) {
+      throw providerError2("Kh\xF4ng nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c bi\u1EC3u m\u1EABu CAPTCHA c\u1EE7a c\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung.", "CAPTCHA_FORM_CHANGED", 502);
+    }
+    const action = new URL(form.formAction || PORTAL_URL2, PORTAL_URL2);
+    const imageUrl = new URL(form.imagePath, PORTAL_URL2);
+    if (action.origin !== PORTAL_ORIGIN2 || imageUrl.origin !== PORTAL_ORIGIN2) {
+      throw providerError2("Bi\u1EC3u m\u1EABu Th\xE1i S\u01A1n c\u1ED5ng chung c\xF3 \u0111\u1ECBa ch\u1EC9 kh\xF4ng h\u1EE3p l\u1EC7.", "CAPTCHA_FORM_CHANGED", 502);
+    }
+    const imageResponse = await requestPortal2(imageUrl, "GET", void 0, jar, 1e4);
+    if (!imageResponse.ok) {
+      throw providerError2("Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c \u1EA3nh CAPTCHA Th\xE1i S\u01A1n c\u1ED5ng chung.", "CAPTCHA_UNAVAILABLE", 502);
+    }
+    const mime = (imageResponse.headers.get("content-type") || "").split(";")[0].toLowerCase();
+    const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+    if (!/^image\/(?:png|jpeg|gif|webp)$/.test(mime) || imageBytes.length < 50 || imageBytes.length > 4e5) {
+      throw providerError2("C\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung tr\u1EA3 \u1EA3nh CAPTCHA kh\xF4ng h\u1EE3p l\u1EC7.", "CAPTCHA_UNAVAILABLE", 502);
+    }
+    const state = {
+      issuedAt: Date.now(),
+      cookies: Array.from(jar, ([name, value2]) => name + "=" + value2),
+      hiddenFields: form.hiddenFields,
+      action: action.pathname + action.search,
+      method: form.method,
+      submitName: form.submitName,
+      submitValue: form.submitValue,
+      lookupCodeHash: createHash3("sha256").update(lookupCode).digest("hex"),
+      lookupField: form.field,
+      captchaField: form.captchaField
+    };
+    return {
+      image: "data:" + mime + ";base64," + imageBytes.toString("base64"),
+      state: encodeState2(state)
+    };
+  } catch (error) {
+    if (error instanceof OriginalInvoiceError) throw error;
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    throw providerError2(
+      timedOut ? "K\u1EBFt n\u1ED1i c\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung h\u1EBFt th\u1EDDi gian ch\u1EDD." : "Kh\xF4ng th\u1EC3 t\u1EA3i CAPTCHA Th\xE1i S\u01A1n c\u1ED5ng chung.",
+      timedOut ? "PROVIDER_TIMEOUT" : "CAPTCHA_UNAVAILABLE",
+      timedOut ? 504 : 502
+    );
+  }
+}
+async function submitThaiSonCommonManualLookup(params) {
+  const lookupCode = normalizeLookupCode2(params.lookupCode);
+  const captcha = String(params.captcha || "").trim();
+  if (!captcha || captcha.length > 32 || /[\r\n]/.test(captcha)) {
+    throw providerError2("Nh\u1EADp m\xE3 ki\u1EC3m tra CAPTCHA.", "CAPTCHA_REQUIRED");
+  }
+  const state = decodeState2(params.state, lookupCode);
+  const jar = new Map(state.cookies.map((pair) => {
+    const index = pair.indexOf("=");
+    return [pair.slice(0, index), pair.slice(index + 1)];
+  }));
+  const payload = new URLSearchParams();
+  Object.entries(state.hiddenFields).forEach(([name, value2]) => payload.set(name, value2));
+  payload.set(state.lookupField, lookupCode);
+  payload.set(state.captchaField, captcha);
+  if (state.submitName && ![state.lookupField, state.captchaField].includes(state.submitName)) {
+    payload.set(state.submitName, state.submitValue || "");
+  }
+  let response;
+  try {
+    const actionUrl = new URL(state.action, PORTAL_URL2);
+    if (state.method === "GET") payload.forEach((value2, name) => actionUrl.searchParams.set(name, value2));
+    response = await requestPortal2(
+      actionUrl,
+      state.method,
+      state.method === "POST" ? payload.toString() : void 0,
+      jar,
+      3e4
+    );
+  } catch (error) {
+    if (error instanceof OriginalInvoiceError) throw error;
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
+    throw providerError2(
+      timedOut ? "Tra c\u1EE9u Th\xE1i S\u01A1n c\u1ED5ng chung h\u1EBFt th\u1EDDi gian ch\u1EDD." : "Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c c\u1ED5ng Th\xE1i S\u01A1n c\u1ED5ng chung.",
+      timedOut ? "PROVIDER_TIMEOUT" : "LOOKUP_FAILED",
+      timedOut ? 504 : 502
+    );
+  }
+  const contentLength = Number(response.headers.get("content-length") || "0");
+  if (contentLength > MAX_RESULT_BYTES2) {
+    throw providerError2("K\u1EBFt qu\u1EA3 tra c\u1EE9u Th\xE1i S\u01A1n c\u1ED5ng chung v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.", "RESULT_TOO_LARGE", 502);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > MAX_RESULT_BYTES2) {
+    throw providerError2("K\u1EBFt qu\u1EA3 tra c\u1EE9u Th\xE1i S\u01A1n c\u1ED5ng chung v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.", "RESULT_TOO_LARGE", 502);
+  }
+  const contentType = response.headers.get("content-type") || "";
+  const verifyPdf = async (pdf, pdfContentType) => {
+    if (pdf.subarray(0, 5).toString("latin1") !== "%PDF-") return;
+    const verification = await verifyIssuerInvoiceBytes(pdf, pdfContentType, {
+      sellerTaxCode: params.sellerTaxCode,
+      invoiceNo: params.invoiceNo,
+      invoiceSeries: params.invoiceSeries
+    });
+    if (!verification.ok) return;
+    return {
+      kind: "pdf",
+      filename: pdfFilename2(params.sellerTaxCode, params.invoiceNo),
+      pdfBuffer: pdf
+    };
+  };
+  if (bytes.subarray(0, 5).toString("latin1") === "%PDF-") {
+    const result = await verifyPdf(bytes, contentType);
+    if (result) return result;
+    throw providerError2("PDF Th\xE1i S\u01A1n c\u1ED5ng chung ch\u01B0a kh\u1EDBp MST v\xE0 s\u1ED1 h\xF3a \u0111\u01A1n \u0111ang m\u1EDF; kh\xF4ng hi\u1EC3n th\u1ECB k\u1EBFt qu\u1EA3.", "INVOICE_IDENTITY_MISMATCH");
+  }
+  if (!response.ok || !/html/i.test(contentType)) {
+    throw providerError2("Th\xE1i S\u01A1n c\u1ED5ng chung tr\u1EA3 k\u1EBFt qu\u1EA3 tra c\u1EE9u kh\xF4ng h\u1EE3p l\u1EC7 (HTTP " + response.status + ").", "LOOKUP_FAILED", 502);
+  }
+  const html = bytes.toString("utf8");
+  if (isThaiSonMarketingPage(html)) {
+    throw providerError2(
+      "K\u1EBFt qu\u1EA3 tr\u1EA3 v\u1EC1 website gi\u1EDBi thi\u1EC7u Th\xE1i S\u01A1n, kh\xF4ng ph\u1EA3i h\xF3a \u0111\u01A1n MARU. C\u1EA7n \u0111\xFAng c\u1ED5ng ph\xE1t h\xE0nh c\u1EE7a ng\u01B0\u1EDDi b\xE1n.",
+      "ISSUER_LOOKUP_PORTAL_REQUIRED"
+    );
+  }
+  let verifiedHtml = verifiedThaiSonInvoiceHtmlWithSeries(html, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
+  const $ = cheerio8.load(html);
+  const returnedForm = parseThaiSonForm(html);
+  const providerMessage = (returnedForm.error || $("#listresult").text()).replace(/\s+/g, " ").trim().slice(0, 240);
+  const isCaptchaError = /captcha|mã kiểm tra|mã xác thực/i.test(providerMessage);
+  const returnedToForm = returnedForm.formFound && returnedForm.field === state.lookupField;
+  const queue = extractThaiSonDownloadTargets(html).map((target) => ({
+    ...target,
+    base: response.url || PORTAL_URL2,
+    depth: 0
+  }));
+  const seenTargets = /* @__PURE__ */ new Set();
+  while (queue.length && seenTargets.size < 18) {
+    const target = queue.shift();
+    let targetUrl;
+    try {
+      targetUrl = new URL(target.path, target.base);
+    } catch {
+      continue;
+    }
+    if (targetUrl.origin !== PORTAL_ORIGIN2 || isThaiSonHelpDocumentLink(targetUrl.href)) continue;
+    if (target.method === "GET" && target.data) {
+      new URLSearchParams(target.data).forEach((value2, name) => targetUrl.searchParams.set(name, value2));
+    }
+    const unique = target.method + "|" + targetUrl.href + "|" + (target.data || "");
+    if (seenTargets.has(unique)) continue;
+    seenTargets.add(unique);
+    try {
+      const targetResponse = await requestPortal2(
+        targetUrl,
+        target.method,
+        target.method === "POST" ? target.data : void 0,
+        jar,
+        15e3
+      );
+      const targetLength = Number(targetResponse.headers.get("content-length") || "0");
+      if (targetLength > MAX_RESULT_BYTES2) {
+        await targetResponse.body?.cancel();
+        continue;
+      }
+      const targetBytes = Buffer.from(await targetResponse.arrayBuffer());
+      if (targetBytes.length > MAX_RESULT_BYTES2) continue;
+      const targetType = targetResponse.headers.get("content-type") || "";
+      const targetPdf = await verifyPdf(targetBytes, targetType);
+      if (targetPdf && !isThaiSonHelpPdf(targetBytes)) return targetPdf;
+      if (target.depth >= 2 || targetBytes.length > 15e5 || !/html/i.test(targetType) && !/<!doctype html|<html/i.test(targetBytes.subarray(0, 250).toString("utf8"))) {
+        continue;
+      }
+      const targetHtml = targetBytes.toString("utf8");
+      verifiedHtml = verifiedHtml || verifiedThaiSonInvoiceHtmlWithSeries(targetHtml, params.sellerTaxCode, params.invoiceNo, params.invoiceSeries);
+      extractThaiSonDownloadTargets(targetHtml).forEach((nested) => {
+        queue.push({ ...nested, base: targetResponse.url || targetUrl.href, depth: target.depth + 1 });
+      });
+    } catch {
+    }
+  }
+  if (verifiedHtml) return { kind: "html", html: verifiedHtml };
+  const providerDetail = providerMessage.replace(/[\r\n]/g, " ").slice(0, 160);
+  if (isCaptchaError) {
+    throw providerError2("C\u1ED5ng Th\xE1i S\u01A1n b\xE1o l\u1ED7i CAPTCHA: " + providerDetail + ". L\u1EA5y CAPTCHA m\u1EDBi v\xE0 nh\u1EADp l\u1EA1i.", "CAPTCHA_REJECTED");
+  }
+  if (returnedToForm) {
+    throw providerError2(
+      providerDetail ? "C\u1ED5ng Th\xE1i S\u01A1n ch\u01B0a tr\u1EA3 h\xF3a \u0111\u01A1n: " + providerDetail : "C\u1ED5ng Th\xE1i S\u01A1n nh\u1EADn y\xEAu c\u1EA7u nh\u01B0ng ch\u1EC9 tr\u1EA3 l\u1EA1i bi\u1EC3u m\u1EABu; ch\u01B0a nh\u1EADn \u0111\u01B0\u1EE3c k\u1EBFt qu\u1EA3 PDF/XML. C\xF3 th\u1EC3 website x\u1EED l\xFD tra c\u1EE9u b\u1EB1ng y\xEAu c\u1EA7u JavaScript ri\xEAng.",
+      "LOOKUP_NOT_COMPLETED"
+    );
+  }
+  throw providerError2(
+    providerDetail || "C\u1ED5ng Th\xE1i S\u01A1n ch\u01B0a tr\u1EA3 PDF/XML kh\u1EDBp MST, k\xFD hi\u1EC7u v\xE0 s\u1ED1 h\xF3a \u0111\u01A1n.",
+    "INVOICE_NOT_VERIFIED"
+  );
+}
+
+// src/services/bkavInvoiceService.ts
+async function downloadOriginalBkavPdf(params) {
+  let lookupCode = String(params.lookupCode || "").trim();
+  if (!lookupCode && params.xml) {
+    const match = params.xml.match(/<(?:MTDiep|MaTraCuu|MTC|MaSoBiMat|MaTraCuuHD)>([^<]+)<\//i) || params.xml.match(/MTC[:\s=]+([A-Za-z0-9_-]+)/i);
+    if (match) lookupCode = match[1].trim();
+  }
+  if (!lookupCode) throw new Error("M\xE3 tra c\u1EE9u Bkav eHoadon kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), params.timeoutMs || 2e4);
+  try {
+    const pageUrl = `https://van.ehoadon.vn/TCHD?MTC=${encodeURIComponent(lookupCode)}`;
+    const page = await fetch(pageUrl, {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+      },
+      signal: controller.signal
+    });
+    if (!page.ok) throw new Error(`C\u1ED5ng Bkav tr\u1EA3 v\u1EC1 HTTP ${page.status}.`);
+    const html = await page.text();
+    const candidates = [...html.matchAll(/(?:href|src)=["']([^"']*Invoice_View[^"']+\.pdf[^"']*)["']/gi)].map((match) => match[1].replace(/&amp;/g, "&"));
+    const relative = candidates[0];
+    if (!relative) {
+      if (/mã tra cứu.*không đúng|không tìm thấy|không tồn tại/i.test(html)) {
+        throw new Error("Bkav kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n v\u1EDBi m\xE3 tra c\u1EE9u n\xE0y.");
+      }
+      throw new Error("Bkav ch\u01B0a tr\u1EA3 v\u1EC1 li\xEAn k\u1EBFt PDF g\u1ED1c cho m\xE3 tra c\u1EE9u n\xE0y.");
+    }
+    const pdfUrl = new URL(relative, pageUrl).toString();
+    const pdf = await fetch(pdfUrl, {
+      headers: {
+        Accept: "application/pdf,application/octet-stream,*/*",
+        Referer: pageUrl,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0 Safari/537.36"
+      },
+      signal: controller.signal
+    });
+    if (!pdf.ok) throw new Error(`Kh\xF4ng t\u1EA3i \u0111\u01B0\u1EE3c PDF Bkav: HTTP ${pdf.status}.`);
+    const data = Buffer.from(await pdf.arrayBuffer());
+    if (data.length < 500 || !data.subarray(0, 10).toString("latin1").includes("%PDF")) {
+      throw new Error("Bkav kh\xF4ng tr\u1EA3 v\u1EC1 t\u1EC7p PDF h\u1EE3p l\u1EC7.");
+    }
+    return {
+      data,
+      filename: `HoaDon_Bkav_${lookupCode}.pdf`,
+      contentType: "application/pdf"
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // src/services/visnamCertificate.ts
@@ -9426,9 +10369,9 @@ async function fetchGdtInvoiceDetail(invoice, headers, signal) {
       shdon: shdonVal,
       khmshdon: invoice.khmshdon || "1"
     });
-    const path3 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
+    const path4 = invoice.isPos ? "/api/sco-query/invoices/detail" : "/api/query/invoices/detail";
     try {
-      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path3}?${params.toString()}`, {
+      const response = await fetch(`https://hoadondientu.gdt.gov.vn${path4}?${params.toString()}`, {
         headers: {
           ...GDT_REQUEST_HEADERS,
           "request-id": getRequestId(),
@@ -10040,13 +10983,13 @@ app.post("/api/gdt/login", async (req, res) => {
   if (!captchaCode || !captchaCode.trim()) {
     return res.status(400).json({ success: false, message: "Vui l\xF2ng nh\xECn h\xECnh v\xE0 nh\u1EADp m\xE3 Captcha hi\u1EC3n th\u1ECB tr\xEAn \u1EA3nh." });
   }
-  const cookieHeader = captchaCookie || (captchaKey ? captchaCookieJar.get(captchaKey) || "" : "");
+  const cookieHeader2 = captchaCookie || (captchaKey ? captchaCookieJar.get(captchaKey) || "" : "");
   try {
     const authRes = await fetchGDT("https://hoadondientu.gdt.gov.vn/api/security-taxpayer/authenticate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...cookieHeader ? { "Cookie": cookieHeader } : {}
+        ...cookieHeader2 ? { "Cookie": cookieHeader2 } : {}
       },
       body: JSON.stringify({
         username: taxCode.trim(),
@@ -10056,7 +10999,7 @@ app.post("/api/gdt/login", async (req, res) => {
       })
     }, 1, 2e4, vietnamProxy);
     const newCookieStr = extractCookies(authRes);
-    const combinedCookies = [cookieHeader, newCookieStr].filter(Boolean).join("; ");
+    const combinedCookies = [cookieHeader2, newCookieStr].filter(Boolean).join("; ");
     const rawText = await authRes.text();
     let authData = {};
     try {
@@ -10197,13 +11140,13 @@ app.post("/api/gdt/invoice-detail", async (req, res) => {
   const rawAuth = bodyToken || "";
   const authHeader = rawAuth && rawAuth.trim() && rawAuth.trim() !== "Bearer" ? rawAuth.trim() : currentSession?.token || "";
   const rawCookie = req.headers["x-gdt-cookie"] || bodyCookie || "";
-  const cookieHeader = rawCookie && rawCookie.trim() ? rawCookie.trim() : currentSession?.cookieHeader || "";
+  const cookieHeader2 = rawCookie && rawCookie.trim() ? rawCookie.trim() : currentSession?.cookieHeader || "";
   if (!authHeader || !invoice) {
     return res.status(400).json({ success: false, message: "Thi\u1EBFu phi\xEAn \u0111\u0103ng nh\u1EADp ho\u1EB7c th\xF4ng tin h\xF3a \u0111\u01A1n." });
   }
   try {
     const tokenHeader = authHeader.startsWith("Bearer ") ? authHeader : `Bearer ${authHeader}`;
-    const gdtHeaders = { Authorization: tokenHeader, ...cookieHeader ? { Cookie: cookieHeader } : {} };
+    const gdtHeaders = { Authorization: tokenHeader, ...cookieHeader2 ? { Cookie: cookieHeader2 } : {} };
     const [detailRes, xmlExportRes] = await Promise.allSettled([
       fetchGdtInvoiceDetail(invoice, gdtHeaders),
       fetchGdtInvoiceXml(invoice, gdtHeaders)
@@ -10243,7 +11186,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
     toDate = void 0;
   }
   const authHeader = bodyToken || currentSession?.token || "";
-  const cookieHeader = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
+  const cookieHeader2 = req.headers["x-gdt-cookie"] || bodyCookie || currentSession?.cookieHeader || "";
   if (!authHeader) {
     return res.status(401).json({
       success: false,
@@ -10265,7 +11208,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
   const posDateChunks = splitDateRangeIntoFixedChunks(rawFrom, rawTo, 10);
   const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
   const tokenHeader = rawToken ? `Bearer ${rawToken}` : "";
-  const cleanCookies = (cookieHeader || "").split(";").map((c) => c.trim()).filter((c) => {
+  const cleanCookies = (cookieHeader2 || "").split(";").map((c) => c.trim()).filter((c) => {
     const parts = c.split("=");
     return parts.length >= 2 && parts[1].trim().length > 0 && parts[0].trim() !== "jwt";
   });
@@ -10612,7 +11555,7 @@ app.post("/api/gdt/query-invoices", async (req, res) => {
       try {
         const detailHeaders = {
           Authorization: tokenHeader,
-          ...sanitizedCookie ? { Cookie: sanitizedCookie } : cookieHeader ? { Cookie: cookieHeader } : {}
+          ...sanitizedCookie ? { Cookie: sanitizedCookie } : cookieHeader2 ? { Cookie: cookieHeader2 } : {}
         };
         let detail = null;
         try {
@@ -10682,7 +11625,7 @@ app.post("/api/gdt/run-selenium", (req, res) => {
     return entry;
   };
   addLog("step", `[1/6] B\u1EAFt \u0111\u1EA7u kh\u1EDFi t\u1EA1o quy tr\xECnh t\u1EF1 \u0111\u1ED9ng h\xF3a Python Selenium cho MST: ${mst}`, "INIT", 10);
-  const pythonScriptPath = path2.join(process.cwd(), "python", "gdt_selenium_crawler.py");
+  const pythonScriptPath = path3.join(process.cwd(), "python", "gdt_selenium_crawler.py");
   const args = [
     pythonScriptPath,
     "--mst",
@@ -10740,8 +11683,8 @@ app.get("/api/gdt/selenium-logs", (req, res) => {
 app.get("/api/gdt/download-python-package", async (req, res) => {
   try {
     const zip = new JSZip6();
-    const fs2 = await import("fs");
-    const pythonDir = path2.join(process.cwd(), "python");
+    const fs3 = await import("fs");
+    const pythonDir = path3.join(process.cwd(), "python");
     const files = [
       "gdt_selenium_crawler.py",
       "requirements.txt",
@@ -10752,9 +11695,9 @@ app.get("/api/gdt/download-python-package", async (req, res) => {
       "HUONG_DAN_SUA_LOI_PYTHON.txt"
     ];
     for (const file of files) {
-      const fullPath = path2.join(pythonDir, file);
-      if (fs2.existsSync(fullPath)) {
-        const content = fs2.readFileSync(fullPath, "utf-8");
+      const fullPath = path3.join(pythonDir, file);
+      if (fs3.existsSync(fullPath)) {
+        const content = fs3.readFileSync(fullPath, "utf-8");
         zip.file(file, content);
       }
     }
@@ -10866,8 +11809,8 @@ echo "=== TAI HOA DON DIEN TU TONG CUC THUE ==="
 pip install -r requirements.txt
 python3 gdt_selenium_crawler.py --type purchase
 `;
-    if (fs2.existsSync(path2.join(pythonDir, "run_windows.bat"))) {
-      zip.file("run_windows.bat", fs2.readFileSync(path2.join(pythonDir, "run_windows.bat"), "utf-8"));
+    if (fs3.existsSync(path3.join(pythonDir, "run_windows.bat"))) {
+      zip.file("run_windows.bat", fs3.readFileSync(path3.join(pythonDir, "run_windows.bat"), "utf-8"));
     } else {
       zip.file("run_windows.bat", runBat);
     }
@@ -11069,9 +12012,27 @@ app.post("/api/invoice-downloader/download", async (req, res) => {
 });
 app.post("/api/invoice-downloader/solve-captcha", async (req, res) => {
   try {
-    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess, timeoutMs } = req.body;
+    const { image, whitelist, alphanumeric, customApiKey, forceGemini, preprocess, preprocessVisnam, isVisnam, provider, timeoutMs } = req.body;
     if (!image) {
       return res.status(400).json({ success: false, error: "\u1EA2nh Captcha kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
+    }
+    if (preprocessVisnam || isVisnam || provider === "visnam" || provider === "VISNAM") {
+      const { solveVisnamCaptcha: solveVisnamCaptcha2 } = await Promise.resolve().then(() => (init_tesseractCaptchaSolver(), tesseractCaptchaSolver_exports));
+      const startT = Date.now();
+      const solved = await solveVisnamCaptcha2(image, timeoutMs || 3500);
+      if (solved && solved.code) {
+        return res.json({
+          success: true,
+          code: solved.code,
+          confidence: solved.confidence,
+          engine: "tesseract-local",
+          processingTimeMs: Date.now() - startT
+        });
+      }
+      return res.json({
+        success: false,
+        error: "OCR n\u1ED9i b\u1ED9 ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u01B0\u1EE3c m\xE3 VIN-HOADON."
+      });
     }
     const prompt = alphanumeric ? ALPHANUMERIC_CAPTCHA_PROMPT : void 0;
     const result = await CaptchaSolver.solveWithAI(image, {
@@ -11183,10 +12144,10 @@ app.all("/api/vnpt/download-pdf", async (req, res) => {
 });
 var vnptPortalSessions = /* @__PURE__ */ new Map();
 var latestVnptSessionId = "";
-function parseRequestCookies(cookieHeader) {
+function parseRequestCookies(cookieHeader2) {
   const result = {};
-  if (!cookieHeader) return result;
-  cookieHeader.split(";").forEach((item) => {
+  if (!cookieHeader2) return result;
+  cookieHeader2.split(";").forEach((item) => {
     const parts = item.split("=");
     const name = parts[0]?.trim();
     if (name) {
@@ -11330,7 +12291,11 @@ app.all(["/Record/DownloadMultiFiles", "/HomeNoLogin/DownloadMultiFiles"], async
 });
 var VISNAM_API = "https://tracuu.vin-hoadon.com/api/services/hddt/TraCuuHoaDon";
 var VISNAM_HTTPS_AGENT = new https4.Agent({
-  ca: [...tls.rootCertificates, VISNAM_RAPIDSSL_INTERMEDIATE]
+  ca: [...tls.rootCertificates, VISNAM_RAPIDSSL_INTERMEDIATE],
+  keepAlive: true,
+  keepAliveMsecs: 3e4,
+  maxSockets: 30,
+  maxFreeSockets: 10
 });
 var visnamHeaders = {
   Accept: "application/json",
@@ -11339,12 +12304,13 @@ var visnamHeaders = {
   Origin: "https://tracuu.vin-hoadon.com",
   Referer: "https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd"
 };
+Promise.resolve().then(() => (init_tesseractCaptchaSolver(), tesseractCaptchaSolver_exports)).then((m) => m.warmupTesseractWorker()).catch((e) => console.warn("[Tesseract Warmup] B\u1ECF qua l\xE0m \u1EA5m tr\u01B0\u1EDBc:", e?.message));
 app.post("/api/visnam/captcha", async (_req, res) => {
   try {
     const upstream = await axios9.post(VISNAM_API + "/RefreshCaptcha", {}, {
       httpsAgent: VISNAM_HTTPS_AGENT,
       headers: visnamHeaders,
-      timeout: 15e3,
+      timeout: 1e4,
       maxRedirects: 0,
       maxContentLength: 4e5,
       maxBodyLength: 1e4
@@ -11359,8 +12325,18 @@ app.post("/api/visnam/captcha", async (_req, res) => {
       });
       return res.status(502).json({ success: false, error: "Visnam tr\u1EA3 v\u1EC1 d\u1EEF li\u1EC7u CAPTCHA kh\xF4ng h\u1EE3p l\u1EC7." });
     }
+    let autoSolvedCode;
+    try {
+      const { solveVisnamCaptcha: solveVisnamCaptcha2 } = await Promise.resolve().then(() => (init_tesseractCaptchaSolver(), tesseractCaptchaSolver_exports));
+      const solved = await solveVisnamCaptcha2(result.image, 2500);
+      if (solved && /^\d{4}$/.test(solved.code)) {
+        autoSolvedCode = solved.code;
+      }
+    } catch (e) {
+      console.warn("[Visnam CAPTCHA] Auto-solve in captcha endpoint warning:", e?.message);
+    }
     res.setHeader("Cache-Control", "no-store");
-    return res.json({ success: true, key: result.key, image: result.image });
+    return res.json({ success: true, key: result.key, image: result.image, autoSolvedCode });
   } catch (error) {
     const upstreamStatus = Number(error?.response?.status || 0);
     const code = String(error?.code || "").slice(0, 40);
@@ -11372,6 +12348,90 @@ app.post("/api/visnam/captcha", async (_req, res) => {
     const explanation = upstreamStatus ? "VIN-HOADON t\u1EEB ch\u1ED1i y\xEAu c\u1EA7u CAPTCHA (HTTP " + upstreamStatus + ")." : code === "ECONNABORTED" ? "K\u1EBFt n\u1ED1i VIN-HOADON qu\xE1 th\u1EDDi gian ch\u1EDD." : "Kh\xF4ng k\u1EBFt n\u1ED1i \u0111\u01B0\u1EE3c m\xE1y ch\u1EE7 CAPTCHA VIN-HOADON (" + (code || "network") + ").";
     return res.status(502).json({ success: false, error: explanation });
   }
+});
+app.post("/api/visnam/auto-lookup", async (req, res) => {
+  const { maSoBiMat, identity } = req.body || {};
+  if (typeof maSoBiMat !== "string" || !/^[A-Za-z0-9_/-]{4,64}$/.test(maSoBiMat.trim()) || !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || "")) || !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || "")) || !/^\d{1,10}$/.test(String(identity.invoiceNo || ""))) {
+    return res.status(400).json({ success: false, error: "Thi\u1EBFu th\xF4ng tin tra c\u1EE9u ho\u1EB7c h\xF3a \u0111\u01A1n kh\xF4ng h\u1EE3p l\u1EC7." });
+  }
+  const cleanSecret = maSoBiMat.trim();
+  const { extractVerifiedVisnamFiles: extractVerifiedVisnamFiles2 } = await Promise.resolve().then(() => (init_visnamResponse(), visnamResponse_exports));
+  const { solveVisnamCaptcha: solveVisnamCaptcha2 } = await Promise.resolve().then(() => (init_tesseractCaptchaSolver(), tesseractCaptchaSolver_exports));
+  let lastKey;
+  let lastImage;
+  let lastSolvedCode;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const capRes = await axios9.post(VISNAM_API + "/RefreshCaptcha", {}, {
+        httpsAgent: VISNAM_HTTPS_AGENT,
+        headers: visnamHeaders,
+        timeout: 8e3,
+        maxRedirects: 0,
+        maxContentLength: 4e5,
+        maxBodyLength: 1e4
+      });
+      const result = capRes.data?.result;
+      if (capRes.data?.success !== true || result?.status !== 0 || typeof result?.key !== "string" || !/^[0-9a-f-]{36}$/i.test(result.key) || typeof result.image !== "string" || !result.image.startsWith("data:image/png;base64,")) {
+        continue;
+      }
+      lastKey = result.key;
+      lastImage = result.image;
+      const solved = await solveVisnamCaptcha2(result.image, 4e3);
+      const captchaCode = solved?.code?.trim();
+      if (!captchaCode || !/^\d{4}$/.test(captchaCode)) {
+        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: OCR c\u1EE5c b\u1ED9 ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u1EE7 4 s\u1ED1, th\u1EED m\xE3 CAPTCHA m\u1EDBi.`);
+        continue;
+      }
+      lastSolvedCode = captchaCode;
+      console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: OCR c\u1EE5c b\u1ED9 nh\u1EADn di\u1EC7n m\xE3 "${captchaCode}". \u0110ang t\u1EF1 \u0111\u1ED9ng tra c\u1EE9u upstream...`);
+      const lookupRes = await axios9.post(
+        VISNAM_API + "/TraCuu",
+        { key: lastKey, captcha: captchaCode, maSoBiMat: cleanSecret },
+        {
+          httpsAgent: VISNAM_HTTPS_AGENT,
+          headers: visnamHeaders,
+          timeout: 12e3,
+          maxRedirects: 0,
+          maxContentLength: 25e6,
+          maxBodyLength: 1e4
+        }
+      );
+      const upstreamResult = lookupRes.data?.result;
+      if (upstreamResult?.status === 1) {
+        const files = await extractVerifiedVisnamFiles2(lookupRes.data, {
+          sellerTaxCode: identity.sellerTaxCode,
+          invoiceSeries: identity.invoiceSeries,
+          invoiceNo: identity.invoiceNo
+        });
+        res.setHeader("Cache-Control", "no-store");
+        return res.json({
+          success: true,
+          pdfBase64: files.pdf.toString("base64"),
+          filename: files.pdfFilename,
+          xmlFilename: files.xmlFilename,
+          captchaSolved: captchaCode,
+          attempts: attempt
+        });
+      }
+      if (upstreamResult?.status === 2) {
+        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: Upstream t\u1EEB ch\u1ED1i m\xE3 "${captchaCode}". Th\u1EED CAPTCHA m\u1EDBi...`);
+        continue;
+      }
+      const errorMsg = String(upstreamResult?.message || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n tr\xEAn h\u1EC7 th\u1ED1ng VIN-HOADON.");
+      return res.status(422).json({ success: false, error: errorMsg });
+    } catch (err) {
+      console.warn(`[Visnam Auto-Lookup] L\u1EA7n ${attempt} g\u1EB7p l\u1ED7i:`, err?.message);
+    }
+  }
+  return res.status(422).json({
+    success: false,
+    error: "Ch\u01B0a t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t CAPTCHA VIN-HOADON th\xE0nh c\xF4ng.",
+    fallbackCaptcha: lastKey && lastImage ? {
+      key: lastKey,
+      image: lastImage,
+      autoSolvedCode: lastSolvedCode
+    } : void 0
+  });
 });
 app.post("/api/visnam/lookup", async (req, res) => {
   const { key, captcha, maSoBiMat, identity } = req.body || {};
@@ -11542,7 +12602,7 @@ app.post("/api/vnpt/portal-submit", express.urlencoded({ extended: true }), asyn
     res.setHeader("Set-Cookie", `vnpt_portal_session_id=${sessionId}; Path=/; SameSite=Lax; Max-Age=1800`);
     const html = String(postRes.data || "");
     const isCaptchaError = /mã xác thực không chính xác|mã xác thực không đúng|sai mã xác thực/i.test(html) && !/thao tác|xem hóa đơn|tải file/i.test(html);
-    const $ = cheerio7.load(html);
+    const $ = cheerio9.load(html);
     $("head").prepend(`<base href="${session.portal}/">`);
     if (isCaptchaError) {
       try {
@@ -12071,39 +13131,54 @@ app.all("/api/minvoice/download-pdf", async (req, res) => {
     ).trim();
     const invoiceNo = String(req.query.invoiceNo || req.query.shdon || req.body?.invoiceNo || req.body?.shdon || "1");
     const invoiceSeries = String(req.query.invoiceSeries || req.query.khhdon || req.body?.invoiceSeries || req.body?.khhdon || "");
+    const recaptchaToken = String(
+      req.query.recaptchaToken || req.body?.recaptchaToken || req.headers["x-recaptcha-token"] || ""
+    ).trim();
     if (!sellerTaxCode) {
       return res.status(400).json({ success: false, error: "M\xE3 s\u1ED1 thu\u1EBF b\xEAn b\xE1n (sellerTaxCode / masothue) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
     if (!lookupCode) {
       return res.status(400).json({ success: false, error: "S\u1ED1 b\u1EA3o m\u1EADt (lookupCode / sobaomat) kh\xF4ng \u0111\u01B0\u1EE3c \u0111\u1EC3 tr\u1ED1ng" });
     }
-    const minvoiceUrl = `https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice?masothue=${encodeURIComponent(
+    const targetEndpoint = recaptchaToken ? "https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoiceCaptcha" : "https://tracuuhoadon.minvoice.com.vn/api/Search/SearchInvoice";
+    const minvoiceUrl = `${targetEndpoint}?masothue=${encodeURIComponent(
       sellerTaxCode
     )}&sobaomat=${encodeURIComponent(lookupCode)}&type=PDF&inchuyendoi=false`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25e3);
+    const headers = {
+      "Accept": "application/pdf, application/octet-stream, */*",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "Referer": "https://tracuuhoadon.minvoice.com.vn/",
+      "Origin": "https://tracuuhoadon.minvoice.com.vn"
+    };
+    if (recaptchaToken) {
+      headers["X-Recaptcha-Token"] = recaptchaToken;
+    }
     const resp = await fetch(minvoiceUrl, {
       method: "GET",
-      headers: {
-        "Accept": "application/pdf, application/octet-stream, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://tracuuhoadon.minvoice.com.vn/",
-        "Origin": "https://tracuuhoadon.minvoice.com.vn"
-      },
+      headers,
       signal: controller.signal
     });
     clearTimeout(timeout);
     if (!resp.ok) {
-      throw new Error(`C\u1ED5ng M-Invoice ph\u1EA3n h\u1ED3i l\u1ED7i HTTP ${resp.status}: ${resp.statusText}`);
+      const errText = await resp.text().catch(() => "");
+      let errMsg = `C\u1ED5ng M-Invoice ph\u1EA3n h\u1ED3i l\u1ED7i HTTP ${resp.status}`;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed.message) errMsg = parsed.message;
+      } catch {
+      }
+      return res.status(resp.status === 400 ? 400 : 502).json({ success: false, error: errMsg });
     }
     const arrayBuf = await resp.arrayBuffer();
     const buffer = Buffer.from(arrayBuf);
     if (buffer.length < 500 || !buffer.subarray(0, 10).toString("latin1").includes("%PDF")) {
-      throw new Error("D\u1EEF li\u1EC7u tr\u1EA3 v\u1EC1 t\u1EEB c\u1ED5ng M-Invoice kh\xF4ng ph\u1EA3i file PDF h\u1EE3p l\u1EC7");
+      return res.status(502).json({ success: false, error: "D\u1EEF li\u1EC7u tr\u1EA3 v\u1EC1 t\u1EEB c\u1ED5ng M-Invoice kh\xF4ng ph\u1EA3i file PDF h\u1EE3p l\u1EC7" });
     }
     const cleanShd = invoiceNo.padStart(7, "0");
     const filename = `HoaDon_MInvoice_${sellerTaxCode}_${cleanShd}_${lookupCode}.pdf`;
-    if (req.query.format === "json" || req.body?.format === "json") {
+    if (req.query.format === "json" || req.body?.format === "json" || req.headers.accept?.includes("application/json")) {
       return res.json({
         success: true,
         filename,
@@ -12115,9 +13190,8 @@ app.all("/api/minvoice/download-pdf", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
     res.setHeader("Content-Length", buffer.length);
     res.send(buffer);
-  } catch (error) {
-    console.error("[M-Invoice] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err?.message || "L\u1ED7i khi t\u1EA3i h\xF3a \u0111\u01A1n M-Invoice." });
   }
 });
 app.all("/api/cyberbill/download-pdf", async (req, res) => {
@@ -12158,6 +13232,41 @@ app.all("/api/cyberbill/download-pdf", async (req, res) => {
   } catch (error) {
     console.error("[CyberBill] L\u1ED7i t\u1EA3i PDF g\u1ED1c:", error.message);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+app.post("/api/thaison-common/captcha", async (req, res) => {
+  try {
+    const challenge = await createThaiSonCommonManualCaptcha(req.body?.lookupCode);
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ success: true, ...challenge });
+  } catch (e) {
+    const status = Number(e?.status);
+    return res.status(status >= 400 && status <= 599 ? status : 502).json({
+      success: false,
+      error: String(e?.message || "Kh\xF4ng th\u1EC3 t\u1EA3i CAPTCHA Th\xE1i S\u01A1n.")
+    });
+  }
+});
+app.post("/api/thaison-common/lookup", async (req, res) => {
+  try {
+    const result = await submitThaiSonCommonManualLookup({
+      state: req.body?.state,
+      lookupCode: req.body?.lookupCode,
+      captcha: req.body?.captcha,
+      sellerTaxCode: String(req.body?.sellerTaxCode || ""),
+      invoiceNo: String(req.body?.invoiceNo || ""),
+      invoiceSeries: String(req.body?.invoiceSeries || "")
+    });
+    res.setHeader("Cache-Control", "no-store");
+    if (result.kind === "pdf") {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("X-Invoice-Filename", encodeURIComponent(result.filename));
+      return res.send(result.pdfBuffer);
+    }
+    return res.json({ success: true, kind: "html", html: result.html });
+  } catch (e) {
+    const status = Number(e?.status);
+    return res.status(status >= 400 && status <= 599 ? status : 502).json({ success: false, error: String(e?.message || "Tra c\u1EE9u Th\xE1i S\u01A1n ch\u01B0a th\xE0nh c\xF4ng.") });
   }
 });
 app.post("/api/saigoncoop/captcha", async (req, res) => {
@@ -12293,11 +13402,11 @@ async function startServer() {
           return next();
         }
         try {
-          const fs2 = await import("fs");
-          const path3 = await import("path");
-          const indexPath = path3.resolve(process.cwd(), "index.html");
-          if (fs2.existsSync(indexPath)) {
-            let template = fs2.readFileSync(indexPath, "utf-8");
+          const fs3 = await import("fs");
+          const path4 = await import("path");
+          const indexPath = path4.resolve(process.cwd(), "index.html");
+          if (fs3.existsSync(indexPath)) {
+            let template = fs3.readFileSync(indexPath, "utf-8");
             template = await vite.transformIndexHtml(req.originalUrl, template);
             return res.status(200).set({ "Content-Type": "text/html" }).end(template);
           }
@@ -12312,10 +13421,10 @@ async function startServer() {
       console.error("[Vite Init Error]:", viteErr.message);
     }
   } else {
-    const distPath = process.env.VERCEL ? path2.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path2.dirname(__filename) : process.cwd();
+    const distPath = process.env.VERCEL ? path3.join(process.cwd(), "dist") : typeof __filename !== "undefined" ? path3.dirname(__filename) : process.cwd();
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path2.join(distPath, "index.html"));
+      res.sendFile(path3.join(distPath, "index.html"));
     });
   }
   app.listen(PORT, "0.0.0.0", () => {

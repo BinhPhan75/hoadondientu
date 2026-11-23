@@ -2207,6 +2207,10 @@ app.all(['/Record/DownloadMultiFiles', '/HomeNoLogin/DownloadMultiFiles'], async
 const VISNAM_API = 'https://tracuu.vin-hoadon.com/api/services/hddt/TraCuuHoaDon';
 const VISNAM_HTTPS_AGENT = new https.Agent({
   ca: [...tls.rootCertificates, VISNAM_RAPIDSSL_INTERMEDIATE],
+  keepAlive: true,
+  keepAliveMsecs: 30000,
+  maxSockets: 30,
+  maxFreeSockets: 10,
 });
 const visnamHeaders = {
   Accept: 'application/json',
@@ -2215,6 +2219,11 @@ const visnamHeaders = {
   Origin: 'https://tracuu.vin-hoadon.com',
   Referer: 'https://tracuu.vin-hoadon.com/tracuuhoadon/tracuuxacthuc/tracuuhd'
 };
+
+// Tự động làm ấm worker Tesseract OCR ngầm để phục vụ giải CAPTCHA siêu tốc (<150ms)
+import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver')
+  .then(m => m.warmupTesseractWorker())
+  .catch(e => console.warn('[Tesseract Warmup] Bỏ qua làm ấm trước:', e?.message));
 
 app.post('/api/visnam/captcha', async (_req, res) => {
   try {
@@ -2241,7 +2250,7 @@ app.post('/api/visnam/captcha', async (_req, res) => {
     let autoSolvedCode: string | undefined;
     try {
       const { solveVisnamCaptcha } = await import('./src/services/invoice-engine/captcha/tesseractCaptchaSolver');
-      const solved = await solveVisnamCaptcha(result.image, 1800);
+      const solved = await solveVisnamCaptcha(result.image, 2500);
       if (solved && /^\d{4}$/.test(solved.code)) {
         autoSolvedCode = solved.code;
       }
@@ -2291,7 +2300,7 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
       const capRes = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
         httpsAgent: VISNAM_HTTPS_AGENT,
         headers: visnamHeaders,
-        timeout: 6000,
+        timeout: 8000,
         maxRedirects: 0,
         maxContentLength: 400000,
         maxBodyLength: 10000
@@ -2306,7 +2315,7 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
       lastKey = result.key;
       lastImage = result.image;
 
-      const solved = await solveVisnamCaptcha(result.image, 2000);
+      const solved = await solveVisnamCaptcha(result.image, 4000);
       const captchaCode = solved?.code?.trim();
       if (!captchaCode || !/^\d{4}$/.test(captchaCode)) {
         console.info(`[Visnam Auto-Lookup] Lần ${attempt}: OCR cục bộ chưa nhận diện đủ 4 số, thử mã CAPTCHA mới.`);
