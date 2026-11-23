@@ -46,6 +46,7 @@ import { fetchMinvoiceInvoicePdf } from '../services/minvoiceClient';
 import { MinvoicePortalModal } from './MinvoicePortalModal';
 import { minvoicePdfCacheKey } from '../services/minvoicePdfImport';
 import { writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
+import { InvoicePdfViewer } from './InvoicePdfViewer';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
@@ -2094,10 +2095,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       allow="clipboard-read; clipboard-write"
                     />
                   ) : originalViettelPdfUrl ? (
-                    <iframe
-                      src={originalViettelPdfUrl}
+                    <InvoicePdfViewer
+                      pdfUrl={originalViettelPdfUrl}
                       title="Bản gốc PDF Viettel vInvoice"
-                      className="w-full h-[1200px] border-0 bg-white"
+                      filename={`HoaDon_Viettel_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}.pdf`}
+                      className="w-full min-h-[1200px]"
                     />
                   ) : originalFourSiPdfUrl ? (
                     <iframe
@@ -2114,10 +2116,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
                     />
                   ) : originalProviderPdfUrl ? (
-                    <iframe
-                      src={originalProviderPdfUrl}
-                      title="Bản PDF gốc từ nhà cung cấp"
-                      className="w-full h-[1200px] border-0 bg-white"
+                    <InvoicePdfViewer
+                      pdfUrl={originalProviderPdfUrl}
+                      title={`Bản PDF gốc ${currentProviderMeta.name || 'từ nhà cung cấp'}`}
+                      filename={`HoaDon_${effectiveInvoice.khhdon || 'HD'}_${effectiveInvoice.shdon || ''}_${effectiveInvoice.nbmst || ''}.pdf`}
+                      className="w-full min-h-[1200px]"
                     />
                   ) : originalEasyInvoiceHtml || originalVnptHtml ? (
                     <iframe

@@ -174,13 +174,32 @@ export const MinvoicePortalModal: React.FC<MinvoicePortalModalProps> = ({
         )}
 
         {/* Khung iframe hiển thị cổng M-Invoice trực tiếp */}
-        <div className="flex-1 w-full bg-white relative">
+        <div 
+          className="flex-1 w-full bg-white relative"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={async (e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (!file || !invoice) return;
+            setIsImporting(true);
+            setImportError(null);
+            try {
+              const blob = await importMinvoiceIssuerPdf(file, invoice);
+              const url = URL.createObjectURL(blob);
+              onPdfImported(url);
+              onClose();
+            } catch (err: any) {
+              setImportError(err?.message || 'Không thể xác thực tệp PDF này.');
+            } finally {
+              setIsImporting(false);
+            }
+          }}
+        >
           <iframe
             src={portalUrl}
             title="Cổng tra cứu M-Invoice"
             className="w-full h-full border-0"
             allow="clipboard-write; clipboard-read"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
           />
         </div>
       </div>
