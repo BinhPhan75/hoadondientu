@@ -440,9 +440,13 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
                 <td className="py-1 px-3 text-right">
                   <div className="flex items-center justify-end gap-1">
                     <input
-                      type="number"
-                      value={indicator22 === 0 ? '' : indicator22}
-                      onChange={(e) => setIndicator22(Number(e.target.value) || 0)}
+                      type="text"
+                      inputMode="numeric"
+                      value={indicator22 === 0 ? '' : indicator22.toLocaleString('vi-VN')}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/[^0-9]/g, '');
+                        setIndicator22(digits ? Number(digits) : 0);
+                      }}
                       placeholder="0"
                       className="w-36 text-right font-mono font-bold text-xs px-2 py-1 bg-white border border-slate-300 rounded focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
