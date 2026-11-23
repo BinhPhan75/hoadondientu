@@ -207,7 +207,7 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-slate-100 p-4 sm:p-6 lg:p-8 print:p-0 print:bg-white">
+    <div className="vat-declaration-scroll flex-1 overflow-y-auto bg-slate-100 p-4 sm:p-6 lg:p-8 print:p-0 print:bg-white">
       {/* Top Controls & Navigation Bar (Hidden when printing) */}
       <div className="max-w-5xl mx-auto mb-6 flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs print:hidden">
         <div className="flex items-center gap-3">
@@ -351,7 +351,7 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
       </div>
 
       {/* Official Form 01/GTGT Paper Presentation (A4 layout) */}
-      <div className="max-w-5xl mx-auto bg-white p-6 sm:p-10 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0 text-slate-900 font-sans">
+      <div id="vat-declaration-print" className="max-w-5xl mx-auto bg-white p-6 sm:p-10 rounded-2xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:p-0 text-slate-900 font-sans">
         {/* National Header */}
         <div className="text-center pb-4 border-b border-slate-200">
           <div className="text-xs font-bold uppercase tracking-wider text-slate-900">
@@ -381,7 +381,7 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
           <div>
             <span className="text-slate-500">Tên người nộp thuế:</span>{' '}
             <strong className="font-semibold text-slate-900 uppercase">
-              {account.taxpayerName || 'DOANH NGHIỆP NỘP THUẾ'}
+              {account.taxpayerName && !account.taxpayerName.startsWith('DOANH NGHIỆP NỘP THUẾ') ? account.taxpayerName : 'Chưa cấu hình tên doanh nghiệp'}
             </strong>
           </div>
           <div>
@@ -393,7 +393,7 @@ export const VatTaxDeclarationView: React.FC<VatTaxDeclarationViewProps> = ({
           <div className="md:col-span-2">
             <span className="text-slate-500">Địa chỉ trụ sở:</span>{' '}
             <span className="text-slate-800">
-              {account.address || 'Đăng ký tại cơ quan thuế quản lý'}
+              {account.address && account.address !== 'Đăng ký tại Tổng cục Thuế' ? account.address : 'Chưa cấu hình địa chỉ doanh nghiệp'}
             </span>
           </div>
         </div>

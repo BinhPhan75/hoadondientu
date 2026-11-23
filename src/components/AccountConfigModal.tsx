@@ -32,6 +32,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
   const [taxCode, setTaxCode] = useState(() => currentConfig.taxCode || localStorage.getItem('gdt_saved_tax_code') || '');
   const [password, setPassword] = useState(() => currentConfig.password || localStorage.getItem('gdt_saved_password') || '');
   const [showPassword, setShowPassword] = useState(false);
+  const [taxpayerName, setTaxpayerName] = useState(currentConfig.taxpayerName || '');
+  const [companyAddress, setCompanyAddress] = useState(currentConfig.address || '');
   const [captchaCode, setCaptchaCode] = useState('');
   const [captchaKey, setCaptchaKey] = useState('');
   const [captchaCookie, setCaptchaCookie] = useState('');
@@ -122,7 +124,9 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
     setTaxCode(currentConfig.taxCode || localStorage.getItem('gdt_saved_tax_code') || '');
     setPassword(currentConfig.password || localStorage.getItem('gdt_saved_password') || '');
     setRememberMe(currentConfig.rememberMe ?? true);
-  }, [currentConfig.taxCode, currentConfig.password, currentConfig.rememberMe]);
+    setTaxpayerName(currentConfig.taxpayerName || '');
+    setCompanyAddress(currentConfig.address || '');
+  }, [currentConfig.taxCode, currentConfig.password, currentConfig.rememberMe, currentConfig.taxpayerName, currentConfig.address]);
 
   if (!isOpen) return null;
 
@@ -174,8 +178,8 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           ...currentConfig,
           taxCode: taxCode.trim(),
           password: password,
-          taxpayerName: loginResult.taxpayerName || `DOANH NGHIỆP NỘP THUẾ (MST: ${taxCode})`,
-          address: loginResult.address || 'Đăng ký tại Tổng cục Thuế',
+          taxpayerName: taxpayerName.trim() || (loginResult.taxpayerName && !loginResult.taxpayerName.startsWith('DOANH NGHIỆP NỘP THUẾ') ? loginResult.taxpayerName : '') || currentConfig.taxpayerName || '',
+          address: companyAddress.trim() || loginResult.address || currentConfig.address || '',
           rememberMe,
           autoSaveSession: true,
           isRealGDT: true,
@@ -287,6 +291,20 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
                 required
               />
             </div>
+          </div>
+
+          {/* Thông tin pháp nhân dùng khi lập và in tờ khai; có thể lưu mà không đăng nhập lại. */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">Tên doanh nghiệp / người nộp thuế</label>
+            <input type="text" value={taxpayerName} onChange={(e) => setTaxpayerName(e.target.value)}
+              placeholder="Nhập tên doanh nghiệp theo đăng ký thuế"
+              className="w-full px-3 py-2 text-xs bg-white border border-gray-300 rounded focus:border-blue-500 focus:outline-hidden text-gray-900" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">Địa chỉ trụ sở doanh nghiệp</label>
+            <textarea value={companyAddress} onChange={(e) => setCompanyAddress(e.target.value)} rows={2}
+              placeholder="Nhập địa chỉ trụ sở theo đăng ký thuế"
+              className="w-full px-3 py-2 text-xs bg-white border border-gray-300 rounded focus:border-blue-500 focus:outline-hidden text-gray-900 resize-y" />
           </div>
 
           {/* Password */}
@@ -420,7 +438,17 @@ export const AccountConfigModal: React.FC<AccountConfigModalProps> = ({
           </div>
 
           {/* Modal Actions */}
-          <div className="pt-4 flex items-center justify-end gap-2 border-t border-slate-200">
+          <div className="pt-4 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200">
+            <button type="button" onClick={() => {
+              if (!taxCode.trim()) {
+                setStatusMessage({ type: 'error', text: 'Vui lòng nhập mã số thuế trước khi lưu.' });
+                return;
+              }
+              onSave({ ...currentConfig, taxCode: taxCode.trim(), taxpayerName: taxpayerName.trim(), address: companyAddress.trim(), rememberMe });
+              onClose();
+            }} className="h-9 px-3 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200">
+              Lưu thông tin doanh nghiệp
+            </button>
             <button
               type="button"
               onClick={onClose}

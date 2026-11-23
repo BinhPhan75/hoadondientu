@@ -117,7 +117,7 @@ export default function App() {
       taxCode: savedMst,
       password: savedPwd,
       customApiKey: parsed?.customApiKey || '',
-      taxpayerName: parsed?.taxpayerName || (savedMst ? `DOANH NGHIỆP NỘP THUẾ (MST: ${savedMst})` : 'Chưa đăng nhập CQT'),
+      taxpayerName: parsed?.taxpayerName && !parsed.taxpayerName.startsWith('DOANH NGHIỆP NỘP THUẾ') ? parsed.taxpayerName : '',
       address: parsed?.address || '',
       rememberMe: parsed?.rememberMe ?? true,
       autoSaveSession: parsed?.autoSaveSession ?? true,
@@ -2189,6 +2189,7 @@ export default function App() {
         )}
 
         {/* Live Bottom Console Dock */}
+        <div className="app-console-dock print:hidden">
         <ConsoleDock
           logs={consoleLogs}
           isRunning={isRefreshing}
@@ -2198,6 +2199,7 @@ export default function App() {
           isCollapsed={isConsoleCollapsed}
           onToggleCollapse={handleToggleConsole}
         />
+        </div>
       </div>
 
       {/* 3. Modals */}
