@@ -367,14 +367,10 @@ export function createVisnamBinarizedBmp(
       const cG = Math.round(g * a + 255 * (1 - a));
       const cB = Math.round(b * a + 255 * (1 - a));
 
-      const isRedLine = cR > cG + 30 && cR > cB + 30;
-      const isGreenLine = cG > cR + 25 && cG > cB + 25;
+      // Visnam CAPTCHA có nền trắng (255, 255, 255). Mọi chữ số (dù đen, xanh lam, xanh lá, đỏ)
+      // đều có độ sáng tối hơn nền trắng. Không loại trừ màu để tránh làm đứt nét số màu.
       const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
-
-      const isDigit =
-        !isRedLine &&
-        !isGreenLine &&
-        (lum < lumThreshold || (cB > cR + 25 && cB > cG + 25 && lum < 220));
+      const isDigit = lum < lumThreshold;
 
       const destXWithPad = dx + padding;
       const pxOffset = rowStart + destXWithPad * 3;
@@ -470,22 +466,24 @@ export async function solveVisnamCaptcha(
       const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
       if (!worker) return null;
 
-      const passes = [
-        { w: 260, h: 90, psm: '7', lum: 175 },
-        { w: 260, h: 90, psm: '8', lum: 175 },
-        { w: 280, h: 100, lum: 180, psm: '7' },
-        { w: 240, h: 80, lum: 170, psm: '7' },
-        { w: 320, h: 100, lum: 180, psm: '8' },
-        { w: 300, h: 90, lum: 165, psm: '6' },
+      const passes: Array<{ w?: number; h?: number; lum?: number; psm: string; raw?: boolean }> = [
+        { w: 260, h: 90, lum: 200, psm: '7' },
+        { w: 260, h: 90, lum: 200, psm: '8' },
+        { w: 260, h: 90, lum: 180, psm: '7' },
+        { w: 260, h: 90, lum: 220, psm: '7' },
+        { w: 280, h: 95, lum: 195, psm: '7' },
+        { w: 240, h: 80, lum: 200, psm: '8' },
+        { raw: true, psm: '7' },
+        { raw: true, psm: '8' },
       ];
 
       for (const pass of passes) {
-        const bmp = createVisnamBinarizedBmp(decoded, pass.w, 12, pass.lum, pass.h);
         await worker.setParameters({
           tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
           tessedit_pageseg_mode: pass.psm as any,
         });
-        const res = await worker.recognize(bmp);
+        const img = pass.raw ? buf : createVisnamBinarizedBmp(decoded, pass.w || 260, 10, pass.lum || 200, pass.h || 90);
+        const res = await worker.recognize(img);
         const cleaned = postProcessOcrText(res.data.text || '', { digitsOnly: true, expectedLength: 4 });
         if (/^\d{4}$/.test(cleaned)) {
           return { code: cleaned, confidence: res.data.confidence || 85 };
