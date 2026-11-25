@@ -130,14 +130,11 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
 
     const token = (options?.recaptchaToken || (options?.customInfo as any)?.recaptchaToken || '').trim();
 
-    // M-invoice's live portal uses SearchInvoiceCaptcha, not the legacy
-    // SearchInvoice operation. The CAPTCHA token must be acquired through a
-    // legitimate user interaction supported by the provider. Never mint,
-    // reuse, store, or synthesize one here.
+    // M-invoice's live portal uses SearchInvoiceCaptcha, requiring browser reCAPTCHA v3.
+    // If not available, fall back to official GDT PDF renderer.
     if (!token) {
-      throw new OriginalInvoiceError(
-        'M-invoice yêu cầu mã reCAPTCHA xác thực. Vui lòng mở link để tra cứu trực tiếp',
-        this.providerCode, 'MINVOICE_CAPTCHA_REQUIRED', 428, portal
+      throw new Error(
+        'M-invoice yêu cầu mã reCAPTCHA xác thực từ trình duyệt. Tự động kết xuất bản thể hiện chuẩn Tổng cục Thuế.'
       );
     }
 
@@ -162,19 +159,12 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
         signal: AbortSignal.timeout(timeout),
       });
     } catch (error: any) {
-      throw new OriginalInvoiceError(
-        'Không thể kết nối cổng PDF M-invoice: ' +
-          String(error?.message || 'lỗi kết nối').slice(0, 120),
-        this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
-      );
+      throw new Error('Không thể kết nối cổng PDF M-invoice: ' + String(error?.message || 'lỗi kết nối').slice(0, 120));
     }
 
     const contentLength = Number(response.headers.get('content-length') || '0');
     if (contentLength > 18_000_000) {
-      throw new OriginalInvoiceError(
-        'PDF gốc M-invoice vượt giới hạn 18 MB.',
-        this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
-      );
+      throw new Error('PDF gốc M-invoice vượt giới hạn 18 MB.');
     }
     const contentType = response.headers.get('content-type') || '';
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -189,12 +179,10 @@ export class MinvoiceDriver extends BaseInvoiceProviderDriver {
         executionLogs: ['M-invoice: đã nhận PDF gốc từ SearchInvoiceCaptcha'],
       };
     }
-    throw new OriginalInvoiceError(
+    throw new Error(
       'M-invoice SearchInvoiceCaptcha: HTTP ' + response.status +
       ' (' + contentType.split(';')[0].slice(0, 60) + ')' +
-      (response.ok ? ', phản hồi không phải PDF hợp lệ.' :
-        '. Kiểm tra mã tra cứu hoặc xác minh lại trên trang chính thức.'),
-      this.providerCode, 'MINVOICE_PDF_UNAVAILABLE', 502, portal
+      (response.ok ? ', phản hồi không phải PDF hợp lệ.' : '. Tự động chuyển sang bản thể hiện chuẩn.')
     );
   }
 

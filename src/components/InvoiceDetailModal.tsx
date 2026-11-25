@@ -47,6 +47,7 @@ import { MinvoicePortalModal } from './MinvoicePortalModal';
 import { minvoicePdfCacheKey } from '../services/minvoicePdfImport';
 import { writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { InvoicePdfViewer } from './InvoicePdfViewer';
+import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
 
 interface InvoiceDetailModalProps {
   invoice: GDTInvoice | null;
