@@ -2294,8 +2294,8 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
   let lastImage: string | undefined;
   let lastSolvedCode: string | undefined;
 
-  // Tự động nhận diện CAPTCHA qua OCR cục bộ (không dùng Gemini API) và tự động xác nhận
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  // Tự động nhận diện CAPTCHA qua OCR cục bộ (không dùng Gemini API) tối đa 5 lần
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       const capRes = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
         httpsAgent: VISNAM_HTTPS_AGENT,
@@ -2318,12 +2318,12 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
       const solved = await solveVisnamCaptcha(result.image, 4000);
       const captchaCode = solved?.code?.trim();
       if (!captchaCode || !/^\d{4}$/.test(captchaCode)) {
-        console.info(`[Visnam Auto-Lookup] Lần ${attempt}: OCR cục bộ chưa nhận diện đủ 4 số, thử mã CAPTCHA mới.`);
+        console.info(`[Visnam Auto-Lookup] Lần ${attempt}/5: OCR cục bộ chưa nhận diện đủ 4 số, thử mã CAPTCHA mới.`);
         continue;
       }
 
       lastSolvedCode = captchaCode;
-      console.info(`[Visnam Auto-Lookup] Lần ${attempt}: OCR cục bộ nhận diện mã "${captchaCode}". Đang tự động tra cứu upstream...`);
+      console.info(`[Visnam Auto-Lookup] Lần ${attempt}/5: OCR cục bộ nhận diện mã "${captchaCode}". Đang tự động tra cứu upstream...`);
 
       const lookupRes = await axios.post(VISNAM_API + '/TraCuu',
         { key: lastKey, captcha: captchaCode, maSoBiMat: cleanSecret },
@@ -2349,24 +2349,38 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
       }
 
       if (upstreamResult?.status === 2) {
-        console.info(`[Visnam Auto-Lookup] Lần ${attempt}: Upstream từ chối mã "${captchaCode}". Thử CAPTCHA mới...`);
+        console.info(`[Visnam Auto-Lookup] Lần ${attempt}/5: Upstream từ chối mã "${captchaCode}". Thử CAPTCHA mới...`);
         continue;
       }
 
       const errorMsg = String(upstreamResult?.message || 'Không tìm thấy hóa đơn trên hệ thống VIN-HOADON.');
       return res.status(422).json({ success: false, error: errorMsg });
     } catch (err: any) {
-      console.warn(`[Visnam Auto-Lookup] Lần ${attempt} gặp lỗi:`, err?.message);
+      console.warn(`[Visnam Auto-Lookup] Lần ${attempt}/5 gặp lỗi:`, err?.message);
     }
   }
 
+  // Nếu sau 5 lần tự động chưa thành công, lấy ảnh CAPTCHA mới tinh để người dùng nhập tay
+  try {
+    const freshCap = await axios.post(VISNAM_API + '/RefreshCaptcha', {}, {
+      httpsAgent: VISNAM_HTTPS_AGENT,
+      headers: visnamHeaders,
+      timeout: 8000,
+    });
+    if (freshCap.data?.result?.key && freshCap.data?.result?.image) {
+      lastKey = freshCap.data.result.key;
+      lastImage = freshCap.data.result.image;
+    }
+  } catch {}
+
   return res.status(422).json({
     success: false,
-    error: 'Chưa tự động vượt CAPTCHA VIN-HOADON thành công.',
+    canManualEntry: true,
+    attempts: 5,
+    error: 'Đã tự động thử giải 5 lần chưa thành công. Vui lòng nhập 4 số trên hình để tải PDF.',
     fallbackCaptcha: lastKey && lastImage ? {
       key: lastKey,
-      image: lastImage,
-      autoSolvedCode: lastSolvedCode
+      image: lastImage
     } : undefined
   });
 });
@@ -2374,8 +2388,8 @@ app.post('/api/visnam/auto-lookup', async (req, res) => {
 app.post('/api/visnam/lookup', async (req, res) => {
   const { key, captcha, maSoBiMat, identity } = req.body || {};
   if (typeof key !== 'string' || !/^[0-9a-f-]{36}$/i.test(key) ||
-      typeof captcha !== 'string' || !/^[A-Za-z0-9]{3,8}$/.test(captcha) ||
-      typeof maSoBiMat !== 'string' || !/^[A-Za-z0-9_-]{6,64}$/.test(maSoBiMat) ||
+      typeof captcha !== 'string' || !/^[A-Za-z0-9]{3,8}$/.test(captcha.trim()) ||
+      typeof maSoBiMat !== 'string' || !/^[A-Za-z0-9_/-]{4,64}$/.test(maSoBiMat.trim()) ||
       !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || '')) ||
       !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || '')) ||
       !/^\d{1,10}$/.test(String(identity.invoiceNo || ''))) {
@@ -2383,7 +2397,7 @@ app.post('/api/visnam/lookup', async (req, res) => {
   }
   try {
     const upstream = await axios.post(VISNAM_API + '/TraCuu',
-      { key, captcha, maSoBiMat },
+      { key, captcha: captcha.trim(), maSoBiMat: maSoBiMat.trim() },
       { httpsAgent: VISNAM_HTTPS_AGENT, headers: visnamHeaders, timeout: 25000, maxRedirects: 0,
         maxContentLength: 25000000, maxBodyLength: 10000 });
     const { extractVerifiedVisnamFiles } = await import('./src/services/visnamResponse');
@@ -2401,11 +2415,14 @@ app.post('/api/visnam/lookup', async (req, res) => {
     });
   } catch (error: any) {
     const status = error?.response?.status;
+    const upstreamMsg = error?.response?.data?.result?.message || error?.response?.data?.error;
     return res.status(status === 429 ? 429 : 422).json({
       success: false,
       error: status === 429
         ? 'VIN-HOADON đang giới hạn truy vấn. Vui lòng thử lại sau.'
-        : 'Không thể tra cứu hoặc xác minh PDF gốc. Kiểm tra CAPTCHA rồi thử lại.'
+        : (typeof upstreamMsg === 'string' && upstreamMsg.length > 0
+            ? upstreamMsg
+            : 'Không thể tra cứu hoặc xác minh PDF gốc. Kiểm tra CAPTCHA rồi thử lại.')
     });
   }
 });

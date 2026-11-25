@@ -38,12 +38,15 @@ function ensureTrainedDataInTmp() {
   }
   const cwd = process.cwd();
   const searchLocations = [
+    path.join(cwd, "eng.traineddata"),
     path.join(cwd, "public", "tessdata", "eng.traineddata"),
     path.join(cwd, "dist", "tessdata", "eng.traineddata"),
     path.resolve("public/tessdata/eng.traineddata"),
     path.resolve("dist/tessdata/eng.traineddata"),
+    "/var/task/eng.traineddata",
     "/var/task/public/tessdata/eng.traineddata",
     "/var/task/dist/tessdata/eng.traineddata",
+    path.join(__dirname, "eng.traineddata"),
     path.join(__dirname, "..", "..", "..", "..", "public", "tessdata", "eng.traineddata"),
     path.join(__dirname, "..", "..", "..", "..", "dist", "tessdata", "eng.traineddata")
   ];
@@ -97,11 +100,13 @@ async function getWorker(whitelist) {
     workerInitializing = (async () => {
       try {
         const cachePath = ensureTrainedDataInTmp();
-        const w2 = await createWorker("eng", 1, {
-          cachePath,
-          langPath: cachePath,
-          gzip: false
-        });
+        const hasTrainedData = fs.existsSync(path.join(cachePath, "eng.traineddata"));
+        const workerOptions = { cachePath };
+        if (hasTrainedData) {
+          workerOptions.langPath = cachePath;
+          workerOptions.gzip = false;
+        }
+        const w2 = await createWorker("eng", 1, workerOptions);
         await applyWorkerParams(w2, targetWhitelist);
         tesseractWorker = w2;
         return w2;
@@ -317,10 +322,8 @@ function createVisnamBinarizedBmp(decoded, targetWidth = 240, padding = 12, lumT
       const cR = Math.round(r * a + 255 * (1 - a));
       const cG = Math.round(g * a + 255 * (1 - a));
       const cB = Math.round(b * a + 255 * (1 - a));
-      const isRedLine = cR > cG + 30 && cR > cB + 30;
-      const isGreenLine = cG > cR + 25 && cG > cB + 25;
       const lum = 0.299 * cR + 0.587 * cG + 0.114 * cB;
-      const isDigit = !isRedLine && !isGreenLine && (lum < lumThreshold || cB > cR + 25 && cB > cG + 25 && lum < 220);
+      const isDigit = lum < lumThreshold;
       const destXWithPad = dx + padding;
       const pxOffset = rowStart + destXWithPad * 3;
       const val = isDigit ? 0 : 255;
@@ -373,20 +376,21 @@ async function solveVisnamCaptcha(imageInput, timeoutMs = 4500) {
       const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
       if (!worker) return null;
       const passes = [
-        { w: 260, h: 90, psm: "7", lum: 175 },
-        { w: 260, h: 90, psm: "8", lum: 175 },
-        { w: 280, h: 100, lum: 180, psm: "7" },
-        { w: 240, h: 80, lum: 170, psm: "7" },
-        { w: 320, h: 100, lum: 180, psm: "8" },
-        { w: 300, h: 90, lum: 165, psm: "6" }
+        { w: 380, lum: 195, psm: "7" },
+        { w: 320, lum: 190, psm: "7" },
+        { w: 420, lum: 200, psm: "7" },
+        { w: 380, lum: 195, psm: "8" },
+        { w: 280, lum: 185, psm: "7" },
+        { raw: true, psm: "7" },
+        { raw: true, psm: "8" }
       ];
       for (const pass of passes) {
-        const bmp = createVisnamBinarizedBmp(decoded, pass.w, 12, pass.lum, pass.h);
         await worker.setParameters({
           tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
           tessedit_pageseg_mode: pass.psm
         });
-        const res = await worker.recognize(bmp);
+        const img = pass.raw ? buf : createVisnamBinarizedBmp(decoded, pass.w || 380, 12, pass.lum || 195);
+        const res = await worker.recognize(img);
         const cleaned = postProcessOcrText(res.data.text || "", { digitsOnly: true, expectedLength: 4 });
         if (/^\d{4}$/.test(cleaned)) {
           return { code: cleaned, confidence: res.data.confidence || 85 };
@@ -12360,7 +12364,7 @@ app.post("/api/visnam/auto-lookup", async (req, res) => {
   let lastKey;
   let lastImage;
   let lastSolvedCode;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
     try {
       const capRes = await axios9.post(VISNAM_API + "/RefreshCaptcha", {}, {
         httpsAgent: VISNAM_HTTPS_AGENT,
@@ -12379,11 +12383,11 @@ app.post("/api/visnam/auto-lookup", async (req, res) => {
       const solved = await solveVisnamCaptcha2(result.image, 4e3);
       const captchaCode = solved?.code?.trim();
       if (!captchaCode || !/^\d{4}$/.test(captchaCode)) {
-        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: OCR c\u1EE5c b\u1ED9 ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u1EE7 4 s\u1ED1, th\u1EED m\xE3 CAPTCHA m\u1EDBi.`);
+        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}/5: OCR c\u1EE5c b\u1ED9 ch\u01B0a nh\u1EADn di\u1EC7n \u0111\u1EE7 4 s\u1ED1, th\u1EED m\xE3 CAPTCHA m\u1EDBi.`);
         continue;
       }
       lastSolvedCode = captchaCode;
-      console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: OCR c\u1EE5c b\u1ED9 nh\u1EADn di\u1EC7n m\xE3 "${captchaCode}". \u0110ang t\u1EF1 \u0111\u1ED9ng tra c\u1EE9u upstream...`);
+      console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}/5: OCR c\u1EE5c b\u1ED9 nh\u1EADn di\u1EC7n m\xE3 "${captchaCode}". \u0110ang t\u1EF1 \u0111\u1ED9ng tra c\u1EE9u upstream...`);
       const lookupRes = await axios9.post(
         VISNAM_API + "/TraCuu",
         { key: lastKey, captcha: captchaCode, maSoBiMat: cleanSecret },
@@ -12414,34 +12418,47 @@ app.post("/api/visnam/auto-lookup", async (req, res) => {
         });
       }
       if (upstreamResult?.status === 2) {
-        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}: Upstream t\u1EEB ch\u1ED1i m\xE3 "${captchaCode}". Th\u1EED CAPTCHA m\u1EDBi...`);
+        console.info(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}/5: Upstream t\u1EEB ch\u1ED1i m\xE3 "${captchaCode}". Th\u1EED CAPTCHA m\u1EDBi...`);
         continue;
       }
       const errorMsg = String(upstreamResult?.message || "Kh\xF4ng t\xECm th\u1EA5y h\xF3a \u0111\u01A1n tr\xEAn h\u1EC7 th\u1ED1ng VIN-HOADON.");
       return res.status(422).json({ success: false, error: errorMsg });
     } catch (err) {
-      console.warn(`[Visnam Auto-Lookup] L\u1EA7n ${attempt} g\u1EB7p l\u1ED7i:`, err?.message);
+      console.warn(`[Visnam Auto-Lookup] L\u1EA7n ${attempt}/5 g\u1EB7p l\u1ED7i:`, err?.message);
     }
+  }
+  try {
+    const freshCap = await axios9.post(VISNAM_API + "/RefreshCaptcha", {}, {
+      httpsAgent: VISNAM_HTTPS_AGENT,
+      headers: visnamHeaders,
+      timeout: 8e3
+    });
+    if (freshCap.data?.result?.key && freshCap.data?.result?.image) {
+      lastKey = freshCap.data.result.key;
+      lastImage = freshCap.data.result.image;
+    }
+  } catch {
   }
   return res.status(422).json({
     success: false,
-    error: "Ch\u01B0a t\u1EF1 \u0111\u1ED9ng v\u01B0\u1EE3t CAPTCHA VIN-HOADON th\xE0nh c\xF4ng.",
+    canManualEntry: true,
+    attempts: 5,
+    error: "\u0110\xE3 t\u1EF1 \u0111\u1ED9ng th\u1EED gi\u1EA3i 5 l\u1EA7n ch\u01B0a th\xE0nh c\xF4ng. Vui l\xF2ng nh\u1EADp 4 s\u1ED1 tr\xEAn h\xECnh \u0111\u1EC3 t\u1EA3i PDF.",
     fallbackCaptcha: lastKey && lastImage ? {
       key: lastKey,
-      image: lastImage,
-      autoSolvedCode: lastSolvedCode
+      image: lastImage
     } : void 0
   });
 });
 app.post("/api/visnam/lookup", async (req, res) => {
   const { key, captcha, maSoBiMat, identity } = req.body || {};
-  if (typeof key !== "string" || !/^[0-9a-f-]{36}$/i.test(key) || typeof captcha !== "string" || !/^[A-Za-z0-9]{3,8}$/.test(captcha) || typeof maSoBiMat !== "string" || !/^[A-Za-z0-9_-]{6,64}$/.test(maSoBiMat) || !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || "")) || !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || "")) || !/^\d{1,10}$/.test(String(identity.invoiceNo || ""))) {
+  if (typeof key !== "string" || !/^[0-9a-f-]{36}$/i.test(key) || typeof captcha !== "string" || !/^[A-Za-z0-9]{3,8}$/.test(captcha.trim()) || typeof maSoBiMat !== "string" || !/^[A-Za-z0-9_/-]{4,64}$/.test(maSoBiMat.trim()) || !identity || !/^\d{10}(?:-\d{3})?$/.test(String(identity.sellerTaxCode || "")) || !/^[0-9A-Za-z]{2,20}$/.test(String(identity.invoiceSeries || "")) || !/^\d{1,10}$/.test(String(identity.invoiceNo || ""))) {
     return res.status(400).json({ success: false, error: "Thi\u1EBFu th\xF4ng tin tra c\u1EE9u ho\u1EB7c h\xF3a \u0111\u01A1n kh\xF4ng h\u1EE3p l\u1EC7." });
   }
   try {
     const upstream = await axios9.post(
       VISNAM_API + "/TraCuu",
-      { key, captcha, maSoBiMat },
+      { key, captcha: captcha.trim(), maSoBiMat: maSoBiMat.trim() },
       {
         httpsAgent: VISNAM_HTTPS_AGENT,
         headers: visnamHeaders,
@@ -12466,9 +12483,10 @@ app.post("/api/visnam/lookup", async (req, res) => {
     });
   } catch (error) {
     const status = error?.response?.status;
+    const upstreamMsg = error?.response?.data?.result?.message || error?.response?.data?.error;
     return res.status(status === 429 ? 429 : 422).json({
       success: false,
-      error: status === 429 ? "VIN-HOADON \u0111ang gi\u1EDBi h\u1EA1n truy v\u1EA5n. Vui l\xF2ng th\u1EED l\u1EA1i sau." : "Kh\xF4ng th\u1EC3 tra c\u1EE9u ho\u1EB7c x\xE1c minh PDF g\u1ED1c. Ki\u1EC3m tra CAPTCHA r\u1ED3i th\u1EED l\u1EA1i."
+      error: status === 429 ? "VIN-HOADON \u0111ang gi\u1EDBi h\u1EA1n truy v\u1EA5n. Vui l\xF2ng th\u1EED l\u1EA1i sau." : typeof upstreamMsg === "string" && upstreamMsg.length > 0 ? upstreamMsg : "Kh\xF4ng th\u1EC3 tra c\u1EE9u ho\u1EB7c x\xE1c minh PDF g\u1ED1c. Ki\u1EC3m tra CAPTCHA r\u1ED3i th\u1EED l\u1EA1i."
     });
   }
 });

@@ -739,7 +739,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const data = await res.json();
       if (openInvoiceIdRef.current !== targetId || originalLoadSequence.current !== sequence) return;
       if (data.success && data.code && /^\d{4}$/.test(String(data.code).trim())) {
-        setVisnamCaptchaCode(String(data.code).trim());
+        // Chỉ tự điền nếu ô nhập mã đang trống, không ghi đè nếu người dùng đã gõ
+        setVisnamCaptchaCode(prev => (prev.trim().length === 0 ? String(data.code).trim() : prev));
       }
     } catch {
       // Ignored
@@ -757,12 +758,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const captcha = await fetchVisnamCaptcha();
       if (openInvoiceIdRef.current !== targetId || originalLoadSequence.current !== sequence) return;
       setVisnamCaptcha(captcha);
-      if (captcha.autoSolvedCode && /^\d{4}$/.test(captcha.autoSolvedCode)) {
-        setVisnamCaptchaCode(captcha.autoSolvedCode);
-      } else {
-        setVisnamCaptchaCode('');
-        void runVisnamOcr(captcha.image, targetId, sequence);
-      }
+      setVisnamCaptchaCode('');
     } catch (error) {
       if (openInvoiceIdRef.current === targetId && originalLoadSequence.current === sequence) {
         setVisnamCaptcha(null);
@@ -800,7 +796,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       invoiceNo: String(target.shdon || extractTagValue(target.rawXml || '', 'SHDon') || '').trim(),
     };
 
-    // Bước 1: Thử tự động giải mã CAPTCHA qua OCR nội bộ và tải trực tiếp ngầm (không cần mở modal)
+    // Bước 1: Thử tự động giải mã CAPTCHA qua OCR nội bộ và tải trực tiếp ngầm tối đa 5 lần (không cần mở modal)
+    let fallbackCaptchaFromAuto: any = null;
     try {
       const autoResult = await autoLookupVisnamInvoicePdf({ lookupCode, identity });
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
@@ -821,18 +818,22 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
       return;
     } catch (autoErr: any) {
-      console.info('[Visnam Auto-Lookup] Chưa tải tự động ngầm được, mở hộp thoại tự điền & xác nhận:', autoErr?.message);
+      console.info('[Visnam Auto-Lookup] Đã tự động thử 5 lần chưa thành công, mở modal để người dùng nhập tay:', autoErr?.message);
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
+      fallbackCaptchaFromAuto = autoErr?.fallbackCaptcha || null;
     } finally {
       setIsDownloadingEasyInvoice(false);
     }
 
-    // Bước 2: Nếu chưa tải được ngầm, mở modal xác minh nhưng tự điền OCR và tự động xác nhận
-    setVisnamCaptcha(null);
+    // Bước 2: Sau 5 lần tự giải nếu chưa thành công, cho người dùng nhập tay để tải hóa đơn
+    setVisnamCaptcha(fallbackCaptchaFromAuto || null);
     setVisnamCaptchaCode('');
-    setVisnamCaptchaError(null);
+    setVisnamCaptchaError('Hệ thống đã tự động thử giải 5 lần chưa thành công. Vui lòng nhìn hình và nhập 4 số bên dưới để tải PDF.');
     setIsVisnamCaptchaOpen(true);
-    await refreshVisnamCaptcha(target.id, sequence);
+
+    if (!fallbackCaptchaFromAuto || !fallbackCaptchaFromAuto.key || !fallbackCaptchaFromAuto.image) {
+      await refreshVisnamCaptcha(target.id, sequence);
+    }
   };
 
   const handleVisnamCaptchaSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -881,22 +882,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       } finally {
         downloadLink.remove();
       }
-    } catch (error) {
+    } catch (error: any) {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
-        // Tự động thử lại CAPTCHA mới nếu nhận diện sai hoặc hết hạn (tối đa 2 lần)
-        if (visnamRetryCountRef.current < 2) {
-          visnamRetryCountRef.current++;
-          setVisnamCaptchaError('Mã CAPTCHA chưa chính xác. Đang tự động đổi ảnh khác và nhận diện lại...');
-          setTimeout(() => {
-            if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
-              void refreshVisnamCaptcha(target.id, sequence);
-            }
-          }, 600);
-        } else {
-          setVisnamCaptcha(null);
-          setVisnamCaptchaCode('');
-          setVisnamCaptchaError(error instanceof Error ? error.message : 'Không tải được PDF VIN-HOADON.');
-        }
+        const errorMsg = error instanceof Error ? error.message : 'Mã CAPTCHA chưa chính xác hoặc không hợp lệ.';
+        setVisnamCaptchaError(`${errorMsg} Vui lòng nhập mã từ hình CAPTCHA mới.`);
+        // Làm mới CAPTCHA để người dùng nhập lại ngay
+        void refreshVisnamCaptcha(target.id, sequence);
       }
     } finally {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
@@ -2618,7 +2609,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         isLoading={isLoadingVisnamCaptcha}
         isSubmitting={isSubmittingVisnamCaptcha}
         isOcrRunning={isVisnamOcrRunning}
-        onCodeChange={value => setVisnamCaptchaCode(value.replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase())}
+        onCodeChange={value => setVisnamCaptchaCode(value.replace(/[^0-9]/g, '').slice(0, 4))}
         onRefresh={() => {
           if (effectiveInvoice) void refreshVisnamCaptcha(effectiveInvoice.id, originalLoadSequence.current);
         }}

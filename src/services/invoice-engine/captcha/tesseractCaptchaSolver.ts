@@ -22,12 +22,15 @@ function ensureTrainedDataInTmp(): string {
 
   const cwd = process.cwd();
   const searchLocations = [
+    path.join(cwd, 'eng.traineddata'),
     path.join(cwd, 'public', 'tessdata', 'eng.traineddata'),
     path.join(cwd, 'dist', 'tessdata', 'eng.traineddata'),
     path.resolve('public/tessdata/eng.traineddata'),
     path.resolve('dist/tessdata/eng.traineddata'),
+    '/var/task/eng.traineddata',
     '/var/task/public/tessdata/eng.traineddata',
     '/var/task/dist/tessdata/eng.traineddata',
+    path.join(__dirname, 'eng.traineddata'),
     path.join(__dirname, '..', '..', '..', '..', 'public', 'tessdata', 'eng.traineddata'),
     path.join(__dirname, '..', '..', '..', '..', 'dist', 'tessdata', 'eng.traineddata'),
   ];
@@ -92,11 +95,13 @@ async function getWorker(whitelist?: string): Promise<Worker | null> {
     workerInitializing = (async () => {
       try {
         const cachePath = ensureTrainedDataInTmp();
-        const w = await createWorker('eng', 1, {
-          cachePath,
-          langPath: cachePath,
-          gzip: false,
-        });
+        const hasTrainedData = fs.existsSync(path.join(cachePath, 'eng.traineddata'));
+        const workerOptions: any = { cachePath };
+        if (hasTrainedData) {
+          workerOptions.langPath = cachePath;
+          workerOptions.gzip = false;
+        }
+        const w = await createWorker('eng', 1, workerOptions);
         await applyWorkerParams(w, targetWhitelist);
         tesseractWorker = w;
         return w;
@@ -466,13 +471,12 @@ export async function solveVisnamCaptcha(
       const worker = await getWorker(DIGITS_CAPTCHA_WHITELIST);
       if (!worker) return null;
 
-      const passes: Array<{ w?: number; h?: number; lum?: number; psm: string; raw?: boolean }> = [
-        { w: 260, h: 90, lum: 200, psm: '7' },
-        { w: 260, h: 90, lum: 200, psm: '8' },
-        { w: 260, h: 90, lum: 180, psm: '7' },
-        { w: 260, h: 90, lum: 220, psm: '7' },
-        { w: 280, h: 95, lum: 195, psm: '7' },
-        { w: 240, h: 80, lum: 200, psm: '8' },
+      const passes: Array<{ w?: number; lum?: number; psm: string; raw?: boolean }> = [
+        { w: 380, lum: 195, psm: '7' },
+        { w: 320, lum: 190, psm: '7' },
+        { w: 420, lum: 200, psm: '7' },
+        { w: 380, lum: 195, psm: '8' },
+        { w: 280, lum: 185, psm: '7' },
         { raw: true, psm: '7' },
         { raw: true, psm: '8' },
       ];
@@ -482,7 +486,7 @@ export async function solveVisnamCaptcha(
           tessedit_char_whitelist: DIGITS_CAPTCHA_WHITELIST,
           tessedit_pageseg_mode: pass.psm as any,
         });
-        const img = pass.raw ? buf : createVisnamBinarizedBmp(decoded, pass.w || 260, 10, pass.lum || 200, pass.h || 90);
+        const img = pass.raw ? buf : createVisnamBinarizedBmp(decoded, pass.w || 380, 12, pass.lum || 195);
         const res = await worker.recognize(img);
         const cleaned = postProcessOcrText(res.data.text || '', { digitsOnly: true, expectedLength: 4 });
         if (/^\d{4}$/.test(cleaned)) {
