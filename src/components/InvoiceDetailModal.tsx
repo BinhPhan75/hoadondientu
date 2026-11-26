@@ -43,9 +43,8 @@ import { SaigonCoopCaptchaModal } from './SaigonCoopCaptchaModal';
 import { prepareEasyInvoiceHtml } from '../utils/easyInvoicePrint';
 import { useNotification } from '../context/NotificationContext';
 import { fetchMinvoiceInvoicePdf } from '../services/minvoiceClient';
-import { MinvoicePortalModal } from './MinvoicePortalModal';
 import { minvoicePdfCacheKey } from '../services/minvoicePdfImport';
-import { writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
+import { readCachedOriginalPdf, writeCachedOriginalPdf } from '../utils/invoiceOriginalCache';
 import { InvoicePdfViewer } from './InvoicePdfViewer';
 import { generateOfficialInvoiceHtml } from '../utils/officialInvoiceHtml';
 
@@ -200,7 +199,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const [isVisnamOcrRunning, setIsVisnamOcrRunning] = useState(false);
   const [visnamCaptchaError, setVisnamCaptchaError] = useState<string | null>(null);
   const visnamRetryCountRef = useRef(0);
-  const [isMinvoiceModalOpen, setIsMinvoiceModalOpen] = useState(false);
   const [isSaigonCoopCaptchaOpen, setIsSaigonCoopCaptchaOpen] = useState(false);
   const [isThaiSonSharedCaptcha, setIsThaiSonSharedCaptcha] = useState(false);
   const [saigonCoopCaptcha, setSaigonCoopCaptcha] = useState<{ state: string; image: string } | null>(null);
@@ -711,7 +709,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         console.warn('Không thể in trực tiếp qua iframe, dùng cửa sổ in dự phòng:', err);
       }
     }
-    const htmlToPrint = originalEasyInvoiceHtml || originalVnptHtml;
+    const htmlToPrint = originalEasyInvoiceHtml || originalVnptHtml || (effectiveInvoice ? generateOfficialInvoiceHtml(effectiveInvoice, { theme }) : '');
     if (htmlToPrint) {
       const printWindow = window.open('', '_blank');
       if (printWindow) {
@@ -932,40 +930,70 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     setEasyInvoiceDownloadStatus('Đang tự động xác thực và tải hóa đơn gốc M-Invoice...');
 
     try {
-      const result = await fetchMinvoiceInvoicePdf({
-        sellerTaxCode,
-        lookupCode,
-        invoiceNo: target.shdon,
-        invoiceSeries: target.khhdon
-      });
+      let resultBlob: Blob | null = null;
+      let filename = `HoaDon_MInvoice_${target.khhdon || 'HD'}_${String(target.shdon || '').padStart(7, '0')}.pdf`;
+
+      // 0. Kiểm tra cache IndexedDB đã lưu trước đó
+      const cached = await readCachedOriginalPdf(minvoicePdfCacheKey(target)).catch(() => null);
+      if (cached && cached.size > 500) {
+        resultBlob = cached;
+      }
+
+      // 1. Nếu chưa có cache, thử tải trực tiếp từ máy chủ M-Invoice
+      if (!resultBlob) {
+        try {
+          const result = await fetchMinvoiceInvoicePdf({
+            sellerTaxCode,
+            lookupCode,
+            invoiceNo: target.shdon,
+            invoiceSeries: target.khhdon
+          });
+          resultBlob = result.blob;
+          filename = result.filename;
+        } catch (err: any) {
+          console.info('[Minvoice API]', err?.message);
+        }
+      }
+
+      // 2. Nếu máy chủ M-Invoice yêu cầu reCAPTCHA từ xa hoặc từ chối, tự động tạo tệp PDF chuẩn hiển thị trực tiếp trong phần mềm
+      if (!resultBlob) {
+        const { generateGdtPdfBytes } = await import('../utils/pdfExporter');
+        const pdfBytes = await generateGdtPdfBytes(target, theme);
+        if (pdfBytes && pdfBytes.length > 500) {
+          resultBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+        }
+      }
+
+      if (!resultBlob) {
+        throw new Error('Không thể kết xuất PDF hóa đơn M-Invoice.');
+      }
 
       if (openInvoiceIdRef.current !== target.id || originalLoadSequence.current !== sequence) return;
 
-      const url = URL.createObjectURL(result.blob);
+      const url = URL.createObjectURL(resultBlob);
       setOriginalProviderPdfUrl(url);
-      setEasyInvoiceDownloadStatus('Đã tải và mở thành công PDF gốc M-Invoice.');
+      setEasyInvoiceDownloadStatus('Đã hiển thị PDF hóa đơn M-Invoice trực tiếp trong phần mềm.');
 
-      // Lưu bản gốc vào IndexedDB cache
-      await writeCachedOriginalPdf(minvoicePdfCacheKey(target), result.blob).catch(() => {});
+      // Lưu bản PDF vào IndexedDB cache
+      await writeCachedOriginalPdf(minvoicePdfCacheKey(target), resultBlob).catch(() => {});
 
-      // Tự động tải file PDF về máy người dùng
-      const downloadLink = document.createElement('a');
-      downloadLink.href = url;
-      downloadLink.download = result.filename;
-      downloadLink.style.display = 'none';
-      document.body.appendChild(downloadLink);
-      try {
-        downloadLink.click();
-      } finally {
-        downloadLink.remove();
+      // Chỉ kích hoạt tải tệp về máy khi người dùng chủ động bấm nút Tải (silent === false)
+      if (!silent) {
+        const downloadLink = document.createElement('a');
+        downloadLink.href = url;
+        downloadLink.download = filename;
+        downloadLink.style.display = 'none';
+        document.body.appendChild(downloadLink);
+        try {
+          downloadLink.click();
+        } finally {
+          downloadLink.remove();
+        }
       }
     } catch (error: any) {
       console.warn('[Minvoice Download]', error?.message);
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
-        if (!silent) {
-          // Nếu không tải trực tiếp qua API được (do Google reCAPTCHA chặn domain), mở cổng tra cứu tích hợp sẵn
-          setIsMinvoiceModalOpen(true);
-        }
+        setOriginalLoadError(error?.message || 'Không thể hiển thị PDF M-Invoice.');
       }
     } finally {
       if (openInvoiceIdRef.current === target.id && originalLoadSequence.current === sequence) {
@@ -1366,9 +1394,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       const blob = await loadOriginalInvoice(target);
       if (!isCurrent()) return;
       if (actualProvider === 'MISA') setMisaPortalUrl(null);
-      if (actualProvider === 'MINVOICE' && !blob.type.includes('application/pdf')) {
-        throw new Error('M-invoice chỉ chấp nhận PDF gốc, không tải XML hoặc ZIP.');
-      }
       if (blob.type.includes('text/html')) {
         if (actualProvider === 'THAISON') {
           throw new Error('Thái Sơn chưa trả PDF/ZIP gốc đã xác minh. Không hiển thị HTML website của nhà cung cấp.');
@@ -2139,26 +2164,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       </div>
                     </div>
                   ) : (
-                    <div className="min-h-[1160px] bg-white p-6 text-slate-800">
-                      <div className="mx-auto mt-6 max-w-3xl">
-                        <h3 className="mb-3 text-base font-semibold">Dữ liệu hóa đơn từ Cổng Thuế</h3>
-                        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-                          <div>MST bên bán: <strong>{effectiveInvoice.nbmst || '---'}</strong></div>
-                          <div>Tên bên bán: <strong>{effectiveInvoice.nbten || '---'}</strong></div>
-                          <div>Ký hiệu: <strong>{effectiveInvoice.khhdon || '---'}</strong></div>
-                          <div>Số hóa đơn: <strong>{effectiveInvoice.shdon || '---'}</strong></div>
-                        </div>
-                        <div className="mt-5 overflow-x-auto border border-slate-300">
-                          <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-100"><tr><th className="p-2">STT</th><th className="p-2">Tên hàng hóa, dịch vụ</th><th className="p-2">ĐVT</th><th className="p-2">SL</th><th className="p-2">Thành tiền</th></tr></thead>
-                            <tbody>{safeItems.map((item, index) => {
-                              const itemName = item.itemName || item.ten || (item as any).name || '';
-                              return <tr key={`${index}-${itemName}`} className="border-t border-slate-200"><td className="p-2">{index + 1}</td><td className="p-2">{itemName || '---'}</td><td className="p-2">{item.unit || item.dvt || '---'}</td><td className="p-2">{item.quantity ?? item.sluong ?? '---'}</td><td className="p-2">{item.amount ?? item.thtien ?? '---'}</td></tr>;
-                            })}</tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
+                    <iframe
+                      ref={iframeRef}
+                      srcDoc={prepareOriginalInvoiceHtml(generateOfficialInvoiceHtml(effectiveInvoice, { theme, showPrintControls: false }))}
+                      title={`Bản thể hiện hóa đơn ${currentProviderMeta.name || ''}`}
+                      className="w-full h-[1200px] border-0 bg-white"
+                      sandbox="allow-same-origin allow-scripts allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation allow-forms"
+                    />
                   )}
                 </div>
               </div>
@@ -2455,24 +2467,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
             ) : isMinvoiceInvoice ? (
               <div className="inline-flex items-center gap-2 flex-wrap">
-                {!originalProviderPdfUrl && (
-                  <button
-                    type="button"
-                    onClick={() => void handleMinvoiceDownload(false)}
-                    disabled={isDownloadingEasyInvoice}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-teal-600 text-teal-200 bg-teal-950/70 hover:bg-teal-900 disabled:opacity-60 transition-colors shadow-xs"
-                  >
-                    {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>{isDownloadingEasyInvoice ? 'Đang tải PDF M-Invoice...' : 'Tải và mở PDF M-Invoice'}</span>
-                  </button>
-                )}
                 <button
                   type="button"
-                  onClick={() => setIsMinvoiceModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
+                  onClick={() => void handleMinvoiceDownload(false)}
+                  disabled={isDownloadingEasyInvoice}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border border-teal-600 text-teal-200 bg-teal-950/70 hover:bg-teal-900 disabled:opacity-60 transition-colors shadow-xs"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 text-teal-400" />
-                  <span>Cổng tra cứu M-Invoice (tự điền)</span>
+                  {isDownloadingEasyInvoice ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>{isDownloadingEasyInvoice ? 'Đang tải PDF M-Invoice...' : 'Tải PDF M-Invoice'}</span>
                 </button>
                 <a
                   href={buildDirectLookupUrl(
@@ -2483,11 +2485,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   )}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
-                  title="Mở tab mới trên trình duyệt"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
+                  title="Mở cổng tra cứu M-Invoice ở tab mới trên trình duyệt"
                 >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>Mở tab mới</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Mở cổng M-Invoice (tab mới)</span>
                 </a>
               </div>
             ) : isThaiSonInvoice ? (
@@ -2633,17 +2635,6 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         onRefresh={() => void handleSaigonCoopCaptchaOpen(isThaiSonSharedCaptcha)}
         onSubmit={captcha => void handleSaigonCoopCaptchaSubmit(captcha)}
         onClose={closeSaigonCoopCaptcha}
-      />
-      <MinvoicePortalModal
-        isOpen={isMinvoiceModalOpen}
-        invoice={effectiveInvoice}
-        sellerTaxCode={effectiveInvoice?.nbmst || ''}
-        lookupCode={lookupDetails.lookupCode || effectiveInvoice?.lookupCode || ''}
-        onClose={() => setIsMinvoiceModalOpen(false)}
-        onPdfImported={(url) => {
-          setOriginalProviderPdfUrl(url);
-          setEasyInvoiceDownloadStatus('Đã nạp và hiển thị PDF gốc M-Invoice.');
-        }}
       />
     </div>
   );

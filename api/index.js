@@ -7752,12 +7752,8 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
     }
     const token = (options?.recaptchaToken || options?.customInfo?.recaptchaToken || "").trim();
     if (!token) {
-      throw new OriginalInvoiceError(
-        "M-invoice y\xEAu c\u1EA7u m\xE3 reCAPTCHA x\xE1c th\u1EF1c. Vui l\xF2ng m\u1EDF link \u0111\u1EC3 tra c\u1EE9u tr\u1EF1c ti\u1EBFp",
-        this.providerCode,
-        "MINVOICE_CAPTCHA_REQUIRED",
-        428,
-        portal
+      throw new Error(
+        "M-invoice y\xEAu c\u1EA7u m\xE3 reCAPTCHA x\xE1c th\u1EF1c t\u1EEB tr\xECnh duy\u1EC7t. T\u1EF1 \u0111\u1ED9ng k\u1EBFt xu\u1EA5t b\u1EA3n th\u1EC3 hi\u1EC7n chu\u1EA9n T\u1ED5ng c\u1EE5c Thu\u1EBF."
       );
     }
     const params = new URLSearchParams([
@@ -7780,23 +7776,11 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
         signal: AbortSignal.timeout(timeout)
       });
     } catch (error) {
-      throw new OriginalInvoiceError(
-        "Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i c\u1ED5ng PDF M-invoice: " + String(error?.message || "l\u1ED7i k\u1EBFt n\u1ED1i").slice(0, 120),
-        this.providerCode,
-        "MINVOICE_PDF_UNAVAILABLE",
-        502,
-        portal
-      );
+      throw new Error("Kh\xF4ng th\u1EC3 k\u1EBFt n\u1ED1i c\u1ED5ng PDF M-invoice: " + String(error?.message || "l\u1ED7i k\u1EBFt n\u1ED1i").slice(0, 120));
     }
     const contentLength = Number(response.headers.get("content-length") || "0");
     if (contentLength > 18e6) {
-      throw new OriginalInvoiceError(
-        "PDF g\u1ED1c M-invoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.",
-        this.providerCode,
-        "MINVOICE_PDF_UNAVAILABLE",
-        502,
-        portal
-      );
+      throw new Error("PDF g\u1ED1c M-invoice v\u01B0\u1EE3t gi\u1EDBi h\u1EA1n 18 MB.");
     }
     const contentType = response.headers.get("content-type") || "";
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -7814,12 +7798,8 @@ var MinvoiceDriver = class extends BaseInvoiceProviderDriver {
         executionLogs: ["M-invoice: \u0111\xE3 nh\u1EADn PDF g\u1ED1c t\u1EEB SearchInvoiceCaptcha"]
       };
     }
-    throw new OriginalInvoiceError(
-      "M-invoice SearchInvoiceCaptcha: HTTP " + response.status + " (" + contentType.split(";")[0].slice(0, 60) + ")" + (response.ok ? ", ph\u1EA3n h\u1ED3i kh\xF4ng ph\u1EA3i PDF h\u1EE3p l\u1EC7." : ". Ki\u1EC3m tra m\xE3 tra c\u1EE9u ho\u1EB7c x\xE1c minh l\u1EA1i tr\xEAn trang ch\xEDnh th\u1EE9c."),
-      this.providerCode,
-      "MINVOICE_PDF_UNAVAILABLE",
-      502,
-      portal
+    throw new Error(
+      "M-invoice SearchInvoiceCaptcha: HTTP " + response.status + " (" + contentType.split(";")[0].slice(0, 60) + ")" + (response.ok ? ", ph\u1EA3n h\u1ED3i kh\xF4ng ph\u1EA3i PDF h\u1EE3p l\u1EC7." : ". T\u1EF1 \u0111\u1ED9ng chuy\u1EC3n sang b\u1EA3n th\u1EC3 hi\u1EC7n chu\u1EA9n.")
     );
   }
 };
